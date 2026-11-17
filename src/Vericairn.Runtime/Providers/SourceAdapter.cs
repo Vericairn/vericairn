@@ -165,6 +165,12 @@ public interface ISourceAdapter
     bool? Reachable(string root, string commit, string branch) => null;
 
     /// <summary>
+    /// From 0.9.4 (CODE-73): whether one commit is a proper ancestor of another, so that a change's base precedes its head, read without
+    /// fetching or changing the repository; false for the same commit, null when unsupported or when either commit is missing.
+    /// </summary>
+    bool? Precedes(string root, string ancestor, string descendant) => null;
+
+    /// <summary>
     /// From 0.9.4 (CODE-73): the paths added, modified or removed between two commits, by name without rename detection (a rename is a
     /// removal and an addition), sorted ordinally; null when unsupported or when either commit is missing, never empty for that.
     /// </summary>

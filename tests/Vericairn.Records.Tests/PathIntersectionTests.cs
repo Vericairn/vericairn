@@ -124,6 +124,52 @@ public class PathIntersectionTests
     }
 
     [Fact]
+    public void CharactersNamedOnlyElsewhereAddNoWorkAndTheSearchStaysDetermined()
+    {
+        // A literal of 1,999 characters against the same literal with its last character changed, and then with 20,000 more distinct
+        // characters in exclusions that never match: each product state is stepped only by the characters its automata name there.
+        string tree = string.Concat(Enumerable.Range(0, 1999).Select(i => (char)('a' + i % 26)));
+        string other = tree[..^1] + "Z";
+        PathIntersection.Outcome plain = PathIntersection.Search(new([tree], []), new([other], []));
+        Assert.True(plain.Determined);
+        Assert.False(plain.Overlap);
+        string[] inflation = [.. Enumerable.Range(0, 10).Select(part => "q/" + new string([.. Enumerable.Range(0x4E00 + part * 1990, 1990).Select(i => (char)i)]))];
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        PathIntersection.Outcome inflated = PathIntersection.Search(new([tree], inflation), new([other], inflation));
+        watch.Stop();
+        Assert.True(inflated.Determined);
+        Assert.False(inflated.Overlap);
+        // The exclusions' own automata cost their characters once; they multiply no step of the search.
+        Assert.InRange(inflated.Work - plain.Work, 0, 4 * inflation.Sum(x => x.Length));
+        Assert.True(inflated.Work < PathIntersection.WorkBound);
+        // A guard against a hang only; the work counted above is the measure.
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60), $"the search took {watch.Elapsed}");
+    }
+
+    [Fact]
+    public void ASearchThatSpendsItsWorkOrWhosePatternsExceedTheStateBoundIsUndetermined()
+    {
+        var first = new PathIntersection.Party(["**"], ["*a*b*", "*b*a*"]);
+        var second = new PathIntersection.Party(["**"], ["*a*a*"]);
+        PathIntersection.Outcome full = PathIntersection.Search(first, second);
+        Assert.True(full.Determined);
+        PathIntersection.Outcome spent = PathIntersection.Search(first, second, work: full.Work / 2);
+        Assert.True(spent.Overlap);
+        Assert.False(spent.Determined);
+        Assert.Null(spent.Witness);
+        Assert.InRange(spent.Work, full.Work / 2, full.Work);
+
+        // Patterns that would compile to more states than the bound stop being built at the bound, before any search, though the search
+        // itself would end at its first step: the other party's paths begin with a character none of them begins with.
+        string[] many = [.. Enumerable.Range(0, 60).Select(i => $"d{i}/" + new string('x', 1990))];
+        Assert.False(PathIntersection.Search(new(many[..10], []), new(["z/**"], [])).Overlap);
+        PathIntersection.Outcome large = PathIntersection.Search(new(many, []), new(["z/**"], []));
+        Assert.True(large.Overlap);
+        Assert.False(large.Determined);
+        Assert.InRange(large.States, PathIntersection.StateBound, PathIntersection.StateBound + 2 * PathIntersection.LengthLimit + 10);
+    }
+
+    [Fact]
     public void ACaseDifferenceIsNoOverlapUnderOrdinalMatching()
     {
         Assert.False(PathIntersection.Search(new(["Docs/**"], []), new(["docs/**"], [])).Overlap);

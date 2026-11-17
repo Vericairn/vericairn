@@ -15,6 +15,7 @@ namespace Vericairn.Runtime.Service;
 internal sealed class RepositoryView(EstateModel model, ISourceAdapter? git, string estate) : IRepositoryView
 {
     private readonly Dictionary<string, (string Branch, IReadOnlyList<string> Paths)?> tracked = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> lines = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> folding = new(StringComparer.Ordinal);
 
     /// <summary>The view for a model through a provider registry's git adapter.</summary>
@@ -33,9 +34,9 @@ internal sealed class RepositoryView(EstateModel model, ISourceAdapter? git, str
     {
         if (tracked.TryGetValue(repository, out (string Branch, IReadOnlyList<string> Paths)? known)) return known;
         (string Branch, IReadOnlyList<string> Paths)? read = null;
-        if (git is not null && Clone(repository) is string clone && git.MainLine(clone) is { } line && git.TrackedPaths(clone, line.Branch) is { } paths)
+        if (git is not null && MainLine(repository) is string line && Clone(repository) is string clone && git.TrackedPaths(clone, line) is { } paths)
         {
-            read = (line.Branch, paths);
+            read = (line, paths);
         }
 
         tracked[repository] = read;
@@ -43,8 +44,21 @@ internal sealed class RepositoryView(EstateModel model, ISourceAdapter? git, str
     }
 
     /// <inheritdoc />
+    public string? MainLine(string repository)
+    {
+        if (lines.TryGetValue(repository, out string? known)) return known;
+        string? line = git is not null && Clone(repository) is string clone ? git.MainLine(clone)?.Branch : null;
+        lines[repository] = line;
+        return line;
+    }
+
+    /// <inheritdoc />
     public bool? Reachable(string repository, string commit, string branch) =>
         git is not null && Clone(repository) is string clone ? git.Reachable(clone, commit, branch) : null;
+
+    /// <inheritdoc />
+    public bool? Precedes(string repository, string ancestor, string descendant) =>
+        git is not null && Clone(repository) is string clone ? git.Precedes(clone, ancestor, descendant) : null;
 
     /// <inheritdoc />
     public bool CaseInsensitive(string repository)

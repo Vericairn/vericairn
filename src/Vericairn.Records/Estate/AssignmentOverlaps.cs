@@ -18,11 +18,17 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 internal interface IRepositoryView
 {
-    /// <summary>The tracked paths at the head of the clone's main line, and that branch; null when no clone or no answer.</summary>
+    /// <summary>The tracked paths at the head of the clone's main line, in ordinal order, and that branch; null when no clone or no answer.</summary>
     (string Branch, IReadOnlyList<string> Paths)? Tracked(string repository);
+
+    /// <summary>The branch of the clone's main line, its integration line (origin's HEAD, else main, else master, as a local branch); null when none.</summary>
+    string? MainLine(string repository);
 
     /// <summary>Whether a commit is reachable from a branch in the clone; null when the clone, the commit or the branch is missing.</summary>
     bool? Reachable(string repository, string commit, string branch);
+
+    /// <summary>Whether one commit is a proper ancestor of another in the clone; null when the clone or either commit is missing.</summary>
+    bool? Precedes(string repository, string ancestor, string descendant);
 
     /// <summary>Whether the clone's filesystem folds case, so that two paths differing only in case name one file.</summary>
     bool CaseInsensitive(string repository);
@@ -38,7 +44,9 @@ internal interface IRepositoryView
 /// by one owner (every other party excludes the shared paths). An assignment is active while it is current and its work order is neither
 /// accepted nor retired, until it is released: its current result is abandoned; completed with a change that is integrated; completed
 /// with no path pattern in its brief; or completed before the check's build, labeled. From the build, a completed result with a path
-/// pattern and no change keeps its assignment active until acceptance.
+/// pattern and no change keeps its assignment active until acceptance. A change releases only as this assignment's integrated work: it
+/// is in the assignment's repository, its base is a proper ancestor of its head, and its head was merged by a change-merge operation or
+/// is reachable from the repository's main line in this machine's registered clone, never from the branch the result names.
 /// </summary>
 internal static class AssignmentOverlaps
 {
@@ -55,13 +63,15 @@ internal static class AssignmentOverlaps
     /// <param name="Repository">The repository's identity.</param>
     /// <param name="Base">The base commit.</param>
     /// <param name="Head">The head commit.</param>
-    /// <param name="Target">The branch it integrates into.</param>
-    /// <param name="Integration">merged (a change-merge operation observed at its head), reachable (its head reachable from the target in this machine's clone), not-integrated, or unknown.</param>
+    /// <param name="Target">The branch the result names as the one it integrates into; it shows nothing of the integration.</param>
+    /// <param name="Integration">merged (a change-merge operation observed at its head), reachable (its head reachable from the main line of this machine's clone), not-integrated, mismatched (it cannot be this assignment's integrated work, as <paramref name="Problem"/> says), or unknown.</param>
     /// <param name="Merge">The change-merge operation that shows it merged.</param>
     /// <param name="Paths">The paths it changed as this machine's clone shows them, by name without rename detection; null when a commit is missing there or no clone was read.</param>
     /// <param name="Read">Whether a clone was read for its paths, so that null paths mean unavailable rather than not asked.</param>
+    /// <param name="Problem">Why the change cannot release its assignment: another repository, a base that is its head or no ancestor of it, or fields the estate cannot read.</param>
+    /// <param name="Branch">The main line of this machine's clone that its head was compared with, when one was read.</param>
     internal sealed record ChangeView(string Repository, string Base, string Head, string Target, string Integration, RecordEnvelope? Merge,
-        IReadOnlyList<(string Path, string Change)>? Paths = null, bool Read = false);
+        IReadOnlyList<(string Path, string Change)>? Paths = null, bool Read = false, string? Problem = null, string? Branch = null);
 
     /// <summary>One assignment as the check reads it.</summary>
     /// <param name="Assignment">Its current revision, or a draft's envelope for a preview.</param>
@@ -246,6 +256,36 @@ internal static class AssignmentOverlaps
 
     /// <summary>How the check reads one assignment, at its current revision.</summary>
     internal static Party? PartyOf(EstateModel model, RecordEnvelope assignment, IRepositoryView? view = null) => new Reading(model, view).Party(model.Latest(assignment));
+
+    /// <summary>
+    /// Why a draft brief would be refused for the fields the check reads, were it recorded, as the write boundary validates a brief (from
+    /// 0.9.4): its permitted changes and exclusions each a string of 1 to 2,000 characters, each exclusion an interpretable pattern, its
+    /// after at most 20 distinct assignment ids, and its repository an id. Empty when the preview may compare it.
+    /// </summary>
+    internal static IReadOnlyList<string> DraftProblems(JsonElement brief)
+    {
+        if (brief.ValueKind != JsonValueKind.Object) return ["A draft brief is a JSON object, as work assign takes it."];
+        var findings = new FindingList();
+        var reader = new Types.BodyReader(brief, "brief", findings, 3);
+        reader.StringArray("permittedChanges", false, allowEmpty: false, maxItemLength: PathIntersection.LengthLimit);
+        IReadOnlyList<string>? excluded = reader.StringArray("excludedChanges", false, allowEmpty: false, maxItemLength: PathIntersection.LengthLimit);
+        var problems = new List<string>(findings.Select(f => $"{f.Location}: {f.Message}"));
+        problems.AddRange((excluded ?? []).Where(e => PathPatterns.Pattern(e) is null)
+            .Select(e => $"brief.excludedChanges: '{(e.Length > 80 ? e[..80] + "..." : e)}' is not a repository-relative pattern; an exclusion is a pattern, since prose excludes nothing."));
+        findings = new FindingList();
+        reader = new Types.BodyReader(brief, "brief", findings, 3);
+        IReadOnlyList<string>? after = reader.StringArray("after", false, allowEmpty: false, maxItemLength: Records.Identity.Ulid.Length);
+        if (reader.Has("repository")) reader.Text("repository", true, Records.Identity.Ulid.Length);
+        problems.AddRange(findings.Select(f => $"{f.Location}: {f.Message}"));
+        if (after is not null)
+        {
+            if (after.Count > Types.AssignmentType.MaxAfter) problems.Add($"brief.after: a brief waits for at most {Types.AssignmentType.MaxAfter} assignments; it names {after.Count}.");
+            if (after.Distinct(StringComparer.Ordinal).Count() != after.Count) problems.Add("brief.after: each assignment is named once.");
+            problems.AddRange(after.Where(id => !Records.Identity.Ulid.IsValid(id)).Take(3).Select(id => $"brief.after: '{id}' is not an assignment id."));
+        }
+
+        return problems;
+    }
 
     /// <summary>A draft brief as the check reads it, for a preview before it is recorded: active, in the repository named.</summary>
     internal static Party Draft(EstateModel model, JsonElement brief, string? repository, string key = "draft")
@@ -456,7 +496,7 @@ internal static class AssignmentOverlaps
             json["change"] = new JsonObject
             {
                 ["repository"] = change.Repository, ["base"] = change.Base, ["head"] = change.Head, ["target"] = change.Target,
-                ["integration"] = change.Integration, ["merge"] = change.Merge?.Id,
+                ["integration"] = change.Integration, ["merge"] = change.Merge?.Id, ["mainLine"] = change.Branch, ["problem"] = change.Problem,
                 ["paths"] = change.Paths is null ? null : new JsonArray([.. change.Paths.Select(p => (JsonNode)new JsonObject { ["path"] = p.Path, ["change"] = p.Change })]),
                 ["pathsUnavailable"] = change.Read && change.Paths is null ? "a commit of the change is missing from this machine's registered clone, or no clone of its repository is registered here" : null,
             };
@@ -529,11 +569,11 @@ internal static class AssignmentOverlaps
             if (!tracked.TryGetValue(repository, out inventory)) tracked[repository] = inventory = view.Tracked(repository);
         }
 
-        List<string> shared = inventory is { } listed ? [.. listed.Paths.Where(p => a.Contains(p) && b.Contains(p)).Order(StringComparer.Ordinal).Take(20)] : [];
+        List<string> shared = inventory is { } listed ? Shared(listed.Paths, a, b) : [];
         bool determined = outcome.Determined || shared.Count > 0;
         if (!determined)
         {
-            labels.Add($"undetermined: the search reached its bound of {PathIntersection.StateBound.ToString("N0", CultureInfo.InvariantCulture)} states, so the pair counts as overlapping");
+            labels.Add($"undetermined: the search reached its bound of {PathIntersection.StateBound.ToString("N0", CultureInfo.InvariantCulture)} states or {PathIntersection.WorkBound.ToString("N0", CultureInfo.InvariantCulture)} steps of work, so the pair counts as overlapping");
         }
 
         foreach (Party party in new[] { first, second }.Where(p => p.Repository is null))
@@ -562,24 +602,89 @@ internal static class AssignmentOverlaps
         return new Overlap(first, second, repository, determined, witnesses, shared.Count > 0, shared.Count > 0 ? inventory!.Value.Branch : null, sequenced, holds, labels);
     }
 
+    /// <summary>The bound on the work of finding tracked witnesses for one pair: characters compared, a wildcard match costing its pattern's length times the path's.</summary>
+    internal const long ScanBound = 50_000_000;
+
+    /// <summary>
+    /// Up to 20 tracked paths, in their ordinal order, in both parties' effective paths, within <see cref="ScanBound"/>: a pattern's
+    /// literal prefix is compared first, a wildcard pattern whose prefix a path begins with costs its length times the path's, and a
+    /// scan that spends the bound keeps what it found.
+    /// </summary>
+    internal static List<string> Shared(IReadOnlyList<string> paths, PathIntersection.Party a, PathIntersection.Party b)
+    {
+        Compiled first = new(a), second = new(b);
+        long work = 0;
+        var shared = new List<string>();
+        foreach (string path in paths)
+        {
+            work += path.Length + 1;
+            if (work > ScanBound) break;
+            bool both = PathPatterns.Valid(path) && first.Contains(path, ref work) && second.Contains(path, ref work);
+            if (work > ScanBound) break;
+            if (!both) continue;
+            shared.Add(path);
+            if (shared.Count == 20) break;
+        }
+
+        return shared;
+    }
+
+    // A party's patterns and exclusions, each with its literal prefix and whether it holds a wildcard, matched as PathPatterns matches them.
+    private sealed class Compiled(PathIntersection.Party party)
+    {
+        private readonly (string Pattern, string Prefix, bool Wild)[] patterns = [.. party.Patterns.Select(Prepare)];
+        private readonly (string Pattern, string Prefix, bool Wild)[] exclusions = [.. party.Exclusions.Select(Prepare)];
+
+        public bool Contains(string path, ref long work) => Any(patterns, path, ref work) && !Any(exclusions, path, ref work);
+
+        private static (string, string, bool) Prepare(string pattern)
+        {
+            int wild = pattern.IndexOfAny(['*', '?']);
+            return (pattern, wild < 0 ? pattern.TrimEnd('/') : pattern[..wild], wild >= 0);
+        }
+
+        private static bool Any((string Pattern, string Prefix, bool Wild)[] list, string path, ref long work)
+        {
+            foreach ((string pattern, string prefix, bool wild) in list)
+            {
+                work += prefix.Length + 1;
+                if (!path.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                if (wild) work += (long)pattern.Length * (path.Length + 1);
+                // A spent bound answers no: the scan stops before this path counts.
+                if (work > ScanBound) return false;
+                if (PathPatterns.Matches(path, pattern)) return true;
+            }
+
+            return false;
+        }
+    }
+
     // Whether a party's after names the other, followed to its current revision.
     private static bool Names(EstateModel model, Party waiting, Party waited) =>
         waited.Assignment.Id != "draft" && waiting.After.Any(id => model.ById.TryGetValue(id, out RecordEnvelope? named) && named.Type == "assignment" && model.Latest(named).Id == model.Latest(waited.Assignment).Id);
 
-    /// <summary>One read of the estate's assignments: work-order states, agent runs and the build's beginning computed once.</summary>
+    /// <summary>
+    /// One read of the estate's assignments: work-order states, agent runs, change-merge operations and the build's beginning computed
+    /// once, and each answer of this machine's clone kept for the reading, so that a change named twice reads the clone once.
+    /// </summary>
     private sealed class Reading
     {
         private readonly EstateModel model;
         private readonly IRepositoryView? view;
-        private readonly Lazy<Dictionary<string, string>> orders;
+        private readonly Dictionary<string, string> orders = new(StringComparer.Ordinal);
         private readonly Lazy<Dictionary<string, string>> runs;
+        private readonly Lazy<Dictionary<string, HashSet<string>>> branches;
+        private readonly Lazy<Dictionary<(string Repository, string Head), RecordEnvelope>> merges;
         private readonly Lazy<RecordEnvelope?> began;
+        private readonly Dictionary<string, string?> lines = new(StringComparer.Ordinal);
+        private readonly Dictionary<(string Repository, string Base, string Head), bool?> precedes = [];
+        private readonly Dictionary<(string Repository, string Head, string Branch), bool?> reachable = [];
+        private readonly Dictionary<(string Repository, string Base, string Head), IReadOnlyList<(string Path, string Change)>?> changed = [];
 
         public Reading(EstateModel model, IRepositoryView? view)
         {
             this.model = model;
             this.view = view;
-            orders = new(() => new Dictionary<string, string>(StringComparer.Ordinal));
             runs = new(() =>
             {
                 var repositories = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -589,6 +694,33 @@ internal static class AssignmentOverlaps
                 }
 
                 return repositories;
+            });
+            // The branches agent runs worked on, by repository: a run's branch is never the integration line, whatever the clone names.
+            branches = new(() =>
+            {
+                var named = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+                foreach (AgentRuns.Run run in AgentRuns.All(model))
+                {
+                    if (run.Target("branch") is string branch && IdentityOf(model, run.Target("repository")) is string repository)
+                    {
+                        (named.TryGetValue(repository, out HashSet<string>? set) ? set : named[repository] = new HashSet<string>(StringComparer.Ordinal)).Add(branch);
+                    }
+                }
+
+                return named;
+            });
+            merges = new(() =>
+            {
+                var observed = new Dictionary<(string, string), RecordEnvelope>();
+                foreach (RecordEnvelope operation in model.Current("operation"))
+                {
+                    if (EstateModel.BodyString(operation, "action") != "change-merge" || EstateModel.BodyString(operation, "status") != "observed-success"
+                        || !operation.Body.TryGetProperty("target", out JsonElement target) || TJson.Text(target, "head") is not string head
+                        || IdentityOf(model, TJson.Text(target, "repository")) is not string repository) continue;
+                    observed.TryAdd((repository, head), operation);
+                }
+
+                return observed;
             });
             began = new(() => Began(model));
         }
@@ -614,65 +746,121 @@ internal static class AssignmentOverlaps
             }
 
             string contributor = EstateModel.BodyString(assignment, "contributor") ?? string.Empty;
-            if (!orders.Value.TryGetValue(order.Id, out string? status))
+            if (!orders.TryGetValue(order.Id, out string? status))
             {
-                orders.Value[order.Id] = status = EstateStatus.StatusOf(model, order);
+                orders[order.Id] = status = EstateStatus.StatusOf(model, order);
             }
 
             IReadOnlyList<RecordEnvelope> attempts = WorkView.AttemptsOf(model, assignment);
             RecordEnvelope? result = attempts.Count == 0 ? null : WorkView.ResultOf(model, attempts[^1]);
-            ChangeView? change = result is null ? null : Change(result);
-            (bool active, string state) = State(status, attempts.Count, result, change, patterns.Count > 0, labels);
+            (bool active, string state, ChangeView? change) = State(status, attempts.Count, result, repository, patterns.Count > 0, labels);
             return new Party(assignment, key, contributor, repository, from, patterns, excluded, after, active, state, labels, result, change);
         }
 
-        private (bool Active, string State) State(string status, int attempts, RecordEnvelope? result, ChangeView? change, bool pattern, List<string> labels)
+        // The records decide first: an accepted or retired work order and an abandoned or unfinished result read no clone, and only a
+        // completed result of open work whose change no change-merge operation shows merged asks this machine's clone.
+        private (bool Active, string State, ChangeView? Change) State(string status, int attempts, RecordEnvelope? result, string? repository, bool pattern, List<string> labels)
         {
-            if (status == "accepted") return (false, "released: its work order is accepted");
-            if (status == "retired") return (false, "released: its work order is retired");
-            if (result is null) return (true, attempts == 0 ? "active: no attempt yet" : "active: an attempt in progress");
+            ChangeView? named = result is null ? null : Named(result, repository);
+            if (status == "accepted") return (false, "released: its work order is accepted", named);
+            if (status == "retired") return (false, "released: its work order is retired", named);
+            if (result is null) return (true, attempts == 0 ? "active: no attempt yet" : "active: an attempt in progress", null);
             string outcome = EstateModel.BodyString(result, "outcome") ?? "?";
-            if (outcome == "abandoned") return (false, $"released: its current result {result.Id} is abandoned");
-            if (outcome != "completed") return (true, $"active: its current result {result.Id} is {outcome}");
-            if (change is not null)
+            if (outcome == "abandoned") return (false, $"released: its current result {result.Id} is abandoned", named);
+            if (outcome != "completed") return (true, $"active: its current result {result.Id} is {outcome}", named);
+            if (named is not null)
             {
+                ChangeView change = Integrate(named, labels);
                 switch (change.Integration)
                 {
                     case "merged":
-                        return (false, $"released: its change's head {change.Head} merged into {change.Target} (operation {change.Merge!.Id})");
+                        string? into = change.Merge!.Body.TryGetProperty("target", out JsonElement merged) ? TJson.Text(merged, "target") : null;
+                        return (false, $"released: its change's head {change.Head} merged{(into is null ? string.Empty : " into " + into)} (operation {change.Merge.Id})", change);
                     case "reachable":
-                        labels.Add($"observed here: its change's head is reachable from {change.Target} in this machine's registered clone");
-                        return (false, $"released: its change's head {change.Head} is reachable from {change.Target}");
+                        labels.Add($"observed here: its change's head is reachable from {change.Branch}, the main line of this machine's registered clone");
+                        return (false, $"released: its change's head {change.Head} is reachable from {change.Branch}", change);
                     case "not-integrated":
-                        return (true, $"active: its change's head {change.Head} is not yet integrated into {change.Target}");
+                        return (true, $"active: its change's head {change.Head} is not yet integrated into {change.Branch}", change);
+                    case "mismatched":
+                        return (true, $"active: its change cannot release it, since {change.Problem}", change);
                     default:
-                        return (true, $"active: its change's head {change.Head} is not observed integrated into {change.Target}");
+                        return (true, $"active: its change's head {change.Head} is not observed integrated into its repository's main line", change);
                 }
             }
 
-            if (!pattern) return (false, $"released: its current result {result.Id} is completed and its brief holds no path pattern");
+            if (!pattern) return (false, $"released: its current result {result.Id} is completed and its brief holds no path pattern", null);
             if (began.Value is not RecordEnvelope start || GoalRules.Before(result, start))
             {
                 labels.Add("its result was recorded before the overlap check, which records no integration, so it counts as released at completion");
-                return (false, $"released: its current result {result.Id} is completed");
+                return (false, $"released: its current result {result.Id} is completed", null);
             }
 
-            return (true, $"active until acceptance: its current result {result.Id} is completed and names no change");
+            return (true, $"active until acceptance: its current result {result.Id} is completed and names no change", null);
         }
 
-        private ChangeView? Change(RecordEnvelope result)
+        // The change a result names as the records alone read it, with what keeps it from being this assignment's work: another
+        // repository than the assignment's, the same commit as base and head, or fields the estate cannot read. Reads no clone.
+        private ChangeView? Named(RecordEnvelope result, string? assignmentRepository)
         {
             if (!result.Body.TryGetProperty("change", out JsonElement change) || change.ValueKind != JsonValueKind.Object) return null;
             string? repository = IdentityOf(model, TJson.Text(change, "repository"));
             string? head = TJson.Text(change, "head"), target = TJson.Text(change, "target"), from = TJson.Text(change, "base");
-            if (repository is null || head is null || target is null || from is null) return null;
-            RecordEnvelope? merge = model.Current("operation").Where(o => EstateModel.BodyString(o, "action") == "change-merge" && EstateModel.BodyString(o, "status") == "observed-success")
-                .FirstOrDefault(o => o.Body.TryGetProperty("target", out JsonElement t) && TJson.Text(t, "head") == head && IdentityOf(model, TJson.Text(t, "repository")) == repository
-                    && (TJson.Text(t, "target") is not string merged || merged == target));
-            IReadOnlyList<(string Path, string Change)>? paths = view?.Changed(repository, from, head);
-            if (merge is not null) return new ChangeView(repository, from, head, target, "merged", merge, paths, view is not null);
-            bool? reachable = view?.Reachable(repository, head, target);
-            return new ChangeView(repository, from, head, target, reachable switch { true => "reachable", false => "not-integrated", null => "unknown" }, null, paths, view is not null);
+            string? problem = repository is null || head is null || target is null || from is null
+                    || !Types.Patterns.Commit.IsMatch(head) || !Types.Patterns.Commit.IsMatch(from) ? "it does not name a repository the estate knows, a base and a head commit and a target"
+                : assignmentRepository is null ? "its assignment names no repository and no run of it named one, so no change can be shown to be its work"
+                : repository != assignmentRepository ? $"it is in {NameOf(model, repository)}, not in {NameOf(model, assignmentRepository)}, the repository its assignment changes"
+                : head == from ? $"its base and head are the same commit, {head}, so it changes nothing"
+                : null;
+            return new ChangeView(repository ?? string.Empty, from ?? string.Empty, head ?? string.Empty, target ?? string.Empty, problem is null ? "unknown" : "mismatched", null, Problem: problem);
+        }
+
+        // A named change's integration: a change-merge operation observed at its head, from the records; else, in this machine's clone, a
+        // base that is a proper ancestor of its head and that head reachable from the repository's main line, never from the branch the
+        // result names as its target and never from a branch an agent run worked on. A change that stays active has its paths read.
+        private ChangeView Integrate(ChangeView named, List<string> labels)
+        {
+            if (named.Problem is not null) return named with { Paths = null, Read = false };
+            string repository = named.Repository, from = named.Base, head = named.Head;
+            if (merges.Value.TryGetValue((repository, head), out RecordEnvelope? merge)) return named with { Integration = "merged", Merge = merge };
+            if (view is null) return named;
+            string? line = Cached(lines, repository, () => view.MainLine(repository));
+            bool? ancestor = Cached(precedes, (repository, from, head), () => view.Precedes(repository, from, head));
+            ChangeView read = named with { Branch = line };
+            if (ancestor == false)
+            {
+                read = read with { Integration = "mismatched", Problem = $"its base {from} is not an ancestor of its head {head} in this machine's registered clone" };
+            }
+            else if (line is null)
+            {
+                labels.Add("this machine has no registered clone of its repository with a main line (origin's HEAD, main or master), so no integration is observed here");
+            }
+            else if (branches.Value.TryGetValue(repository, out HashSet<string>? worked) && worked.Contains(line))
+            {
+                labels.Add($"the main line of this machine's registered clone, {line}, is a branch an agent run worked on, so reaching it shows no integration");
+            }
+            else if (ancestor is null)
+            {
+                labels.Add("a commit of its change is missing from this machine's registered clone, so no integration is observed here");
+            }
+            else
+            {
+                bool? reached = Cached(reachable, (repository, head, line), () => view.Reachable(repository, head, line));
+                if (reached == true) return read with { Integration = "reachable" };
+                if (reached == false) read = read with { Integration = "not-integrated" };
+            }
+
+            if (line is not null && named.Target != line)
+            {
+                labels.Add($"its change names {named.Target} as its target; only the repository's main line, {line}, shows integration here");
+            }
+
+            return read with { Paths = Cached(changed, (repository, from, head), () => view.Changed(repository, from, head)), Read = true };
+        }
+
+        private static TValue Cached<TKey, TValue>(Dictionary<TKey, TValue> cache, TKey key, Func<TValue> read) where TKey : notnull
+        {
+            if (!cache.TryGetValue(key, out TValue? value)) cache[key] = value = read();
+            return value;
         }
     }
 }

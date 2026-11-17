@@ -141,8 +141,17 @@ public class OverlapCheckTests
         WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("assignment", run.Estate.OperatorId, PolicyFixtureElement(body), $"work-order:{order.Id}:{order.ComputedHash}", Supersedes: run.Assignment));
         Assert.False(refused.Ok);
         Assert.Contains(refused.Problem!.Findings, f => f.Code == "assignment.narrowing-in-flight");
-        // The same revision without a narrowing is not held by the run.
         body["brief"]!.AsObject().Remove("excludedChanges");
+        // Nor do its repository or its permitted changes change while the run is in flight: the run keeps working where admission checked it.
+        body["brief"]!["repository"] = model.FirstEstate!.Id;
+        WriteOutcome moved = run.Service.NewRecord(new NewRecordRequest("assignment", run.Estate.OperatorId, PolicyFixtureElement(body), $"work-order:{order.Id}:{order.ComputedHash}", Supersedes: run.Assignment));
+        Assert.Contains(moved.Problem!.Findings, f => f.Code == "assignment.narrowing-in-flight" && f.Location.EndsWith("#body.brief.repository", StringComparison.Ordinal));
+        body["brief"]!["repository"] = run.Resource;
+        body["brief"]!["permittedChanges"] = new JsonArray("path:widget/core/");
+        WriteOutcome narrowed = run.Service.NewRecord(new NewRecordRequest("assignment", run.Estate.OperatorId, PolicyFixtureElement(body), $"work-order:{order.Id}:{order.ComputedHash}", Supersedes: run.Assignment));
+        Assert.Contains(narrowed.Problem!.Findings, f => f.Code == "assignment.narrowing-in-flight" && f.Location.EndsWith("#body.brief.permittedChanges", StringComparison.Ordinal));
+        body["brief"]!["permittedChanges"] = new JsonArray("path:widget/");
+        // The same revision without a narrowing is not held by the run.
         body["note"] = "The same brief, noted.";
         WriteOutcome noted = run.Service.NewRecord(new NewRecordRequest("assignment", run.Estate.OperatorId, PolicyFixtureElement(body), $"work-order:{order.Id}:{order.ComputedHash}", Supersedes: run.Assignment));
         Assert.True(noted.Ok, noted.Problem?.Message + " " + string.Join("; ", noted.Problem?.Findings.Select(f => f.Code + " " + f.Message) ?? []));
@@ -233,6 +242,29 @@ public class OverlapCheckTests
         Assert.Contains("and the draft brief in widget", preview.Text, StringComparison.Ordinal);
         Assert.Equal(run.Resource, preview.Json.GetProperty("draft").GetProperty("repository").GetString());
         Assert.Contains("It overlaps no active assignment.", run.Service.WorkOverlapPreview(new OverlapPreviewRequest(RunEstate.Json(DocsBrief), run.Resource)).Text, StringComparison.Ordinal);
+
+        // A draft is held to what the write boundary holds a recorded brief to before anything is compared.
+        var invalid = new JsonObject
+        {
+            ["permittedChanges"] = new JsonArray("path:" + new string('a', 2001)), ["excludedChanges"] = new JsonArray("the operator guide"),
+            ["after"] = new JsonArray([.. Enumerable.Range(0, 21).Select(_ => (JsonNode)run.Assignment)]),
+        };
+        string problem = run.Service.WorkOverlapPreview(new OverlapPreviewRequest(PolicyFixtureElement(invalid), run.Resource)).Json.GetProperty("problem").GetString()!;
+        Assert.StartsWith("The draft brief would not be recorded, so nothing was compared: ", problem, StringComparison.Ordinal);
+        Assert.Contains("1 to 2000 characters", problem, StringComparison.Ordinal);
+        Assert.Contains("prose excludes nothing", problem, StringComparison.Ordinal);
+        Assert.Contains("at most 20 assignments", problem, StringComparison.Ordinal);
+
+        // A draft that inflates the characters the patterns name with exclusions that never match is compared within the search's bounds.
+        var inflated = new JsonObject
+        {
+            ["permittedChanges"] = new JsonArray("path:widget/" + new string('w', 1980)),
+            ["excludedChanges"] = new JsonArray([.. Enumerable.Range(0, 10).Select(part => (JsonNode)("path:q/" + new string([.. Enumerable.Range(0x4E00 + part * 1990, 1990).Select(i => (char)i)])))]),
+        };
+        OverlapResponse bounded = run.Service.WorkOverlapPreview(new OverlapPreviewRequest(PolicyFixtureElement(inflated), run.Resource));
+        Assert.False(bounded.Json.TryGetProperty("problem", out JsonElement refusal), refusal.ToString());
+        JsonElement found = Assert.Single(bounded.Json.GetProperty("overlaps").EnumerateArray(), o => o.GetProperty("first").GetProperty("assignment").GetString() == run.Assignment);
+        Assert.True(found.GetProperty("determined").GetBoolean());
     }
 
     [Fact]
@@ -283,6 +315,154 @@ public class OverlapCheckTests
     }
 
     [Fact]
+    public void AResultReleasesItsAssignmentOnlyWhenItsOwnChangeIsIntegratedIntoTheMainLine()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        run.Service.Providers.Register(new GitCommandAdapter());
+        string root = Git(run.Clone, "rev-parse", "HEAD");
+        Order(run, "W-3");
+        Order(run, "W-4");
+        string earlier = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-3", run.Estate.BuilderId, run.Estate.OperatorId, RunEstate.Json(DocsBrief)) { Repository = run.Resource })).Id;
+        string later = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-4", run.Estate.BuilderId, run.Estate.OperatorId, After(DocsBrief, earlier)) { Repository = run.Resource })).Id;
+        // The work, pushed to its own branch, as a worker's settlement fetches a run's audited branch into the registered clone.
+        Git(run.Clone, "checkout", "-q", "-b", "work/w-3");
+        Commit(run.Clone, "docs/guide.md", "guide\n", "The guide");
+        string work = Git(run.Clone, "rev-parse", "HEAD");
+        Git(run.Clone, "checkout", "-q", "main");
+
+        // The first probe: the result names the assignment's own work branch as its target. Only the main line shows integration.
+        Complete(run, earlier, root, work, target: "work/w-3");
+        JsonElement own = Party(run, earlier);
+        Assert.True(own.GetProperty("active").GetBoolean());
+        Assert.Equal(("not-integrated", "main"), (own.GetProperty("change").GetProperty("integration").GetString(), own.GetProperty("change").GetProperty("mainLine").GetString()));
+        Assert.Equal("attempt.after", Assert.Single(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")).Problem!.Findings).Code);
+
+        // The second probe: base and head are both the main line's existing commit.
+        WriteOutcome same = Submit(run, earlier, root, root);
+        Assert.True(same.Ok);
+        Assert.Contains(same.Notices!, n => n.StartsWith($"Warning: result {same.Written!.Id} names a change that cannot release assignment {earlier}, since its base and head are the same commit", StringComparison.Ordinal));
+        JsonElement empty = Party(run, earlier);
+        Assert.True(empty.GetProperty("active").GetBoolean());
+        Assert.Equal("mismatched", empty.GetProperty("change").GetProperty("integration").GetString());
+        Assert.False(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")).Ok);
+
+        // The third probe: a change in another registered repository, reachable from that clone's main line.
+        string gadgetClone = Path.Combine(run.Scratch, "gadget");
+        Directory.CreateDirectory(gadgetClone);
+        Git(gadgetClone, "init", "-q", "-b", "main");
+        Commit(gadgetClone, "README.md", "gadget\n", "The first commit");
+        string gadgetRoot = Git(gadgetClone, "rev-parse", "HEAD");
+        Commit(gadgetClone, "docs/guide.md", "guide\n", "The gadget's guide");
+        string gadgetHead = Git(gadgetClone, "rev-parse", "HEAD");
+        string gadget = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("resource", run.Estate.OperatorId, RunEstate.Json($$"""{"kind":"repository","name":"gadget","role":"The gadget's source.","location":{"rootCommit":"{{gadgetRoot}}"},"visibility":"private"}""")))).Id;
+        RepositoryClones.Register(run.Service.Session.Manifest.Estate, gadget, gadgetClone);
+        Assert.True(new GitCommandAdapter().Reachable(gadgetClone, gadgetHead, "main"));
+        WriteOutcome elsewhere = Submit(run, earlier, gadgetRoot, gadgetHead, repository: gadget);
+        Assert.Contains(elsewhere.Notices!, n => n.Contains($"since it is in gadget ({gadget}), not in widget ({run.Resource})", StringComparison.Ordinal));
+        JsonElement other = Party(run, earlier);
+        Assert.True(other.GetProperty("active").GetBoolean());
+        Assert.Equal("mismatched", other.GetProperty("change").GetProperty("integration").GetString());
+        Assert.False(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")).Ok);
+
+        // The honest case: the work merged into the main line, named by its own range, releases the assignment, and the wait ends.
+        Git(run.Clone, "merge", "-q", "--no-ff", "-m", "Merge the guide", "work/w-3");
+        WriteOutcome integrated = Submit(run, earlier, root, work);
+        Assert.Null(integrated.Notices);
+        Assert.DoesNotContain(run.Service.WorkOverlap().Json.GetProperty("assignments").EnumerateArray(), a => a.GetProperty("assignment").GetString() == earlier);
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")));
+    }
+
+    [Fact]
+    public void AResultTheCheckCountsReleasedAtCompletionIsNotWarnedAndOneAfterItsFirstRecordIs()
+    {
+        using var estate = new TestEstate(3);
+        using EstateService service = EstateService.Open(estate.Root);
+        // A work order and an assignment an older runtime recorded: its brief holds a path pattern and names no repository, and no record of
+        // the check exists.
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, """{"key":"W-1","kind":"ordinary","title":"Widget","intent":"Build it.","scope":["widget"],"exitQuestion":"Built?","inputs":[],"deliverables":["widget"]}""");
+        JsonObject body = new() { ["contributor"] = estate.BuilderId, ["brief"] = JsonNode.Parse(RunEstate.Brief) };
+        RecordEnvelope older = estate.Add("assignment", estate.OperatorId, body.ToJsonString(), subject: order.Reference);
+        const string Completed = """{"outcome":"completed","summary":"Built.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""";
+        string attempt = RunEstate.Ok(service.Attempt(new AttemptRequest(older.Id, estate.BuilderId, "widget repository, a work branch", "Start."))).Id;
+        WriteOutcome released = service.Result(new ResultRequest(attempt, estate.BuilderId, RunEstate.Json(Completed)));
+        Assert.True(released.Ok);
+        Assert.Null(released.Notices);
+        AssignmentOverlaps.Party party = AssignmentOverlaps.PartyOf(estate.Load(), older)!;
+        Assert.False(party.Active);
+        Assert.Contains("recorded before the overlap check", Assert.Single(party.Labels), StringComparison.Ordinal);
+
+        // A new assignment names its repository, the check's first record; a later completed result naming no change keeps its assignment
+        // active until acceptance, and the write says so.
+        RunEstate.Ok(service.Assign(new AssignRequest("W-1", estate.BuilderId, estate.OperatorId, RunEstate.Json(RunEstate.Brief))));
+        attempt = RunEstate.Ok(service.Attempt(new AttemptRequest(older.Id, estate.BuilderId, "widget repository, a work branch", "Again."))).Id;
+        WriteOutcome warned = service.Result(new ResultRequest(attempt, estate.BuilderId, RunEstate.Json(Completed)));
+        Assert.StartsWith($"Warning: result {warned.Written!.Id} is completed and names no change", Assert.Single(warned.Notices!), StringComparison.Ordinal);
+        Assert.True(AssignmentOverlaps.PartyOf(estate.Load(), older)!.Active);
+    }
+
+    [Fact]
+    public void TheClonesGraftsAndSubmoduleSettingSteerNoOverlapRead()
+    {
+        TestPrerequisites.RequireGit();
+        string clone = Path.Combine(Path.GetTempPath(), "vericairn-overlap-git-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(clone);
+        try
+        {
+            Git(clone, "init", "-q", "-b", "main");
+            Commit(clone, "README.md", "one\n", "One");
+            string first = Git(clone, "rev-parse", "HEAD");
+            Git(clone, "checkout", "-q", "-b", "side");
+            Commit(clone, "side.txt", "side\n", "A side commit");
+            string side = Git(clone, "rev-parse", "HEAD");
+            Git(clone, "checkout", "-q", "main");
+            Commit(clone, "README.md", "two\n", "Two");
+            string main = Git(clone, "rev-parse", "HEAD");
+            // A submodule's commit recorded and then moved, as a gitlink.
+            Git(clone, "update-index", "--add", "--cacheinfo", $"160000,{first},sub");
+            Git(clone, "commit", "-q", "-m", "A submodule");
+            string linked = Git(clone, "rev-parse", "HEAD");
+            Git(clone, "update-index", "--cacheinfo", $"160000,{side},sub");
+            Git(clone, "commit", "-q", "-m", "The submodule moved");
+            string moved = Git(clone, "rev-parse", "HEAD");
+
+            var git = new GitCommandAdapter();
+            Assert.False(git.Reachable(clone, side, "main"));
+            // A graft giving main's commit the side commit as its parent, and a setting that hides submodules from diffs.
+            File.WriteAllText(Path.Combine(clone, ".git", "info", "grafts"), $"{main} {side}\n");
+            Git(clone, "config", "diff.ignoreSubmodules", "all");
+            Assert.Equal("true", PlainGit(clone, "merge-base", "--is-ancestor", side, main));
+            Assert.Empty(PlainGit(clone, "diff", "--name-only", linked, moved));
+
+            Assert.False(git.Reachable(clone, side, "main"));
+            Assert.False(git.Precedes(clone, side, main));
+            Assert.True(git.Precedes(clone, first, main));
+            Assert.False(git.Precedes(clone, main, main));
+            Assert.Equal([new SourceChange("sub", "modified")], git.ChangedPaths(clone, linked, moved));
+        }
+        finally
+        {
+            try { Directory.Delete(clone, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    // Git as a clone's own configuration and info files steer it, for the control of what the overlap check's reads ignore.
+    private static string PlainGit(string clone, params string[] arguments)
+    {
+        var info = new ProcessStartInfo("git") { WorkingDirectory = clone, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        using Process process = Process.Start(info)!;
+        string output = process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return arguments[0] == "merge-base" ? (process.ExitCode == 0 ? "true" : "false") : output.Trim();
+    }
+
+    private static JsonElement Party(RunEstate run, string assignment) =>
+        Assert.Single(run.Service.WorkOverlap().Json.GetProperty("assignments").EnumerateArray(), a => a.GetProperty("assignment").GetString() == assignment);
+
+    [Fact]
     public void TheScopeAuditCountsAChangedPathMatchingAnExclusionAsOutside()
     {
         var before = new WorkspaceSnapshot(new Dictionary<string, string>(StringComparer.Ordinal));
@@ -330,10 +510,21 @@ public class OverlapCheckTests
         run.Service.RunStart(new RunStartRequest(assignment, "generic", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource,
             Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("generic", run.Report(report)) }));
 
-    private static string Complete(RunEstate run, string assignment, string from, string head)
+    private static string Complete(RunEstate run, string assignment, string from, string head, string target = "main", string? repository = null) =>
+        RunEstate.Ok(Submit(run, assignment, from, head, target, repository)).Id;
+
+    private static WriteOutcome Submit(RunEstate run, string assignment, string from, string head, string target = "main", string? repository = null)
     {
         string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(assignment, run.Estate.BuilderId, "widget repository, a work branch", "Start."))).Id;
-        return RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, run.Estate.BuilderId, RunEstate.Json($$$"""{"outcome":"completed","summary":"Built.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none","change":{"repository":"{{{run.Resource}}}","base":"{{{from}}}","head":"{{{head}}}","target":"main"}}""")))).Id;
+        return run.Service.Result(new ResultRequest(attempt, run.Estate.BuilderId, RunEstate.Json($$$"""{"outcome":"completed","summary":"Built.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none","change":{"repository":"{{{repository ?? run.Resource}}}","base":"{{{from}}}","head":"{{{head}}}","target":"{{{target}}}"}}""")));
+    }
+
+    private static void Commit(string clone, string path, string content, string message)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(clone, path))!);
+        File.WriteAllText(Path.Combine(clone, path), content);
+        Git(clone, "add", path);
+        Git(clone, "commit", "-q", "-m", message);
     }
 
     // A concurrent-paths policy on the widget's repository, approved and signed with the operator's key held here.

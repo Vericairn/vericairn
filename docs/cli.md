@@ -13,7 +13,7 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 36, November 17, 2026. Add `work overlap`, which lists the active assignments by repository and every overlap of their effective permitted paths, and previews a draft brief's with `--brief`, `--repository` on `work assign`, and the overlaps that `work assign`, `work attempt`, `worker run` and `goal step` report on standard error, in the development build.
+Revision 36, November 17, 2026. Add `work overlap`, which lists the active assignments by repository and every overlap of their effective permitted paths, and previews a draft brief's with `--brief`, `--repository` on `work assign`, and the overlaps that `work assign`, `work attempt`, `worker run` and `goal step` report on standard error; an assignment is released only by its own change integrated into its repository's main line, in the development build.
 
 Revision 35, November 16, 2026. Fold every line taken from the runtime to the terminal's width with `runtime:` on every row, make its runs of spaces one space, and show a presence-related command's problems from the runtime the same way, in the development build.
 
@@ -1078,48 +1078,65 @@ It lists the active assignments by repository, each with its patterns, its exclu
 overlap of two of them: their patterns, their witnesses, the resolution and each `vericairn.estate/concurrent-paths` policy whose
 selection the overlap meets, with its level. `--repository` shows one repository's, a repository resource's id or `estate`;
 `--brief <file>` previews a draft brief, as `work assign` takes it, against the active assignments before it is recorded, in the
-repository its brief or `--repository` names. It records nothing. `--json` writes the view as `vericairn.overlaps/1`:
+repository its brief or `--repository` names. The draft is first held to what the write boundary holds a recorded brief to: each
+`permittedChanges` and `excludedChanges` entry 1 to 2,000 characters, each exclusion a pattern, and at most 20 distinct assignment
+ids in `after`; a draft that falls short answers with `problem` and is compared with nothing. It records nothing, and the runtime
+compares a snapshot of the records without holding its other operations. `--json` writes the view as `vericairn.overlaps/1`:
 `assignments`, each with `assignment`, `key`, `repository`, `repositoryFrom` (`brief`, `run` or `unknown`), `patterns`, `excluded`,
 `leftOut`, `after`, `active`, `state`, `labels`, `result` and, for a result that names one, `change` with its `integration`
-(`merged`, `reachable`, `not-integrated` or `unknown`) and its `paths`, each `path` with its `change` (`added`, `modified` or
-`removed`), read from this machine's registered clone by name without rename detection, or `pathsUnavailable` when a commit is
-missing there; `overlaps`, each with `first` and `second`, `repository`, `determined`,
+(`merged`, `reachable`, `not-integrated`, `mismatched` or `unknown`), the `mainLine` it was compared with, the `problem` that makes
+it `mismatched`, and its `paths`, each `path` with its `change` (`added`, `modified` or `removed`), read from this machine's
+registered clone by name without rename detection, or `pathsUnavailable` when a commit is missing there; `overlaps`, each with
+`first` and `second`, `repository`, `determined`,
 `witnesses`, `witnessKind` (`tracked` or `possible`), `branch`, `resolution` (`none` or `sequence`), `held`, `policies` and
 `labels`; and, for a preview, `draft`.
 
 An assignment is active while it is current and its work order is neither accepted nor retired, until it is released: its current
 result is abandoned; it is completed and names a `change` that is integrated, shown by a `change-merge` operation observed at the
-change's head, or by the head being reachable from the target branch in this machine's registered clone, labeled as observed
-here; it is completed and its brief holds no path pattern; or it is completed and was recorded before the overlap check, labeled,
-since nothing recorded its integration. From 0.9.4 a completed result whose brief holds a path pattern and that names no `change`
-keeps its assignment active until acceptance. An assignment whose brief names no repository is compared under the one its agent
-runs named, or, with none, as possibly in any repository, which the view labels.
+change's head, or by the head being reachable from the main line of this machine's registered clone (origin's `HEAD`, else `main`,
+else `master`, as a local branch), labeled as observed here; it is completed and its brief holds no path pattern; or it is
+completed and was recorded before the overlap check, labeled, since nothing recorded its integration. A change releases only its
+own assignment's work: it is in the repository the assignment's brief names, or for an older brief the one its agent runs named,
+and its base is a proper ancestor of its head. A change in another repository, with the same commit as base and head, or whose
+base is no ancestor of its head in the clone is `mismatched` and keeps the assignment active, and the branch a result names as
+its `target` never shows integration: only the main line does, and never a branch an agent run worked on. From 0.9.4 a completed
+result whose brief holds a path pattern and that names no `change` keeps its assignment active until acceptance. Before the
+check's first record in an estate (the first brief naming a repository, exclusions or `after`, or result naming a change),
+results count as recorded before it by the times the records state, which the command line and the API take from the caller. An
+assignment whose brief names no repository is compared under the one its agent runs named, or, with none, as possibly in any
+repository, which the view labels. A reading asks the clone only about completed results of work that is still open, once for
+each change.
 
 Two active assignments overlap when some valid path, by the worker's rules for a repository-relative path with nonempty components
 and no leading or trailing slash, matches a pattern of each and no exclusion of either. The comparison is exact over the patterns'
-grammar: a search of their automata, bounded at 100,000 states, that reports a pair it cannot decide within the bound as
-overlapping and undetermined. A shortest path longer than 2,000 characters means no valid overlap. Each overlap shows up to 20
-tracked paths in the intersection at the main line of the registered clone, else the shortest path either could create, labeled
-so. Matching is ordinal, as the worker's is; on a case-insensitive filesystem two paths that differ only in case name one file,
-and the view says so for a clone there.
+grammar: a search of their automata, bounded at 100,000 states, the patterns' own automata included, and at 5,000,000 steps of
+work, each character a state is stepped by and each move of an automaton followed, that reports a pair it cannot decide within
+either bound as overlapping and undetermined. A state is stepped only by the characters its automata name there and one
+representative of the rest, so characters the patterns name elsewhere add no work. A shortest path longer than 2,000 characters
+means no valid overlap. Each overlap shows up to 20 tracked paths in the intersection at the main line of the registered clone,
+sought within a bound of their own, else the shortest path either could create, labeled so. Matching is ordinal, as the worker's
+is; on a case-insensitive filesystem two paths that differ only in case name one file, and the view says so for a clone there.
 
 An overlap is resolved by sequence, the later assignment's brief naming the earlier in `after`, or by one owner, every other
 party's brief excluding the shared paths in `excludedChanges`. Adding an exclusion or an `after` grants less and needs no
-amendment; it is refused while a run of the assignment is in flight. `goal step` records the later of two assignments whose
-overlap a `concurrent-paths` policy at `refuse` holds with `after` naming the earlier, and for an agent's step records that
-assignment alone, so that its run starts from a later `goal step` once the earlier is released; it reports every other overlap
-and starts the work. `goal next` shows the overlaps of the goal's work and those a new assignment of its next step would have.
-`worker run`, `goal step` and a new attempt refuse while an assignment named in `after` is not released, and a run is refused in
-another repository than its brief names, so register a repository with `sources adopt` before you assign work in it.
+amendment; a revision that changes an assignment's `repository`, `permittedChanges`, `excludedChanges` or `after` is refused while
+a run of it is in flight, so that the run keeps working where admission checked it and is compared there. `goal step` records the
+later of two assignments whose overlap a `concurrent-paths` policy at `refuse` holds with `after` naming the earlier, and for an
+agent's step records that assignment alone, so that its run starts from a later `goal step` once the earlier is released; it
+reports every other overlap and starts the work. `goal next` shows the overlaps of the goal's work and those a new assignment of
+its next step would have. `worker run`, `goal step` and a new attempt refuse while an assignment named in `after` is not released,
+and a run is refused in another repository than its brief names, so register a repository with `sources adopt` before you assign
+work in it.
 
 `work assign --repository <resource id or estate>` names the repository a brief with a path pattern changes when the brief names
 none; without it, the estate's own repository fills it when the estate names no repository resource, and otherwise the write is
 refused with the candidates. `work assign`, `work attempt`, `records new assignment`, `worker run` and `goal step` print each
-overlap of the assignment with the active assignments on standard error, and a completed result that names no change prints
-the write boundary's warning there; the record's own output, and its JSON, are unchanged. `status` and `progress` show the open
-overlaps under the work from the records alone, and their canonical JSON gains `overlaps` while one is open. The same view is
-`GET /v1/overlaps` and `POST /v1/overlaps/preview`, the SDK's `WorkOverlap` and `WorkOverlapPreview`, and the MCP read tool
-`work_overlap` ([MCP](mcp.md#tool-annotations-and-definitions-094)).
+overlap of the assignment with the active assignments on standard error, and a completed result that keeps its assignment
+active, since it names no change or one that cannot release it, prints the write boundary's warning there; the record's own
+output, and its JSON, are unchanged. `status` and `progress` show the open overlaps under the work from the records alone, and
+their canonical JSON gains `overlaps` while one is open. The same view is `GET /v1/overlaps` and `POST /v1/overlaps/preview`, the
+SDK's `WorkOverlap` and `WorkOverlapPreview`, and the MCP read tool `work_overlap`
+([MCP](mcp.md#tool-annotations-and-definitions-094)).
 
 ## `vericairn estate first-authority` (0.9.3)
 

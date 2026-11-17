@@ -25,21 +25,18 @@ public sealed partial class EstateService
     /// <inheritdoc />
     public OverlapResponse WorkOverlap(string? repository = null)
     {
-        lock (gate)
+        (EstateModel model, RepositoryView view) = Snapshot();
+        string? identity = null;
+        if (repository is not null && (identity = RepositoryIdentity(model, repository)) is null)
         {
-            EstateModel model = session.Load();
-            string? identity = null;
-            if (repository is not null && (identity = RepositoryIdentity(model, repository)) is null)
-            {
-                return OverlapProblem($"No repository has id {repository}: name a repository resource or estate.");
-            }
-
-            RepositoryView view = View(model);
-            IReadOnlyList<AssignmentOverlaps.Party> parties = AssignmentOverlaps.Parties(model, view);
-            IReadOnlyList<AssignmentOverlaps.Overlap> overlaps = AssignmentOverlaps.Overlaps(model, parties, view);
-            using JsonDocument json = JsonDocument.Parse(AssignmentOverlaps.RenderJson(model, parties, overlaps, identity));
-            return new OverlapResponse(AssignmentOverlaps.RenderText(model, parties, overlaps, identity, view), json.RootElement.Clone());
+            return OverlapProblem($"No repository has id {repository}: name a repository resource or estate.");
         }
+
+        // The comparison reads this snapshot of the records outside the service's gate, so that other operations never wait for it.
+        IReadOnlyList<AssignmentOverlaps.Party> parties = AssignmentOverlaps.Parties(model, view);
+        IReadOnlyList<AssignmentOverlaps.Overlap> overlaps = AssignmentOverlaps.Overlaps(model, parties, view);
+        using JsonDocument json = JsonDocument.Parse(AssignmentOverlaps.RenderJson(model, parties, overlaps, identity));
+        return new OverlapResponse(AssignmentOverlaps.RenderText(model, parties, overlaps, identity, view), json.RootElement.Clone());
     }
 
     /// <inheritdoc />
@@ -51,31 +48,45 @@ public sealed partial class EstateService
             return OverlapProblem("A draft brief is a JSON object, as work assign takes it.");
         }
 
+        // A draft is held to what the write boundary holds a recorded brief to before anything is compared.
+        IReadOnlyList<string> problems = AssignmentOverlaps.DraftProblems(request.Brief);
+        if (problems.Count > 0)
+        {
+            return OverlapProblem($"The draft brief would not be recorded, so nothing was compared: {string.Join(" ", problems.Take(10))}{(problems.Count > 10 ? $" And {problems.Count - 10} more." : string.Empty)}");
+        }
+
+        (EstateModel model, RepositoryView view) = Snapshot();
+        string? named = request.Repository ?? TJson.Text(request.Brief, "repository");
+        string? identity = named is null ? null : RepositoryIdentity(model, named);
+        if (named is not null && identity is null)
+        {
+            return OverlapProblem($"No repository has id {named}: name a repository resource or estate.");
+        }
+
+        // The comparison reads this snapshot of the records outside the service's gate, so that other operations never wait for a preview.
+        AssignmentOverlaps.Party draft = AssignmentOverlaps.Draft(model, request.Brief, identity);
+        IReadOnlyList<AssignmentOverlaps.Overlap> overlaps = AssignmentOverlaps.With(model, draft, view);
+        IReadOnlyList<AssignmentOverlaps.Party> parties = AssignmentOverlaps.Parties(model, view);
+        var text = new StringBuilder("Draft brief in ").Append(AssignmentOverlaps.NameOf(model, identity)).Append(": ")
+            .Append(draft.Patterns.Count == 0 ? "no interpretable path pattern, so it changes no repository and overlaps nothing" : string.Join(", ", draft.Patterns))
+            .Append(draft.Excluded.Count > 0 ? " less " + string.Join(", ", draft.Excluded) : string.Empty).Append('\n');
+        if (draft.Patterns.Count > 0 && identity is null)
+        {
+            text.Append("It names no repository, so it is compared with every repository; a recorded brief with a path pattern names its repository.\n");
+        }
+
+        text.Append(overlaps.Count == 0 ? "It overlaps no active assignment.\n" : string.Concat(overlaps.Select(o => AssignmentOverlaps.Sentence(model, o) + "\n")));
+        using JsonDocument json = JsonDocument.Parse(AssignmentOverlaps.RenderJson(model, parties, overlaps, identity, draft));
+        return new OverlapResponse(text.ToString(), json.RootElement.Clone());
+    }
+
+    /// <summary>The records as loaded under the service's gate, and this machine's clones as they show them; a model loaded here is this read's alone.</summary>
+    private (EstateModel Model, RepositoryView View) Snapshot()
+    {
         lock (gate)
         {
             EstateModel model = session.Load();
-            string? named = request.Repository ?? TJson.Text(request.Brief, "repository");
-            string? identity = named is null ? null : RepositoryIdentity(model, named);
-            if (named is not null && identity is null)
-            {
-                return OverlapProblem($"No repository has id {named}: name a repository resource or estate.");
-            }
-
-            RepositoryView view = View(model);
-            AssignmentOverlaps.Party draft = AssignmentOverlaps.Draft(model, request.Brief, identity);
-            IReadOnlyList<AssignmentOverlaps.Overlap> overlaps = AssignmentOverlaps.With(model, draft, view);
-            IReadOnlyList<AssignmentOverlaps.Party> parties = AssignmentOverlaps.Parties(model, view);
-            var text = new StringBuilder("Draft brief in ").Append(AssignmentOverlaps.NameOf(model, identity)).Append(": ")
-                .Append(draft.Patterns.Count == 0 ? "no interpretable path pattern, so it changes no repository and overlaps nothing" : string.Join(", ", draft.Patterns))
-                .Append(draft.Excluded.Count > 0 ? " less " + string.Join(", ", draft.Excluded) : string.Empty).Append('\n');
-            if (draft.Patterns.Count > 0 && identity is null)
-            {
-                text.Append("It names no repository, so it is compared with every repository; a recorded brief with a path pattern names its repository.\n");
-            }
-
-            text.Append(overlaps.Count == 0 ? "It overlaps no active assignment.\n" : string.Concat(overlaps.Select(o => AssignmentOverlaps.Sentence(model, o) + "\n")));
-            using JsonDocument json = JsonDocument.Parse(AssignmentOverlaps.RenderJson(model, parties, overlaps, identity, draft));
-            return new OverlapResponse(text.ToString(), json.RootElement.Clone());
+            return (model, View(model));
         }
     }
 
@@ -175,8 +186,11 @@ public sealed partial class EstateService
     }
 
     /// <summary>
-    /// The write boundary's warning for a new completed result (from 0.9.4, CODE-73): its assignment holds a path pattern and the result
-    /// names no change, so the assignment stays active until acceptance rather than until its change is integrated.
+    /// The write boundary's warning for a new completed result (from 0.9.4, CODE-73), by the rule the overlap check reads its assignment
+    /// with from the records: its assignment holds a path pattern and stays active, since the result names no change, or names one that
+    /// cannot be the assignment's work (another repository, or the same commit as base and head), so the assignment stays active until
+    /// acceptance rather than until its change is integrated. A result the check counts as released at completion, recorded before any
+    /// record of the check, is not warned.
     /// </summary>
     private WriteOutcome WithResultNotices(WriteOutcome outcome)
     {
@@ -185,10 +199,16 @@ public sealed partial class EstateService
         {
             EstateModel model = session.Load();
             if (!model.ById.TryGetValue(written.Id, out RecordEnvelope? result) || result.Type != "result" || EstateModel.BodyString(result, "outcome") != "completed"
-                || result.Body.TryGetProperty("change", out _) || WorkView.AttemptOfResult(model, result) is not { } attempt || WorkView.AssignmentOfAttempt(model, attempt) is not { } assignment
-                || !assignment.Body.TryGetProperty("brief", out JsonElement brief) || !AssignmentOverlaps.HoldsPattern(brief)) return outcome;
-            string notice = $"Warning: result {result.Id} is completed and names no change, so assignment {assignment.Id}, whose brief holds a path pattern, stays active until its work order is accepted. Name the change (repository, base, head and target) in a corrected result, and the assignment is released once that change is integrated.";
-            return outcome with { Notices = [.. outcome.Notices ?? [], notice] };
+                || WorkView.AttemptOfResult(model, result) is not { } attempt || WorkView.AssignmentOfAttempt(model, attempt) is not { } assignment
+                || !assignment.Body.TryGetProperty("brief", out JsonElement brief) || !AssignmentOverlaps.HoldsPattern(brief)
+                || AssignmentOverlaps.PartyOf(model, assignment) is not { Active: true } party || party.Result?.Id != result.Id) return outcome;
+            string? notice = party.Change switch
+            {
+                null => $"Warning: result {result.Id} is completed and names no change, so assignment {party.Assignment.Id}, whose brief holds a path pattern, stays active until its work order is accepted. Name the change (repository, base, head and target) in a corrected result, and the assignment is released once that change is integrated.",
+                { Problem: string problem } => $"Warning: result {result.Id} names a change that cannot release assignment {party.Assignment.Id}, since {problem}, so the assignment stays active until its work order is accepted. Name the assignment's own change (its repository, the commit its work began from as base, and its head) in a corrected result, and the assignment is released once that change is integrated into the repository's main line.",
+                _ => null,
+            };
+            return notice is null ? outcome : outcome with { Notices = [.. outcome.Notices ?? [], notice] };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -198,8 +218,9 @@ public sealed partial class EstateService
 
     /// <summary>
     /// The write boundary's overlap rules (from 0.9.4, CODE-73) for proposed records: a new assignment in record format 3 whose brief holds a
-    /// path pattern names its repository, and an assignment is narrowed (exclusions or after changed) only once no run of it is in flight.
-    /// Records already in the estate keep their reading.
+    /// path pattern names its repository, and an assignment's repository, permitted changes, exclusions and after change only once no run
+    /// of it is in flight, so that the run keeps working where admission checked it and is compared there. Records already in the estate
+    /// keep their reading.
     /// </summary>
     private static void OverlapBoundary(EstateModel model, IReadOnlyList<AuthoredRecord> records, FindingList relevant)
     {
@@ -216,17 +237,20 @@ public sealed partial class EstateService
             }
 
             if (envelope.Supersedes is string previous && model.ById.TryGetValue(previous, out RecordEnvelope? earlier) && earlier.Type == "assignment"
-                && (Field(brief, "excludedChanges") != Field(earlier, "excludedChanges") || Field(brief, "after") != Field(earlier, "after")))
+                && InFlightFields.FirstOrDefault(name => Field(brief, name) != Field(earlier, name)) is string changed)
             {
                 HashSet<string> chain = [.. model.Chain(envelope)];
                 if (AgentRuns.All(model).FirstOrDefault(r => r.InFlight && r.Assignment is string carried && chain.Contains(carried)) is { } run)
                 {
-                    relevant.Add(new Finding(Severity.Error, "assignment.narrowing-in-flight", record.RelativePath + "#body.brief",
-                        $"Run {run.Id} of this assignment is in flight: an assignment's exclusions and after change only once its run settles or is stopped, so that the work in flight keeps the paths it was granted."));
+                    relevant.Add(new Finding(Severity.Error, "assignment.narrowing-in-flight", record.RelativePath + "#body.brief." + changed,
+                        $"Run {run.Id} of this assignment is in flight: an assignment's repository, permitted changes, exclusions and after change only once its run settles or is stopped, so that the work in flight keeps the repository and paths it was granted and the overlap check compares it where it works."));
                 }
             }
         }
     }
+
+    /// <summary>The brief fields a revision changes only once no run of the assignment is in flight.</summary>
+    private static readonly string[] InFlightFields = ["repository", "permittedChanges", "excludedChanges", "after"];
 
     private static string Field(JsonElement brief, string name) => brief.ValueKind == JsonValueKind.Object && brief.TryGetProperty(name, out JsonElement value) ? CanonicalJson.Serialize(value) : string.Empty;
 

@@ -9,14 +9,21 @@ namespace Vericairn.Records.Estate;
 /// selectors. Each party's patterns and exclusions are compiled from the worker's grammar, the selection's selectors from the policy
 /// grammar, and the valid paths from <see cref="PathPatterns.Valid"/>'s rules, each to a finite automaton over path characters; the
 /// automata are determinized lazily by subset construction, which complements the exclusions, and their product is searched breadth
-/// first for an accepted path. Every subset state and every product state counts toward a bound; a search that reaches it reports the
-/// pair as overlapping, undetermined. The length limit of 2,000 characters is not compiled in: the search returns the shortest accepted
+/// first for an accepted path. Every state counts toward a bound of states, the patterns' own automata (about one state per character)
+/// as well as the subset and product states, and every step of the search toward a bound of work: each character a product state is
+/// stepped by and each move of an automaton followed. A search that reaches either bound reports the pair as overlapping, undetermined.
+/// A product state is stepped only by the characters some automaton's state there names, the slash and the dot, and one other character
+/// with and one without whitespace, since every other character steps each automaton alike, so the characters the patterns name
+/// elsewhere add no work there. The length limit of 2,000 characters is not compiled in: the search returns the shortest accepted
 /// path, so a shortest path longer than the limit means no valid overlap exists. Matching is ordinal, as the worker's is.
 /// </summary>
 internal static class PathIntersection
 {
-    /// <summary>The bound on subset and product states together.</summary>
+    /// <summary>The bound on states: the patterns' automata, their subset states and the product states together.</summary>
     internal const int StateBound = 100_000;
+
+    /// <summary>The bound on the search's work: characters stepped at product states and automaton moves followed, together.</summary>
+    internal const long WorkBound = 5_000_000;
 
     /// <summary>The length limit of a valid path, checked on the shortest witness.</summary>
     internal const int LengthLimit = 2000;
@@ -32,40 +39,41 @@ internal static class PathIntersection
 
     /// <summary>A search's outcome.</summary>
     /// <param name="Overlap">True when a valid path is in both parties' effective paths, or when the search could not decide.</param>
-    /// <param name="Determined">False when the search reached its state bound; such a pair counts as overlapping.</param>
+    /// <param name="Determined">False when the search reached its bound of states or of work; such a pair counts as overlapping.</param>
     /// <param name="Witness">The shortest such path when one was found, the first among the shortest in the search's order.</param>
-    /// <param name="States">The subset and product states the search counted.</param>
-    internal sealed record Outcome(bool Overlap, bool Determined, string? Witness, int States);
+    /// <param name="States">The states the search counted: its automata's, their subset states and the product states.</param>
+    /// <param name="Work">The work the search counted: characters stepped at product states and automaton moves followed.</param>
+    internal sealed record Outcome(bool Overlap, bool Determined, string? Witness, int States, long Work);
 
     /// <summary>Whether a path matches a selector of a selection, in the policy grammar; with no selection, every path does.</summary>
     internal static bool Selected(IReadOnlyList<string>? selectors, string path) => selectors is null || selectors.Any(s => PathPatterns.SelectorMatches(s, path));
 
     /// <summary>Searches the intersection of two parties' effective paths, within a selection's selectors when one is given.</summary>
-    internal static Outcome Search(Party first, Party second, IReadOnlyList<string>? selectors = null, int bound = StateBound)
+    internal static Outcome Search(Party first, Party second, IReadOnlyList<string>? selectors = null, int bound = StateBound, long work = WorkBound)
     {
         ArgumentNullException.ThrowIfNull(first);
         ArgumentNullException.ThrowIfNull(second);
         if (first.Patterns.Count == 0 || second.Patterns.Count == 0 || selectors is { Count: 0 })
         {
-            return new Outcome(false, true, null, 0);
+            return new Outcome(false, true, null, 0, 0);
         }
 
-        Alphabet alphabet = Alphabet.Of([.. first.Patterns, .. first.Exclusions, .. second.Patterns, .. second.Exclusions], selectors ?? []);
-        var counter = new Counter();
-        Lazy[] parts =
-        [
-            new(Nfa.Worker(first.Patterns), alphabet, counter),
-            new(Nfa.Worker(first.Exclusions), alphabet, counter),
-            new(Nfa.Worker(second.Patterns), alphabet, counter),
-            new(Nfa.Worker(second.Exclusions), alphabet, counter),
-            new(selectors is null ? Nfa.Universal() : Nfa.Selectors(selectors), alphabet, counter),
-        ];
+        var counter = new Counter(bound, work);
+        // The patterns' automata count toward both bounds as they are built, so that no list of patterns builds more than the bound allows.
+        Nfa? firstPatterns = Nfa.Worker(first.Patterns, counter), firstExclusions = Nfa.Worker(first.Exclusions, counter);
+        Nfa? secondPatterns = Nfa.Worker(second.Patterns, counter), secondExclusions = Nfa.Worker(second.Exclusions, counter);
+        Nfa? selection = selectors is null ? Nfa.Universal(counter) : Nfa.Selectors(selectors, counter);
+        if (counter.Exhausted || firstPatterns is null || firstExclusions is null || secondPatterns is null || secondExclusions is null || selection is null)
+        {
+            return Undetermined();
+        }
 
+        Lazy[] parts = [new(firstPatterns, counter), new(firstExclusions, counter), new(secondPatterns, counter), new(secondExclusions, counter), new(selection, counter)];
         var start = new State(parts[0].Start, parts[1].Start, parts[2].Start, parts[3].Start, parts[4].Start, ValidPaths.Start);
         var index = new Dictionary<State, int> { [start] = 0 };
         var states = new List<State> { start };
-        var parents = new List<(int Parent, int Symbol)> { (-1, -1) };
-        counter.Count++;
+        var parents = new List<(int Parent, char Char)> { (-1, '\0') };
+        counter.States++;
         var frontier = new List<int> { 0 };
         for (int depth = 0; depth < LengthLimit && frontier.Count > 0; depth++)
         {
@@ -73,26 +81,29 @@ internal static class PathIntersection
             foreach (int at in frontier)
             {
                 State state = states[at];
-                for (int symbol = 0; symbol < alphabet.Count; symbol++)
+                char[] symbols = Symbols(parts, state, counter);
+                counter.Work += symbols.Length;
+                if (counter.Exhausted) return Undetermined();
+                foreach (char c in symbols)
                 {
-                    int valid = ValidPaths.Step(state.Valid, alphabet.Chars[symbol]);
+                    int valid = ValidPaths.Step(state.Valid, c);
                     if (valid == ValidPaths.Dead) continue;
-                    int a = parts[0].Step(state.A, symbol);
-                    int b = parts[2].Step(state.B, symbol);
-                    int s = parts[4].Step(state.S, symbol);
-                    if (counter.Count >= bound) return new Outcome(true, false, null, counter.Count);
+                    int a = parts[0].Step(state.A, c);
+                    int b = parts[2].Step(state.B, c);
+                    int s = parts[4].Step(state.S, c);
+                    if (counter.Exhausted) return Undetermined();
                     if (parts[0].Empty(a) || parts[2].Empty(b) || parts[4].Empty(s)) continue;
-                    var reached = new State(a, parts[1].Step(state.ExcludedA, symbol), b, parts[3].Step(state.ExcludedB, symbol), s, valid);
+                    var reached = new State(a, parts[1].Step(state.ExcludedA, c), b, parts[3].Step(state.ExcludedB, c), s, valid);
                     if (index.ContainsKey(reached)) continue;
-                    if (counter.Count >= bound) return new Outcome(true, false, null, counter.Count);
-                    counter.Count++;
+                    if (counter.Exhausted) return Undetermined();
+                    counter.States++;
                     index[reached] = states.Count;
                     states.Add(reached);
-                    parents.Add((at, symbol));
+                    parents.Add((at, c));
                     if (ValidPaths.Accepting(valid) && parts[0].Accepting(a) && !parts[1].Accepting(reached.ExcludedA) && parts[2].Accepting(b)
                         && !parts[3].Accepting(reached.ExcludedB) && parts[4].Accepting(s))
                     {
-                        return new Outcome(true, true, Witness(states.Count - 1), counter.Count);
+                        return new Outcome(true, true, Witness(states.Count - 1), counter.States, counter.Work);
                     }
 
                     next.Add(states.Count - 1);
@@ -103,14 +114,16 @@ internal static class PathIntersection
         }
 
         // No accepted path of at most the length limit: none is valid.
-        return new Outcome(false, true, null, counter.Count);
+        return new Outcome(false, true, null, counter.States, counter.Work);
+
+        Outcome Undetermined() => new(true, false, null, counter.States, counter.Work);
 
         string Witness(int at)
         {
             var chars = new List<char>();
             for (int i = at; parents[i].Parent >= 0; i = parents[i].Parent)
             {
-                chars.Add(alphabet.Chars[parents[i].Symbol]);
+                chars.Add(parents[i].Char);
             }
 
             chars.Reverse();
@@ -118,50 +131,78 @@ internal static class PathIntersection
         }
     }
 
-    private sealed class Counter
+    // Representatives of the characters no automaton's state names: one without whitespace, tried in this order, and one with.
+    private const string Others = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-+=@,";
+    private const string Spaces = " \u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000";
+
+    /// <summary>
+    /// The characters a product state is stepped by: each literal character the states of its automata name, the slash and the dot, and
+    /// one representative each of the other non-whitespace and whitespace characters a valid path may hold, since each automaton steps
+    /// every character it does not name alike, and the valid paths tell them apart only by whitespace; control characters, the backslash
+    /// and the colon never occur in a valid path. Ordered so that the first shortest witness reads plainly: other characters by ordinal,
+    /// then the dot and the slash, then whitespace.
+    /// </summary>
+    private static char[] Symbols(Lazy[] parts, State state, Counter counter)
     {
-        public int Count;
+        var named = new HashSet<char> { '/', '.' };
+        parts[0].Name(state.A, named);
+        parts[1].Name(state.ExcludedA, named);
+        parts[2].Name(state.B, named);
+        parts[3].Name(state.ExcludedB, named);
+        parts[4].Name(state.S, named);
+        named.RemoveWhere(c => !Allowed(c));
+        var chars = new List<char>(named);
+        int scanned = 0;
+        char? other = null;
+        foreach (char c in Others)
+        {
+            scanned++;
+            if (!named.Contains(c))
+            {
+                other = c;
+                break;
+            }
+        }
+
+        for (int i = 0x00C0; other is null && i < 0x20C0; i++)
+        {
+            scanned++;
+            char c = (char)i;
+            if (Allowed(c) && !char.IsWhiteSpace(c) && !named.Contains(c)) other = c;
+        }
+
+        if (other is char o) chars.Add(o);
+        foreach (char c in Spaces)
+        {
+            scanned++;
+            if (!named.Contains(c))
+            {
+                chars.Add(c);
+                break;
+            }
+        }
+
+        counter.Work += scanned;
+        chars.Sort((x, y) => Rank(x) != Rank(y) ? Rank(x).CompareTo(Rank(y)) : x.CompareTo(y));
+        return [.. chars];
+    }
+
+    private static bool Allowed(char c) => !char.IsControl(c) && c is not ('\\' or ':');
+
+    // Letters and other characters first, then the dot and the slash, whitespace last, so that a witness reads plainly.
+    private static int Rank(char c) => char.IsWhiteSpace(c) ? 2 : c is '.' or '/' ? 1 : 0;
+
+    /// <summary>What a search has spent of its two bounds.</summary>
+    private sealed class Counter(int stateBound, long workBound)
+    {
+        public int States;
+
+        public long Work;
+
+        public bool Exhausted => States >= stateBound || Work >= workBound;
     }
 
     private readonly record struct State(int A, int ExcludedA, int B, int ExcludedB, int S, int Valid);
-
-    /// <summary>
-    /// The path characters the search distinguishes: each literal character of a pattern or selector, the slash and the dot, and one
-    /// representative each of the other non-whitespace and whitespace characters a valid path may hold; control characters, the
-    /// backslash and the colon never occur in a valid path. Ordered so that the first shortest witness reads plainly: other characters by
-    /// ordinal, then the dot and the slash, then whitespace.
-    /// </summary>
-    private sealed class Alphabet
-    {
-        private Alphabet(char[] chars) => Chars = chars;
-
-        public char[] Chars { get; }
-
-        public int Count => Chars.Length;
-
-        public static Alphabet Of(IEnumerable<string> patterns, IEnumerable<string> selectors)
-        {
-            var literal = new HashSet<char> { '/', '.' };
-            foreach (string pattern in patterns) literal.UnionWith(pattern.Where(c => c is not ('*' or '?')));
-            foreach (string selector in selectors) literal.UnionWith(selector.Where(c => c != '*'));
-            literal.RemoveWhere(c => !Allowed(c));
-            const string others = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-+=@,";
-            char? other = others.Cast<char?>().FirstOrDefault(c => !literal.Contains(c!.Value))
-                ?? Enumerable.Range(0x00C0, 0x2000).Select(i => (char)i).Cast<char?>().FirstOrDefault(c => Allowed(c!.Value) && !char.IsWhiteSpace(c.Value) && !literal.Contains(c.Value));
-            char? space = " \u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000".Cast<char?>()
-                .FirstOrDefault(c => !literal.Contains(c!.Value));
-            var chars = new List<char>(literal);
-            if (other is char o) chars.Add(o);
-            if (space is char w) chars.Add(w);
-            chars.Sort((x, y) => Rank(x) != Rank(y) ? Rank(x).CompareTo(Rank(y)) : x.CompareTo(y));
-            return new Alphabet([.. chars]);
-        }
-
-        private static bool Allowed(char c) => !char.IsControl(c) && c is not ('\\' or ':');
-
-        // Letters and other characters first, then the dot and the slash, whitespace last, so that a witness reads plainly.
-        private static int Rank(char c) => char.IsWhiteSpace(c) ? 2 : c is '.' or '/' ? 1 : 0;
-    }
 
     /// <summary>The valid-path language as a deterministic automaton: the component so far, and whether a non-whitespace character occurred.</summary>
     private static class ValidPaths
@@ -198,9 +239,11 @@ internal static class PathIntersection
     /// <summary>A nondeterministic automaton over path characters, with epsilon moves; edges match one character, any but a slash, or any.</summary>
     private sealed class Nfa
     {
-        private const int Literal = 0;
+        public const int Literal = 0;
         private const int NotSlash = 1;
         private const int Any = 2;
+
+        private Counter counter = null!;
 
         public List<List<(int Kind, char Char, int To)>> Edges { get; } = [];
 
@@ -212,48 +255,53 @@ internal static class PathIntersection
 
         public static bool Matches(int kind, char edge, char c) => kind switch { Literal => edge == c, NotSlash => c != '/', _ => true };
 
-        /// <summary>The union of a list of the worker's patterns; with none, the empty language.</summary>
-        public static Nfa Worker(IEnumerable<string> patterns)
+        /// <summary>The union of a list of the worker's patterns; with none, the empty language; null once the search's bounds are spent.</summary>
+        public static Nfa? Worker(IEnumerable<string> patterns, Counter counter)
         {
-            var nfa = new Nfa { Start = 0 };
+            var nfa = new Nfa { Start = 0, counter = counter };
             nfa.Add();
             foreach (string pattern in patterns)
             {
+                if (counter.Exhausted) return null;
                 int start = nfa.Add();
                 nfa.Epsilon[nfa.Start].Add(start);
                 nfa.AddWorker(start, pattern);
             }
 
-            return nfa;
+            return counter.Exhausted ? null : nfa;
         }
 
-        /// <summary>The union of a selection's selectors in the policy grammar.</summary>
-        public static Nfa Selectors(IEnumerable<string> selectors)
+        /// <summary>The union of a selection's selectors in the policy grammar; null once the search's bounds are spent.</summary>
+        public static Nfa? Selectors(IEnumerable<string> selectors, Counter counter)
         {
-            var nfa = new Nfa { Start = 0 };
+            var nfa = new Nfa { Start = 0, counter = counter };
             nfa.Add();
             foreach (string selector in selectors)
             {
+                if (counter.Exhausted) return null;
                 int start = nfa.Add();
                 nfa.Epsilon[nfa.Start].Add(start);
                 nfa.AddSelector(start, selector);
             }
 
-            return nfa;
+            return counter.Exhausted ? null : nfa;
         }
 
         /// <summary>Every path.</summary>
-        public static Nfa Universal()
+        public static Nfa Universal(Counter counter)
         {
-            var nfa = new Nfa { Start = 0 };
+            var nfa = new Nfa { Start = 0, counter = counter };
             nfa.Add();
             nfa.Edges[0].Add((Any, '\0', 0));
             nfa.Accept[0] = true;
             return nfa;
         }
 
+        // Each state counts toward the search's bound of states and of work as it is built.
         private int Add()
         {
+            counter.States++;
+            counter.Work++;
             Edges.Add([]);
             Epsilon.Add([]);
             Accept.Add(false);
@@ -379,21 +427,27 @@ internal static class PathIntersection
         }
     }
 
-    /// <summary>A lazily determinized automaton whose subset states count toward the search's bound.</summary>
+    /// <summary>
+    /// A lazily determinized automaton whose subset states count toward the search's bound of states, and each move it follows toward
+    /// its bound of work. A subset state is stepped once by each literal character its states name and by the slash, and once for every
+    /// other character, which its states' edges cannot tell apart.
+    /// </summary>
     private sealed class Lazy
     {
+        // The key of the step by any character a subset state's literal edges do not name, other than the slash.
+        private const int Other = -1;
+
         private readonly Nfa nfa;
-        private readonly Alphabet alphabet;
         private readonly Counter counter;
         private readonly Dictionary<int[], int> ids = new(new Sets());
         private readonly List<int[]> sets = [];
         private readonly List<bool> accepting = [];
+        private readonly List<HashSet<char>?> literals = [];
         private readonly Dictionary<(int, int), int> steps = [];
 
-        public Lazy(Nfa nfa, Alphabet alphabet, Counter counter)
+        public Lazy(Nfa nfa, Counter counter)
         {
             this.nfa = nfa;
-            this.alphabet = alphabet;
             this.counter = counter;
             Start = Intern(Closure([nfa.Start]));
         }
@@ -404,22 +458,43 @@ internal static class PathIntersection
 
         public bool Empty(int id) => sets[id].Length == 0;
 
-        public int Step(int id, int symbol)
+        /// <summary>Adds the literal characters a subset state's edges name.</summary>
+        public void Name(int id, HashSet<char> named) => named.UnionWith(Literals(id));
+
+        public int Step(int id, char c)
         {
-            if (steps.TryGetValue((id, symbol), out int known)) return known;
-            char c = alphabet.Chars[symbol];
+            int key = c == '/' || Literals(id).Contains(c) ? c : Other;
+            if (steps.TryGetValue((id, key), out int known)) return known;
             var reached = new List<int>();
             foreach (int state in sets[id])
             {
                 foreach ((int kind, char edge, int to) in nfa.Edges[state])
                 {
+                    counter.Work++;
                     if (Nfa.Matches(kind, edge, c)) reached.Add(to);
                 }
             }
 
             int next = Intern(Closure(reached));
-            steps[(id, symbol)] = next;
+            steps[(id, key)] = next;
             return next;
+        }
+
+        private HashSet<char> Literals(int id)
+        {
+            if (literals[id] is HashSet<char> known) return known;
+            var named = new HashSet<char>();
+            foreach (int state in sets[id])
+            {
+                foreach ((int kind, char edge, int _) in nfa.Edges[state])
+                {
+                    counter.Work++;
+                    if (kind == Nfa.Literal) named.Add(edge);
+                }
+            }
+
+            literals[id] = named;
+            return named;
         }
 
         private int[] Closure(IEnumerable<int> states)
@@ -429,6 +504,7 @@ internal static class PathIntersection
             while (stack.Count > 0)
             {
                 int state = stack.Pop();
+                counter.Work++;
                 if (!seen.Add(state)) continue;
                 foreach (int to in nfa.Epsilon[state]) stack.Push(to);
             }
@@ -441,11 +517,12 @@ internal static class PathIntersection
         private int Intern(int[] set)
         {
             if (ids.TryGetValue(set, out int id)) return id;
-            counter.Count++;
+            counter.States++;
             id = sets.Count;
             ids[set] = id;
             sets.Add(set);
             accepting.Add(set.Any(s => nfa.Accept[s]));
+            literals.Add(null);
             return id;
         }
 

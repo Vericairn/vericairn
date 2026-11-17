@@ -150,6 +150,97 @@ public class AssignmentOverlapTests
     }
 
     [Fact]
+    public void AChangeReleasesItsAssignmentOnlyAsItsOwnWorkIntegratedIntoTheMainLine()
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope widget = Repository(f, "widget");
+        RecordEnvelope gadget = Repository(f, "gadget");
+        RecordEnvelope honest = Assign(f, Order(f, "W-1"), ["path:src/**"], repository: widget.Id);
+        Complete(f, honest, change: (widget.Id, "main"));
+        RecordEnvelope ownBranch = Assign(f, Order(f, "W-2"), ["path:src/**"], repository: widget.Id);
+        Complete(f, ownBranch, change: (widget.Id, "work/w-2"));
+        RecordEnvelope same = Assign(f, Order(f, "W-3"), ["path:src/**"], repository: widget.Id);
+        Complete(f, same, change: (widget.Id, "main"), from: Head);
+        RecordEnvelope elsewhere = Assign(f, Order(f, "W-4"), ["path:src/**"], repository: widget.Id);
+        Complete(f, elsewhere, change: (gadget.Id, "main"));
+        RecordEnvelope unnamed = Assign(f, Order(f, "W-5"), ["path:src/**"]);
+        Complete(f, unnamed, change: (widget.Id, "main"));
+        EstateModel model = f.Estate.Load();
+        Assert.DoesNotContain(model.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith("records/result", StringComparison.Ordinal));
+
+        // The honest change, its base before its head and its head reachable from the main line, releases its assignment.
+        var reached = new View { Reachable = true };
+        AssignmentOverlaps.Party released = AssignmentOverlaps.PartyOf(model, honest, reached)!;
+        Assert.False(released.Active);
+        Assert.Equal(("reachable", "main"), (released.Change!.Integration, released.Change.Branch));
+
+        // Reachability is read from the main line only, never from the branch the result names, so its own work branch releases nothing.
+        var view = new View { Reachable = false };
+        AssignmentOverlaps.Party behind = AssignmentOverlaps.PartyOf(model, ownBranch, view)!;
+        Assert.True(behind.Active);
+        Assert.Equal("not-integrated", behind.Change!.Integration);
+        Assert.Contains($"{Head} reachable from main in {widget.Id}", view.Reads);
+        Assert.DoesNotContain(view.Reads, r => r.Contains("work/w-2", StringComparison.Ordinal));
+        Assert.Contains(behind.Labels, l => l.Contains("names work/w-2 as its target; only the repository's main line, main", StringComparison.Ordinal));
+
+        // A change whose base is its head, or that is in another repository than its assignment's, or whose assignment names none,
+        // cannot be the assignment's work: it stays active whatever the clone shows, and the clone is not asked whether it is reachable.
+        foreach ((RecordEnvelope assignment, string problem) in new[]
+        {
+            (same, "its base and head are the same commit"), (elsewhere, $"it is in gadget ({gadget.Id}), not in widget ({widget.Id})"), (unnamed, "its assignment names no repository"),
+        })
+        {
+            var clone = new View { Reachable = true };
+            AssignmentOverlaps.Party party = AssignmentOverlaps.PartyOf(model, assignment, clone)!;
+            Assert.True(party.Active, problem);
+            Assert.Equal("mismatched", party.Change!.Integration);
+            Assert.Contains(problem, party.Change.Problem, StringComparison.Ordinal);
+            Assert.StartsWith("active: its change cannot release it, since ", party.State, StringComparison.Ordinal);
+            Assert.Empty(clone.Reads);
+            Assert.True(AssignmentOverlaps.PartyOf(model, assignment)!.Active);
+        }
+
+        // A base that is no ancestor of the head in the clone is not this change's range either.
+        AssignmentOverlaps.Party unrelated = AssignmentOverlaps.PartyOf(model, honest, new View { Reachable = true, Precedes = false })!;
+        Assert.True(unrelated.Active);
+        Assert.Contains("is not an ancestor of its head", unrelated.Change!.Problem, StringComparison.Ordinal);
+        // With no main line in the clone, nothing is observed integrated.
+        Assert.True(AssignmentOverlaps.PartyOf(model, honest, new View { Reachable = true, Line = null })!.Active);
+    }
+
+    [Fact]
+    public void AReadingAsksTheCloneOnlyForCompletedResultsOfOpenWorkAndOnceForEachChange()
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope widget = Repository(f, "widget");
+        RecordEnvelope acceptedOrder = Order(f, "W-1");
+        RecordEnvelope accepted = Assign(f, acceptedOrder, ["path:src/**"], repository: widget.Id);
+        Complete(f, accepted, change: (widget.Id, "main"));
+        f.Add("acceptance", new JsonObject { ["statement"] = "Accepted.", ["basis"] = new JsonArray(), ["self"] = true }, subject: acceptedOrder.Reference);
+        RecordEnvelope abandoned = Assign(f, Order(f, "W-2"), ["path:src/**"], repository: widget.Id);
+        Complete(f, abandoned, outcome: "abandoned", change: (widget.Id, "main"));
+        RecordEnvelope partial = Assign(f, Order(f, "W-3"), ["path:src/**"], repository: widget.Id);
+        Complete(f, partial, outcome: "partial", change: (widget.Id, "main"));
+        EstateModel model = f.Estate.Load();
+
+        var view = new View { Reachable = true };
+        Dictionary<string, AssignmentOverlaps.Party> parties = AssignmentOverlaps.Parties(model, view).ToDictionary(p => p.Assignment.Id, StringComparer.Ordinal);
+        Assert.Equal("released: its work order is accepted", parties[accepted.Id].State);
+        Assert.False(parties[abandoned.Id].Active);
+        Assert.True(parties[partial.Id].Active);
+        Assert.Empty(view.Reads);
+
+        // Two open assignments whose completed results name the same change read the clone once for it within one reading.
+        RecordEnvelope first = Assign(f, Order(f, "W-4"), ["path:src/**"], repository: widget.Id);
+        Complete(f, first, change: (widget.Id, "main"));
+        RecordEnvelope second = Assign(f, Order(f, "W-5"), ["path:src/**"], repository: widget.Id);
+        Complete(f, second, change: (widget.Id, "main"));
+        var counted = new View { Reachable = false };
+        Assert.All(AssignmentOverlaps.Parties(f.Estate.Load(), counted).Where(p => p.Assignment.Id == first.Id || p.Assignment.Id == second.Id), p => Assert.True(p.Active));
+        Assert.Equal([$"main line of {widget.Id}", $"{Base} before {Head} in {widget.Id}", $"{Head} reachable from main in {widget.Id}", $"paths {Base}..{Head} in {widget.Id}"], counted.Reads);
+    }
+
+    [Fact]
     public void AChangeMergeObservedAtTheChangesHeadReleasesItsAssignment()
     {
         using var f = new PolicyFixture();
@@ -350,12 +441,12 @@ public class AssignmentOverlapTests
     private static RecordEnvelope Attempt(PolicyFixture f, RecordEnvelope assignment) =>
         f.Add("attempt", new JsonObject { ["startedAt"] = "2026-10-13T12:00:00Z", ["workspace"] = "a work branch", ["note"] = "Work." }, builder: true, subject: assignment.Reference);
 
-    private static RecordEnvelope Complete(PolicyFixture f, RecordEnvelope assignment, string outcome = "completed", (string Repository, string Target)? change = null)
+    private static RecordEnvelope Complete(PolicyFixture f, RecordEnvelope assignment, string outcome = "completed", (string Repository, string Target)? change = null, string from = Base, string head = Head)
     {
         RecordEnvelope attempt = Attempt(f, assignment);
         JsonObject body = PolicyFixture.ResultBody();
         body["outcome"] = outcome;
-        if (change is { } named) body["change"] = new JsonObject { ["repository"] = named.Repository, ["base"] = Base, ["head"] = Head, ["target"] = named.Target };
+        if (change is { } named) body["change"] = new JsonObject { ["repository"] = named.Repository, ["base"] = from, ["head"] = head, ["target"] = named.Target };
         return f.Add("result", body, builder: true, subject: attempt.Reference);
     }
 
@@ -368,20 +459,47 @@ public class AssignmentOverlapTests
         return f.Policy(body);
     }
 
+    // A clone as the check reads it, counting each read of a change so that a test sees which reads were made.
     private sealed class View : IRepositoryView
     {
         public (string Branch, IReadOnlyList<string> Paths)? Paths { get; init; }
 
         public bool? Reachable { get; init; }
 
+        public bool? Precedes { get; init; } = true;
+
+        public string? Line { get; init; } = "main";
+
         public bool Folds { get; init; }
+
+        public List<string> Reads { get; } = [];
 
         (string Branch, IReadOnlyList<string> Paths)? IRepositoryView.Tracked(string repository) => Paths;
 
-        bool? IRepositoryView.Reachable(string repository, string commit, string branch) => Reachable;
+        string? IRepositoryView.MainLine(string repository)
+        {
+            Reads.Add($"main line of {repository}");
+            return Line;
+        }
+
+        bool? IRepositoryView.Reachable(string repository, string commit, string branch)
+        {
+            Reads.Add($"{commit} reachable from {branch} in {repository}");
+            return Reachable;
+        }
+
+        bool? IRepositoryView.Precedes(string repository, string ancestor, string descendant)
+        {
+            Reads.Add($"{ancestor} before {descendant} in {repository}");
+            return Precedes;
+        }
 
         bool IRepositoryView.CaseInsensitive(string repository) => Folds;
 
-        IReadOnlyList<(string Path, string Change)>? IRepositoryView.Changed(string repository, string from, string to) => null;
+        IReadOnlyList<(string Path, string Change)>? IRepositoryView.Changed(string repository, string from, string to)
+        {
+            Reads.Add($"paths {from}..{to} in {repository}");
+            return null;
+        }
     }
 }
