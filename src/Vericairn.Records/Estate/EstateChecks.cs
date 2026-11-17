@@ -163,7 +163,15 @@ public static partial class EstateChecks
     private static void ScanText(string file, string relative, FindingList findings, EstateModel model) => ScanText(File.ReadAllBytes(file), relative, findings, model);
 
     // A binary or non-UTF-8 file is already reported by the text scan, and is not read as instructions.
-    private static void ScanInstructions(string file, string relative, FindingList findings)
+    private static void ScanInstructions(string file, string relative, FindingList findings) =>
+        ScanInstructions(file, relative, findings, InstructionFileChecks.Scan);
+
+    /// <summary>
+    /// Reads one owner's instruction file with the given scan. A failure of the scan itself never fails the whole check: the file gets
+    /// one finding, instructions.unreadable, naming the file and the kind of failure and never its content, and none of the scan's
+    /// partial findings.
+    /// </summary>
+    internal static void ScanInstructions(string file, string relative, FindingList findings, Action<string, string, FindingList> scan)
     {
         byte[] bytes = File.ReadAllBytes(file);
         if (Array.IndexOf(bytes, (byte)0) >= 0)
@@ -171,13 +179,32 @@ public static partial class EstateChecks
             return;
         }
 
+        string text;
         try
         {
-            InstructionFileChecks.Scan(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes), relative, findings);
+            text = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
         }
         catch (DecoderFallbackException)
         {
             // layout.encoding already names the file.
+            return;
+        }
+
+        var scanned = new FindingList();
+        try
+        {
+            scan(text, relative, scanned);
+        }
+        catch (Exception exception)
+        {
+            // Any failure of one file's heuristic scan becomes that file's finding; the rest of the check goes on.
+            findings.Warning(InstructionFileChecks.UnreadableCode, relative, $"The check could not read this file for hooks, approvals and secret-like values ({exception.GetType().Name}), so nothing in it was checked for them. Review it by hand, and report the failure.");
+            return;
+        }
+
+        foreach (Finding finding in scanned)
+        {
+            findings.Add(finding);
         }
     }
 

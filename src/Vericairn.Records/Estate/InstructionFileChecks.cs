@@ -22,6 +22,7 @@ internal static class InstructionFileChecks
     internal const string ApprovalCode = "instructions.approval";
     internal const string SecretCode = "instructions.secret";
     internal const string RepositoryCode = "instructions.repository";
+    internal const string UnreadableCode = "instructions.unreadable";
 
     private const string HookMessage = "Defines a hook: a command an agent tool that reads this file may run on its own, in every session started here. Review it, and keep hooks out of the owner's instructions unless you mean every session to run them.";
     private const string ApprovalMessage = "Grants an automatic approval: an agent tool that reads this file may act without asking first. Review it, and keep approvals out of the owner's instructions unless you mean every session to have them.";
@@ -98,15 +99,18 @@ internal static class InstructionFileChecks
     // judged by its start, so that a long line of keys stays linear.
     private const int ValueLimit = 128;
 
-    // Words that open a line forbidding what it names.
-    private static readonly string[] Prohibitions = ["never", "do not", "don't", "dont", "must not", "should not", "shall not", "avoid", "not", "no"];
+    // Words that open a sentence forbidding what it names: capitalized as a sentence's first word, each followed by a space.
+    private static readonly string[] Prohibitions = ["Never ", "Do not ", "Don't ", "Don\u2019t ", "Must not ", "Should not ", "Shall not ", "Avoid ", "Not ", "No "];
+
+    // Words that turn a forbidding clause around, so that what follows them is not forbidden: "Never run without", "Do not forget".
+    private static readonly HashSet<string> Turns = new(StringComparer.OrdinalIgnoreCase) { "without", "forget", "by", "unless", "except", "instead", "but", "always", "only" };
 
     /// <summary>Scans the text of an owner's instruction file at the estate root, adding one warning for each kind found on a line.</summary>
     internal static void Scan(string text, string relative, FindingList findings)
     {
         int[] starts = LineStarts(text);
         var found = new SortedSet<(int Line, int Kind)>();
-        var forbidding = new Dictionary<int, bool>();
+        var forbidding = new Dictionary<int, int>();
         foreach (Match match in HookKey.Matches(text)) found.Add((Line(starts, match.Index), 0));
         foreach (Match match in HookMention.Matches(text)) Mention(text, starts, forbidding, match.Index, 0, found);
         foreach (Match match in ApprovalKey.Matches(text)) found.Add((Line(starts, match.Index), 1));
@@ -230,16 +234,17 @@ internal static class InstructionFileChecks
         }
     }
 
-    private static void Mention(string text, int[] starts, Dictionary<int, bool> forbidding, int index, int kind, SortedSet<(int Line, int Kind)> found)
+    // A mention is reported unless it lies inside the clause its line opens by forbidding; that clause's end is read once a line.
+    private static void Mention(string text, int[] starts, Dictionary<int, int> forbidding, int index, int kind, SortedSet<(int Line, int Kind)> found)
     {
         int line = Line(starts, index);
-        if (!forbidding.TryGetValue(line, out bool forbids))
+        if (!forbidding.TryGetValue(line, out int until))
         {
-            forbids = Forbids(text, starts[line - 1], LineEnd(text, starts, line));
-            forbidding[line] = forbids;
+            until = ForbiddenUntil(text, starts[line - 1], LineEnd(text, starts, line));
+            forbidding[line] = until;
         }
 
-        if (!forbids) found.Add((line, kind));
+        if (index >= until) found.Add((line, kind));
     }
 
     // The value after a key's separator: past spaces, a YAML block indicator and one line break with its indentation, and an opening
@@ -318,7 +323,10 @@ internal static class InstructionFileChecks
     // starts with one of those characters is still a value.
     private static bool IsPlaceholder(string text, int index, string raw)
     {
-        if (raw.Length == 0) return true;
+        // Punctuation alone, an ellipsis or stars standing for the whole value, or a run of one or two characters stands where a value
+        // would; a value that only holds an ellipsis or stars somewhere is still a value.
+        string value = raw.TrimEnd(',', ';', '.');
+        if (value.Length == 0 || raw.All(c => c is '.' or ',' or ';' or '*' or '\u2026' or '\u2022') || raw.Distinct().Count() <= 2) return true;
         if (raw[0] is '<' or '[' or '(' or '{')
         {
             char close = raw[0] switch { '<' => '>', '[' => ']', '(' => ')', _ => '}' };
@@ -333,14 +341,17 @@ internal static class InstructionFileChecks
 
         if (raw.StartsWith("${", StringComparison.Ordinal) || raw.StartsWith("{{", StringComparison.Ordinal)) return true;
         // A variable: $NAME in capitals and digits, or a name of letters alone; a value mixing lower case and digits after a $ is a value.
-        string name = raw.TrimEnd(',', ';', '.')[1..];
-        if (raw[0] == '$' && name.Length > 0 && (char.IsAsciiLetter(name[0]) || name[0] == '_') && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')
-            && (!name.Any(char.IsAsciiLetterLower) || !name.Any(char.IsAsciiDigit))) return true;
-        if (raw[0] == '%' && raw.Length > 2 && raw.TrimEnd(',', ';', '.').EndsWith('%') && raw.Trim('%', ',', ';', '.').All(c => char.IsAsciiLetterOrDigit(c) || c == '_')) return true;
+        if (value[0] == '$' && value.Length > 1)
+        {
+            string name = value[1..];
+            if ((char.IsAsciiLetter(name[0]) || name[0] == '_') && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')
+                && (!name.Any(char.IsAsciiLetterLower) || !name.Any(char.IsAsciiDigit))) return true;
+        }
+
+        if (value[0] == '%' && value.Length > 2 && value.EndsWith('%') && value.Trim('%').All(c => char.IsAsciiLetterOrDigit(c) || c == '_')) return true;
         foreach (string reference in new[] { "env:", "vault:", "secret:", "secrets.", "op://", "keychain:", "ref:", "file:" })
             if (raw.StartsWith(reference, StringComparison.OrdinalIgnoreCase)) return true;
-        return raw.Contains("...", StringComparison.Ordinal) || raw.Contains('…', StringComparison.Ordinal) || raw.Contains("***", StringComparison.Ordinal)
-            || raw.Distinct().Count() <= 2;
+        return false;
     }
 
     // Not a value at all: a URL, a path or a version number.
@@ -360,8 +371,11 @@ internal static class InstructionFileChecks
         return dots >= 1 && digits >= 2 && (at == value.Length || value[at] is '-' or '+');
     }
 
-    // Whether a line, past its indentation and its quote and list markers, opens by forbidding: never, do not, avoid and the like.
-    private static bool Forbids(string text, int start, int end)
+    // Where the clause that a line opens by forbidding ends, or the line's start when it opens with none. A line opens with one when, past
+    // its indentation and its quote and list markers, it starts with a capitalized forbidding word and a space, as "Never pass ...". The
+    // clause runs to its first sentence or clause end, a period, exclamation or question mark, semicolon or colon before a space or the
+    // line's end, or to the first word that turns it around, such as "without" or "forget".
+    private static int ForbiddenUntil(string text, int start, int end)
     {
         int at = start;
         while (at < end)
@@ -378,14 +392,25 @@ internal static class InstructionFileChecks
             break;
         }
 
-        foreach (string word in Prohibitions)
+        string? opening = Prohibitions.FirstOrDefault(word => at + word.Length <= end && string.CompareOrdinal(text, at, word, 0, word.Length) == 0);
+        if (opening is null) return start;
+        for (int i = at + opening.Length; i < end;)
         {
-            if (at + word.Length <= end && string.Compare(text, at, word, 0, word.Length, StringComparison.OrdinalIgnoreCase) == 0
-                && (at + word.Length == end || !char.IsAsciiLetter(text[at + word.Length])))
-                return true;
+            char c = text[i];
+            if (c is '.' or '!' or '?' or ';' or ':' && (i + 1 == end || char.IsWhiteSpace(text[i + 1]))) return i;
+            if (char.IsAsciiLetter(c))
+            {
+                int word = i;
+                while (word < end && char.IsAsciiLetter(text[word])) word++;
+                if (Turns.Contains(text[i..word])) return i;
+                i = word;
+                continue;
+            }
+
+            i++;
         }
 
-        return false;
+        return end;
     }
 
     private static int[] LineStarts(string text)

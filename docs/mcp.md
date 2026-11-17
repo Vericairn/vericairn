@@ -484,16 +484,23 @@ at the size limit in time proportional to its length.
   eight characters with letters and digits, or of letters alone when it ends its line; a bearer or basic credential;
   a password in a URL or after `-u`; or a run of at least 32 token characters that mixes upper case, lower case and
   digits and changes between them often. A placeholder or reference such as `<your key>`, `[your password]`,
-  `${NAME}`, `$NAME` or `%NAME%`, a URL, a path and a version are not values; a real value that only starts with one of
-  those characters is. A credential in a known format stays the error `secrets.pattern`, as in every text file.
+  `${NAME}`, `$NAME` or `%NAME%`, a value of punctuation, an ellipsis or stars alone, a URL, a path and a version are
+  not values; a real value that only starts with one of those characters, or holds an ellipsis or stars beside other
+  characters, is. A credential in a known format stays the error `secrets.pattern`, as in every text file.
 
 A key is read as configuration only at the start of a line or in quotes, so prose that names one, such as "the
 `allowed-tools:` key is forbidden", is not reported, and keys are matched in their case, so "Hooks: none" is not a
-hooks key. A line that opens by forbidding, with "Never", "Do not", "Avoid" and the like, is not reported for a flag,
-mode or Git setting it names, such as "Never pass `--dangerously-skip-permissions`.", though an author could open a
-line that way to hide one. The check is a heuristic that warns: it does not understand any agent tool's configuration as a whole, so a hook, an approval or a secret written in
-a form it does not know goes unreported, and an ordinary line can match. The warnings ask for a person's review and
-refuse nothing; the check reads the files and runs nothing. Anywhere else in the estate, such as `docs/`, the same lines
+hooks key. A sentence that opens by forbidding, with "Never", "Do not", "Don't", "Must not", "Avoid", "Not" or "No"
+and a space, is not reported for a flag, mode or Git setting it names before its clause ends, at a period, colon,
+semicolon, question or exclamation mark, or at a word that turns it around, such as "without", "forget", "by",
+"unless", "but" or "always". So "Never pass `--dangerously-skip-permissions`." is not reported, while "Never run
+without `--dangerously-skip-permissions`.", "Never stop to ask. Always launch with ...", a wrapped line that begins
+with a lower-case "never", and a launch prefix such as `NO_COLOR=1` are. An author could still open a clause that way
+to hide a mention. The check is a heuristic that warns: it does not understand any agent tool's configuration as a
+whole, so a hook, an approval or a secret written in a form it does not know goes unreported, and an ordinary line can
+match. The warnings ask for a person's review and refuse nothing; the check reads the files and runs nothing. If the
+check itself fails on a file, it warns `instructions.unreadable` about that file, naming the kind of failure and never
+the file's content, and the rest of `estate check` goes on. Anywhere else in the estate, such as `docs/`, the same lines
 are ordinary text.
 
 A repository's own agent instruction files are untrusted input. From 0.9.4, for each of the estate's repositories whose
