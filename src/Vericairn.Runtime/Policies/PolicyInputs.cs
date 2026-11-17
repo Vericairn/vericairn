@@ -105,34 +105,5 @@ internal static class PolicyInputs
                 throw new PolicyParameterException("Invalid repository selector.");
     }
 
-    internal static bool Matches(string selector, string path)
-    {
-        string[] pattern = selector.Split('/');
-        string[] parts = path.Split('/');
-        var memo = new Dictionary<(int, int), bool>();
-        return Match(0, 0);
-        bool Match(int p, int s)
-        {
-            if (memo.TryGetValue((p, s), out bool cached)) return cached;
-            bool result = p == pattern.Length ? s == parts.Length : pattern[p] == "**"
-                ? Match(p + 1, s) || s < parts.Length && Match(p, s + 1)
-                : s < parts.Length && Component(pattern[p], parts[s]) && Match(p + 1, s + 1);
-            memo[(p, s)] = result;
-            return result;
-        }
-    }
-
-    private static bool Component(string pattern, string value)
-    {
-        int p = 0, v = 0, star = -1, start = 0;
-        while (v < value.Length)
-        {
-            if (p < pattern.Length && pattern[p] == '*') { star = p++; start = v; }
-            else if (p < pattern.Length && pattern[p] == value[v]) { p++; v++; }
-            else if (star >= 0) { p = star + 1; v = ++start; }
-            else return false;
-        }
-        while (p < pattern.Length && pattern[p] == '*') p++;
-        return p == pattern.Length;
-    }
+    internal static bool Matches(string selector, string path) => PathPatterns.SelectorMatches(selector, path);
 }
