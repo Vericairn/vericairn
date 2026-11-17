@@ -83,6 +83,14 @@ records, names the first links that fit in it and counts the rest; the refusal's
 child findings name every one. Neither names an absolute path or quotes the
 document beyond its links.
 
+From 0.9.4 (FIX-138), `links-resolve` passes over a link written inside code: a
+fenced code block, an indented code block or an inline code span, as Markdown reads
+them at the top level, in list items and in block quotes. Such a link is an example
+of Markdown, such as an owner's `AGENTS.md` shown for an estate's root, and is never
+followed. A broken relative link outside code is still refused, and each finding
+keeps the line and column it had before 0.9.4. Before 0.9.4 every link in the text
+was checked, so an example's link that resolved to nothing refused the clearance.
+
 ```text
 ERROR document.check-failed records/document-review/...: A failed check refuses the clearance (links-resolve: Links in docs/guide.md that do not resolve within the repository (1): ../../other-repo/example.md at line 3, column 17, which leads outside the repository.); record needs-change, or fix the document and review it again.
 INFO document.check-detail docs/guide.md:3:17: links-resolve: ../../other-repo/example.md does not resolve, which leads outside the repository.

@@ -382,7 +382,8 @@ optionally `--independence self|independent-agent|operator`, for a document of a
 which the runtime, not the reviewer, states the content's hash, the covered paths' identity and the triggers answered,
 records the reviewer's independence (below), and runs the declared checks:
 `names-version` (the document names the version of each release the review answers), `links-resolve` (every relative
-link resolves within the repository) and `matches-generator` (generated content equals a fresh generation). A failed
+link resolves within the repository; from 0.9.4, a link inside a fenced or indented code block or an inline code span is
+an example and is not checked) and `matches-generator` (generated content equals a fresh generation). A failed
 check refuses the clearance; a check no installed pack provides is recorded as not performed. A declared estate document
 that is not in the working tree is a `document.absent` warning. Like a `release` trigger, the releases generator takes
 any revision of a product's record as the product.
