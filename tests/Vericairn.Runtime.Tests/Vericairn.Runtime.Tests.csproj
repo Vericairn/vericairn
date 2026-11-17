@@ -21,6 +21,7 @@
     <Compile Include="../TestSupport/ReleaseGateSource.cs" Link="TestSupport/ReleaseGateSource.cs" />
     <Compile Include="../TestSupport/FakeReleaseProvider.cs" Link="TestSupport/FakeReleaseProvider.cs" />
     <Compile Include="../TestSupport/SecurityReportFixtures.cs" Link="TestSupport/SecurityReportFixtures.cs" />
+    <Compile Include="../TestSupport/RepositoryProgramProbe.cs" Link="TestSupport/RepositoryProgramProbe.cs" />
     <Compile Include="../TestSupport/SilentPeer.cs" Link="TestSupport/SilentPeer.cs" />
     <Compile Include="../TestSupport/PresenceHelperStandIn.cs" Link="TestSupport/PresenceHelperStandIn.cs" />
     <Compile Include="../TestSupport/SharedFileHash.cs" Link="TestSupport/SharedFileHash.cs" />

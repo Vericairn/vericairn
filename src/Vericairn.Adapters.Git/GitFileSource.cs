@@ -50,7 +50,7 @@ public sealed partial class GitFileSource : IDocumentSource
         return select(declaration, generator, commit, path =>
         {
             if (!DocumentPatterns.IsSafeSourcePath(path) || !tree.TryGetValue(path, out string? mode) || mode is not ("100644" or "100755")
-                || Run(directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || (total += bytes.Length) > 64L * 1024 * 1024) return null;
+                || RunIsolated(directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || (total += bytes.Length) > 64L * 1024 * 1024) return null;
             return DocumentSourceSnapshot.Content("file", path, EstateModel.BodyString(declaration, "repository") ?? "repository", path, ContentHash.Sha256(bytes), bytes);
         });
     }
@@ -65,7 +65,7 @@ public sealed partial class GitFileSource : IDocumentSource
         foreach ((string path, string mode) in tree.Where(p => GeneratedDocumentContract.Owns(declaration, p.Key)).OrderBy(p => p.Key, StringComparer.Ordinal))
         {
             if (mode is not ("100644" or "100755") || !DocumentPatterns.IsSafePath(path)
-                || Run(directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || bytes.Length > 1048576 || (total += bytes.Length) > 64L * 1024 * 1024)
+                || RunIsolated(directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || bytes.Length > 1048576 || (total += bytes.Length) > 64L * 1024 * 1024)
                 return new(DocumentGenerationStatus.Unavailable, [], commit, "A candidate member cannot be read as a bounded regular file.");
             files.Add(new(path, [.. bytes]));
         }
@@ -75,7 +75,7 @@ public sealed partial class GitFileSource : IDocumentSource
     private static Dictionary<string, string>? Tree(string directory, string commit)
     {
         if (!Patterns.Commit.IsMatch(commit) || Text(directory, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != commit
-            || Run(directory, out byte[] bytes, "ls-tree", "-r", "-z", "--full-tree", commit) != 0) return null;
+            || RunIsolated(directory, out byte[] bytes, "ls-tree", "-r", "-z", "--full-tree", commit) != 0) return null;
         var tree = new Dictionary<string, string>(StringComparer.Ordinal);
         var portable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string entry in new UTF8Encoding(false, true).GetString(bytes).Split('\0', StringSplitOptions.RemoveEmptyEntries))
@@ -101,13 +101,13 @@ public sealed partial class GitFileSource : IDocumentSource
 
     /// <inheritdoc />
     public bool IsAncestor(EstateModel model, RecordEnvelope declaration, string ancestor, string descendant) =>
-        this.clone(model, declaration) is string clone && Run(clone, out _, "merge-base", "--is-ancestor", ancestor, descendant) == 0;
+        this.clone(model, declaration) is string clone && RunIsolated(clone, out _, "merge-base", "--is-ancestor", ancestor, descendant) == 0;
 
     /// <inheritdoc />
     public byte[]? Read(EstateModel model, RecordEnvelope declaration, string commit)
     {
         string? path = EstateModel.BodyString(declaration, "path");
-        return this.clone(model, declaration) is string clone && path is not null && Run(clone, out byte[] bytes, "cat-file", "blob", $"{commit}:{path}") == 0 ? bytes : null;
+        return this.clone(model, declaration) is string clone && path is not null && RunIsolated(clone, out byte[] bytes, "cat-file", "blob", $"{commit}:{path}") == 0 ? bytes : null;
     }
 
     /// <inheritdoc />
@@ -131,7 +131,7 @@ public sealed partial class GitFileSource : IDocumentSource
 
     /// <inheritdoc />
     public bool Exists(EstateModel model, RecordEnvelope declaration, string commit, string path) =>
-        this.clone(model, declaration) is string clone && Run(clone, out _, "cat-file", "-e", $"{commit}:{path}") == 0;
+        this.clone(model, declaration) is string clone && RunIsolated(clone, out _, "cat-file", "-e", $"{commit}:{path}") == 0;
 
     private static string? Clone(EstateModel model, RecordEnvelope declaration)
     {
@@ -147,15 +147,26 @@ public sealed partial class GitFileSource : IDocumentSource
     }
 
     private static string? Text(string clone, params string[] arguments) =>
-        Run(clone, out byte[] output, arguments) == 0 && Encoding.UTF8.GetString(output).Trim() is { Length: > 0 } text ? text : null;
+        RunIsolated(clone, out byte[] output, arguments) == 0 && Encoding.UTF8.GetString(output).Trim() is { Length: > 0 } text ? text : null;
 
-    internal static int Run(string clone, out byte[] output, params string[] arguments) => Run(clone, out output, false, arguments);
-
-    internal static int RunIsolated(string clone, out byte[] output, params string[] arguments) => Run(clone, out output, true, arguments);
-
-    private static int Run(string clone, out byte[] output, bool isolated, string[] arguments)
+    /// <summary>Runs one hardened git process in the clone with its own <see cref="GitHardening"/>; -1 when git could not run.</summary>
+    internal static int RunIsolated(string clone, out byte[] output, params string[] arguments)
     {
-        ProcessStartInfo info = StartInfo(clone, isolated, arguments);
+        GitHardening hardening;
+        try { hardening = GitHardening.Create(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            output = [];
+            return -1;
+        }
+
+        using (hardening) return RunIsolated(hardening, clone, out output, arguments);
+    }
+
+    /// <summary>Runs one hardened git process in the clone under the caller's <see cref="GitHardening"/>; -1 when git could not run.</summary>
+    internal static int RunIsolated(GitHardening hardening, string clone, out byte[] output, params string[] arguments)
+    {
+        ProcessStartInfo info = StartInfo(clone, hardening, arguments);
         try
         {
             using Process process = Start(info);
@@ -182,34 +193,15 @@ public sealed partial class GitFileSource : IDocumentSource
         }
     }
 
-    // Every git process of this adapter starts from these exact arguments and environment: no shell, no replacement objects,
-    // no lazy fetch and no optional locks; an isolated start also ignores ambient routing, system, global and command-line
-    // configuration and refuses every transport.
-    internal static ProcessStartInfo StartInfo(string clone, bool isolated, IEnumerable<string> arguments)
+    // Every git process of this adapter starts from these exact arguments and environment: no shell, no replacement objects, no
+    // lazy fetch, no optional locks, no ambient routing, no system, global or inherited command-line configuration, no transport,
+    // and the repository's own program, pager and hooks settings overridden (GitHardening). The hardening's directory must outlive
+    // the process.
+    internal static ProcessStartInfo StartInfo(string clone, GitHardening hardening, IEnumerable<string> arguments)
     {
+        ArgumentNullException.ThrowIfNull(hardening);
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = clone };
-        info.ArgumentList.Add("--no-replace-objects");
-        info.ArgumentList.Add("-c");
-        info.ArgumentList.Add("core.quotepath=off");
-        if (isolated)
-        {
-            info.ArgumentList.Add("-c");
-            info.ArgumentList.Add("protocol.allow=never");
-            // Match the adapter's local history observations: ambient Git routing and configuration cannot select another source.
-            foreach (string variable in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_INDEX_FILE", "GIT_NAMESPACE", "GIT_SHALLOW_FILE", "GIT_CONFIG_PARAMETERS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_LITERAL_PATHSPECS", "GIT_ICASE_PATHSPECS" })
-                info.Environment.Remove(variable);
-            info.Environment["GIT_CONFIG_COUNT"] = "0";
-            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            info.Environment["GIT_CONFIG_GLOBAL"] = string.Empty;
-            info.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        }
-        foreach (string argument in arguments)
-        {
-            info.ArgumentList.Add(argument);
-        }
-
-        info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-        info.Environment["GIT_NO_LAZY_FETCH"] = "1";
+        hardening.Apply(info, ["--no-replace-objects", "-c", "core.quotepath=off", .. arguments]);
         return info;
     }
 

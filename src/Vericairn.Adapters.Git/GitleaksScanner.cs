@@ -86,7 +86,9 @@ public sealed partial class GitleaksScanner : ISecretScanner
     {
         var info = new ProcessStartInfo("gitleaks") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
+        // The scanner starts git in the clone itself; git's configuration environment carries the same hardening to it.
+        using GitHardening hardening = Harden();
+        hardening.ApplyEnvironment(info);
         return run(info);
     }
 
@@ -95,10 +97,23 @@ public sealed partial class GitleaksScanner : ISecretScanner
         // Gitleaks can report zero findings when git cannot read a range. Establish readability independently,
         // before and after scanning, without asking git for patches or retaining any source text.
         var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (string argument in new[] { "--no-replace-objects", "rev-list", "--count", range }) info.ArgumentList.Add(argument);
+        using GitHardening hardening = Harden();
+        hardening.Apply(info, ["--no-replace-objects", "rev-list", "--count", range]);
         ProcessResult result = run(info);
         return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0
             && int.TryParse(result.StandardOutput.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int count) && count >= 0 ? count : null;
+    }
+
+    private static GitHardening Harden()
+    {
+        try
+        {
+            return GitHardening.Create();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new ProviderRefusedException("git cannot run isolated: a temporary directory could not be created; nothing was scanned.", error);
+        }
     }
 
     private static byte[] ReadConfiguration()

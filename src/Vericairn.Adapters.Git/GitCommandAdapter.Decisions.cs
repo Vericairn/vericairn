@@ -42,8 +42,9 @@ public sealed partial class GitCommandAdapter
             if (Read("rev-parse", "--verify", "HEAD^{commit}")?.Trim() != head) return null;
             return new(baseCommit, head, documents);
 
-            string? Read(params string[] arguments) => GitFileSource.RunIsolated(root, out byte[] bytes,
-                ["-c", "core.fsmonitor=false", .. arguments]) == 0 ? new UTF8Encoding(false, true).GetString(bytes) : null;
+            // The estate's own repository, read through the adapter's hardened runner.
+            string? Read(params string[] arguments) => GitFileSource.RunIsolated(root, out byte[] bytes, arguments) == 0
+                ? new UTF8Encoding(false, true).GetString(bytes) : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {

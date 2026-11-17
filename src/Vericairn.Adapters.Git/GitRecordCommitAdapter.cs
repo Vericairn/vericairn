@@ -86,7 +86,7 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
         }
         string[] paths = all.Keys.Order(StringComparer.Ordinal).ToArray();
         // --only names precisely the prepared record and members, and any carried trail records. Each record already carries its device signature.
-        Read(directory, ["add", "--intent-to-add", "--", .. paths]);
+        WithoutHooks(directory, ["add", "--intent-to-add", "--", .. paths]);
         string message = "Record operator action " + Path.GetFileNameWithoutExtension(record)
             + (carried.Count == 0 ? string.Empty : $" and carry {carried.Count} trail {(carried.Count == 1 ? "record" : "records")} of earlier actions");
         WithoutHooks(directory, ["commit", "--only", "--no-gpg-sign", "-m", message, "--", .. paths]);
@@ -171,6 +171,9 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
             throw new ProviderRefusedException("The branch does not contain exactly the original signed record, its generated members and any carried trail records on its pinned base; inspect it before resuming.");
     }
 
+    // No replacement objects, and reading the index never starts an fsmonitor hook program.
+    private static readonly string[] Isolation = ["--no-replace-objects", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"];
+
     private static readonly IReadOnlyDictionary<string, string> NoneCarried = new Dictionary<string, string>(StringComparer.Ordinal);
 
     // The action's own record and members with the carried trail records of earlier actions: each carried path a canonical record path
@@ -215,7 +218,7 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
 
     private void WithoutHooks(string directory, params string[] arguments)
     {
-        // An empty temporary hooks directory also prevents checkout hooks, including on Windows.
+        // An empty temporary hooks directory also prevents checkout and index-change hooks, including on Windows.
         string hooks = Path.Combine(Path.GetTempPath(), "vericairn-record-hooks-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(hooks);
         try { Read(directory, ["-c", "core.hooksPath=" + hooks, .. arguments]); }
@@ -225,8 +228,7 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
     private string Read(string directory, params string[] arguments)
     {
         var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        info.ArgumentList.Add("--no-replace-objects");
-        foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        foreach (string argument in Isolation.Concat(arguments)) info.ArgumentList.Add(argument);
         info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
         info.Environment["GIT_TERMINAL_PROMPT"] = "0";
         ProcessResult result = run(info);
