@@ -77,8 +77,15 @@ public static partial class EstateChecks
             {
                 ScanText(file, relative, findings, model);
             }
+
+            // From 0.9.4 (FIX-139): the owner's instruction files at the root are read for hooks, approvals and secret-like values.
+            if (EstateLayout.OwnerInstructionFiles.Contains(relative))
+            {
+                ScanInstructions(file, relative, findings);
+            }
         }
 
+        InstructionFileChecks.CheckRepositories(model, findings);
         CheckRetirements(model, findings);
         CheckDocuments(model, findings);
         CheckLivingDocuments(model, findings);
@@ -154,6 +161,25 @@ public static partial class EstateChecks
     }
 
     private static void ScanText(string file, string relative, FindingList findings, EstateModel model) => ScanText(File.ReadAllBytes(file), relative, findings, model);
+
+    // A binary or non-UTF-8 file is already reported by the text scan, and is not read as instructions.
+    private static void ScanInstructions(string file, string relative, FindingList findings)
+    {
+        byte[] bytes = File.ReadAllBytes(file);
+        if (Array.IndexOf(bytes, (byte)0) >= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            InstructionFileChecks.Scan(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes), relative, findings);
+        }
+        catch (DecoderFallbackException)
+        {
+            // layout.encoding already names the file.
+        }
+    }
 
     private static void ScanText(byte[] bytes, string relative, FindingList findings, EstateModel? model = null)
     {

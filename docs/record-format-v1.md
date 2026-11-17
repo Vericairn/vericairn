@@ -246,3 +246,7 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   git's and GitHub's metadata: `.git`, `.gitignore`, `.gitattributes`, `.github` and, from 0.6.0, a `.mailmap`, which
   shows the history's names and addresses as one author in git's own views; it is scanned as text and travels in an
   export like `.gitattributes`.
+- From 0.9.4, `vericairn estate check` warns about a hook definition, an automatic approval or a value that looks like a
+  secret in the owner's agent instruction files at the root, naming the file, the line and the kind and never the value,
+  and about a repository's own instruction files at the root of its clone registered on this machine, as untrusted input
+  ([the MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) lists what it reads).

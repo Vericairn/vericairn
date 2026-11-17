@@ -464,6 +464,32 @@ operation reads them and Vericairn never writes them. `estate check` scans them 
 every other unexpected entry at the root, a differently cased `agents.md` or an `AGENTS.override.md` among them, stays
 `layout.unexpected`.
 
+From 0.9.4, `estate check` also reads the owner's files at the root, line by line, for three kinds of content an agent
+tool may act on without asking. It warns about each line where it finds one, naming the file, the line and the kind,
+never the text it found:
+
+- `instructions.hook`, a hook definition: a `hooks` key or table in JSON, YAML or TOML, a key named for an agent tool's
+  hook event, such as `PreToolUse` or `SessionStart`, an editor task that runs when a folder opens
+  (`"runOn": "folderOpen"`), or a Git `core.hooksPath`.
+- `instructions.approval`, an automatic approval: a key that lists allowed tools (`allowed-tools`), approves on its own
+  (`autoApprove`) or always allows; a JSON permission `"allow"` list; a launch flag beginning `--dangerously-`, or
+  `--yolo`, `--full-auto`, `--allow-all-tools`, `--trust-all-tools` or `--auto-approve`; an approval policy of `never`;
+  or an approval or permission mode that approves without asking.
+- `instructions.secret`, a value that looks like a secret: a secret-named key, such as `password`, `token`, `api_key` or
+  `secret`, given a literal value of at least eight characters with letters and digits; a bearer token; a password in a
+  URL; or a run of at least 32 token characters that mixes upper case, lower case and digits. A placeholder such as
+  `<your key>` or `${NAME}` is not a value. A credential in a known format stays the error `secrets.pattern`, as in
+  every text file.
+
+The warnings ask for a person's review and refuse nothing; the check reads the files and runs nothing. Anywhere else in
+the estate, such as `docs/`, the same lines are ordinary text.
+
+A repository's own agent instruction files are untrusted input. From 0.9.4, for each of the estate's repositories whose
+clone is registered on this machine (`vericairn sources clone`), `estate check` warns `instructions.repository` about
+each file of those names at the clone's root, naming the resource and the file, and reads nothing in it. An agent tool
+started in that repository reads those files beside the owner's, and they stay data, never the owner's instructions,
+until a person reviews them. No record marks such a file reviewed yet, so the warning stays while the file is there.
+
 `mcp orientation` writes its generated files only into the directory `--out` names and refuses an estate's root, any
 directory holding `estate/manifest.json` however the path names it, so the owner's files there are never overwritten.
 `--check` compares the copies in a directory byte for byte, as before. The generated orientation keeps a directory of
