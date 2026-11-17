@@ -131,7 +131,7 @@ internal static class PathIntersection
         }
     }
 
-    // Representatives of the characters no automaton's state names: one without whitespace, tried in this order, and one with.
+    // The preferred representatives of the characters no automaton's state names: one without whitespace, tried in this order, and one with.
     private const string Others = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-+=@,";
     private const string Spaces = " \u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000";
 
@@ -152,39 +152,35 @@ internal static class PathIntersection
         parts[4].Name(state.S, named);
         named.RemoveWhere(c => !Allowed(c));
         var chars = new List<char>(named);
-        int scanned = 0;
-        char? other = null;
-        foreach (char c in Others)
-        {
-            scanned++;
-            if (!named.Contains(c))
-            {
-                other = c;
-                break;
-            }
-        }
-
-        for (int i = 0x00C0; other is null && i < 0x20C0; i++)
-        {
-            scanned++;
-            char c = (char)i;
-            if (Allowed(c) && !char.IsWhiteSpace(c) && !named.Contains(c)) other = c;
-        }
-
-        if (other is char o) chars.Add(o);
-        foreach (char c in Spaces)
-        {
-            scanned++;
-            if (!named.Contains(c))
-            {
-                chars.Add(c);
-                break;
-            }
-        }
-
+        long scanned = 0;
+        if (Representative(named, Others, whitespace: false, ref scanned) is char other) chars.Add(other);
+        if (Representative(named, Spaces, whitespace: true, ref scanned) is char space) chars.Add(space);
         counter.Work += scanned;
         chars.Sort((x, y) => Rank(x) != Rank(y) ? Rank(x).CompareTo(Rank(y)) : x.CompareTo(y));
         return [.. chars];
+    }
+
+    /// <summary>
+    /// A character a valid path may hold, with or without whitespace as asked, that the state names nowhere: the first of the preferred
+    /// ones, else the first of every other character from U+00C0 on and then below it. Null only when every such character is named,
+    /// so that none is left for a representative to stand for; the search's soundness rests on this, never on its bounds.
+    /// </summary>
+    private static char? Representative(HashSet<char> named, string preferred, bool whitespace, ref long scanned)
+    {
+        foreach (char c in preferred)
+        {
+            scanned++;
+            if (!named.Contains(c)) return c;
+        }
+
+        for (int i = 0; i <= char.MaxValue; i++)
+        {
+            scanned++;
+            char c = (char)((i + 0x00C0) & char.MaxValue);
+            if (Allowed(c) && char.IsWhiteSpace(c) == whitespace && !named.Contains(c)) return c;
+        }
+
+        return null;
     }
 
     private static bool Allowed(char c) => !char.IsControl(c) && c is not ('\\' or ':');

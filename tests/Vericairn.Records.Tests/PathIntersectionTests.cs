@@ -170,6 +170,26 @@ public class PathIntersectionTests
     }
 
     [Fact]
+    public void AStateThatNamesEveryPreferredRepresentativeStillStepsTheCharactersItDoesNotName()
+    {
+        // One party permits a single component less one exclusion headed by each preferred representative, the dot and each whitespace
+        // character; the other permits a single component. A path of one character no exclusion names, such as '!', is in both.
+        const string preferred = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-+=@,";
+        IEnumerable<char> heads = preferred.Concat(Enumerable.Range(0x00C0, 0x20C0 - 0x00C0).Select(i => (char)i).Where(c => !char.IsControl(c) && !char.IsWhiteSpace(c)))
+            .Append('.').Concat(Enumerable.Range(0, 0x10000).Select(i => (char)i).Where(c => char.IsWhiteSpace(c) && !char.IsControl(c)));
+        string[] exclusions = [.. heads.Distinct().Select(c => c + "*")];
+        var narrowed = new PathIntersection.Party(["*"], exclusions);
+        var broad = new PathIntersection.Party(["*"], []);
+        Assert.True(narrowed.Contains("!") && broad.Contains("!"));
+        // Correctness rests on no bound: with the work bound raised far beyond what the search needs, it finds a witness.
+        PathIntersection.Outcome outcome = PathIntersection.Search(narrowed, broad, work: 400_000_000);
+        Assert.True(outcome.Determined, outcome.ToString());
+        Assert.True(outcome.Overlap, outcome.ToString());
+        Assert.Equal(1, outcome.Witness!.Length);
+        Assert.True(narrowed.Contains(outcome.Witness) && broad.Contains(outcome.Witness), outcome.Witness);
+    }
+
+    [Fact]
     public void ACaseDifferenceIsNoOverlapUnderOrdinalMatching()
     {
         Assert.False(PathIntersection.Search(new(["Docs/**"], []), new(["docs/**"], [])).Overlap);

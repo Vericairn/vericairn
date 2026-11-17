@@ -206,6 +206,18 @@ public class AssignmentOverlapTests
         Assert.Contains("is not an ancestor of its head", unrelated.Change!.Problem, StringComparison.Ordinal);
         // With no main line in the clone, nothing is observed integrated.
         Assert.True(AssignmentOverlaps.PartyOf(model, honest, new View { Reachable = true, Line = null })!.Active);
+
+        // A range on the main line that touched none of the assignment's effective paths is not its work, and one whose paths the clone
+        // cannot show is not shown to be.
+        AssignmentOverlaps.Party unrelatedRange = AssignmentOverlaps.PartyOf(model, honest, new View { Reachable = true, Changes = [("README.md", "modified"), ("docs/guide.md", "added")] })!;
+        Assert.True(unrelatedRange.Active);
+        Assert.Equal("mismatched", unrelatedRange.Change!.Integration);
+        Assert.StartsWith("none of the 2 paths it changed is in its assignment's effective permitted paths", unrelatedRange.Change.Problem, StringComparison.Ordinal);
+        AssignmentOverlaps.Party unshown = AssignmentOverlaps.PartyOf(model, honest, new View { Reachable = true, Changes = null })!;
+        Assert.True(unshown.Active);
+        Assert.Contains(unshown.Labels, l => l.Contains("are unavailable in this machine's registered clone", StringComparison.Ordinal));
+        // One touched path in the effective paths is enough, whatever else the range touched.
+        Assert.False(AssignmentOverlaps.PartyOf(model, honest, new View { Reachable = true, Changes = [("README.md", "modified"), ("src/core/b.cs", "removed")] })!.Active);
     }
 
     [Fact]
@@ -272,6 +284,14 @@ public class AssignmentOverlapTests
         AssignmentOverlaps.Party released = AssignmentOverlaps.PartyOf(model, assignment)!;
         Assert.False(released.Active);
         Assert.Equal(("merged", merged.Id), (released.Change!.Integration, released.Change.Merge!.Id));
+        Assert.False(AssignmentOverlaps.PartyOf(model, assignment, new View())!.Active);
+
+        // A merged head whose range the clone shows touching none of the assignment's paths is another change's, not this one's.
+        AssignmentOverlaps.Party other = AssignmentOverlaps.PartyOf(model, assignment, new View { Changes = [("docs/guide.md", "modified")] })!;
+        Assert.True(other.Active);
+        Assert.Equal("mismatched", other.Change!.Integration);
+        // A clone that cannot show the range leaves the merge the records show standing.
+        Assert.False(AssignmentOverlaps.PartyOf(model, assignment, new View { Changes = null })!.Active);
     }
 
     [Fact]
@@ -472,6 +492,8 @@ public class AssignmentOverlapTests
 
         public bool Folds { get; init; }
 
+        public IReadOnlyList<(string Path, string Change)>? Changes { get; init; } = [("src/a.cs", "modified")];
+
         public List<string> Reads { get; } = [];
 
         (string Branch, IReadOnlyList<string> Paths)? IRepositoryView.Tracked(string repository) => Paths;
@@ -499,7 +521,7 @@ public class AssignmentOverlapTests
         IReadOnlyList<(string Path, string Change)>? IRepositoryView.Changed(string repository, string from, string to)
         {
             Reads.Add($"paths {from}..{to} in {repository}");
-            return null;
+            return Changes;
         }
     }
 }

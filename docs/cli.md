@@ -1097,9 +1097,12 @@ change's head, or by the head being reachable from the main line of this machine
 else `master`, as a local branch), labeled as observed here; it is completed and its brief holds no path pattern; or it is
 completed and was recorded before the overlap check, labeled, since nothing recorded its integration. A change releases only its
 own assignment's work: it is in the repository the assignment's brief names, or for an older brief the one its agent runs named,
-and its base is a proper ancestor of its head. A change in another repository, with the same commit as base and head, or whose
-base is no ancestor of its head in the clone is `mismatched` and keeps the assignment active, and the branch a result names as
-its `target` never shows integration: only the main line does, and never a branch an agent run worked on. From 0.9.4 a completed
+its base is a proper ancestor of its head, and where the clone shows the paths it changed, one of them is in the assignment's
+effective permitted paths (a brief with no path pattern asks none). A change in another repository, with the same commit as base
+and head, whose base is no ancestor of its head in the clone, or that changed none of the assignment's paths is `mismatched` and
+keeps the assignment active, and the branch a result names as its `target` never shows integration: only the main line does, and
+never a branch an agent run worked on. A range already on the main line that touches one of the assignment's paths is taken as
+the result states it, a signed claim of its contributor. From 0.9.4 a completed
 result whose brief holds a path pattern and that names no `change` keeps its assignment active until acceptance. Before the
 check's first record in an estate (the first brief naming a repository, exclusions or `after`, or result naming a change),
 results count as recorded before it by the times the records state, which the command line and the API take from the caller. An
@@ -1131,11 +1134,13 @@ work in it.
 `work assign --repository <resource id or estate>` names the repository a brief with a path pattern changes when the brief names
 none; without it, the estate's own repository fills it when the estate names no repository resource, and otherwise the write is
 refused with the candidates. `work assign`, `work attempt`, `records new assignment`, `worker run` and `goal step` print each
-overlap of the assignment with the active assignments on standard error, and a completed result that keeps its assignment
-active, since it names no change or one that cannot release it, prints the write boundary's warning there; the record's own
-output, and its JSON, are unchanged. `status` and `progress` show the open overlaps under the work from the records alone, and
-their canonical JSON gains `overlaps` while one is open. The same view is `GET /v1/overlaps` and `POST /v1/overlaps/preview`, the
-SDK's `WorkOverlap` and `WorkOverlapPreview`, and the MCP read tool `work_overlap`
+overlap of the assignment with the active assignments on standard error, and a completed result whose brief holds a path pattern
+prints the write boundary's warning there when the records alone show it keeps its assignment active: it names no change, or a
+change in another repository or with the same commit as base and head. A change only a clone shows `mismatched`, such as one
+whose base is no ancestor of its head or whose paths are none of the assignment's, is written without a warning and shown so by
+`work overlap`. The record's own output, and its JSON, are unchanged. `status` and `progress` show the open overlaps under the work
+from the records alone, and their canonical JSON gains `overlaps` while one is open. The same view is `GET /v1/overlaps` and
+`POST /v1/overlaps/preview`, the SDK's `WorkOverlap` and `WorkOverlapPreview`, and the MCP read tool `work_overlap`
 ([MCP](mcp.md#tool-annotations-and-definitions-094)).
 
 ## `vericairn estate first-authority` (0.9.3)

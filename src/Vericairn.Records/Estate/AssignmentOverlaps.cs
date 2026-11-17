@@ -45,8 +45,9 @@ internal interface IRepositoryView
 /// accepted nor retired, until it is released: its current result is abandoned; completed with a change that is integrated; completed
 /// with no path pattern in its brief; or completed before the check's build, labeled. From the build, a completed result with a path
 /// pattern and no change keeps its assignment active until acceptance. A change releases only as this assignment's integrated work: it
-/// is in the assignment's repository, its base is a proper ancestor of its head, and its head was merged by a change-merge operation or
-/// is reachable from the repository's main line in this machine's registered clone, never from the branch the result names.
+/// is in the assignment's repository, its base is a proper ancestor of its head, its head was merged by a change-merge operation or is
+/// reachable from the repository's main line in this machine's registered clone, never from the branch the result names, and where the
+/// clone shows the paths it touched, one of them is in the assignment's effective paths.
 /// </summary>
 internal static class AssignmentOverlaps
 {
@@ -629,6 +630,26 @@ internal static class AssignmentOverlaps
         return shared;
     }
 
+    /// <summary>
+    /// Whether one of these paths is in a party's effective paths, within <see cref="ScanBound"/>: null when the bound is spent first, so
+    /// that a scan cut short shows nothing either way.
+    /// </summary>
+    internal static bool? Touches(IEnumerable<string> paths, PathIntersection.Party party)
+    {
+        Compiled compiled = new(party);
+        long work = 0;
+        foreach (string path in paths)
+        {
+            work += path.Length + 1;
+            if (work > ScanBound) return null;
+            bool inside = PathPatterns.Valid(path) && compiled.Contains(path, ref work);
+            if (work > ScanBound) return null;
+            if (inside) return true;
+        }
+
+        return false;
+    }
+
     // A party's patterns and exclusions, each with its literal prefix and whether it holds a wildcard, matched as PathPatterns matches them.
     private sealed class Compiled(PathIntersection.Party party)
     {
@@ -753,13 +774,15 @@ internal static class AssignmentOverlaps
 
             IReadOnlyList<RecordEnvelope> attempts = WorkView.AttemptsOf(model, assignment);
             RecordEnvelope? result = attempts.Count == 0 ? null : WorkView.ResultOf(model, attempts[^1]);
-            (bool active, string state, ChangeView? change) = State(status, attempts.Count, result, repository, patterns.Count > 0, labels);
+            // The paths a change must touch to be this assignment's work: its effective paths, or none to ask of a brief with no path pattern.
+            PathIntersection.Party? scope = patterns.Count == 0 ? null : new(patterns, IsEstate(model, repository) ? [.. excluded, .. EstateLeftOut] : excluded);
+            (bool active, string state, ChangeView? change) = State(status, attempts.Count, result, repository, scope, labels);
             return new Party(assignment, key, contributor, repository, from, patterns, excluded, after, active, state, labels, result, change);
         }
 
         // The records decide first: an accepted or retired work order and an abandoned or unfinished result read no clone, and only a
         // completed result of open work whose change no change-merge operation shows merged asks this machine's clone.
-        private (bool Active, string State, ChangeView? Change) State(string status, int attempts, RecordEnvelope? result, string? repository, bool pattern, List<string> labels)
+        private (bool Active, string State, ChangeView? Change) State(string status, int attempts, RecordEnvelope? result, string? repository, PathIntersection.Party? scope, List<string> labels)
         {
             ChangeView? named = result is null ? null : Named(result, repository);
             if (status == "accepted") return (false, "released: its work order is accepted", named);
@@ -770,7 +793,7 @@ internal static class AssignmentOverlaps
             if (outcome != "completed") return (true, $"active: its current result {result.Id} is {outcome}", named);
             if (named is not null)
             {
-                ChangeView change = Integrate(named, labels);
+                ChangeView change = Integrate(named, scope, labels);
                 switch (change.Integration)
                 {
                     case "merged":
@@ -788,7 +811,7 @@ internal static class AssignmentOverlaps
                 }
             }
 
-            if (!pattern) return (false, $"released: its current result {result.Id} is completed and its brief holds no path pattern", null);
+            if (scope is null) return (false, $"released: its current result {result.Id} is completed and its brief holds no path pattern", null);
             if (began.Value is not RecordEnvelope start || GoalRules.Before(result, start))
             {
                 labels.Add("its result was recorded before the overlap check, which records no integration, so it counts as released at completion");
@@ -816,12 +839,22 @@ internal static class AssignmentOverlaps
 
         // A named change's integration: a change-merge operation observed at its head, from the records; else, in this machine's clone, a
         // base that is a proper ancestor of its head and that head reachable from the repository's main line, never from the branch the
-        // result names as its target and never from a branch an agent run worked on. A change that stays active has its paths read.
-        private ChangeView Integrate(ChangeView named, List<string> labels)
+        // result names as its target and never from a branch an agent run worked on. Where the clone shows the paths the change touched,
+        // one of them is in the assignment's effective paths, so that an unrelated range on the main line is not its work. A change that
+        // stays active has its paths read.
+        private ChangeView Integrate(ChangeView named, PathIntersection.Party? scope, List<string> labels)
         {
             if (named.Problem is not null) return named with { Paths = null, Read = false };
             string repository = named.Repository, from = named.Base, head = named.Head;
-            if (merges.Value.TryGetValue((repository, head), out RecordEnvelope? merge)) return named with { Integration = "merged", Merge = merge };
+            if (merges.Value.TryGetValue((repository, head), out RecordEnvelope? merge))
+            {
+                // A merge the records show stands unless the clone shows the change touched none of the assignment's paths.
+                IReadOnlyList<(string Path, string Change)>? merged = view is null || scope is null ? null : Cached(changed, (repository, from, head), () => view.Changed(repository, from, head));
+                return merged is not null && Touches(merged.Select(p => p.Path), scope!) == false
+                    ? named with { Integration = "mismatched", Problem = Untouched(merged.Count), Paths = merged, Read = true }
+                    : named with { Integration = "merged", Merge = merge };
+            }
+
             if (view is null) return named;
             string? line = Cached(lines, repository, () => view.MainLine(repository));
             bool? ancestor = Cached(precedes, (repository, from, head), () => view.Precedes(repository, from, head));
@@ -845,7 +878,19 @@ internal static class AssignmentOverlaps
             else
             {
                 bool? reached = Cached(reachable, (repository, head, line), () => view.Reachable(repository, head, line));
-                if (reached == true) return read with { Integration = "reachable" };
+                if (reached == true)
+                {
+                    if (scope is null) return read with { Integration = "reachable" };
+                    IReadOnlyList<(string Path, string Change)>? touched = Cached(changed, (repository, from, head), () => view.Changed(repository, from, head));
+                    bool? inside = touched is null ? null : Touches(touched.Select(p => p.Path), scope);
+                    if (inside == true) return read with { Integration = "reachable" };
+                    if (inside == false) return read with { Integration = "mismatched", Problem = Untouched(touched!.Count), Paths = touched, Read = true };
+                    labels.Add(touched is null
+                        ? "the paths its change touched are unavailable in this machine's registered clone, so it is not shown to be its assignment's work"
+                        : "the paths its change touched could not be compared with its assignment's within the bound, so it is not shown to be its assignment's work");
+                    return read with { Paths = touched, Read = true };
+                }
+
                 if (reached == false) read = read with { Integration = "not-integrated" };
             }
 
@@ -856,6 +901,9 @@ internal static class AssignmentOverlaps
 
             return read with { Paths = Cached(changed, (repository, from, head), () => view.Changed(repository, from, head)), Read = true };
         }
+
+        private static string Untouched(int count) =>
+            $"none of the {count.ToString(CultureInfo.InvariantCulture)} {(count == 1 ? "path" : "paths")} it changed is in its assignment's effective permitted paths, so it is not that assignment's work";
 
         private static TValue Cached<TKey, TValue>(Dictionary<TKey, TValue> cache, TKey key, Func<TValue> read) where TKey : notnull
         {

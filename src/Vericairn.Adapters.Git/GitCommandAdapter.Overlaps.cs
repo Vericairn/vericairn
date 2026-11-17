@@ -12,7 +12,8 @@ namespace Vericairn.Adapters.Git;
 /// From 0.9.4 (CODE-73): what a registered clone shows the overlap check, read without checkout, fetch or change. Each read starts as
 /// the adapter's isolated reads do (no system or global configuration, no transport, no replacement objects, no lazy fetch) and, as
 /// the workspace commands do, without a pager, a file-system monitor or hooks, and with the clone's grafts ignored, so that the
-/// clone's own configuration and info files cannot run a program or steer which commits are ancestors; a diff compares submodules too.
+/// clone's own configuration and info files cannot run a program or steer which commits are ancestors; a diff compares submodules too
+/// and names every path from the repository's root, whatever subdirectory the clone's configured working tree puts it in.
 /// </summary>
 public sealed partial class GitCommandAdapter
 {
@@ -62,7 +63,7 @@ public sealed partial class GitCommandAdapter
         try
         {
             if (!Directory.Exists(root) || !Patterns.Commit.IsMatch(baseCommit) || !Patterns.Commit.IsMatch(head) || !HasCommit(root, baseCommit) || !HasCommit(root, head)
-                || Read(root, out byte[] bytes, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=none", "--name-status", "-z", baseCommit, head, "--") != 0) return null;
+                || Read(root, out byte[] bytes, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-relative", "--ignore-submodules=none", "--name-status", "-z", baseCommit, head, "--") != 0) return null;
             string[] fields = new UTF8Encoding(false, true).GetString(bytes).Split('\0', StringSplitOptions.RemoveEmptyEntries);
             var changes = new List<SourceChange>();
             for (int i = 0; i + 1 < fields.Length; i += 2)

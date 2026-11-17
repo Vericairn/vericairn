@@ -364,12 +364,46 @@ public class OverlapCheckTests
         Assert.Equal("mismatched", other.GetProperty("change").GetProperty("integration").GetString());
         Assert.False(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")).Ok);
 
+        // A range already on the main line that is no part of the work, here a later commit touching only the readme, is not its change.
+        Commit(run.Clone, "README.md", "widget, again\n", "An unrelated change");
+        string unrelated = Git(run.Clone, "rev-parse", "HEAD");
+        Submit(run, earlier, root, unrelated);
+        JsonElement range = Party(run, earlier);
+        Assert.True(range.GetProperty("active").GetBoolean());
+        Assert.Equal("mismatched", range.GetProperty("change").GetProperty("integration").GetString());
+        Assert.StartsWith("none of the 1 path it changed", range.GetProperty("change").GetProperty("problem").GetString(), StringComparison.Ordinal);
+        Assert.False(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")).Ok);
+
         // The honest case: the work merged into the main line, named by its own range, releases the assignment, and the wait ends.
         Git(run.Clone, "merge", "-q", "--no-ff", "-m", "Merge the guide", "work/w-3");
         WriteOutcome integrated = Submit(run, earlier, root, work);
         Assert.Null(integrated.Notices);
         Assert.DoesNotContain(run.Service.WorkOverlap().Json.GetProperty("assignments").EnumerateArray(), a => a.GetProperty("assignment").GetString() == earlier);
         RunEstate.Ok(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")));
+    }
+
+    [Fact]
+    public void AMainLineAnAgentRunWorkedOnShowsNoIntegration()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        run.Service.Providers.Register(new GitCommandAdapter());
+        string root = Git(run.Clone, "rev-parse", "HEAD");
+        Order(run, "W-3");
+        string assignment = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-3", run.Estate.BuilderId, run.Estate.OperatorId, RunEstate.Json(DocsBrief)) { Repository = run.Resource })).Id;
+        // The work, on main, as a run that names main as its branch leaves main when its settlement moves the branch to the run's head.
+        Commit(run.Clone, "docs/guide.md", "guide\n", "The guide");
+        string head = Git(run.Clone, "rev-parse", "HEAD");
+        Complete(run, assignment, root, head);
+        Assert.DoesNotContain(run.Service.WorkOverlap().Json.GetProperty("assignments").EnumerateArray(), a => a.GetProperty("assignment").GetString() == assignment);
+
+        // Once the records show an agent run that worked on main in this repository, reaching main shows no integration.
+        run.Estate.SetClock(DateTimeOffset.UtcNow);
+        run.Estate.Add("operation", run.Estate.OperatorId, $$"""{"provider":"generic","action":"agent-run","identity":"main-branch-run","intent":"Run the widget on main.","target":{"assignment":"{{run.Assignment}}","principal":"{{run.Estate.BuilderId}}","workspace":"widget, branch main","repository":"{{run.Resource}}","branch":"main","goal":"{{run.Goal}}"},"status":"not-started","cap":{"wallMinutes":5,"attemptsPerStep":3},"evidence":[]}""");
+        Assert.Contains(AgentRuns.All(run.Estate.Load()), r => r.Target("branch") == "main");
+        JsonElement held = Party(run, assignment);
+        Assert.True(held.GetProperty("active").GetBoolean());
+        Assert.Equal(("unknown", "main"), (held.GetProperty("change").GetProperty("integration").GetString(), held.GetProperty("change").GetProperty("mainLine").GetString()));
+        Assert.Contains(held.GetProperty("labels").EnumerateArray(), l => l.GetString()!.Contains("main, is a branch an agent run worked on", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -447,6 +481,36 @@ public class OverlapCheckTests
         }
     }
 
+    [Fact]
+    public void AClonesConfiguredWorkingTreeAndRelativeDiffsLeaveAChangesPathsWhole()
+    {
+        TestPrerequisites.RequireGit();
+        string parent = Path.Combine(Path.GetTempPath(), "vericairn-overlap-git-" + Guid.NewGuid().ToString("N"));
+        string clone = Path.Combine(parent, "clone");
+        Directory.CreateDirectory(clone);
+        try
+        {
+            Git(clone, "init", "-q", "-b", "main");
+            Commit(clone, "README.md", "one\n", "One");
+            string from = Git(clone, "rev-parse", "HEAD");
+            Commit(clone, "docs/guide.md", "guide\n", "A guide");
+            Commit(clone, "src/a.cs", "a\n", "A source");
+            string head = Git(clone, "rev-parse", "HEAD");
+            // The clone's own configuration puts its working tree one directory up and makes diffs relative to where git runs.
+            Git(clone, "config", "core.worktree", parent);
+            Git(clone, "config", "diff.relative", "true");
+            Assert.Empty(PlainGit(clone, "diff", "--name-only", from, head));
+
+            Assert.Equal([new SourceChange("docs/guide.md", "added"), new SourceChange("src/a.cs", "added")], new GitCommandAdapter().ChangedPaths(clone, from, head));
+        }
+        finally
+        {
+            try { Directory.Delete(parent, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     // Git as a clone's own configuration and info files steer it, for the control of what the overlap check's reads ignore.
     private static string PlainGit(string clone, params string[] arguments)
     {
@@ -454,9 +518,11 @@ public class OverlapCheckTests
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
         using Process process = Process.Start(info)!;
         string output = process.StandardOutput.ReadToEnd();
-        process.StandardError.ReadToEnd();
+        string error = process.StandardError.ReadToEnd();
         process.WaitForExit();
-        return arguments[0] == "merge-base" ? (process.ExitCode == 0 ? "true" : "false") : output.Trim();
+        if (arguments[0] == "merge-base") return process.ExitCode == 0 ? "true" : "false";
+        Assert.True(process.ExitCode == 0, error);
+        return output.Trim();
     }
 
     private static JsonElement Party(RunEstate run, string assignment) =>
