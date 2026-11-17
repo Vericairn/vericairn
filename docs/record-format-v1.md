@@ -166,6 +166,11 @@ any other; the archive entry's attributes carry the same mode for other tools. R
 inventory alone, applies it on Linux and macOS, and refuses any other value (`export.entry-mode`), so it never creates a
 link, a directory or a special file. An entry without `mode`, as every release before 0.9.3 wrote it, restores as before.
 
+From 0.9.4, an export also carries the owner's agent instruction files at the estate's root, each one present as a file of
+exactly the name the estate check allows there, with its bytes and mode, and the restore writes it back like any other
+member. The export refuses an estate where a link stands in place of one of them, before it writes anything. An export
+written before 0.9.4 lacks them and restores as before.
+
 ## Software: resources, observations, verifications and operations
 
 A repository the estate uses is a `resource` of kind `repository`, identified by its `rootCommit`, which adoption always

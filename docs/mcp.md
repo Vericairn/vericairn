@@ -492,8 +492,10 @@ reads the owner's instructions first, and they lead it to the generated orientat
 directory. Before 0.9.3 the owner's instructions lived in `docs/`, linked from the root `README.md`; that arrangement
 still works.
 
-`estate export` doesn't carry the owner's files at the root yet. A cold recovery restores them from the supplemental
-capture and checks them against its list, as
+From 0.9.4, `estate export` carries each of the owner's files present at the root, with its bytes and mode, and lists it
+in the export's inventory; `estate restore` writes it back exactly. An export refuses an estate where a link stands in
+place of one of them, and writes nothing. An export written before 0.9.4 lacks them, so a cold recovery from one restores
+them from the supplemental capture and checks them against its list, as
 [the three inventories of a cold recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery) describe.
 
 ## Qualification

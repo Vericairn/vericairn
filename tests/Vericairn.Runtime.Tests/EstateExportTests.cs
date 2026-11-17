@@ -4,9 +4,12 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Nodes;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Records.Tests;
 using Vericairn.Runtime.Portability;
+using Vericairn.Runtime.Store;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -275,6 +278,100 @@ public sealed class EstateExportTests : IDisposable
         Assert.Single(Directory.EnumerateFileSystemEntries(destination));
     }
 
+    // FIX-135 (decision 01M7B8GEH9SAGM03HD6FKFV1DA): the owner's agent instruction files at the root travel with the export, each with
+    // its bytes and mode, and the restore writes them back exactly.
+    [Fact]
+    public void OwnerInstructionFilesPresentAtTheRootRestoreExactlyAsExported()
+    {
+        using var estate = new TestEstate();
+        string[] names = [.. EstateLayout.OwnerInstructionFiles.Order(StringComparer.Ordinal)];
+        string pointer = names.First(name => name != "AGENTS.md"), absent = names.Last(name => name != "AGENTS.md" && name != pointer);
+        byte[] agents = "# Working in this estate\n\nThese are the owner's instructions for agents working in this estate.\n"u8.ToArray();
+        byte[] pointing = "Read `AGENTS.md`.\n"u8.ToArray();
+        File.WriteAllBytes(Path.Combine(estate.Root, "AGENTS.md"), agents);
+        File.WriteAllBytes(Path.Combine(estate.Root, pointer), pointing);
+        if (!OperatingSystem.IsWindows())
+        {
+            // One executable, so the mode is seen to travel; the other stays an ordinary file.
+            File.SetUnixFileMode(Path.Combine(estate.Root, pointer), File.GetUnixFileMode(Path.Combine(estate.Root, pointer)) | UnixFileMode.UserExecute);
+        }
+
+        string archive = Path.Combine(scratch, "estate-export.zip");
+        using (EstateSession session = EstateSession.Open(estate.Root))
+        {
+            EstateExport.Write(session, archive);
+        }
+
+        Dictionary<string, JsonObject> listed = Inventory(archive);
+        Assert.Equal(ContentHash.Sha256(agents), listed["AGENTS.md"]["hash"]!.GetValue<string>());
+        Assert.Equal(agents.Length, listed["AGENTS.md"]["bytes"]!.GetValue<long>());
+        Assert.Equal("100644", listed["AGENTS.md"]["mode"]!.GetValue<string>());
+        Assert.Equal(ContentHash.Sha256(pointing), listed[pointer]["hash"]!.GetValue<string>());
+        Assert.Equal(OperatingSystem.IsWindows() ? "100644" : "100755", listed[pointer]["mode"]!.GetValue<string>());
+        Assert.False(listed.ContainsKey(absent));
+
+        string destination = Path.Combine(scratch, "restored");
+        EstateExport.Restore(archive, destination);
+        Assert.Equal(agents, File.ReadAllBytes(Path.Combine(destination, "AGENTS.md")));
+        Assert.Equal(pointing, File.ReadAllBytes(Path.Combine(destination, pointer)));
+        Assert.False(File.Exists(Path.Combine(destination, absent)));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.None, File.GetUnixFileMode(Path.Combine(destination, "AGENTS.md")) & UnixFileMode.UserExecute);
+            Assert.Equal(UnixFileMode.UserExecute, File.GetUnixFileMode(Path.Combine(destination, pointer)) & UnixFileMode.UserExecute);
+        }
+
+        Assert.DoesNotContain(EstateChecks.Run(EstateLoader.Load(destination)), f => f.Code is "layout.unexpected" or "layout.symlink");
+    }
+
+    [Fact]
+    public void AnEstateWithoutOwnerInstructionFilesExportsNoneAndADifferentlyCasedFileIsNotTheOwners()
+    {
+        using var estate = new TestEstate();
+        File.WriteAllText(Path.Combine(estate.Root, "agents.md"), "Not one of the owner's instruction files.\n");
+        string archive = Path.Combine(scratch, "estate-export.zip");
+        using (EstateSession session = EstateSession.Open(estate.Root))
+        {
+            EstateExport.Write(session, archive);
+        }
+
+        Assert.DoesNotContain(Inventory(archive).Keys, path => EstateLayout.OwnerInstructionFiles.Contains(path, StringComparer.OrdinalIgnoreCase));
+        string destination = Path.Combine(scratch, "restored");
+        EstateExport.Restore(archive, destination);
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(destination).Select(Path.GetFileName), name => EstateLayout.OwnerInstructionFiles.Contains(name!, StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ALinkInPlaceOfAnOwnerInstructionFileRefusesTheExportAndWritesNothing()
+    {
+        using var estate = new TestEstate();
+        string outside = Path.Combine(scratch, "outside.md");
+        File.WriteAllText(outside, "Bytes from outside the estate.\n");
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(estate.Root, "AGENTS.md"), outside);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Skip("This account cannot create a symbolic link.");
+        }
+
+        string archive = Path.Combine(scratch, "estate-export.zip");
+        using EstateSession session = EstateSession.Open(estate.Root);
+        InvalidOperationException refused = Assert.Throws<InvalidOperationException>(() => EstateExport.Write(session, archive));
+        Assert.Contains("AGENTS.md at the estate root is a link", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Nothing was written", refused.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(archive));
+    }
+
+    [Fact]
+    public void AnOwnerInstructionFileListedAsALinkRestoresNothing()
+    {
+        string archive = WriteExport([("AGENTS.md", "elsewhere.md")], new JsonArray(Item("AGENTS.md", "elsewhere.md", "120000")));
+        InvalidOperationException exception = AssertRefused(archive, "export.entry-mode", "AGENTS.md");
+        Assert.Contains("never creates a link", exception.Message, StringComparison.Ordinal);
+    }
+
     public void Dispose() => Directory.Delete(scratch, recursive: true);
 
     private InvalidOperationException AssertRefused(string archive, string code, string? path = null)
@@ -315,6 +412,13 @@ public sealed class EstateExportTests : IDisposable
         };
         WriteEntry(zip, EstateExport.SummaryEntry, Encoding.UTF8.GetBytes(summary.ToJsonString()));
         return path;
+    }
+
+    private static Dictionary<string, JsonObject> Inventory(string archive)
+    {
+        using ZipArchive zip = ZipFile.OpenRead(archive);
+        using Stream stream = zip.GetEntry(EstateExport.InventoryEntry)!.Open();
+        return JsonNode.Parse(stream)!.AsArray().Select(item => item!.AsObject()).ToDictionary(item => item["path"]!.GetValue<string>(), StringComparer.Ordinal);
     }
 
     private static JsonObject Item(string path, string content, string? mode = null)

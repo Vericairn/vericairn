@@ -5,7 +5,8 @@ original recording, a video master or a dataset, with exact-byte custody, and re
 uses only records that exist today and adds no record type. The typed parts that
 [DESIGN-42](#planned-what-design-42-adds) plans come later. In 0.9.3 the guide adds
 [the three inventories of a cold recovery](#the-three-inventories-of-a-cold-recovery), which classify
-every file of a restored estate.
+every file of a restored estate. From 0.9.4 the export carries the owner's agent instruction files at
+the estate's root, so they come back with the exported payload.
 
 Every identity and address below is synthetic: the store is `store.example.invalid`, and the
 artifact is 9,437,184 bytes (9 MiB). Each JSON block names the file it is saved as, and the commands
@@ -21,8 +22,8 @@ a check in the product's tests, so they validate against this release.
 3. Record the intake as an operation: the intent first, then the copy, then the readback.
 4. Name the artifact in the result by hash, bytes and media type, with no `location`, and give the
    store reference in the result's `evidence`.
-5. Back up the store yourself, and keep the owner's agent instruction files with that backup.
-   `estate export` carries neither.
+5. Back up the store yourself: `estate export` doesn't carry it. From 0.9.4 the export carries the
+   owner's agent instruction files at the root.
 6. After a restore, classify every file before anything writes to the restored copy: the exported
    payload, the supplemental sources and the housekeeping listed exactly. Preserve any other file
    and find where it came from.
@@ -334,19 +335,23 @@ Your readback finds those cases, and you record them as failures.
 
 - every record file and every native object;
 - the `estate/` directory with its manifest, `design/`, `docs/`, `README.md`, `LICENSE`, the bootstrap
-  scripts, `.gitattributes`, `.gitignore`, `.mailmap` and `.github`.
+  scripts, `.gitattributes`, `.gitignore`, `.mailmap` and `.github`;
+- from 0.9.4, the owner's agent instruction files at the root, `AGENTS.md` and the two pointer files
+  [the MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) names, each one present, with its
+  bytes and mode.
 
 It excludes keys, sessions, credentials and authority, the machine's live store and its local notes,
-the housekeeping native operations write under `.vericairn/`, and git history. It doesn't carry the
-owner's agent instruction files at the root yet. It also excludes every payload held outside the
-estate repository: an external store's artifacts and a release's files. Today its summary doesn't
-list the external references it leaves out.
+the housekeeping native operations write under `.vericairn/`, and git history. It also excludes every
+payload held outside the estate repository: an external store's artifacts and a release's files.
+Today its summary doesn't list the external references it leaves out. From 0.9.4 `estate export`
+refuses an estate where a link stands in place of an instruction file, and writes nothing: the export
+carries each one only as a file, and a restore never makes a link.
 
 So recovery needs a supplemental capture: the store's own backup, made after the intake, that holds
 every reference the records name. A snapshot, a versioned bucket or a second store all work. Encrypt
 it, keep its key apart from it, and keep it under an account that can restore it without the live
-store. Keep the owner's instruction files in the capture too, until the export carries them. To check
-the capture without the estate, keep the list of its references and paths, hashes and byte counts
+store. An export written before 0.9.4 doesn't carry the owner's instruction files, so while you keep
+one, keep those files in the capture too. To check the capture without the estate, keep the list of its references and paths, hashes and byte counts
 with it. The records can always rebuild the store's part of that list: each result output without a
 `location`, with the reference its evidence names.
 
@@ -460,8 +465,8 @@ it by a pattern or delete it.
 
 | Inventory | What it holds | Its list | How you verify a file |
 | --- | --- | --- | --- |
-| The exported payload | Every record and native object, `estate/`, `design/`, `docs/`, `README.md`, `LICENSE`, `bootstrap`, `bootstrap.ps1`, `.gitattributes`, `.gitignore`, `.mailmap` and `.github` | `export/inventory.json` in the export: each member's `path`, `bytes`, `hash` and, from 0.9.3, `mode` | The file at `path` has exactly `bytes` bytes and the SHA-256 `hash`, and every member is present. On Linux and macOS a member whose `mode` is `100755` is executable, and no other member is. |
-| Supplemental private or external sources | The store's backup, restored beside the estate and never inside it; the owner's agent instruction files at the root, `AGENTS.md` and the two pointer files [the MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) names; a mirror of the git history, if you keep one | The list kept with the supplemental capture: each reference or path, byte count and SHA-256 | A payload by its readback, recorded as a verification; restored records never count as recovered bytes. An instruction file by its byte count and SHA-256 against the list. |
+| The exported payload | Every record and native object, `estate/`, `design/`, `docs/`, `README.md`, `LICENSE`, `bootstrap`, `bootstrap.ps1`, `.gitattributes`, `.gitignore`, `.mailmap` and `.github`, and from 0.9.4 the owner's agent instruction files at the root, `AGENTS.md` and the two pointer files [the MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) names | `export/inventory.json` in the export: each member's `path`, `bytes`, `hash` and, from 0.9.3, `mode` | The file at `path` has exactly `bytes` bytes and the SHA-256 `hash`, and every member is present. On Linux and macOS a member whose `mode` is `100755` is executable, and no other member is. |
+| Supplemental private or external sources | The store's backup, restored beside the estate and never inside it; a mirror of the git history, if you keep one; and, from an export written before 0.9.4, the owner's agent instruction files at the root | The list kept with the supplemental capture: each reference or path, byte count and SHA-256 | A payload by its readback, recorded as a verification; restored records never count as recovered bytes. An instruction file by its byte count and SHA-256 against the list. |
 | Machine-local housekeeping | The files native operations write under `.vericairn/` for their own use, and the temporary file a stopped write leaves | [The lists below](#housekeeping-listed-exactly) | The path matches an entry, and a file whose content the entry fixes has exactly that content. |
 
 `export/inventory.json` and `export/export.json` describe the export and aren't restored. The restore
@@ -471,8 +476,10 @@ that one place, since a restore always makes a repository-synced estate. Check t
 the exported one with that value changed. From a repository-synced export, the manifest is restored
 unchanged.
 
-The estate check allows the owner's instruction files at the root from 0.9.3, but `estate export`
-doesn't carry them yet, so they come back from the supplemental capture. Keys, sessions, the live
+The estate check allows the owner's instruction files at the root from 0.9.3. From 0.9.4 `estate
+export` carries each one present as a member, and `estate restore` writes it back with its bytes and
+mode; an export written before 0.9.4 lacks them, so from such an export they come back from the
+supplemental capture. Keys, sessions, the live
 store and the runtime's state stay under the Vericairn home, never in the estate directory. None of
 them belongs in an export or in a capture meant to travel with it, and neither does housekeeping.
 
@@ -538,8 +545,10 @@ and SHA-256 with its member's. Every member must be present and match, and no ot
 yet; a restore never makes a link. Reading the restored copy, as `records show` and `estate check` do,
 writes nothing to it.
 
-The supplemental sources come back from the capture: the store's backup beside the estate, and the
-owner's instruction files into its root, each checked against the capture's list.
+The supplemental sources come back from the capture: the store's backup beside the estate, checked
+against the capture's list. The owner's instruction files are members from 0.9.4, restored and
+checked with the rest; from an export written before 0.9.4, copy them into the root from the capture
+and check each against its list.
 
 ### Classify again after you write
 
@@ -550,11 +559,11 @@ write printed with `--json` and holding the `id` and `hash` printed beside it; o
 record's `hash` is the record's own, written inside it, not the SHA-256 of its file. `.git/` is git's
 own, and you leave it out by that one name; the restore never makes it.
 
-In this guide's example, once `AGENTS.md` is back from the capture and the readback and the
-classification are recorded in the restored copy, the files beyond the inventory are exactly these:
+In this guide's example, the owner's `AGENTS.md` is a member, restored with the rest. Once the
+readback and the classification are recorded in the restored copy, the files beyond the inventory are
+exactly these:
 
 ```text
-AGENTS.md                                               supplemental, from the capture
 records/verification/<yyyy-mm>/<readback-id>.json       written after the restore
 records/verification/<yyyy-mm>/<restore-files-id>.json  written after the restore
 .vericairn/record-staging/.gitignore                    housekeeping
@@ -600,10 +609,9 @@ verified every member. Save as `restore-files.json`:
   },
   "role": "operator",
   "outcome": "passed",
-  "summary": "Classified every file of the restored estate. Before any write, each file was a member of the export's inventory with its bytes and SHA-256, and every member was present. AGENTS.md matches the supplemental capture's list. After the readback was recorded here, the other files are that record and the listed housekeeping. One unexpected file was moved out unchanged.",
+  "summary": "Classified every file of the restored estate. Before any write, each file was a member of the export's inventory with its bytes and SHA-256, the owner's AGENTS.md among them, and every member was present. After the readback was recorded here, the other files are that record and the listed housekeeping. One unexpected file was moved out unchanged.",
   "evidence": [
     {"summary": "The export's inventory, export/inventory.json", "hash": "<inventory-hash>"},
-    {"summary": "AGENTS.md, restored from the supplemental capture", "hash": "sha256:<agents-sha256-hex>"},
     {"summary": "vault/obj-0001, found at the restored estate's root: 9,437,184 bytes with the result's SHA-256, a misplaced copy of the external payload. Moved unchanged to the quarantine beside the restore.", "hash": "sha256:<sha256-hex>"}
   ],
   "limitations": ["Covers the files of this restored copy. The readback, not this classification, proves the external payload's bytes."],
