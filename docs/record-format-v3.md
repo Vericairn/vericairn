@@ -573,7 +573,7 @@ the write-boundary rules below apply only to new records.
 | Record | Additive contract |
 | --- | --- |
 | `assignment` | `brief.repository`: the identity of the repository the work changes, the estate's own (its first charter's id) or a repository resource's (its first record's id). `brief.excludedChanges`: patterns in the grammar of `permittedChanges` that the work leaves out, each an interpretable pattern, never prose, since prose excludes nothing. `brief.after`: at most 20 assignment ids whose work this one waits for; each is followed to its current revision, and validation refuses one that names the assignment itself, names it twice or makes a cycle (`assignment.after`), and an exclusion that is prose (`assignment.excluded`) or a repository that is no such identity (`assignment.repository`). |
-| `result` | Optional `change: {repository, base, head, target}`: the repository's identity as above, the base and head commits (40 lower-case hex digits) and the branch the change integrates into, a plain branch name (`result.change`). The runtime derives the change's paths from the registered clone, by name without rename detection, so a rename is a removal and an addition; a clone missing either commit makes them unavailable, never empty. The change releases its assignment only as that assignment's work: in the repository its brief names (for an older brief, the one its runs named), with a base that is a proper ancestor of its head, merged by a `change-merge` operation at that head or reachable from the main line of the registered clone, never from the branch named as `target`, and, where the clone shows the paths it changed, touching one of the assignment's effective permitted paths. Any other change keeps the assignment active. |
+| `result` | Optional `change: {repository, base, head, target}`: the repository's identity as above, the base and head commits (40 lower-case hex digits) and the branch the change integrates into, a plain branch name (`result.change`). The runtime derives the change's paths from the registered clone, by name without rename detection, so a rename is a removal and an addition; a clone missing either commit makes them unavailable, never empty. The change releases its assignment only as that assignment's work: in the repository its brief names (for an older brief, the one its runs named), merged by a `change-merge` operation at that head or reachable from the main line of the registered clone, never from the branch named as `target`, and, where the clone shows them, with a base that is a proper ancestor of its head and touching one of the assignment's effective permitted paths; a reachable head needs the clone to show both, and a merge the records show stands where no clone shows otherwise. Any other change keeps the assignment active. An assignment whose brief holds no path pattern is released when its result is completed, whatever change it names. |
 
 From 0.9.4 the runtime's write boundary refuses a new format-3 assignment whose
 permitted changes hold a path pattern and whose brief names no repository
@@ -586,10 +586,11 @@ a revision that changes an assignment's `repository`, `permittedChanges`,
 it names in `after` is not released (`attempt.after`). Narrowing by exclusion or
 `after` grants less, so it needs no amendment. A new completed result whose
 assignment holds a path pattern and that names no `change`, or a `change` in
-another repository or with the same commit as base and head, is written with a
-warning in the write's notices, since its assignment then stays active until
-acceptance; a result the check counts as released at completion, recorded
-before the check's first record, is not warned.
+another repository, with the same commit as base and head, or for an older
+assignment that names no repository, is written with a warning in the write's
+notices, since its assignment then stays active until acceptance; a result the
+check counts as released at completion, recorded before the check's first
+record, is not warned.
 
 The overlap check reads these fields; status and progress show its open
 overlaps from the records alone, and `vericairn work overlap` adds what this

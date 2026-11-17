@@ -45,9 +45,10 @@ internal interface IRepositoryView
 /// accepted nor retired, until it is released: its current result is abandoned; completed with a change that is integrated; completed
 /// with no path pattern in its brief; or completed before the check's build, labeled. From the build, a completed result with a path
 /// pattern and no change keeps its assignment active until acceptance. A change releases only as this assignment's integrated work: it
-/// is in the assignment's repository, its base is a proper ancestor of its head, its head was merged by a change-merge operation or is
-/// reachable from the repository's main line in this machine's registered clone, never from the branch the result names, and where the
-/// clone shows the paths it touched, one of them is in the assignment's effective paths.
+/// is in the assignment's repository; its head was merged by a change-merge operation the records show, or is reachable from the
+/// repository's main line in this machine's registered clone, never from the branch the result names; and where the clone shows them,
+/// its base is a proper ancestor of its head and one of the paths it touched is in the assignment's effective paths. A reachable head
+/// needs the clone to show both; a merge the records show stands where no clone shows otherwise.
 /// </summary>
 internal static class AssignmentOverlaps
 {
@@ -358,7 +359,7 @@ internal static class AssignmentOverlaps
     {
         IReadOnlyList<Wait> waits = Waits(model, assignment, view);
         if (waits.Count == 0) return null;
-        return $"Assignment {assignment.Id} runs after {string.Join(", ", waits.Select(w => $"{w.Party.Key}'s assignment {w.Current.Id}"))}, and {(waits.Count == 1 ? "it is" : "they are")} not released yet ({string.Join("; ", waits.Select(w => w.Party.State))}): {what} waits until {(waits.Count == 1 ? "it is" : "each is")} released, when {(waits.Count == 1 ? "its" : "each one's")} current result is abandoned, or completed with a change that is integrated, or {(waits.Count == 1 ? "its" : "each")} work order is accepted or retired.";
+        return $"Assignment {assignment.Id} runs after {string.Join(", ", waits.Select(w => $"{w.Party.Key}'s assignment {w.Current.Id}"))}, and {(waits.Count == 1 ? "it is" : "they are")} not released yet ({string.Join("; ", waits.Select(w => w.Party.State))}): {what} waits until {(waits.Count == 1 ? "it is" : "each is")} released, when {(waits.Count == 1 ? "its" : "each one's")} current result is abandoned, or completed with a change that is integrated, or completed at all when {(waits.Count == 1 ? "its" : "the")} brief holds no path pattern, or {(waits.Count == 1 ? "its" : "each")} work order is accepted or retired.";
     }
 
     /// <summary>One overlap in a sentence, as a write or a run reports it.</summary>
@@ -791,6 +792,8 @@ internal static class AssignmentOverlaps
             string outcome = EstateModel.BodyString(result, "outcome") ?? "?";
             if (outcome == "abandoned") return (false, $"released: its current result {result.Id} is abandoned", named);
             if (outcome != "completed") return (true, $"active: its current result {result.Id} is {outcome}", named);
+            // A brief with no path pattern changes no repository the check compares, so its completed result releases it whatever change it names.
+            if (scope is null) return (false, $"released: its current result {result.Id} is completed and its brief holds no path pattern", named);
             if (named is not null)
             {
                 ChangeView change = Integrate(named, scope, labels);
@@ -811,7 +814,6 @@ internal static class AssignmentOverlaps
                 }
             }
 
-            if (scope is null) return (false, $"released: its current result {result.Id} is completed and its brief holds no path pattern", null);
             if (began.Value is not RecordEnvelope start || GoalRules.Before(result, start))
             {
                 labels.Add("its result was recorded before the overlap check, which records no integration, so it counts as released at completion");
@@ -848,7 +850,13 @@ internal static class AssignmentOverlaps
             string repository = named.Repository, from = named.Base, head = named.Head;
             if (merges.Value.TryGetValue((repository, head), out RecordEnvelope? merge))
             {
-                // A merge the records show stands unless the clone shows the change touched none of the assignment's paths.
+                // A merge the records show stands unless this machine's clone shows the change's base is no ancestor of its head, or the
+                // change touched none of the assignment's paths; where the clone cannot show either, the records decide.
+                if (view is not null && Cached(precedes, (repository, from, head), () => view.Precedes(repository, from, head)) == false)
+                {
+                    return named with { Integration = "mismatched", Problem = NotAncestor(from, head), Paths = Cached(changed, (repository, from, head), () => view.Changed(repository, from, head)), Read = true };
+                }
+
                 IReadOnlyList<(string Path, string Change)>? merged = view is null || scope is null ? null : Cached(changed, (repository, from, head), () => view.Changed(repository, from, head));
                 return merged is not null && Touches(merged.Select(p => p.Path), scope!) == false
                     ? named with { Integration = "mismatched", Problem = Untouched(merged.Count), Paths = merged, Read = true }
@@ -861,7 +869,7 @@ internal static class AssignmentOverlaps
             ChangeView read = named with { Branch = line };
             if (ancestor == false)
             {
-                read = read with { Integration = "mismatched", Problem = $"its base {from} is not an ancestor of its head {head} in this machine's registered clone" };
+                read = read with { Integration = "mismatched", Problem = NotAncestor(from, head) };
             }
             else if (line is null)
             {
@@ -901,6 +909,8 @@ internal static class AssignmentOverlaps
 
             return read with { Paths = Cached(changed, (repository, from, head), () => view.Changed(repository, from, head)), Read = true };
         }
+
+        private static string NotAncestor(string from, string head) => $"its base {from} is not an ancestor of its head {head} in this machine's registered clone";
 
         private static string Untouched(int count) =>
             $"none of the {count.ToString(CultureInfo.InvariantCulture)} {(count == 1 ? "path" : "paths")} it changed is in its assignment's effective permitted paths, so it is not that assignment's work";

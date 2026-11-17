@@ -383,6 +383,35 @@ public class OverlapCheckTests
     }
 
     [Fact]
+    public void ABriefWithNoPathPatternIsReleasedAtCompletionWhateverChangeItNames()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        run.Service.Providers.Register(new GitCommandAdapter());
+        string root = Git(run.Clone, "rev-parse", "HEAD");
+        Commit(run.Clone, "docs/guide.md", "guide\n", "The guide");
+        string head = Git(run.Clone, "rev-parse", "HEAD");
+        Order(run, "W-3");
+        Order(run, "W-4");
+        // A brief whose permitted changes are prose changes no repository the check compares, so it names none.
+        const string ProseBrief = """{"outcome":"Notes on the guide.","sources":[],"permittedChanges":["the widget's guide, read and annotated"],"prohibitedEffects":["no publication"],"workspace":["widget repository, a work branch"],"limits":[],"expectedOutputs":["notes"],"reviewCriteria":["they read"],"recovery":"Record a result."}""";
+        string prose = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-3", run.Estate.BuilderId, run.Estate.OperatorId, RunEstate.Json(ProseBrief)))).Id;
+        Assert.False(Brief(run.Estate.Load(), prose).TryGetProperty("repository", out _));
+        string later = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-4", run.Estate.BuilderId, run.Estate.OperatorId, After(DocsBrief, prose)) { Repository = run.Resource })).Id;
+        Assert.False(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")).Ok);
+
+        // Its completed result names a change, which can be no assignment's own work without a repository: it is released all the same,
+        // without a warning, and the assignment waiting on it in after starts.
+        WriteOutcome result = Submit(run, prose, root, head);
+        Assert.True(result.Ok);
+        Assert.Null(result.Notices);
+        EstateModel model = run.Estate.Load();
+        AssignmentOverlaps.Party party = AssignmentOverlaps.PartyOf(model, model.ById[prose], RepositoryView.For(model, run.Service.Providers, run.Service.Session.Manifest.Estate))!;
+        Assert.False(party.Active);
+        Assert.Contains("is completed and its brief holds no path pattern", party.State, StringComparison.Ordinal);
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-4", "Start.")));
+    }
+
+    [Fact]
     public void AMainLineAnAgentRunWorkedOnShowsNoIntegration()
     {
         using var run = new RunEstate(recordFormat: 3);

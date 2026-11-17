@@ -290,8 +290,16 @@ public class AssignmentOverlapTests
         AssignmentOverlaps.Party other = AssignmentOverlaps.PartyOf(model, assignment, new View { Changes = [("docs/guide.md", "modified")] })!;
         Assert.True(other.Active);
         Assert.Equal("mismatched", other.Change!.Integration);
-        // A clone that cannot show the range leaves the merge the records show standing.
+        // A merged head whose base the clone shows is no ancestor of it names no range of this work, as for a reachable head.
+        var unrelated = new View { Precedes = false };
+        AssignmentOverlaps.Party noRange = AssignmentOverlaps.PartyOf(model, assignment, unrelated)!;
+        Assert.True(noRange.Active);
+        Assert.Equal("mismatched", noRange.Change!.Integration);
+        Assert.Contains($"its base {Base} is not an ancestor of its head {Head}", noRange.Change.Problem, StringComparison.Ordinal);
+        Assert.Contains($"{Base} before {Head} in {repository.Id}", unrelated.Reads);
+        // A clone that cannot show the range, its ancestry or its paths, leaves the merge the records show standing.
         Assert.False(AssignmentOverlaps.PartyOf(model, assignment, new View { Changes = null })!.Active);
+        Assert.False(AssignmentOverlaps.PartyOf(model, assignment, new View { Changes = null, Precedes = null })!.Active);
     }
 
     [Fact]

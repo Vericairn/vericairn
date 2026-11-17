@@ -1094,21 +1094,25 @@ registered clone by name without rename detection, or `pathsUnavailable` when a 
 An assignment is active while it is current and its work order is neither accepted nor retired, until it is released: its current
 result is abandoned; it is completed and names a `change` that is integrated, shown by a `change-merge` operation observed at the
 change's head, or by the head being reachable from the main line of this machine's registered clone (origin's `HEAD`, else `main`,
-else `master`, as a local branch), labeled as observed here; it is completed and its brief holds no path pattern; or it is
-completed and was recorded before the overlap check, labeled, since nothing recorded its integration. A change releases only its
-own assignment's work: it is in the repository the assignment's brief names, or for an older brief the one its agent runs named,
-its base is a proper ancestor of its head, and where the clone shows the paths it changed, one of them is in the assignment's
-effective permitted paths (a brief with no path pattern asks none). A change in another repository, with the same commit as base
-and head, whose base is no ancestor of its head in the clone, or that changed none of the assignment's paths is `mismatched` and
-keeps the assignment active, and the branch a result names as its `target` never shows integration: only the main line does, and
-never a branch an agent run worked on. A range already on the main line that touches one of the assignment's paths is taken as
-the result states it, a signed claim of its contributor. From 0.9.4 a completed
-result whose brief holds a path pattern and that names no `change` keeps its assignment active until acceptance. Before the
-check's first record in an estate (the first brief naming a repository, exclusions or `after`, or result naming a change),
-results count as recorded before it by the times the records state, which the command line and the API take from the caller. An
-assignment whose brief names no repository is compared under the one its agent runs named, or, with none, as possibly in any
-repository, which the view labels. A reading asks the clone only about completed results of work that is still open, once for
-each change.
+else `master`, as a local branch), labeled as observed here; it is completed and its brief holds no path pattern, whatever change
+it names; or it is completed and was recorded before the overlap check, labeled, since nothing recorded its integration. A change
+releases only its own assignment's work: it is in the repository the assignment's brief names, or for an older brief the one its
+agent runs named, and where the clone shows them, its base is a proper ancestor of its head and one of the paths it changed is in
+the assignment's effective permitted paths. A head reachable from the main line needs the clone to show both; a head a
+`change-merge` operation merged stands as the records show it where no clone shows otherwise, so `status` and `progress`, which
+read the records alone, can show released what `work overlap` on a machine with the clone shows `mismatched`. A change in another
+repository, with the same commit as base and head, whose base is no ancestor of its head in the clone, or that changed none of the
+assignment's paths is `mismatched` and keeps the assignment active, and the branch a result names as its `target` never shows
+integration: only the main line does, and never a branch an agent run worked on. A range on the main line that touches one of the
+assignment's paths is taken as the result states it, a signed claim of its contributor that may be mistaken as well as false: a
+result naming its fork point and the main line's tip while its own work is still unmerged releases the assignment whenever
+another change in that range touched one of its paths. From 0.9.4 a completed result whose brief holds a path pattern and that
+names no `change` keeps its assignment active until acceptance. Before the check's first record in an estate (the first brief
+naming a repository, exclusions or `after`, or result naming a change), results count as recorded before it by the times the
+records state, which the command line and the API take from the caller. An assignment whose brief names no repository is compared
+under the one its agent runs named, or, with none, as possibly in any repository, which the view labels. A reading asks the clone
+only about completed results of work that is still open, once for each change, so its cost grows with the open assignments whose
+completed results name distinct changes, and `work assign` and `work attempt` pay it while the runtime holds its other operations.
 
 Two active assignments overlap when some valid path, by the worker's rules for a repository-relative path with nonempty components
 and no leading or trailing slash, matches a pattern of each and no exclusion of either. The comparison is exact over the patterns'
@@ -1136,7 +1140,8 @@ none; without it, the estate's own repository fills it when the estate names no 
 refused with the candidates. `work assign`, `work attempt`, `records new assignment`, `worker run` and `goal step` print each
 overlap of the assignment with the active assignments on standard error, and a completed result whose brief holds a path pattern
 prints the write boundary's warning there when the records alone show it keeps its assignment active: it names no change, or a
-change in another repository or with the same commit as base and head. A change only a clone shows `mismatched`, such as one
+change in another repository, with the same commit as base and head, or for an older brief that names no repository and whose
+runs named none. A change only a clone shows `mismatched`, such as one
 whose base is no ancestor of its head or whose paths are none of the assignment's, is written without a warning and shown so by
 `work overlap`. The record's own output, and its JSON, are unchanged. `status` and `progress` show the open overlaps under the work
 from the records alone, and their canonical JSON gains `overlaps` while one is open. The same view is `GET /v1/overlaps` and
