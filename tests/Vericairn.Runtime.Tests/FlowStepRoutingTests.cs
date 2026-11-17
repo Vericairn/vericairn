@@ -52,7 +52,7 @@ public class FlowStepRoutingTests
         RecordWritten lyrics = Done(run, drafting.Id, ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
 
         // review-lyrics is the reviewer's, a person: assigned to the operator and asked of them, pinning the lyrics by their result.
-        GoalStepResponse second = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse second = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(second.Ok, second.Message);
         Assert.Equal(("ask", "review-lyrics", "person", op), (second.Outcome, second.Step, second.Route, second.Principal));
         RecordEnvelope reviewing = run.Estate.Load().ById[second.Assignment!.Id];
@@ -84,7 +84,7 @@ public class FlowStepRoutingTests
         Assert.Contains("master  stale", run.Service.Goal(goal)!.Text, StringComparison.Ordinal);
 
         // The review step reruns first: a fresh assignment to the reviewer, pinning the new lyrics; its review of them clears it.
-        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal(("ask", "review-lyrics"), (again.Outcome, again.Step));
         Assert.NotEqual(reviewing.Id, again.Assignment!.Id);
         Assert.Equal(changed.Id, Assert.Single(run.Estate.Load().ById[again.Assignment.Id].Body.GetProperty("step").GetProperty("inputs").EnumerateArray()).GetProperty("id").GetString());
@@ -120,7 +120,7 @@ public class FlowStepRoutingTests
         Done(run, outro.Assignment.Id, ("clip", FlowFixture.Hash('2'), null));
 
         // Listening is a person's role: routed to the operator, never to the agent, even though the roster could name one.
-        GoalStepResponse listen = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse listen = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal(("ask", "listen", "person", op), (listen.Outcome, listen.Step, listen.Route, listen.Principal));
         Review(run, remastered);
 
@@ -222,7 +222,7 @@ public class FlowStepRoutingTests
             ["contributor"] = op, ["step"] = new JsonObject { ["key"] = "draft" },
             ["brief"] = new JsonObject
             {
-                ["outcome"] = "Carry step draft.", ["sources"] = new JsonArray(), ["permittedChanges"] = new JsonArray("path:song/"), ["prohibitedEffects"] = new JsonArray("publication"),
+                ["outcome"] = "Carry step draft.", ["sources"] = new JsonArray(), ["permittedChanges"] = new JsonArray("path:song/"), ["repository"] = run.Resource, ["prohibitedEffects"] = new JsonArray("publication"),
                 ["workspace"] = new JsonArray("song repository, a work branch"), ["limits"] = new JsonArray(), ["expectedOutputs"] = new JsonArray("the lyrics"),
                 ["reviewCriteria"] = new JsonArray("the lyrics exist"), ["recovery"] = "Carry it again.",
             },

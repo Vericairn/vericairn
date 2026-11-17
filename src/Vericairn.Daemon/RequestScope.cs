@@ -71,6 +71,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/records/prepare", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/context/prepare", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/context/brief", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/overlaps/preview", StringComparison.OrdinalIgnoreCase) &&
             // The index is derived machine-local state, never a record: updating it is part of reading.
             !operation.Equals("POST /v1/search", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/search/index", StringComparison.OrdinalIgnoreCase) &&
@@ -288,6 +289,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/goals"] = typeof(GoalProposeRequest),
         ["GET /v1/goals/{id}"] = null,
         ["GET /v1/goals/{id}/next"] = null,
+        ["GET /v1/overlaps"] = null,
+        ["POST /v1/overlaps/preview"] = typeof(OverlapPreviewRequest),
         ["POST /v1/goals/{id}/step"] = typeof(GoalStepRequest),
         ["POST /v1/goals/{id}/activate"] = typeof(GoalActionRequest),
         ["POST /v1/goals/{id}/pause"] = typeof(GoalActionRequest),
@@ -377,6 +380,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PromptUseRequest)] = (_, r, d) => Acting(((PromptUseRequest)r).By, d),
         [typeof(PromptQuery)] = (_, _, _) => null,
         [typeof(ResourceRequest)] = (_, _, _) => null,
+        // From 0.9.4 (CODE-73): a preview reads a draft brief and records nothing.
+        [typeof(OverlapPreviewRequest)] = (_, _, _) => null,
         // A selecting read (MCP-05) reads for the device's own principal; the route refuses another and judges every delivery again.
         [typeof(EventSelectRequest)] = (_, r, d) => Optional(((EventSelectRequest)r).Principal, d),
         // From 0.9.3 (FIX-124): presence notices name what the person at the runtime's machine is asked to sign there; no device reads them.

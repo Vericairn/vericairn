@@ -268,6 +268,20 @@ public sealed partial class ToolRegistry
                 }),
             Read("work_observe", "What an observer sees of a work order: its assignments, attempts, results, amendments, reviews and acceptances.", Arguments(("workOrder", "Work-order key or record id.")), "workOrder",
                 async (api, a, token) => { ObserveResponse? o = (await api.ObserveAsync(Arg(a, "workOrder"), cancellationToken: token).ConfigureAwait(false)); return o is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(o.Text, false); }),
+            Read("work_overlap", "From 0.9.4: the overlap check's view: the active assignments by repository, each with its effective permitted paths (permitted patterns less exclusions) and why it is active, and every overlap of two of them with its patterns, witnesses and resolution and the concurrent-paths policies that hold it; with brief, a draft brief's overlaps before it is recorded. As text, or as JSON of format vericairn.overlaps/1 when form is json. Reading it records nothing.", OverlapArguments(),
+                async (api, a, token) =>
+                {
+                    OverlapResponse view = a?["brief"] is JsonObject
+                        ? await api.WorkOverlapPreviewAsync(new OverlapPreviewRequest(Body(a, "brief"), OptionalArg(a, "repository")), token).ConfigureAwait(false)
+                        : await api.WorkOverlapAsync(OptionalArg(a, "repository"), token).ConfigureAwait(false);
+                    bool problem = view.Json.ValueKind == JsonValueKind.Object && view.Json.TryGetProperty("problem", out _);
+                    return OptionalArg(a, "form") switch
+                    {
+                        null or "text" => new ToolCallResult(view.Text, problem),
+                        "json" => new ToolCallResult(view.Json.GetRawText(), problem),
+                        string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
+                    };
+                }),
             Read("context_prepare", "Compute a measured deterministic context package for a work order, with exact original identities and a complete withheld list. Optional maxBytes is a context allocation, separate from a run spending cap; mandatory overflow refuses. Without maxBytes, optional bodies are withheld. Optional searches add the top three new candidates of each as optional sources pinned by exact hash, recorded in the manifest; they grant no authority. Tokens remain unknown. Writes nothing.", WithSearchArgument(Arguments(("workOrder", "Work-order key or record id."), ("maxBytes", "Optional positive context byte allocation, as a decimal string."))), "workOrder",
                 async (api, a, token) =>
                 {
@@ -423,6 +437,13 @@ public sealed partial class ToolRegistry
         JsonObject schema = Arguments(("goal", "Goal record id (ULID), any revision."), ("step", "The decision step's key."), ("reasons", "Why this path, from the evidence named."));
         schema["properties"]!["paths"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "The path or paths of the step's transition the decision takes; several only where the flow allows." };
         schema["properties"]!["evidence"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "The records the decision rests on, each as id or type:id, pinned at their current hash." };
+        return schema;
+    }
+
+    private static JsonObject OverlapArguments()
+    {
+        JsonObject schema = Arguments(("repository", "A repository resource's id or estate: only that repository's assignments and overlaps, or the repository a draft brief would change when it names none."), ("form", "text (the default) or json."));
+        schema["properties"]!["brief"] = new JsonObject { ["type"] = "object", ["description"] = "A draft brief, as an assignment carries it: its overlaps with the active assignments are previewed, and nothing is recorded." };
         return schema;
     }
 

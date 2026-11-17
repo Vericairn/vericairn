@@ -208,7 +208,15 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(153, synchronous.Length);
+        Assert.Equal(155, synchronous.Length);
+        // From 0.9.4 (CODE-73) the overlap check's view and a draft brief's preview, with their defaults and cancellable counterparts.
+        foreach (string name in new[] { nameof(IEstateApi.WorkOverlap), nameof(IEstateApi.WorkOverlapPreview) })
+        {
+            Assert.Single(synchronous, method => method.Name == name);
+            Assert.False(typeof(IEstateApi).GetMethod(name)!.IsAbstract);
+            Assert.False(typeof(IEstateApi).GetMethod(name + "Async")!.IsAbstract);
+        }
+
         // From 0.9.4 (FIX-143) closing a goal's run, with its default and its cancellable counterpart.
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.GoalClose));
         Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.GoalClose))!.IsAbstract);

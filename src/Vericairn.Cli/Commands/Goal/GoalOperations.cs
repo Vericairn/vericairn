@@ -335,6 +335,8 @@ internal sealed class GoalOperations(CommandContext context)
                 return Failed;
             }
 
+            // From 0.9.4 (CODE-73): the overlaps the step's assignment has, and any after routing recorded, beside the step's output.
+            foreach (string notice in (step.Notices ?? []).Concat(step.Run?.Notices ?? [])) context.Error.WriteLine(notice);
             RunRow? row = step.Outcome == "run" && !options.Detach ? RunConsole.Follow(context, api, step.Run!.Run, options.By) : null;
             if (json)
             {

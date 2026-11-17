@@ -125,6 +125,8 @@ public static class OpenApiDocument
         ("POST", "/v1/goals"),
         ("GET", "/v1/goals/{id}"),
         ("GET", "/v1/goals/{id}/next"),
+        ("GET", "/v1/overlaps"),
+        ("POST", "/v1/overlaps/preview"),
         ("POST", "/v1/goals/{id}/step"),
         ("POST", "/v1/goals/{id}/activate"),
         ("POST", "/v1/goals/{id}/pause"),
@@ -235,6 +237,11 @@ public static class OpenApiDocument
                     ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" },
                     ["description"] = name == "asOf" ? "Explicit canonical UTC preview time. Never authorizes submission." : "Exact release record id selecting its product, version and commit.",
                 }).ToArray());
+            }
+
+            if (method == "GET" && path == "/v1/overlaps")
+            {
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "repository", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A repository resource's id or estate; every repository when omitted." });
             }
 
             if (method == "GET" && path == "/v1/records")
@@ -918,7 +925,9 @@ public static class OpenApiDocument
             ["SignedRecordRequest"] = Object(("plan", "string"), ("signature", "string"), ("device", "string")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
             ["WorkNewRequest"] = workNewRequest,
-            ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object")),
+            ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object"), ("repository", "string")),
+            ["OverlapPreviewRequest"] = Object(("brief", "object"), ("repository", "string")),
+            ["OverlapResponse"] = Object(("text", "string"), ("json", "object")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["WorkProgressRequest"] = progressRequest,
             ["WorkProgressClaim"] = progressClaim,
@@ -1007,7 +1016,7 @@ public static class OpenApiDocument
             ["GoalDecideRequest"] = Object(("by", "string"), ("step", "string"), ("paths", "array"), ("reasons", "string"), ("evidence", "array")),
             ["GoalStepReason"] = Object(("step", "string"), ("reason", "string")),
             ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"))),
-            ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object"), ("decision", "object")),
+            ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object"), ("decision", "object"), ("notices", "array")),
             ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string")),
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
@@ -1067,7 +1076,7 @@ public static class OpenApiDocument
             ["RunSettleRequest"] = Object(("by", "string"), ("recordsChecked", "boolean")),
             ["RunSettleResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("problem", "object")),
             ["HarnessQualifyRequest"] = Object(("launcher", "string"), ("by", "string"), ("settings", "object")),
-            ["RunResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("cap", "object"), ("workspace", "string"), ("problem", "object")),
+            ["RunResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("cap", "object"), ("workspace", "string"), ("problem", "object"), ("notices", "array")),
             ["RunStopResponse"] = Object(("run", "string"), ("state", "string"), ("message", "string"), ("ok", "boolean"), ("stop", "object"), ("problem", "object")),
             ["RunRow"] = Object(("run", "string"), ("identity", "string"), ("launcher", "string"), ("agent", "string"), ("assignment", "string"), ("goal", "string"), ("workspace", "string"), ("status", "string"), ("cap", "object"), ("usage", "object"), ("charged", "object"), ("stop", "object"), ("heartbeat", "string"), ("observed", "boolean"), ("generic", "boolean"), ("liveness", "object"), ("scope", "object"), ("signals", "array"), ("execution", "object"), ("executionObserved", "object"), ("requestedProgress", "object")),
             ["RunsResponse"] = Object(("runs", "array"), ("goals", "array")),
@@ -1081,7 +1090,7 @@ public static class OpenApiDocument
             ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string"), ("presenceDevice", "object"), ("presenceSignature", "string")),
             ["CertificateRotateRequest"] = Object(("compromised", "boolean"), ("reason", "string"), ("identity", "boolean")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
-            ["WriteOutcome"] = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"))),
+            ["WriteOutcome"] = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"), ("notices", "array"))),
             ["TriggeredCheckpoint"] = Required(Object(("trigger", "string"), ("written", "object"), ("skipped", "string")), "trigger"),
             ["HistoryCheckpointRequest"] = Object(("by", "string"), ("adopt", "boolean"), ("check", "boolean"), ("expectPlan", "string")),
             ["HistoryCheckpointResponse"] = Required(Object(("trigger", "string"), ("applied", "boolean"), ("adopted", "boolean"), ("witnessed", "integer"), ("listed", "integer"), ("heads", "array"),
@@ -1169,6 +1178,7 @@ public static class OpenApiDocument
         "/v1/goals/{id}/accept" => "GoalAcceptRequest",
         "/v1/goals/{id}/close" => "GoalCloseRequest",
         "/v1/goals/{id}/decide" => "GoalDecideRequest",
+        "/v1/overlaps/preview" => "OverlapPreviewRequest",
         "/v1/devices/revoke" => "RevokeRequest",
         "/v1/runs" => "RunStartRequest",
         "/v1/runs/prepare" => "RunStartRequest",
@@ -1316,6 +1326,8 @@ public static class OpenApiDocument
         ("POST", "/v1/operator/close") => "Close the exact displayed selections with the operator's admitted signing device. Each acceptance pins its result and names every displayed passing review as its basis. All also pins complete candidate membership. Changed evidence, missing passing reviews and non-operators refuse the whole action without writes. Custody checks presence per signature, or from 0.9.4 once for an announced list of up to 16 acceptances under a presence session where the release helper and the macOS version allow it and neither the charter nor the device's owner asks per signature. Not exposed through MCP.",
         ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it. The body's limits.deadline is validated and recorded but not yet enforced; goal next and goal step hold a run of a flow at limits.consecutiveFailures, which is otherwise validated and recorded but not enforced, and a direct worker start is not held by it.",
         ("GET", "/v1/goals/{id}") => "A goal by the id of any of its revisions: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its acceptance.",
+        ("GET", "/v1/overlaps") => "From 0.9.4: the overlap check's view (vericairn.overlaps/1): the active assignments by repository, each with its effective permitted paths (its interpretable patterns less its exclusions, and in the estate's own repository less records/ and objects/) and why it is active, and every overlap of two of them with its patterns, witnesses (up to 20 tracked paths at the registered clone's main line, else the shortest valid path either could create), resolution and the concurrent-paths policies whose selection it meets. Read-only; the clone's answers are this machine's, labeled so.",
+        ("POST", "/v1/overlaps/preview") => "From 0.9.4: a draft brief's overlaps with the active assignments before it is recorded, as the overlap check's view shows them. Records nothing.",
         ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
         ("POST", "/v1/goals/{id}/step") => "Take an active goal's next step, one at a time, as an operator, the goal's sponsor when a person, or a principal holding local-engineering: its first eligible step whose route acts, routed from the runtime's machine. An agent's step goes on with the assignment that holds it, or is assigned to the agent together with its run's intent after the worker's whole preflight, and its run starts through the worker; every refusal before the intent, custody, the budget, the repository, the launcher or the workspace, records nothing, the assignment included. A person's step is assigned to the person and asked of them, the recommendation first, the two recorded together; a step no principal is available for is asked of the sponsor, never given to a contributor the roster does not name. It activates, funds, accepts and answers nothing.",
         ("POST", "/v1/goals/{id}/activate") => "Activate a proposed goal, which grants its budget: by its sponsor, a person who holds the operator role or a grant of the spending scope, or by an operator when an agent sponsors it; an agent never activates a goal.",

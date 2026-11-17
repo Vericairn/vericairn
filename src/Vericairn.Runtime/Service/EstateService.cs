@@ -410,8 +410,32 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             lock (gate)
             {
-                return NewEvidenceLocked(request, draft, session.Load());
+                WriteOutcome evidence = NewEvidenceLocked(request, draft, session.Load());
+                return request.Type == "result" ? WithResultNotices(evidence) : evidence;
             }
+        }
+
+        // From 0.9.4 (CODE-73), a new assignment's brief names its repository where it can be filled, and its overlaps are reported.
+        if (request.Type == "assignment" && request.Body.ValueKind == JsonValueKind.Object && request.Body.TryGetProperty("brief", out JsonElement assigned))
+        {
+            lock (gate)
+            {
+                EstateModel model = session.Load();
+                RecordEnvelope? assignedOrder = subject is not null && model.ById.TryGetValue(subject.Id, out RecordEnvelope? pinned) && pinned.Type == "work-order" ? pinned : null;
+                if (FillRepository(model, assigned, null, out _, assignedOrder) is JsonElement filled && filled.GetRawText() != assigned.GetRawText())
+                {
+                    JsonObject body = JsonNode.Parse(request.Body.GetRawText())!.AsObject();
+                    body["brief"] = JsonNode.Parse(filled.GetRawText());
+                    draft = draft with { Body = Element(body) };
+                }
+
+                return WithAssignmentNotices(WriteLocked(draft, model));
+            }
+        }
+
+        if (request.Type == "attempt")
+        {
+            return WithAttemptNotices(Write(draft));
         }
 
         if (IsPolicyWrite(draft))
@@ -563,8 +587,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 body["note"] = request.Note;
             }
 
+            // From 0.9.4 (CODE-73), a brief with a path pattern names its repository: the brief's, the request's, or the estate's own.
+            if (FillRepository(model, request.Brief, request.Repository, out string? unnamed, order) is not JsonElement filled)
+            {
+                return Refuse(unnamed!);
+            }
+
+            body["brief"] = JsonNode.Parse(filled.GetRawText());
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("assignment", request.By, document.RootElement, order.Reference), model);
+            return WithAssignmentNotices(WriteLocked(new RecordDraft("assignment", request.By, document.RootElement, order.Reference), model));
         }
     }
 
@@ -601,7 +632,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             at ??= DeviceSigningTime();
             var body = new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(at ?? DateTimeOffset.UtcNow), ["workspace"] = request.Workspace, ["note"] = request.Note };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("attempt", request.By, document.RootElement, assignment.Reference, At: at), model);
+            return WithAttemptNotices(WriteLocked(new RecordDraft("attempt", request.By, document.RootElement, assignment.Reference, At: at), model));
         }
     }
 
@@ -623,9 +654,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     body = Element(retained);
                 }
             }
-            return HasDuties(body) || request.Expected is not null
+            return WithResultNotices(HasDuties(body) || request.Expected is not null
                 ? SignedEvidenceAbout("result", "attempt", request.Attempt, request.By, body, request.Expected)
-                : About("result", "attempt", request.Attempt, request.By, body);
+                : About("result", "attempt", request.Attempt, request.By, body));
         }
     }
 
@@ -3064,6 +3095,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             EstateModel proposed = LoadWith(records);
             if (UnclosedActRefusal(proposed, records, () => LoadWith([])) is Problem unclosed) return unclosed;
             FindingList relevant = Invalid(proposed, records);
+            AttemptWaits(proposed, records, relevant);
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
                 : JudgePolicySources(records, proposed);
@@ -3188,6 +3220,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             relevant.Add(finding with { Severity = Severity.Error });
         }
 
+        // From 0.9.4 (CODE-73), a new assignment with a path pattern names its repository, and none is narrowed while its run is in flight.
+        OverlapBoundary(model, records, relevant);
         return relevant;
     }
 

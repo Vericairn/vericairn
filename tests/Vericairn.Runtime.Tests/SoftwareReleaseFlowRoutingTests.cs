@@ -34,12 +34,12 @@ public class SoftwareReleaseFlowRoutingTests
 
         // The review is the reviewer's; goal step records no request while it is pending, and no command is shown anywhere.
         Assert.DoesNotContain(accept, Shown(run, goal), StringComparison.Ordinal);
-        Assert.Equal("none", run.Service.GoalStep(goal, new GoalStepRequest(op)).Outcome);
+        Assert.Equal("none", run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Outcome);
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("review", run.Estate.BuilderId,
             RunEstate.Json("""{"independence":"independent-agent","outcome":"pass","summary":"Reviewed the exact candidate.","findings":[]}"""), $"release:{candidate.Id}:{candidate.Hash}")));
 
         // Acceptance is next: its request carries the candidate's exact hash; publication's command appears nowhere yet.
-        GoalStepResponse accepting = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse accepting = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(accepting.Ok, accepting.Message);
         Assert.Equal(("request", "accept"), (accepting.Outcome, accepting.Step));
         RecordEnvelope request = run.Estate.Load().ById[accepting.Request!.Id];
@@ -54,7 +54,7 @@ public class SoftwareReleaseFlowRoutingTests
         Assert.Equal("done", Step(run, goal, "accept").GetProperty("state").GetString());
 
         // Publication is next: a publication request with the provider's stable-channel command.
-        GoalStepResponse publishing = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse publishing = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal(("request", "publish"), (publishing.Outcome, publishing.Step));
         RecordEnvelope publication = run.Estate.Load().ById[publishing.Request!.Id];
         Assert.Equal(("publication", publish), (EstateModel.BodyString(publication, "kind"), publication.Body.GetProperty("content")[0].GetProperty("text").GetString()));
@@ -86,7 +86,7 @@ public class SoftwareReleaseFlowRoutingTests
         Assert.True(withdrawn.Ok, withdrawn.Message);
 
         // The branch is entered: the draft's deletion is a publication request carrying the provider's deletion command.
-        GoalStepResponse deleting = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse deleting = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(deleting.Ok, deleting.Message);
         Assert.Equal(("request", "delete-draft"), (deleting.Outcome, deleting.Step));
         RecordEnvelope request = run.Estate.Load().ById[deleting.Request!.Id];
@@ -98,7 +98,7 @@ public class SoftwareReleaseFlowRoutingTests
         Assert.Equal("stopped", Step(run, goal, "delete-draft").GetProperty("state").GetString());
 
         // goal step puts the step to the operator again; the operator's own close of that request, with the link, completes it.
-        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal(("request", "delete-draft"), (again.Outcome, again.Step));
         RunEstate.Ok(run.Service.OperatorRequestDone(again.Request!.Id, new OperatorRequestCloseRequest(op, Link: "https://example.invalid/releases")));
         JsonElement flow = run.Service.Goal(goal)!.Json.GetProperty("flow");
@@ -175,7 +175,7 @@ public class SoftwareReleaseFlowRoutingTests
     private static void WorkStep(RunEstate run, RecordWritten carrier, string step, params (string Name, string Hash, string MediaType)[] outputs)
     {
         string assignment = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("assignment", run.Estate.OperatorId, RunEstate.Json($$$"""
-            {"contributor":"{{{run.Estate.BuilderId}}}","step":{"key":"{{{step}}}"},"brief":{"outcome":"Carry step {{{step}}}.","sources":[],"permittedChanges":["docs/"],"prohibitedEffects":["publication"],"workspace":["the product's repository"],"limits":[],"expectedOutputs":["the step's outputs"],"reviewCriteria":["the outputs exist"],"recovery":"Carry it again."}}
+            {"contributor":"{{{run.Estate.BuilderId}}}","step":{"key":"{{{step}}}"},"brief":{"outcome":"Carry step {{{step}}}.","sources":[],"permittedChanges":["docs/"],"repository":"{{{run.Resource}}}","prohibitedEffects":["publication"],"workspace":["the product's repository"],"limits":[],"expectedOutputs":["the step's outputs"],"reviewCriteria":["the outputs exist"],"recovery":"Carry it again."}}
             """), $"work-order:{carrier.Id}:{carrier.Hash}"))).Id;
         string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(assignment, run.Estate.BuilderId, "the product's repository, a work branch", "Carry the step."))).Id;
         var named = new JsonArray(outputs.Select(o => (JsonNode)new JsonObject { ["name"] = o.Name, ["hash"] = o.Hash, ["mediaType"] = o.MediaType }).ToArray());

@@ -277,6 +277,14 @@ public partial interface IEstateApi
     Task<NextResponse?> GoalNextAsync(string goal, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(GoalNext), () => GoalNext(goal), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable counterpart of <see cref="WorkOverlap"/>; a stopped observation does not undo an effect.</summary>
+    Task<OverlapResponse> WorkOverlapAsync(string? repository = null, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WorkOverlap), () => WorkOverlap(repository), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="WorkOverlapPreview"/>; a stopped observation does not undo an effect.</summary>
+    Task<OverlapResponse> WorkOverlapPreviewAsync(OverlapPreviewRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WorkOverlapPreview), () => WorkOverlapPreview(request), false, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="GoalStep"/>; a stopped observation does not undo an effect.</summary>
     Task<GoalStepResponse> GoalStepAsync(string goal, GoalStepRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(GoalStep), () => GoalStep(goal, request), true, this as IClientOperationLifetime, cancellationToken);

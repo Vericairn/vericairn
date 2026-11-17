@@ -563,6 +563,42 @@ flow shows the result and reads the step undecided. `records describe result`
 includes this contract, and the generic record reader advances to
 `vericairn.records/readers/9`.
 
+## Concurrent assignments compared by their permitted paths (0.9.4)
+
+CODE-73 adds three optional fields to an assignment's `brief` and one optional
+field to `result` within format 3, and no record type. An assignment or result
+without them behaves as before: none is refused or warned for lacking one, and
+the write-boundary rules below apply only to new records.
+
+| Record | Additive contract |
+| --- | --- |
+| `assignment` | `brief.repository`: the identity of the repository the work changes, the estate's own (its first charter's id) or a repository resource's (its first record's id). `brief.excludedChanges`: patterns in the grammar of `permittedChanges` that the work leaves out, each an interpretable pattern, never prose, since prose excludes nothing. `brief.after`: at most 20 assignment ids whose work this one waits for; each is followed to its current revision, and validation refuses one that names the assignment itself, names it twice or makes a cycle (`assignment.after`), and an exclusion that is prose (`assignment.excluded`) or a repository that is no such identity (`assignment.repository`). |
+| `result` | Optional `change: {repository, base, head, target}`: the repository's identity as above, the base and head commits (40 lower-case hex digits) and the branch the change integrates into, a plain branch name (`result.change`). The runtime derives the change's paths from the registered clone, by name without rename detection, so a rename is a removal and an addition; a clone missing either commit makes them unavailable, never empty. |
+
+From 0.9.4 the runtime's write boundary refuses a new format-3 assignment whose
+permitted changes hold a path pattern and whose brief names no repository
+(`assignment.repository-required`); `work assign`, `goal step`, routing and
+flows fill it from the run's repository, the one named with `--repository`,
+or, when the estate names no repository resource, the estate's own. It refuses
+a revision that changes an assignment's `excludedChanges` or `after` while a run
+of it is in flight (`assignment.narrowing-in-flight`), and a new attempt on an
+assignment while one it names in `after` is not released (`attempt.after`).
+Narrowing by exclusion or `after` grants less, so it needs no amendment. A new
+completed result whose assignment holds a path pattern and that names no
+`change` is written with a warning in the write's notices, since its assignment
+then stays active until acceptance.
+
+The overlap check reads these fields; status and progress show its open
+overlaps from the records alone, and `vericairn work overlap` adds what this
+machine's registered clones show ([CLI](cli.md#vericairn-work-overlap-094)). A
+reader of format 3 that predates the fields refuses an assignment or a result
+that carries one as an unknown key, as any later format-3 field, so the estate's
+pin keeps every machine on a release that reads them; an older reader keeps
+reading every record without them. A format-2 estate refuses them, as every
+format-3 field. `records describe assignment` and `records describe result`
+include this contract, and the generic record reader advances to
+`vericairn.records/readers/10`.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

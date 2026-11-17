@@ -335,6 +335,11 @@ internal sealed class RunAdmissionService(
                 return Refused(RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded."));
             }
 
+            if (AssignmentOverlaps.WaitRefusal(model, plan.Assignment, "its run", RepositoryView.For(model, Providers, session.Manifest.Estate)) is string waiting)
+            {
+                return Refused(RunProblem(pending, "not-started", "refused", waiting + " Nothing was recorded."));
+            }
+
             DateTimeOffset now = WorkerOptions.Clock.GetUtcNow();
             if (goal is not null)
             {
@@ -597,6 +602,14 @@ internal sealed class RunAdmissionService(
             : null;
     }
 
+    /// <summary>The overlaps of a run's assignment with the active assignments, each a sentence (from 0.9.4, CODE-73); null when none.</summary>
+    private static List<string>? Overlaps(EstateModel model, RecordEnvelope assignment, RepositoryView view)
+    {
+        if (AssignmentOverlaps.PartyOf(model, assignment, view) is not { Patterns.Count: > 0 } party) return null;
+        List<string> notices = [.. AssignmentOverlaps.With(model, party with { Active = true }, view).Select(o => AssignmentOverlaps.Sentence(model, o))];
+        return notices.Count == 0 ? null : notices;
+    }
+
     /// <summary>The preflight of a run, before anything is prepared or recorded: every refusal that needs only the records and this machine's keys.</summary>
     private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, IReadOnlyList<RecordFile> files, RunStartRequest request, IAgentLauncher launcher, RunConfiguration configuration)
     {
@@ -723,7 +736,20 @@ internal sealed class RunAdmissionService(
             return (null, $"No repository resource has id {request.Repository}.", null);
         }
 
+        // From 0.9.4 (CODE-73): a run works in the repository its brief names, so the overlap check compares it there; and it waits while an
+        // assignment its brief runs after is not released.
         string estate = session.Manifest.Estate;
+        if (AssignmentOverlaps.Brief(assignment).Repository is string briefRepository && AssignmentOverlaps.IdentityOf(model, briefRepository) is string briefed && briefed != model.Chain(resource)[0])
+        {
+            return (null, $"The brief of assignment {assignment.Id} names {AssignmentOverlaps.NameOf(model, briefed)} as the repository it changes, and this run would work in {AssignmentOverlaps.NameOf(model, model.Chain(resource)[0])}: run it in the repository its brief names, or revise the brief.", null);
+        }
+
+        var view = RepositoryView.For(model, Providers, estate);
+        if (AssignmentOverlaps.WaitRefusal(model, assignment, "its run", view) is string waiting)
+        {
+            return (null, waiting, null);
+        }
+
         string? clone = model.Chain(resource).Append(request.Repository).Select(id => RepositoryClones.Find(estate, id)).FirstOrDefault(c => c is not null);
         if (clone is null || !Directory.Exists(clone))
         {
@@ -811,6 +837,7 @@ internal sealed class RunAdmissionService(
         {
             PromptUse = promptUse,
             RepositoryIds = [.. model.Chain(resource).Append(request.Repository).Distinct(StringComparer.Ordinal)],
+            Notices = Overlaps(model, assignment, view),
         }, null, null);
     }
 
@@ -957,6 +984,9 @@ internal sealed class RunAdmissionService(
 
         /// <summary>Every id the repository resource is known by, its first revision's first: what machine-local setup and preparation are kept under.</summary>
         internal IReadOnlyList<string> RepositoryIds { get; init; } = [];
+
+        /// <summary>From 0.9.4 (CODE-73), the overlaps admission found between the run's assignment and the active assignments; null when none.</summary>
+        internal IReadOnlyList<string>? Notices { get; init; }
     }
 
     /// <summary>The sponsor's custody exception a run is launched under, in force when its intent is recorded, and the devices that would otherwise refuse it here.</summary>

@@ -24,6 +24,8 @@ public sealed class EstateModel
     private Dictionary<string, CurrentUse>? currentOperationIdentities;
     private IReadOnlyList<LivingDocuments.State>? livingDocuments;
     private Lazy<RecordEnvelope?>? resultAcceptancesBegan;
+    private Lazy<RecordEnvelope?>? overlapCheckBegan;
+    private Lazy<IReadOnlyList<AssignmentOverlaps.Overlap>>? recordOverlaps;
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -132,6 +134,8 @@ public sealed class EstateModel
         currentOperationIdentities = null;
         livingDocuments = null;
         resultAcceptancesBegan = null;
+        overlapCheckBegan = null;
+        recordOverlaps = null;
         if (excluded.Count == 0) return;
         notCounting = excluded;
         CountingRecords = Records.Where(r => !excluded.Contains(r.Id)).ToList();
@@ -151,6 +155,8 @@ public sealed class EstateModel
             manifest = value;
             livingDocuments = null;
             resultAcceptancesBegan = null;
+            overlapCheckBegan = null;
+            recordOverlaps = null;
             // The record format the manifest states decides which admissions, and so which records, count.
             lock (trustGate)
             {
@@ -238,6 +244,20 @@ public sealed class EstateModel
     /// </summary>
     internal RecordEnvelope? ResultAcceptancesBegan(Func<EstateModel, RecordEnvelope?> find) =>
         LazyInitializer.EnsureInitialized(ref resultAcceptancesBegan, () => new Lazy<RecordEnvelope?>(() => find(this))).Value;
+
+    /// <summary>
+    /// The first record the overlap check's build wrote (<see cref="AssignmentOverlaps.Began"/>), found the first time it is asked once
+    /// the model is loaded and kept with it.
+    /// </summary>
+    internal RecordEnvelope? OverlapCheckBegan(Func<EstateModel, RecordEnvelope?> find) =>
+        LazyInitializer.EnsureInitialized(ref overlapCheckBegan, () => new Lazy<RecordEnvelope?>(() => find(this))).Value;
+
+    /// <summary>
+    /// The overlaps among active assignments as the records alone show them (<see cref="AssignmentOverlaps.Overlaps(EstateModel, IRepositoryView?)"/>
+    /// with no clone), derived the first time status or progress asks once the model is loaded and kept with it.
+    /// </summary>
+    internal IReadOnlyList<AssignmentOverlaps.Overlap> RecordOverlaps(Func<EstateModel, IReadOnlyList<AssignmentOverlaps.Overlap>> derive) =>
+        LazyInitializer.EnsureInitialized(ref recordOverlaps, () => new Lazy<IReadOnlyList<AssignmentOverlaps.Overlap>>(() => derive(this))).Value;
 
     /// <summary>The first current record using a value, and whether one with another id uses it too.</summary>
     private readonly record struct CurrentUse(string First, bool Shared);

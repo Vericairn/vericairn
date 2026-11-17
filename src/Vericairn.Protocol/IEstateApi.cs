@@ -226,6 +226,16 @@ public partial interface IEstateApi
     NextResponse? GoalNext(string goal);
 
     /// <summary>
+    /// From 0.9.4 (CODE-73): the overlap check's view: the active assignments by repository, every overlap of their effective permitted
+    /// paths with its witnesses and resolution, and the concurrent-paths policies that hold it; only one repository's when it is named (a
+    /// repository resource's id or estate). Read-only.
+    /// </summary>
+    OverlapResponse WorkOverlap(string? repository = null) => throw new NotSupportedException("This API implementation does not support the overlap check.");
+
+    /// <summary>From 0.9.4 (CODE-73): a draft brief's overlaps with the active assignments, before it is recorded. Read-only.</summary>
+    OverlapResponse WorkOverlapPreview(OverlapPreviewRequest request) => throw new NotSupportedException("This API implementation does not support the overlap check.");
+
+    /// <summary>
     /// Takes a goal's next step, one at a time: its first eligible step whose route acts, routed from the runtime's machine. An agent's
     /// step starts its run through the worker, within the custody precondition; a person's is assigned and asked; one no principal is
     /// available for is asked of the sponsor. It activates, funds, accepts and answers nothing.

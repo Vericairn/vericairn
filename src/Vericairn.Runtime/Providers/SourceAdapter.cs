@@ -66,6 +66,11 @@ public sealed record RecordOrigins(bool Shallow, IReadOnlyDictionary<string, str
     public IReadOnlyDictionary<string, DateTimeOffset> AddedAt { get; init; } = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
 }
 
+/// <summary>From 0.9.4 (CODE-73): one path a change touched and how: added, modified or removed.</summary>
+/// <param name="Path">The repository-relative path.</param>
+/// <param name="Change">added, modified or removed.</param>
+public sealed record SourceChange(string Path, string Change);
+
 /// <summary>
 /// An estate's main line (design/signed-history.md § 7): the local branch its history is judged through whatever is checked out, and
 /// that branch's tip.
@@ -145,6 +150,25 @@ public interface ISourceAdapter
 
     /// <summary>A file's exact bytes at a commit, without fetching or changing the repository; null when absent or unavailable.</summary>
     byte[]? FileAtCommit(string root, string commit, string path) => null;
+
+    /// <summary>
+    /// From 0.9.4 (CODE-73): the tracked paths at the head of a local branch, read without checkout, fetch or change; the overlap check's
+    /// witnesses. Null when unsupported, when the branch is absent or when the tree is unreadable.
+    /// </summary>
+    IReadOnlyList<string>? TrackedPaths(string root, string branch) => null;
+
+    /// <summary>
+    /// From 0.9.4 (CODE-73): whether a commit is reachable from a local branch's head (or, when the branch is not local, from origin's
+    /// branch of that name), read without fetching or changing the repository; null when unsupported or when the commit or branch is
+    /// missing, never false for what this clone cannot see.
+    /// </summary>
+    bool? Reachable(string root, string commit, string branch) => null;
+
+    /// <summary>
+    /// From 0.9.4 (CODE-73): the paths added, modified or removed between two commits, by name without rename detection (a rename is a
+    /// removal and an addition), sorted ordinally; null when unsupported or when either commit is missing, never empty for that.
+    /// </summary>
+    IReadOnlyList<SourceChange>? ChangedPaths(string root, string baseCommit, string head) => null;
 
     /// <summary>
     /// The adapter's isolated workspace operations, including recovery, scope observation and local retention after settlement.
