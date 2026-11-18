@@ -422,6 +422,106 @@ public sealed class LocalPushTests : IDisposable
         Assert.Equal("FIX-90", DisclosureHolds.Disclosed(holds, text));
     }
 
+    // FIX-137: the hold's reads do not depend on the clone's display settings. A root commit an unrelated history brings in by a merge
+    // shows its patch whatever log.showRoot says, and its paths too; the merge's combined diff leaves out the lines the root already
+    // holds, so only the root's own patch carries them. Prefix, color, signature and ordering settings change nothing read, and a
+    // submodule change is read though the clone ignores submodules; a commit whose tree changed but whose patch showed nothing would
+    // refuse the read.
+    [Theory]
+    [InlineData("show-root-off")]
+    [InlineData("display-settings")]
+    [InlineData("ignored-submodules")]
+    public void ThePublishedTextDoesNotDependOnTheClonesDisplaySettings(string setting)
+    {
+        const string held = "the held phrase of FIX-90";
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        string initial = Git(repository, "rev-parse", "HEAD");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        string? root = null;
+        switch (setting)
+        {
+            case "show-root-off":
+                Git(repository, "checkout", "--orphan", "orphan");
+                Git(repository, "rm", "-q", "-r", "--cached", ".");
+                File.Delete(Path.Combine(repository, "readme.txt"));
+                File.WriteAllText(Path.Combine(repository, "orphan.txt"), "Orphan notes.\n" + held + "\n");
+                Git(repository, "add", "orphan.txt");
+                Git(repository, "commit", "-m", "An unrelated root");
+                root = Git(repository, "rev-parse", "HEAD");
+                Git(repository, "checkout", "-f", "work/change");
+                Git(repository, "merge", "--allow-unrelated-histories", "--no-edit", "orphan");
+                Git(repository, "config", "log.showRoot", "false");
+                break;
+            case "display-settings":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\n" + held + "\n");
+                Git(repository, "add", "data.txt");
+                Git(repository, "commit", "-m", "Add notes");
+                foreach ((string key, string value) in new[] { ("diff.noprefix", "true"), ("diff.mnemonicPrefix", "true"), ("diff.relative", "true"),
+                    ("diff.orderFile", "readme.txt"), ("color.diff", "always"), ("color.ui", "always"), ("log.showSignature", "true"), ("diff.context", "9") })
+                    Git(repository, "config", key, value);
+                break;
+            case "ignored-submodules":
+                Git(repository, "update-index", "--add", "--cacheinfo", "160000," + initial + ",vendor/module");
+                Git(repository, "commit", "-m", "Pin a module");
+                Git(repository, "config", "diff.ignoreSubmodules", "all");
+                break;
+        }
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        string? text = adapter.PublishedText(repository, plan);
+        Assert.NotNull(text);
+        IReadOnlyDictionary<string, IReadOnlyList<string>> paths = adapter.ChangedPaths(repository, plan)!;
+        Assert.NotNull(paths);
+        if (setting == "ignored-submodules")
+        {
+            Assert.Contains("Subproject commit " + initial, text, StringComparison.Ordinal);
+            Assert.Equal(["vendor/module"], paths[head]);
+            return;
+        }
+        Assert.Equal("FIX-90", DisclosureHolds.Disclosed([new("FIX-90", "order", [])], text));
+        Assert.DoesNotContain("\u001b[", text, StringComparison.Ordinal);
+        if (root is not null) Assert.Equal(["orphan.txt"], paths[root]);
+    }
+
+    // FIX-137: the hold's read has a bound of its own, here a test's small one: a commit within it is read, one beyond it refuses, and so
+    // do commits each within it whose patches add up to more.
+    [Theory]
+    [InlineData(16, 1, true)]
+    [InlineData(256, 1, false)]
+    [InlineData(40, 2, false)]
+    public void ThePublishedTextReadsWithinItsOwnBound(int kibibytes, int commits, bool readable)
+    {
+        const int limit = 64 * 1024;
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        for (int commit = 0; commit < commits; commit++)
+        {
+            var lines = new System.Text.StringBuilder();
+            while (lines.Length < kibibytes * 1024) lines.Append("A line of the documentation set, long enough to add up quickly.\n");
+            File.WriteAllText(Path.Combine(repository, "set-" + commit + ".md"), lines + "the held phrase of FIX-90\n");
+            Git(repository, "add", "set-" + commit + ".md");
+            Git(repository, "commit", "-m", "Add part " + commit + " of the set");
+        }
+        string head = Git(repository, "rev-parse", "HEAD");
+        GitPushAdapter standard = Adapter();
+        var adapter = new GitPushAdapter(info => BoundedProcess.Run(info, TestTiming.HangTimeout), info => BoundedProcess.Run(info, TestTiming.HangTimeout, limit), limit);
+        PushPlan plan = standard.Prepare(repository, remote, "work/change", "main", head);
+        string? text = adapter.PublishedText(repository, plan);
+        Assert.Equal(readable, text is not null);
+        if (readable) Assert.Equal("FIX-90", DisclosureHolds.Disclosed([new("FIX-90", "order", [])], text!));
+        // The other reads keep their own bound.
+        Assert.Equal(commits, adapter.CommitMessages(repository, plan)!.Count);
+    }
+
     // FIX-137: each commit's own added lines are read, so text one commit adds and a later one removes, which the push still publishes
     // in its history, is read; an evil merge's own lines are read, even once a later commit removes them, while a line its target
     // parent already holds is not; and a clean push of several commits discloses nothing.
