@@ -5,13 +5,16 @@ using System.Text;
 using System.Text.Json;
 using Vericairn.Records.Model;
 using Vericairn.Records.Text;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Estate;
 
 /// <summary>
 /// Work orders held from disclosure: while a work order is marked <c>disclosure: held</c> and the release that carries it has not
-/// been published, its key and distinctive text must not reach a public repository. Publishing that release, with its
-/// documentation set, ends the hold; what the release then discloses stays the operator's choice.
+/// been published, its key and distinctive text must not reach a public repository. Publishing that release ends the hold; what the
+/// release then discloses stays the operator's choice. Before that, one push may carry them (FIX-137): the carrying release's
+/// documentation set, with the held fixes it carries, once the operator has approved that release's Security section, as the release
+/// procedure merges it just before the candidate's submission; every other push stays held until publication.
 /// </summary>
 public static class DisclosureHolds
 {
@@ -24,7 +27,10 @@ public static class DisclosureHolds
     /// <summary>One held work order: its key and the distinctive phrases of its title, intent and scope.</summary>
     public sealed record Hold(string Key, string WorkOrder, IReadOnlyList<string> Phrases);
 
-    /// <summary>The holds in force: current held work orders whose carrying release has no published release record.</summary>
+    /// <summary>
+    /// The holds in force: current held work orders whose carrying release has no published release record. A checked push may still
+    /// carry one with the documentation set of <see cref="DocumentationSetRelease"/>'s release.
+    /// </summary>
     public static IReadOnlyList<Hold> Active(EstateModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -52,16 +58,64 @@ public static class DisclosureHolds
         return null;
     }
 
+    /// <summary>
+    /// The version of the release whose documentation set a checked push of <paramref name="product"/>'s repository may carry with this
+    /// hold's text (FIX-137), or null when no push may before publication. It is the hold's carrying release, a release of that product,
+    /// once the operator has approved its Security section: an ask about the release's carrier, put to the operator, is answered by the
+    /// operator's decision, made after the held work order's current revision, and no ask about the carrier still waits, open or
+    /// notified. The caller then lets the push pass this hold only if the push carries that version's documentation set.
+    /// </summary>
+    internal static string? DocumentationSetRelease(EstateModel model, Hold hold, string product)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(hold);
+        ArgumentNullException.ThrowIfNull(product);
+        if (!model.ById.TryGetValue(hold.WorkOrder, out RecordEnvelope? order) || order.Type != "work-order") return null;
+        order = model.Latest(order);
+        if (Carrying(order) is not (string carrier, string placed, string version) || !Patterns.SemanticVersion.IsMatch(version)
+            || LivingDocuments.ProductIdentity(model, placed) != LivingDocuments.ProductIdentity(model, product)) return null;
+        return SecuritySectionApproved(model, carrier, order.AtTime) ? version : null;
+    }
+
+    /// <summary>
+    /// Whether the operator has approved the Security section of the release that <paramref name="carrier"/> carries, after
+    /// <paramref name="since"/>: as the release flow's <c>security-section</c> trap reads it, an ask about the carrier answered by the
+    /// operator's decision, none still waiting; and, beyond the trap, at least one such answer, decided and recorded after
+    /// <paramref name="since"/>, so that a section approved before a fix joined the hold never covers it.
+    /// </summary>
+    internal static bool SecuritySectionApproved(EstateModel model, string carrier, DateTimeOffset since)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        if (!model.ById.TryGetValue(carrier, out RecordEnvelope? record) || record.Type != "work-order") return false;
+        HashSet<string> carriers = [.. model.Chain(model.Latest(record))];
+        List<(string State, IReadOnlyList<RecordEnvelope> Answers)> asks = [.. model.Current("ask")
+            .Where(a => a.Subject is { Type: "work-order" } subject && carriers.Contains(subject.Id)).Select(a => Asks.State(model, a))];
+        if (asks.Any(a => Asks.IsWaiting(a.State))) return false;
+        return asks.Any(a => a.State == "answered" && a.Answers.Any(d => model.HasRole(EstateModel.BodyString(d, "decidedBy"), Roles.Operator)
+            && d.AtTime > since && Decided(d) > since));
+    }
+
     // The hold ends when the release that carries the work order is published.
-    private static bool Released(EstateModel model, RecordEnvelope order)
+    private static bool Released(EstateModel model, RecordEnvelope order) => Carrying(order) is (_, string product, string version)
+        && model.Current("release").Any(r => EstateModel.BodyString(r, "status") == "published"
+            && EstateModel.BodyString(r, "version") == version && r.Subject?.Id == product);
+
+    // The release a work order is placed in: its carrier, product and version.
+    private static (string Carrier, string Product, string Version)? Carrying(RecordEnvelope order)
     {
         if (!order.Body.TryGetProperty("placement", out JsonElement placement) || placement.ValueKind != JsonValueKind.Object
             || !placement.TryGetProperty("kind", out JsonElement kind) || kind.GetString() != "release"
             || !placement.TryGetProperty("version", out JsonElement version) || version.ValueKind != JsonValueKind.String
-            || !placement.TryGetProperty("product", out JsonElement product) || product.ValueKind != JsonValueKind.String) return false;
-        return model.Current("release").Any(r => EstateModel.BodyString(r, "status") == "published"
-            && EstateModel.BodyString(r, "version") == version.GetString() && r.Subject?.Id == product.GetString());
+            || !placement.TryGetProperty("product", out JsonElement product) || product.ValueKind != JsonValueKind.String) return null;
+        string carrier = placement.TryGetProperty("carrier", out JsonElement named) && named.ValueKind == JsonValueKind.String ? named.GetString()! : "";
+        return (carrier, product.GetString()!, version.GetString()!);
     }
+
+    // When the operator decided: the decision's stated time, or its record's time when that cannot be read.
+    private static DateTimeOffset Decided(RecordEnvelope decision) =>
+        EstateModel.BodyString(decision, "decidedAt") is string at && DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out DateTimeOffset decided)
+            ? decided : decision.AtTime;
 
     private static IEnumerable<string> Texts(RecordEnvelope order)
     {

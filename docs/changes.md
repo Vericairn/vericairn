@@ -128,9 +128,26 @@ after Unicode NFKC normalization and full case folding computed by Vericairn its
 on every platform and build. A phrase shorter than 24 characters, or one another current work order also uses, such as a standard closing step,
 is not matched on its own. The check applies whoever authored the commits.
 
-The hold ends when the release that carries the work order (its placement) is recorded as published with its documentation
-set; what that release discloses stays the operator's choice. A push to a private repository is not held. If a hold is in
-force and the push adapter cannot read the push's text, the push is refused.
+The hold ends when the release that carries the work order (its placement) is recorded as published; what that release
+discloses stays the operator's choice. A push to a private repository is not held. If a hold is in force and the push adapter
+cannot read the push's text, the push is refused.
+
+From 0.9.4 (FIX-137), one push may carry the held text before then: the carrying release's documentation set, with the held
+fixes it carries, once the operator has approved that release's Security section, as the release procedure merges the set
+just before the candidate's submission. Every other push that would add the held text stays refused until the release is
+published, including one made after that approval. Before 0.9.4 the hold ended only at publication, so a checked push refused
+the release's own documentation set when it carried a held fix's guide text.
+
+- **The set.** The push must be a checked push of the product the release belongs to, and carry the set unmerged: its head
+  holds `docs/releases/<version>/manifest.json`, a `vericairn.docs/1` manifest of the carrying release's version, and its
+  target branch's head holds none, as while the set's pull request is open. The push adapter reads the manifest at those
+  two commits only, without the clone's filters; an adapter that reads no files (`IPushAdapter.FileText`) never lets a set
+  pass, and a read that fails refuses the push.
+- **The approval.** The Security section counts as approved when an ask about the release's carrier work order, put to the
+  operator, is answered by the operator's decision, decided and recorded after the held work order's current revision, and
+  no ask about the carrier still waits, open or notified. A decision made before the work order was last revised, such as
+  before it was placed in the release or marked held, does not cover it: ask the operator again. A refusal of a push while
+  such an approval stands says that only the push carrying the set may carry the held text.
 
 ## Merge and observe
 

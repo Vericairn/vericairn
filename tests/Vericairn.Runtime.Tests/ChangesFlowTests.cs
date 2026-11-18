@@ -858,6 +858,14 @@ public sealed class ChangesFlowTests
         public string? Observe(string directory, string remote, string branch) => RemoteHead;
         internal string? Text { get; set; } = "";
         public string? PublishedText(string directory, PushPlan plan) => Text;
+        internal Dictionary<(string Commit, string Path), string> Files { get; } = [];
+        internal int FileReads { get; private set; }
+        public string? FileText(string directory, PushPlan plan, string commit, string path)
+        {
+            FileReads++;
+            Assert.True(commit == plan.Head || commit == plan.TargetHead);
+            return Files.TryGetValue((commit, path), out string? text) ? text : null;
+        }
     }
 
     internal sealed class ControlledProvider : IPullRequestProvider

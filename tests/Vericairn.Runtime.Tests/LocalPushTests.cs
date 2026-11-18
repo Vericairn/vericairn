@@ -94,6 +94,33 @@ public sealed class LocalPushTests : IDisposable
         Assert.False(File.Exists(marker));
     }
 
+    // FIX-137: a checked push reads one file at its head or its target branch's head, absent as null and never through the clone's filters.
+    [Fact]
+    public void APushReadsAFileAtItsHeadOrTargetOnly()
+    {
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "docs/set");
+        Directory.CreateDirectory(Path.Combine(repository, "docs", "releases", "1.0.0"));
+        File.WriteAllText(Path.Combine(repository, "docs", "releases", "1.0.0", "manifest.json"), "{\"format\":\"vericairn.docs/1\"}\n");
+        File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.json filter=rewrite\n");
+        Git(repository, "add", ".");
+        Git(repository, "commit", "-m", "Add the set");
+        string head = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "config", "filter.rewrite.smudge", "echo rewritten");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "docs/set", "main", head);
+        Assert.Equal("{\"format\":\"vericairn.docs/1\"}\n", adapter.FileText(repository, plan, plan.Head, "docs/releases/1.0.0/manifest.json"));
+        Assert.Null(adapter.FileText(repository, plan, plan.TargetHead, "docs/releases/1.0.0/manifest.json"));
+        Assert.Null(adapter.FileText(repository, plan, plan.Head, "docs/releases/1.0.0"));
+        Assert.Null(adapter.FileText(repository, plan, plan.Head, "docs/releases/2.0.0/manifest.json"));
+        Assert.Throws<ProviderRefusedException>(() => adapter.FileText(repository, plan, new string('e', 40), "readme.txt"));
+        Assert.Throws<ProviderRefusedException>(() => adapter.FileText(repository, plan, plan.Head, "docs/../readme.txt"));
+    }
+
     // The adapter isolates its own git processes. Only its read of the user's credential settings sees this test's stand-in
     // for the user's global configuration.
     private GitPushAdapter Adapter() => new(info =>

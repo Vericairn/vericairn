@@ -98,6 +98,30 @@ public sealed class GitPushAdapter : IPushAdapter
     }
 
     /// <inheritdoc />
+    public string? FileText(string directory, PushPlan plan, string commit, string path)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(path);
+        if (!Patterns.Commit.IsMatch(commit) || commit != plan.Head && commit != plan.TargetHead)
+            throw new ProviderRefusedException("A push reads files only at its head or its target branch's head.");
+        if (!Patterns.RelativePath.IsMatch(path)) throw new ProviderRefusedException("A push reads a file by its normalized repository-relative path.");
+        // The tree entry first, so that a missing path reads as absent and a failed read refuses. Only the object's own bytes are read:
+        // no filter, text conversion or attribute of the clone applies.
+        ProcessResult listed = Invoke(directory, ["ls-tree", "-z", "--full-tree", commit, "--", path]);
+        if (listed is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) throw new ProviderRefusedException("git could not read the push's files.");
+        string entry = listed.StandardOutput.TrimEnd('\0');
+        if (entry.Length == 0) return null;
+        int tab = entry.IndexOf('\t', StringComparison.Ordinal);
+        string[] fields = tab < 0 ? [] : entry[..tab].Split(' ');
+        if (fields.Length != 3 || entry[(tab + 1)..] != path || entry.Contains('\0', StringComparison.Ordinal))
+            throw new ProviderRefusedException("git could not read the push's files.");
+        if (fields[1] != "blob") return null;
+        ProcessResult blob = Invoke(directory, ["cat-file", "blob", fields[2]]);
+        if (blob is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) throw new ProviderRefusedException("git could not read the push's files.");
+        return blob.StandardOutput;
+    }
+
+    /// <inheritdoc />
     public string? Observe(string directory, string remote, string branch)
     {
         Branch(directory, branch);

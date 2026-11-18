@@ -48,4 +48,11 @@ public interface IPushAdapter
     /// which refuses a push while a disclosure hold is in force.
     /// </summary>
     string? PublishedText(string directory, PushPlan plan) => null;
+
+    /// <summary>
+    /// The text of one file, by its repository-relative path, at a commit the plan names: its head or its target branch's head. Null
+    /// when that commit holds no file at the path, or when the adapter reads no files, which never lets a push pass a disclosure hold;
+    /// a read that fails refuses. From 0.9.4 (FIX-137) a checked push reads whether it carries a release's documentation set this way.
+    /// </summary>
+    string? FileText(string directory, PushPlan plan, string commit, string path) => null;
 }
