@@ -100,6 +100,12 @@ public sealed class GoalStatusType : IRecordType
             {
                 context.Error(code, message);
             }
+
+            // From 0.9.4 (GOAL-07): a standing agent is never activated past its until time, nor beside an active one of its role over its subject.
+            foreach ((string code, string message) in StandingAgents.ActivationRefusals(context.Model, goal, context.Record))
+            {
+                context.Error(code, message);
+            }
         }
         else if (status is "impossible" or "abandoned" && !GoalRules.MayEnd(context.Model, goal, context.Record.By, context.Record))
         {

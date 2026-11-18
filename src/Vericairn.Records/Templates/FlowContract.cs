@@ -124,7 +124,8 @@ public static partial class FlowContract
         var triggers = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader trigger in body.NestedArray("triggers", false, allowEmpty: false) ?? [])
         {
-            string? kind = trigger.Text("kind", true, 100, Patterns.Slug, "a trigger kind");
+            // From 0.9.4 (GOAL-07) a trigger kind is one of the standing agents' (design/standing-agents.md § 6).
+            string? kind = trigger.Enum("kind", true, [.. StandingAgents.TriggerKinds]);
             trigger.Text("summary", true, 2000);
             trigger.NoOtherKeys();
             if (kind is not null && !triggers.Add(kind))

@@ -289,6 +289,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/goals"] = typeof(GoalProposeRequest),
         ["GET /v1/goals/{id}"] = null,
         ["GET /v1/goals/{id}/next"] = null,
+        ["GET /v1/goals/{id}/due"] = null,
         ["GET /v1/overlaps"] = null,
         ["POST /v1/overlaps/preview"] = typeof(OverlapPreviewRequest),
         ["POST /v1/goals/{id}/step"] = typeof(GoalStepRequest),

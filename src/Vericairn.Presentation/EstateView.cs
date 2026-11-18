@@ -54,6 +54,50 @@ public sealed record FlowRunRow(string Goal, string Title, string Status, string
 public sealed record FindingRow(string Severity, string Code, string Location, string Message);
 
 /// <summary>
+/// From 0.9.4: a standing agent as status, progress, the goal view, Workbench and Remote show it (the estate's design/standing-agents.md
+/// § 11): its state, next occurrence, occurrences by state, period spend and failure pause, as the runtime rendered them as of
+/// <paramref name="AsOf"/>; nothing here derives a state of its own.
+/// </summary>
+public sealed record StandingRow(string Goal, string Title, string State, string Reason, string? Next, int Due, int Deferred, int Running, int Settled, string? Period, string? AsOf = null)
+{
+    /// <summary>The agent and its state, in the state language.</summary>
+    public string Heading => $"{Title}: {StateLanguage.Label("standing", State)}; next occurrence {Next ?? "on a record or a request"}";
+
+    /// <summary>Its occurrences by state, its period's spend and why it is in its state.</summary>
+    public string Detail => $"{Due.ToString(System.Globalization.CultureInfo.InvariantCulture)} due, {Deferred.ToString(System.Globalization.CultureInfo.InvariantCulture)} deferred, {Running.ToString(System.Globalization.CultureInfo.InvariantCulture)} running, {Settled.ToString(System.Globalization.CultureInfo.InvariantCulture)} awaiting review{(Period is null ? string.Empty : "; " + Period)}. {Reason}{(AsOf is null ? string.Empty : $" As of {AsOf}.")}";
+
+    /// <summary>The rows of the standing agents a status, progress or goal document gives; none when it gives none.</summary>
+    public static IReadOnlyList<StandingRow> From(JsonElement standing) =>
+        standing.ValueKind switch
+        {
+            JsonValueKind.Array => standing.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.Object).Select(One).ToList(),
+            JsonValueKind.Object => [One(standing)],
+            _ => [],
+        };
+
+    private static StandingRow One(JsonElement s)
+    {
+        JsonElement goal = s.TryGetProperty("goal", out JsonElement g) ? g : default;
+        JsonElement counts = s.TryGetProperty("counts", out JsonElement c) ? c : default;
+        string? period = null;
+        if (s.TryGetProperty("period", out JsonElement p) && p.ValueKind == JsonValueKind.Object && p.TryGetProperty("caps", out JsonElement caps) && caps.ValueKind == JsonValueKind.Object)
+        {
+            JsonElement spent = p.TryGetProperty("spent", out JsonElement used) ? used : default;
+            period = $"this period {string.Join(", ", caps.EnumerateObject().Select(cap => $"{cap.Name} {(spent.ValueKind == JsonValueKind.Object && spent.TryGetProperty(cap.Name, out JsonElement n) ? n.GetRawText() : "0")} of {cap.Value.GetRawText()}"))}";
+        }
+
+        return new StandingRow(Text(goal, "id") ?? "?", Text(goal, "title") ?? "?", Text(s, "state") ?? "?", Text(s, "reason") ?? string.Empty, Text(s, "next"),
+            Count(counts, "due"), Count(counts, "deferred"), Count(counts, "running"), Count(counts, "settled"), period, Text(s, "asOf"));
+    }
+
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static int Count(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number ? value.GetInt32() : 0;
+}
+
+/// <summary>
 /// A work order proposed for a goal whose plan says sponsor-approves, waiting for its sponsor's approval before it joins the goal, as
 /// canonical status gives it (FIX-117).
 /// </summary>
@@ -158,6 +202,9 @@ public sealed class EstateView
     /// <summary>The runs of flows status shows, each with its stops.</summary>
     public IReadOnlyList<FlowRunRow> Runs { get; private set; } = [];
 
+    /// <summary>From 0.9.4, the standing agents status shows, each as of the estate's newest record.</summary>
+    public IReadOnlyList<StandingRow> Standing { get; private set; } = [];
+
     /// <summary>Every run's stops, run by run, in the order each flow reaches them.</summary>
     public IReadOnlyList<StopRow> Stops => Runs.SelectMany(r => r.Stops).ToList();
 
@@ -235,6 +282,7 @@ public sealed class EstateView
                 Decisions = DecisionRow.From(e.TryGetProperty("decisions", out JsonElement decisions) ? decisions : default),
             };
         });
+        view.Standing = StandingRow.From(document.TryGetProperty("standingAgents", out JsonElement standing) ? standing : default);
         view.Reconcile = Rows(document, "reconcile", e => new FindingRow("error", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
         view.Proposals = Rows(document, "proposals", e => new ProposalRow(Str(e, "goal") ?? "?", Str(e, "goalTitle") ?? "?", Str(e, "sponsor"), Str(e, "key") ?? "?", Str(e, "title") ?? "?", Str(e, "id") ?? string.Empty, Str(e, "by") ?? "?"));
         view.Attention = DeriveAttention(view);
@@ -262,6 +310,12 @@ public sealed class EstateView
         foreach (ProposalRow proposal in view.Proposals)
         {
             items.Add(new AttentionItem("decision needed", $"{proposal.Key} {proposal.Title}", $"Proposed for goal {proposal.GoalTitle} by {proposal.By}; its plan says the sponsor approves, so it joins the goal only once {(proposal.Sponsor is null ? "an operator" : "its sponsor, " + proposal.Sponsor + ",")} approves it.", "waiting for the sponsor", view.AsOf, "Read the work order; its sponsor approves it by recording its status planned.", "work-order", proposal.Id));
+        }
+
+        foreach (StandingRow agent in view.Standing.Where(s => s.State is "held" or "lapsed"))
+        {
+            items.Add(new AttentionItem("decision needed", $"standing agent {agent.Title}", agent.Reason, StateLanguage.Label("standing", agent.State), view.AsOf,
+                agent.State == "held" ? "Answer the ask about its failures, or revise or stop it." : "Renew it with a revision its sponsor activates, or stop it.", "goal", agent.Goal));
         }
 
         foreach (ReleaseRowView release in view.Releases.Where(r => r.Status == "candidate"))

@@ -626,7 +626,7 @@ public static class FlowRuns
     }
 
     /// <summary>Validates one subject binding against the field the flow declares: a record reference of its type, a text value, or a list of instance names.</summary>
-    private static void Bind(ValidationContext context, BodyReader subject, string name, string type, string? recordType)
+    internal static void Bind(ValidationContext context, BodyReader subject, string name, string type, string? recordType)
     {
         if (!subject.Has(name))
         {

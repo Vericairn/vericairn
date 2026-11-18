@@ -603,6 +603,38 @@ format-3 field. `records describe assignment` and `records describe result`
 include this contract, and the generic record reader advances to
 `vericairn.records/readers/10`.
 
+## Standing agents (0.9.4)
+
+GOAL-07 adds a goal's `plan.standing` and an assignment's `occurrence` within
+format 3, and no record type: a standing agent is a stewardship goal, which
+already carries its sponsor, budget, lifecycle and ledger. A goal or assignment
+without them behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `goal` | Optional `plan.standing: {pin, subject, triggers, period, until, runsOn?}`, on a stewardship goal only and never beside `plan.flow`, with a `given` plan of exactly one ordinary work order (`standing.kind`, `standing.flow`, `standing.work`). `pin` is the exact `{id, version, hash}` of a flow that declares the trigger kinds the plan uses and exactly one routed step, of kind work (`standing.flow`, `standing.trigger`); `subject` binds the flow's subject as a run's does (`standing.subject`); each trigger has its own slug `key` and a `kind`: `schedule {unit: days|months, every, firstAt}`, `duty {policy, rule}`, `event {recordType, fields?, roles?}`, `condition {record}` with a record predicate, or `request` (`standing.trigger`); `period {unit: days|months, every?, runs, wallMinutes, tokens?, currency?}` caps the units the budget caps, which are then each run's caps (`standing.period`); `until` is after the goal is recorded (`standing.until`); `runsOn` is a runtime identity's public-key hash. A flow's `triggers` declare kinds from the same five. |
+| `assignment` | Optional `occurrence: {key, trigger, revision, item}` on, and only on, an assignment of a standing agent's work order (`assignment.occurrence`). `revision` is the goal revision the trigger's declaration originates from; `item` is `{interval, dueAt}`, `{record: {type, id, hash}}`, `{failing, records}`, `{at, by}` or the duty's `{occurrence, policy, rule, dueAt, deadline, schedule}`; `key` is the goal's identity, the trigger, the revision and the item joined by `/`, or `duty/` and the duty occurrence's identity. A schedule's interval and an event's record are due when the assignment is recorded, and a request's time is no later. An earlier assignment naming the same key refuses it (`assignment.duplicate`) unless this one is a person's hand-over of that one's step. |
+
+`goal-status` with status `active` is refused for a standing agent past its
+`until`, or while another active standing agent of the same flow or work role
+carries the same subject (`goal-status.standing`). An `agent-run` operation whose
+goal is a standing agent is refused past `until`, while its consecutive failed
+runs reach the goal's `limits.consecutiveFailures` (three when unset) and no
+answered ask about the latest lets it go on, past the period's `runs`, for an
+assignment naming no occurrence (`operation.standing`, `operation.budget`), or
+with a cap above the budget's per-run cap; the ledger of a standing agent
+charges each period's runs against the period's caps.
+
+A reader of format 3 that predates these fields refuses an assignment that
+carries `occurrence` as an unknown key and refuses a goal whose plan carries
+`standing` as an unknown key of `plan`, as any later format-3 field, so the
+estate's pin keeps every machine on a release that reads them: such a reader
+shows neither record and dispatches nothing of the agent. A reader that reads
+them but cannot resolve the flow shows the goal with a warning
+(`standing.unavailable`) and dispatches none of its occurrences. A format-2
+estate refuses them. `records describe goal` and `records describe assignment`
+include this contract.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

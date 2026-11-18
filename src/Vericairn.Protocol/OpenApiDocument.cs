@@ -125,6 +125,7 @@ public static class OpenApiDocument
         ("POST", "/v1/goals"),
         ("GET", "/v1/goals/{id}"),
         ("GET", "/v1/goals/{id}/next"),
+        ("GET", "/v1/goals/{id}/due"),
         ("GET", "/v1/overlaps"),
         ("POST", "/v1/overlaps/preview"),
         ("POST", "/v1/goals/{id}/step"),
@@ -237,6 +238,11 @@ public static class OpenApiDocument
                     ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" },
                     ["description"] = name == "asOf" ? "Explicit canonical UTC preview time. Never authorizes submission." : "Exact release record id selecting its product, version and commit.",
                 }).ToArray());
+            }
+
+            if (method == "GET" && path == "/v1/goals/{id}/due")
+            {
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "asOf", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The explicit UTC time the standing agent's triggers are evaluated at; the runtime's clock when omitted." });
             }
 
             if (method == "GET" && path == "/v1/overlaps")
@@ -928,6 +934,7 @@ public static class OpenApiDocument
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object"), ("repository", "string")),
             ["OverlapPreviewRequest"] = Object(("brief", "object"), ("repository", "string")),
             ["OverlapResponse"] = Object(("text", "string"), ("json", "object")),
+            ["GoalDueResponse"] = Object(("text", "string"), ("json", "object")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["WorkProgressRequest"] = progressRequest,
             ["WorkProgressClaim"] = progressClaim,
@@ -1015,7 +1022,7 @@ public static class OpenApiDocument
             ["GoalCloseRequest"] = Object(("by", "string"), ("reason", "string"), ("stepReasons", "array")),
             ["GoalDecideRequest"] = Object(("by", "string"), ("step", "string"), ("paths", "array"), ("reasons", "string"), ("evidence", "array")),
             ["GoalStepReason"] = Object(("step", "string"), ("reason", "string")),
-            ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"))),
+            ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("occurrence", "string"), ("now", "string"))),
             ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object"), ("decision", "object"), ("notices", "array")),
             ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string")),
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
@@ -1329,6 +1336,7 @@ public static class OpenApiDocument
         ("GET", "/v1/overlaps") => "From 0.9.4: the overlap check's view (vericairn.overlaps/1): the active assignments by repository, each with its effective permitted paths (its interpretable patterns less its exclusions, and in the estate's own repository less records/ and objects/) and why it is active, and every overlap of two of them with its patterns, witnesses (up to 20 tracked paths at the registered clone's main line, else the shortest valid path either could create), resolution and the concurrent-paths policies whose selection it meets. Read-only; the clone's answers are this machine's, labeled so.",
         ("POST", "/v1/overlaps/preview") => "From 0.9.4: a draft brief's overlaps with the active assignments before it is recorded, as the overlap check's view shows them. Records nothing.",
         ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
+        ("GET", "/v1/goals/{id}/due") => "From 0.9.4: a standing agent's occurrences as of an explicit UTC time, asOf or the runtime's clock (vericairn.due/1): its state, its triggers and when each is next due, its period's caps and spend, its concurrency and failure pause, and each occurrence with its key and state (due, deferred with its reason, running, assigned, settled, disposed or held). Read-only; the same on every machine for the same records and time.",
         ("POST", "/v1/goals/{id}/step") => "Take an active goal's next step, one at a time, as an operator, the goal's sponsor when a person, or a principal holding local-engineering: its first eligible step whose route acts, routed from the runtime's machine. An agent's step goes on with the assignment that holds it, or is assigned to the agent together with its run's intent after the worker's whole preflight, and its run starts through the worker; every refusal before the intent, custody, the budget, the repository, the launcher or the workspace, records nothing, the assignment included. A person's step is assigned to the person and asked of them, the recommendation first, the two recorded together; a step no principal is available for is asked of the sponsor, never given to a contributor the roster does not name. It activates, funds, accepts and answers nothing.",
         ("POST", "/v1/goals/{id}/activate") => "Activate a proposed goal, which grants its budget: by its sponsor, a person who holds the operator role or a grant of the spending scope, or by an operator when an agent sponsors it; an agent never activates a goal.",
         ("POST", "/v1/goals/{id}/pause") => "Pause an active goal; its sponsor's, or an operator's for a goal an agent sponsors. Prevents new runs but does not stop runs already in flight; request each run's stop separately.",

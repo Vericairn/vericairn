@@ -407,6 +407,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public NextResponse? GoalNext(string goal) => Get<NextResponse>(GoalPath(goal, "next"), allowNotFound: true);
 
     /// <inheritdoc />
+    public GoalDueResponse? GoalDue(string goal, string? asOf = null) => Get<GoalDueResponse>(GoalPath(goal, "due") + (asOf is null ? string.Empty : "?asOf=" + Uri.EscapeDataString(asOf)), allowNotFound: true);
+
+    /// <inheritdoc />
     public OverlapResponse WorkOverlap(string? repository = null) => Get<OverlapResponse>(repository is null ? "/v1/overlaps" : "/v1/overlaps?repository=" + Uri.EscapeDataString(repository))!;
 
     /// <inheritdoc />

@@ -139,6 +139,7 @@ public static class ApiRoutes
         app.MapPost($"{v}/goals", (GoalProposeRequest request) => Outcome(service.GoalPropose(request)));
         app.MapGet($"{v}/goals/{{id}}", (string id) => service.Goal(id) is GoalResponse goal ? Results.Json(goal, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/goals/{{id}}/next", (string id) => service.GoalNext(id) is NextResponse next ? Results.Json(next, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/goals/{{id}}/due", (string id, string? asOf) => service.GoalDue(id, string.IsNullOrWhiteSpace(asOf) ? null : asOf) is GoalDueResponse due ? Results.Json(due, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/overlaps", (string? repository) => Results.Json(service.WorkOverlap(string.IsNullOrWhiteSpace(repository) ? null : repository), ProtocolJson.Options));
         app.MapPost($"{v}/overlaps/preview", (OverlapPreviewRequest request) => Results.Json(service.WorkOverlapPreview(request), ProtocolJson.Options));
         app.MapPost($"{v}/goals/{{id}}/step", (string id, GoalStepRequest request) => Results.Json(service.GoalStep(id, request), ProtocolJson.Options));

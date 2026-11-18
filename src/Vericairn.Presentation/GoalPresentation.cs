@@ -229,6 +229,9 @@ public sealed class GoalPresentation
     /// <summary>For a run, from 0.9.4 (PROC-19), each step's decision: who decided what and why, or that it waits on its decider; none otherwise.</summary>
     public IReadOnlyList<DecisionRow> Decisions { get; private set; } = [];
 
+    /// <summary>From 0.9.4 (GOAL-07), for a standing agent, its state, next occurrence, deferrals and period spend; none for any other goal.</summary>
+    public IReadOnlyList<StandingRow> Standing { get; private set; } = [];
+
     /// <summary>Work orders proposed for the goal that wait for its sponsor's approval; none unless its plan says sponsor-approves.</summary>
     public IReadOnlyList<ProposedRow> Proposed { get; private set; } = [];
 
@@ -253,6 +256,7 @@ public sealed class GoalPresentation
         view.Stops = StopRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("stops", out JsonElement stops) ? stops : default);
         view.Due = DueRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("steps", out JsonElement timed) ? timed : default);
         view.Decisions = DecisionRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("steps", out JsonElement decided) ? decided : default);
+        view.Standing = StandingRow.From(Obj(goal, "standing"));
         view.Proposed = Items(goal, "proposed").Select(p => new ProposedRow(Str(p, "key") ?? "?", Str(p, "title") ?? "?", Str(p, "id") ?? "?", Str(p, "byName") ?? Str(p, "by") ?? "?", Str(p, "approve"))).ToList();
         string? current = Str(Obj(goal, "evaluation"), "id");
         view.Evaluations = Items(goal, "evaluations").Select(e => new EvaluationRow(Str(e, "id") ?? "?", Str(e, "byName") ?? Str(e, "by") ?? "?", Str(e, "at") ?? "?", Str(e, "outcome") ?? "?", Str(e, "summary") ?? string.Empty, Str(e, "id") == current)).ToList();

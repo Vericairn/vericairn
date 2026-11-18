@@ -594,7 +594,7 @@ internal sealed class RunAdmissionService(
         RecordEnvelope current = model.Latest(assignment);
         FlowRuns.StepRef? step = FlowRuns.StepOf(current);
         IReadOnlyList<RecordEnvelope> holders = WorkView.OrderOfAssignment(model, current) is RecordEnvelope order
-            ? Routing.Assignments(model, model.Latest(order), step) : [];
+            ? Routing.Assignments(model, model.Latest(order), step).Where(a => StandingAgents.KeyOf(a) == StandingAgents.KeyOf(current)).ToList() : [];
         // A later assignment of the step holds it; routing's own pending assignment, not yet stored with its intent, is the latest.
         RecordEnvelope? later = holders.LastOrDefault(h => h.Id != current.Id && GoalRules.Before(current, h));
         return later is not null

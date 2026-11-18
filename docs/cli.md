@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 37, November 17, 2026. Add standing agents: `goal propose --kind stewardship --standing <flow>` with `--trigger`, `--period`, `--until` and `--runs-on`, `goal due`, which lists a standing agent's occurrences as of an explicit time, and `--occurrence` and `--now` on `goal step`, which carries one occurrence per command within the agent's caps, in the development build.
+
 Revision 36, November 17, 2026. Add `work overlap`, which lists the active assignments by repository and every overlap of their effective permitted paths, and previews a draft brief's with `--brief`, `--repository` on `work assign`, and the overlaps that `work assign`, `work attempt`, `worker run` and `goal step` report on standard error; an assignment is released only by its own change integrated into its repository's main line, in the development build.
 
 Revision 35, November 16, 2026. Fold every line taken from the runtime to the terminal's width with `runtime:` on every row, make its runs of spaces one space, and show a presence-related command's problems from the runtime the same way, in the development build.
@@ -1147,6 +1149,66 @@ whose base is no ancestor of its head or whose paths are none of the assignment'
 from the records alone, and their canonical JSON gains `overlaps` while one is open. The same view is `GET /v1/overlaps` and
 `POST /v1/overlaps/preview`, the SDK's `WorkOverlap` and `WorkOverlapPreview`, and the MCP read tool `work_overlap`
 ([MCP](mcp.md#tool-annotations-and-definitions-094)).
+
+## Standing agents: `goal due` and `goal step --occurrence` (0.9.4)
+
+From 0.9.4 (GOAL-07), a standing agent is a stewardship goal whose plan carries `standing`: a flow that declares its trigger kinds
+and one routed work step, the subject it binds, its triggers, its caps per UTC-anchored period, an until time and, optionally, the
+runtime that dispatches it unattended. Each occurrence a trigger makes due is carried as one assignment of the goal's one ordinary
+work order, naming the occurrence. A flow, a trigger and a proposal grant nothing; the sponsor's activation grants the budget.
+
+```sh
+vericairn goal propose --by <sponsor> --kind stewardship --standing example/researcher@1.0.0 --work-order RES-1 \
+  --title "Research the widget" --objective "Keep researching the widget." --done '{"type":"work-order","fields":{"key":"RESEARCHED"}}' \
+  --subject topic="the widget" --budget wallMinutes=30 --budget attemptsPerStep=2 \
+  --trigger '{"key":"monthly","kind":"schedule","unit":"months","every":1,"firstAt":"2026-12-01T00:00:00Z"}' \
+  --trigger '{"key":"asked","kind":"request"}' --period runs=4 --period wallMinutes=120
+vericairn goal due <goal>
+vericairn goal due <goal> --as-of 2027-01-15T00:00:00Z --json
+vericairn goal step <goal> --by <sponsor> --repository <repository id>
+vericairn goal step <goal> --by <sponsor> --repository <repository id> --occurrence <key> --now 2027-01-15T00:00:00Z
+vericairn goal step <goal> --by <sponsor> --repository <repository id> --occurrence request
+```
+
+A trigger has its own `key` and a `kind`: `schedule` (`unit` days or months, `every`, a UTC `firstAt`; a day is 86,400 seconds, a
+month keeps the anchor's day or the last day of a shorter month, and ticks missed while nothing carried them coalesce into the
+latest), `duty` (`policy` and `rule` of a recurring duty; each occurrence the policy evaluation owes stays due until the duty's own
+evidence discharges it, and a trigger never discharges a duty), `event` (`recordType`, optional string `fields` and optional
+`roles`; each such record recorded after the trigger was activated, never one of the agent's own, and an agent's record only for a
+trigger naming that agent's standing role, from an agent no agent's records trigger), `condition` (`record`, a record predicate as
+`--done` takes it; once for each new set of records it reads while it fails) or `request` (an occurrence on demand, `--occurrence
+request`, keyed by its time and requester). `--period` caps what the runs started in each UTC-anchored period spend together:
+`unit=months` (calendar months, the default) or `unit=days` (days counted from 1970-01-01), `every`, `runs` and `wallMinutes`, and
+`tokens` and `currency` where the budget caps them; the budget is then each run's caps. `--until` is when the agent returns to its
+sponsor, thirty days from now when omitted. The proposal prints what `goal due` shows.
+
+An occurrence's key is the goal's identity, the trigger's key, the trigger's revision (the earliest goal revision from which its
+declaration is unchanged, so a renewal that keeps a trigger keeps its keys) and the item; a duty trigger's key is the duty
+occurrence's own identity, so two agents never both carry one deadline. `goal due` evaluates the triggers from the records at
+`--as-of`, this runtime's clock when omitted, and lists the agent's state (`active`, `paused`, `lapsed`, `held`, `unavailable`,
+`stopped` or the goal's status), each trigger and when it is next due, the period's caps and spend, the runs in flight and the
+consecutive failed runs, and each occurrence with its key and state: `due`; `deferred`, with its reason; `running`; `assigned` to a
+person; `settled`, its result awaiting review; `disposed`, its result reviewed; or `held`, its attempts spent. With `--json` it
+writes `vericairn.due/1`. It records nothing.
+
+`goal step` on a standing agent evaluates the triggers again at `--now`, never later than the runtime's clock, and carries one
+occurrence: the one `--occurrence` names, a request made now, or the oldest due one. Its assignment names the occurrence's key,
+trigger, revision and item, and its brief carries the flow's role brief, the records that made it due quoted among its sources as
+untrusted content, the goal's constraints, the flow's never lines and every reserved effect; an agent's run works on a branch of
+its own for the occurrence. A key holds one assignment whoever records it, `records new assignment` included: a second one is
+refused (`assignment.duplicate`) unless a person takes the occurrence over with `work takeover`, and a settled occurrence runs again
+only when a review returns its result, on the assignment that holds it. Every assignment of the standing work order names an
+occurrence. Nothing is dispatched while the goal is not active or past its until time; when a period's cap is reached its
+occurrences defer and `goal step` asks the sponsor once in the period; while the runs in flight fill the budget's concurrency (one
+when it states none) occurrences wait; and after the goal's `limits.consecutiveFailures` failed runs in a row (three when it sets
+none), a run settled as a known failure or a result blocked or abandoned, `goal step` asks the sponsor once and dispatches nothing
+until a decision answers it. A run's intent is refused at the record for a run on no occurrence, past the until time, during the
+failure pause or past the period's runs. A second standing agent of one role over one subject is never activated, nor one past its
+until time. `goal next` routes each due occurrence by the role of the flow's work step; `goal show`, `status` and `progress` show
+each agent's state, next occurrence, occurrences by state and period spend, and canonical status and progress JSON gain `standingAgents`
+while one exists. The same view is `GET /v1/goals/{id}/due`, the SDK's `GoalDue`, and the MCP read tool
+`goal_due`; `GoalStepRequest` gains `occurrence` and `now`. Community carries one occurrence per command, by hand or by the owner's
+script; unattended dispatch is the carrier's, which honors `runsOn`.
 
 ## `vericairn estate first-authority` (0.9.3)
 

@@ -365,7 +365,12 @@ public static partial class NextEligible
             ["eligible"] = step.Planned?.Eligible,
             ["holds"] = step.Planned is null ? null : new JsonArray(step.Planned.Relations.Where(r => r.Holds).Select(r => (JsonNode)new JsonObject { ["relation"] = r.Kind, ["type"] = r.Type, ["id"] = r.Id, ["key"] = r.Key, ["state"] = r.State }).ToArray()),
             ["assignment"] = step.Assignment is null ? null : new JsonObject { ["id"] = step.Assignment.Id, ["contributor"] = contributor, ["contributorName"] = Routing.NameOf(model, contributor) },
-            ["route"] = route is null ? null : new JsonObject
+            ["route"] = RouteJson(model, route),
+        };
+    }
+
+    /// <summary>A route as the next-eligible view's JSON gives it, or null.</summary>
+    private static JsonObject? RouteJson(EstateModel model, Route? route) => route is null ? null : new JsonObject
             {
                 ["state"] = route.State,
                 ["dispatches"] = route.Dispatches,
@@ -385,9 +390,7 @@ public static partial class NextEligible
                     ["exception"] = route.Exception is RecordEnvelope exception ? new JsonObject { ["id"] = exception.Id, ["by"] = exception.By, ["expires"] = EstateModel.BodyString(exception, "expires"), ["reason"] = EstateModel.BodyString(exception, "reason") } : null,
                 } : null,
                 ["candidates"] = new JsonArray(route.Candidates.Select(c => (JsonNode)new JsonObject { ["principal"] = c.Principal, ["name"] = c.Name, ["kind"] = c.Kind, ["available"] = c.Available, ["launcher"] = c.Launcher, ["reasons"] = Strings(c.Reasons) }).ToArray()),
-            },
-        };
-    }
+            };
 
     private static JsonObject AskJson(EstateModel model, RecordEnvelope ask)
     {

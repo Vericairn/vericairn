@@ -298,6 +298,17 @@ public static class EstateStatus
 
         // A run's position and its stops (design/flow.md § 8), as a live read shows them.
         text.Append(FlowStops.RunsText(model, FlowStops.Runs(model, at)));
+        // From 0.9.4 (GOAL-07; design/standing-agents.md § 11), each standing agent's state, next occurrence, deferrals and period spend.
+        IReadOnlyList<StandingAgents.Agent> standing = Standing(model, at);
+        if (standing.Count > 0)
+        {
+            text.Append("Standing agents: ").Append(standing.Count.ToString(CultureInfo.InvariantCulture)).Append('\n');
+            foreach (StandingAgents.Agent agent in standing)
+            {
+                text.Append("  ").Append(StandingView.Line(agent)).Append('\n');
+            }
+        }
+
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Documents: ").Append(model.Current("document-revision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture))
@@ -408,6 +419,22 @@ public static class EstateStatus
             .OrderBy(r => EstateModel.BodyString(r, "asOf"), StringComparer.Ordinal).ThenBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
+    /// <summary>Every current standing agent as of a time, by goal id.</summary>
+    internal static IReadOnlyList<StandingAgents.Agent> Standing(EstateModel model, DateTimeOffset at) => Standing(model, () => at);
+
+    /// <summary>Every current standing agent as of a time read only when there is one, by goal id.</summary>
+    internal static IReadOnlyList<StandingAgents.Agent> Standing(EstateModel model, Func<DateTimeOffset> at)
+    {
+        List<RecordEnvelope> goals = [.. model.Current("goal").Where(StandingAgents.IsStanding).OrderBy(g => g.Id, StringComparer.Ordinal)];
+        if (goals.Count == 0)
+        {
+            return [];
+        }
+
+        DateTimeOffset time = at();
+        return [.. goals.Select(g => StandingAgents.Derive(model, g, time))];
+    }
+
     /// <summary>
     /// Machine-readable status in canonical pretty JSON, byte-identical across machines, platforms and reading times for the same estate:
     /// nothing in it reads the clock. A run's position, its stops and the delivery of its operator requests are derived at the records' own
@@ -473,6 +500,14 @@ public static class EstateStatus
         if (runs.Count > 0)
         {
             status["runs"] = FlowStops.RunsJson(model, runs);
+        }
+
+        // From 0.9.4 (GOAL-07): each standing agent as of the estate's newest record, so canonical status never depends on when it is read;
+        // absent when there is none. A duty trigger's occurrences are the runtime's to evaluate, in goal due.
+        IReadOnlyList<StandingAgents.Agent> standing = Standing(model, recorded);
+        if (standing.Count > 0)
+        {
+            status["standingAgents"] = new JsonArray([.. standing.Select(a => (JsonNode)StandingView.Summary(model, a))]);
         }
 
         // From 0.9.4 (CODE-73), the open overlaps of active assignments, from the records alone; absent when there is none.
