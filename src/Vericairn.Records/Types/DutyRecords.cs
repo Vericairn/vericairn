@@ -149,6 +149,47 @@ internal static partial class DutyRecords
         return policy;
     }
 
+    /// <summary>
+    /// Why a release does not open an occurrence of a release-scheduled duty at its originating revision, as the duty's evaluation opens
+    /// one (from 0.9.4, GOAL-07); null when it does: the first published revision of a release of the schedule's product, published
+    /// within the schedule's window (from its activation, strictly after a changed schedule's revision, and no later than its next
+    /// boundary), whose version names no other first publication of that product.
+    /// </summary>
+    internal static string? PublicationRefusal(EstateModel model, RecordEnvelope origin, string? key, JsonElement schedule, RecordEnvelope release)
+    {
+        string? product = PolicyRecords.Text(schedule, "product");
+        if (product is null || !model.ById.TryGetValue(product, out RecordEnvelope? declared) || declared.Type != "product" || release.Type != "release"
+            || !PolicyRecords.ReleaseMatchesProduct(model, release, product))
+        {
+            return "its release is not one of the schedule's product";
+        }
+
+        bool Published(RecordEnvelope record) => EstateModel.BodyString(record, "status") == "published";
+        bool First(RecordEnvelope record) => Published(record) && !model.Chain(record).SkipLast(1).Any(id => Published(model.ById[id]));
+        if (!First(release))
+        {
+            return "its release is not the first published revision of a release";
+        }
+
+        DateTimeOffset activation = Time(EstateModel.BodyString(origin, "startsAt")) ?? origin.AtTime;
+        if (release.AtTime < activation || (origin.Supersedes is not null && release.AtTime <= origin.AtTime))
+        {
+            return "its release was published before the schedule's activation";
+        }
+
+        RecordEnvelope? boundary = model.OfType("estate-policy").Where(p => model.Chain(p).Contains(origin.Id, StringComparer.Ordinal) && p.Id != origin.Id &&
+            (EstateModel.BodyString(p, "state") == "retired" || !IsDuty(Rule(p, key)) || Origin(model, p, key).Id != origin.Id)).OrderBy(p => p.At, StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal).FirstOrDefault();
+        if (boundary is not null && release.AtTime > boundary.AtTime)
+        {
+            return "its release was published after the schedule's next boundary";
+        }
+
+        string? version = EstateModel.BodyString(release, "version");
+        return model.OfType("release").Any(r => r.Id != release.Id && First(r) && PolicyRecords.ReleaseMatchesProduct(model, r, product) && EstateModel.BodyString(r, "version") == version)
+            ? "its release's version names another first publication of the product, so the publication is ambiguous"
+            : null;
+    }
+
     internal static DateTimeOffset? Occurrence(ValidationContext context, BodyReader? occurrence, RecordEnvelope policy, string? key, RecordEnvelope? subject)
     {
         if (occurrence is null) return null;

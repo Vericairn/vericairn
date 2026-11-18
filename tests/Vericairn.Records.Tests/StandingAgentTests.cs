@@ -373,9 +373,9 @@ public class StandingAgentTests
     }
 
     [Fact]
-    public void ARunItsSponsorAskedToStopIsNoFailureWhileARunTheWorkerStoppedAtACapIs()
+    public void ARunItsSponsorOrAnOperatorAskedToStopIsNoFailureWhileAStopByAnyoneElseOrTheWorkerIs()
     {
-        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 60, ["attemptsPerStep"] = 8 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 });
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 80, ["attemptsPerStep"] = 12 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 300 });
         StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
         RecordEnvelope assignment = fixture.Assign(occurrence);
 
@@ -389,14 +389,27 @@ public class StandingAgentTests
         Assert.Equal(("active", 0), (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures));
         Assert.DoesNotContain(Validate(fixture, "operation", fixture.RunBody(assignment, "run-goes-on", "not-started")), f => f.Severity == Severity.Error);
 
-        // Three the worker stopped at a cap the run reached are the agent's failures: the pause holds.
+        // Three stopped by a principal that neither sponsors the goal nor holds the operator role, as a dispatcher stopping its own failing
+        // runs would, are the agent's failures: the pause holds. The sponsor's answer lets it go on.
         RecordEnvelope? last = null;
+        for (int i = 1; i <= 3; i++)
+        {
+            last = fixture.Settle(fixture.RunIntent(assignment, "run-dispatcher-" + i.ToString(CultureInfo.InvariantCulture)), "known-failure", fixture.Estate.BuilderId);
+        }
+
+        Assert.DoesNotContain(fixture.Estate.Load().Findings, f => f.Severity == Severity.Error);
+        StandingAgents.Agent held = fixture.Agent(fixture.Estate.Clock);
+        Assert.Equal(("held", 3, last!.Id), (held.State, held.Failures, held.FailureTrigger!.Id));
+        AnswerPause(fixture, last);
+        Assert.Equal(("active", 0), (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures));
+
+        // Three the worker stopped at a cap the run reached are the agent's failures too.
         for (int i = 1; i <= 3; i++)
         {
             last = fixture.Settle(fixture.RunIntent(assignment, "run-capped-" + i.ToString(CultureInfo.InvariantCulture)), "known-failure", "worker");
         }
 
-        StandingAgents.Agent held = fixture.Agent(fixture.Estate.Clock);
+        held = fixture.Agent(fixture.Estate.Clock);
         Assert.Equal(("held", 3, last!.Id), (held.State, held.Failures, held.FailureTrigger!.Id));
     }
 
@@ -596,5 +609,74 @@ public class StandingAgentTests
         // Paused, no new occurrence is carried, whatever time its triggers were evaluated at.
         fixture.Add("goal-status", new JsonObject { ["status"] = "paused", ["note"] = "Paused for the test." }, subject: goal.Reference);
         Assert.Contains(Carry(monthly, new JsonObject { ["interval"] = 4, ["dueAt"] = "2026-11-01T00:00:00Z" }), f => f.Code == "assignment.occurrence" && f.Message.Contains("is paused when this assignment is recorded", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AReleaseDutyOccurrenceIsOnlyTheFirstPublicationOfTheSchedulesProductWithinItsWindow()
+    {
+        using var fixture = new StandingFixture(activate: false);
+        RecordEnvelope Product(string slug) => fixture.Add("product", new JsonObject
+        {
+            ["name"] = "Fixture product", ["slug"] = slug, ["summary"] = "Synthetic publication history.",
+            ["editions"] = new JsonArray(new JsonObject { ["name"] = "Community", ["slug"] = "community", ["summary"] = "Fixture edition." }),
+            ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "Fixture surface." }),
+        });
+        RecordEnvelope Publish(RecordEnvelope product, string version)
+        {
+            RecordEnvelope candidate = fixture.Add("release", new JsonObject
+            {
+                ["version"] = version, ["repository"] = "Example/example", ["commit"] = new string('1', 40), ["status"] = "candidate",
+                ["artifacts"] = new JsonArray(new JsonObject { ["name"] = "fixture", ["hash"] = FlowFixture.Hash('b'), ["bytes"] = 0, ["platform"] = "any" }),
+                ["recordFormat"] = new JsonObject { ["reads"] = new JsonArray(1, 2, 3), ["writes"] = 3 }, ["evidence"] = new JsonArray(), ["qualified"] = new JsonArray(), ["signing"] = "Fixture only", ["limitations"] = new JsonArray(),
+            }, subject: new RecordReference("product", product.Id, null));
+            fixture.Add("acceptance", new JsonObject { ["statement"] = "Accept the fixture publication.", ["basis"] = new JsonArray(), ["self"] = true }, subject: candidate.Reference);
+            JsonObject body = PolicyFixture.Body(candidate);
+            body["status"] = "published";
+            body["publishedAt"] = RecordParser.FormatTimestamp(fixture.Estate.Clock);
+            body["url"] = "https://example.invalid/releases/fixture";
+            return fixture.Add("release", body, subject: candidate.Subject, supersedes: candidate.Id);
+        }
+
+        // A release-scheduled duty from 13:00; one release of its product is published before that.
+        RecordEnvelope product = Product("example");
+        RecordEnvelope other = Product("other");
+        RecordEnvelope early = Publish(product, "0.9.0");
+        JsonObject definition = fixture.Policies.PolicyBody();
+        definition["rules"]![0]!["parameters"]!["schedule"] = new JsonObject { ["kind"] = "release", ["product"] = product.Id };
+        RecordEnvelope policy = fixture.Policies.Policy(definition);
+        JsonObject duty = new() { ["key"] = "releases", ["kind"] = "duty", ["policy"] = policy.Id, ["rule"] = "monthly" };
+        RecordEnvelope goal = fixture.Add("goal", fixture.GoalBody(triggers: new JsonArray(duty)), supersedes: fixture.Goal.Id);
+        fixture.Activate(goal);
+
+        // Within its window: the product's first publication, another product's, and a later published revision of the first.
+        fixture.Estate.SetClock(At("2026-10-13T14:00:00Z"));
+        RecordEnvelope first = Publish(product, "1.0.0");
+        RecordEnvelope elsewhere = Publish(other, "1.0.0");
+        fixture.Add("acceptance", new JsonObject { ["statement"] = "Accept the publication again.", ["basis"] = new JsonArray(), ["self"] = true }, subject: first.Reference);
+        JsonObject again = PolicyFixture.Body(first);
+        again["url"] = "https://example.invalid/releases/fixture-again";
+        again["publishedAt"] = RecordParser.FormatTimestamp(fixture.Estate.Clock.AddSeconds(1));
+        RecordEnvelope republished = fixture.Add("release", again, subject: first.Subject, supersedes: first.Id);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings.Where(f => f.Severity == Severity.Error)));
+        fixture.Estate.SetClock(At("2026-11-14T00:00:00Z"));
+
+        StandingAgents.Trigger trigger = StandingAgents.Triggers(fixture.Estate.Load(), goal).Single(t => t.Key == "releases");
+        string subject = fixture.Estate.Load().Chain(fixture.Estate.Estate)[0];
+        FindingList Carry(RecordEnvelope release)
+        {
+            JsonObject schedule = new() { ["kind"] = "release", ["publication"] = PolicyFixture.Ref(release) };
+            JsonObject item = new()
+            {
+                ["occurrence"] = $"{policy.Id}:{subject}:{CanonicalJson.Serialize(Element(schedule))}", ["policy"] = PolicyFixture.Ref(policy), ["rule"] = "monthly",
+                ["dueAt"] = release.At, ["deadline"] = RecordParser.FormatTimestamp(release.AtTime.AddDays(3)), ["schedule"] = schedule,
+            };
+            var occurrence = new StandingAgents.Occurrence(StandingAgents.Key(fixture.Goal.Id, trigger, StandingAgents.ItemKey("duty", Element(item))!), trigger.Key, trigger.Kind, trigger.Revision, Element(item), fixture.Estate.Clock, [], "probe");
+            return Validate(fixture, "assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId), fixture.Work.Reference);
+        }
+
+        Assert.DoesNotContain(Carry(first), f => f.Severity == Severity.Error);
+        Assert.Contains(Carry(elsewhere), f => f.Code == "assignment.occurrence" && f.Message.Contains("is not one of the schedule's product", StringComparison.Ordinal));
+        Assert.Contains(Carry(early), f => f.Code == "assignment.occurrence" && f.Message.Contains("published before the schedule's activation", StringComparison.Ordinal));
+        Assert.Contains(Carry(republished), f => f.Code == "assignment.occurrence" && f.Message.Contains("is not the first published revision", StringComparison.Ordinal));
     }
 }

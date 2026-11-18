@@ -758,8 +758,8 @@ internal static class StandingAgents
     /// The goal's consecutive failed runs that count toward the failure pause, judged from the records before a record when one is given:
     /// one outcome for each settled run, in the order the runs were started: the latest result recorded on its assignment between its start
     /// and the next run of that assignment, failed when blocked or abandoned, whatever the harness's exit; or, with no result, its settlement,
-    /// failed when a known failure, unless a principal asked it to stop (its sponsor's pause or stop, or an operator's), when the failure is
-    /// theirs and not the agent's; a run that settled with neither a result nor a failure counts for nothing. Only the failures after the
+    /// failed when a known failure, unless who decides for the goal asked it to stop (its sponsor when a person, or an operator, as they
+    /// stood when the stop was recorded), when the failure is theirs and not the agent's; a run that settled with neither a result nor a failure counts for nothing. Only the failures after the
     /// last success, and after the failure its sponsor last answered the pause's ask about, count; the latest of them first.
     /// </summary>
     private static (int Count, RecordEnvelope? Latest) Failures(EstateModel model, RecordEnvelope goal, IReadOnlyList<RecordEnvelope> assignments, IReadOnlyList<AgentRuns.Run> runs, RecordEnvelope? before = null)
@@ -781,7 +781,7 @@ internal static class StandingAgents
             {
                 outcomes.Add((result, EstateModel.BodyString(result, "outcome") is "blocked" or "abandoned"));
             }
-            else if (run.Status == "known-failure" && !StopRequested(run))
+            else if (run.Status == "known-failure" && !DeciderStopped(model, goal, run))
             {
                 outcomes.Add((run.Latest, true));
             }
@@ -804,9 +804,23 @@ internal static class StandingAgents
         return (trailing.Count, trailing.Count == 0 ? null : trailing[0].Record);
     }
 
-    /// <summary>True when a principal asked a run to stop, not the worker for a cap the run reached.</summary>
-    private static bool StopRequested(AgentRuns.Run run) =>
-        run.Revisions.Any(r => TJson.Text(TJson.Object(r.Body, "stop"), "requestedBy") is string by && by != "worker");
+    /// <summary>
+    /// True when who decides for the goal asked a run to stop, read as the records stood when the stop was first recorded: the sponsor its
+    /// goal revision then names, when a person, or a principal holding the operator role then (goal pause --stop-runs, goal stop, an
+    /// operator's run stop). A stop anyone else requested, the dispatcher that started the run included, and the worker's for a cap the
+    /// run reached, leave its known failure the agent's.
+    /// </summary>
+    private static bool DeciderStopped(EstateModel model, RecordEnvelope goal, AgentRuns.Run run)
+    {
+        if (TJson.Text(TJson.Object(run.Latest.Body, "stop"), "requestedBy") is not string by || by == "worker"
+            || run.Revisions.FirstOrDefault(r => TJson.Text(TJson.Object(r.Body, "stop"), "requestedBy") == by) is not RecordEnvelope stopped)
+        {
+            return false;
+        }
+
+        RecordEnvelope standing = model.Chain(model.Latest(goal)).Where(model.ById.ContainsKey).Select(id => model.ById[id]).LastOrDefault(g => GoalRules.Before(g, stopped)) ?? goal;
+        return GoalRules.AccepterOf(model, standing).Decides(model, by, stopped) || model.HasRoleAt(by, Roles.Operator, stopped);
+    }
 
     /// <summary>
     /// Every assignment that names an occurrence key, in any revision, current, withdrawn by a reconciliation or stranded: a result on any
@@ -1456,6 +1470,15 @@ internal static class StandingAgents
         // publication, nothing else), and the item must be it exactly in canonical form: an extra key or a changed value is another item.
         JsonElement schedule = PolicyRecords.Property(parameters, "schedule");
         JsonElement occurrence = TJson.Object(item, "schedule");
+
+        // A release opens an occurrence only as the duty's evaluation opens one: the first publication of the schedule's product, within
+        // the schedule's window, so a later published revision of one release, or another product's, never names a second key.
+        if (PolicyRecords.Text(schedule, "kind") == "release" && TJson.Text(TJson.Object(occurrence, "publication"), "id") is string publicationId
+            && model.ById.TryGetValue(publicationId, out RecordEnvelope? publication) && DutyRecords.PublicationRefusal(model, policy, key, schedule, publication) is string notOpened)
+        {
+            return $"its schedule item is not one of the duty's schedule: {notOpened}";
+        }
+
         (JsonElement Item, DateTimeOffset Due)? own = PolicyRecords.Text(schedule, "kind") switch
         {
             "interval" when occurrence.ValueKind == JsonValueKind.Object && occurrence.TryGetProperty("number", out JsonElement n) && n.ValueKind == JsonValueKind.Number && n.TryGetInt64(out long number) && number >= 0

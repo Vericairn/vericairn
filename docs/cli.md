@@ -1215,11 +1215,12 @@ until time; when a period's cap is reached its occurrences defer and `goal step`
 awaiting review reach the plan's `awaitingReview` (`--awaiting-review`, three when unset) dispatch defers; while the runs in flight
 fill the budget's concurrency (one when it states none) occurrences wait; and after the goal's `limits.consecutiveFailures` failed
 runs in a row (three when it sets none), each run counted once by its result, failed when blocked or abandoned whatever its
-harness's exit, or with no result by its settlement as a known failure unless a principal asked it to stop (`--stop-runs`, `goal
-stop`), `goal step` asks the sponsor once and dispatches nothing until a decision answers it. A run's intent is refused at the
-record, whatever route starts it, for a run on no occurrence or on a settled one, past the until time, during the failure pause,
-past the period's runs or while results awaiting review reach their cap, each judged by the records before the intent. A second
-standing agent of one role over one subject is never activated, nor one past its until time.
+harness's exit, or with no result by its settlement as a known failure unless its sponsor (when a person) or an operator asked it to
+stop (`--stop-runs`, `goal stop`, `worker stop`; a stop by anyone else, the dispatcher that started it included, counts), `goal
+step` asks the sponsor once and dispatches nothing until a decision answers it. A run's intent is refused at the record, whatever
+route starts it, for a run on no occurrence or on a settled one, past the until time, during the failure pause, past the period's
+runs or while results awaiting review reach their cap, each judged by the records before the intent. A second standing agent of one
+role over one subject is never activated, nor one past its until time.
 
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]
