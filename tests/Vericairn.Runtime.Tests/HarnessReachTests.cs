@@ -255,9 +255,10 @@ public class HarnessReachTests
             return environment;
         }
 
+        /// <summary>Writes a file under the fixture home, the relative path's segments joined with this platform's separator.</summary>
         public string File(string relative, string content)
         {
-            string path = Path.Combine(Home, relative);
+            string path = Path.Combine([Home, .. relative.Split('/')]);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             System.IO.File.WriteAllText(path, content);
             return path;
