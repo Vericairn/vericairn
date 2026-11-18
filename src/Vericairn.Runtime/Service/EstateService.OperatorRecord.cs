@@ -242,7 +242,10 @@ public sealed partial class EstateService
             cancellationToken.ThrowIfCancellationRequested();
             adapter.Branch(Root, checkpoint.Basis, checkpoint.Branch, files, Receipts());
             stage = "commit";
-            string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, files, Receipts(), checkpoint.CarriedFiles);
+            // The commit carries the trailer lines the estate requires on every pushed commit, so its checked push finds them (CODE-81).
+            IReadOnlyList<string> trailers;
+            lock (gate) trailers = [.. CommitMessages.In(session.Load(), DateTimeOffset.UtcNow).Trailers.Select(t => t.Line)];
+            string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, files, Receipts(), checkpoint.CarriedFiles, trailers);
             if (checkpoint.Head is not null && checkpoint.Head != head) throw new ProviderRefusedException("The recorded commit changed; reconcile it before continuing.");
             checkpoint = checkpoint with { Head = head };
             lock (gate) SaveOperatorCheckpoint(identity, checkpoint);

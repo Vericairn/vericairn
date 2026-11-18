@@ -49,6 +49,36 @@ public sealed class PushProviderTests
         Assert.Equal(verdict == "passed", scan.Passed(Plan));
     }
 
+    // CODE-81: the scan's range reads, its own count and gitleaks' git, ignore the clone's info/grafts, replace objects and derived
+    // caches, which could otherwise hide a commit of the range from the scan while the push still delivers it.
+    [Fact]
+    public void TheScansRangeReadsIgnoreTheClonesGraftsReplaceObjectsAndCaches()
+    {
+        var started = new List<ProcessStartInfo>();
+        var scanner = new GitleaksScanner(info =>
+        {
+            started.Add(info);
+            if (info.FileName == "git") return Success("2");
+            if (info.ArgumentList[0] == "version") return Success("8.30.1");
+            string report = info.ArgumentList.Single(a => a.StartsWith("--report-path=", StringComparison.Ordinal)).Split('=', 2)[1];
+            File.WriteAllText(report, "0");
+            return Success();
+        });
+        Assert.Equal("passed", scanner.Scan(Path.GetTempPath(), Plan).Verdict);
+        Assert.Contains(started, i => i.FileName == "git");
+        Assert.Contains(started, i => i.FileName == "gitleaks" && i.ArgumentList[0] == "git");
+        Assert.All(started, info =>
+        {
+            Assert.Equal("1", info.Environment["GIT_NO_REPLACE_OBJECTS"]);
+            string grafts = info.Environment["GIT_GRAFT_FILE"]!;
+            Assert.True(Path.IsPathFullyQualified(grafts) && !File.Exists(grafts) && !Directory.Exists(Path.GetDirectoryName(grafts)));
+            Assert.False(info.Environment.ContainsKey("GIT_CONFIG_PARAMETERS"));
+            Assert.Equal("3", info.Environment["GIT_CONFIG_COUNT"]);
+            Assert.Equal(["core.commitGraph=false", "pack.useBitmaps=false", "core.multiPackIndex=false"],
+                Enumerable.Range(0, 3).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
+        });
+    }
+
     [Theory]
     [InlineData("NotStarted")]
     [InlineData("TimedOut")]

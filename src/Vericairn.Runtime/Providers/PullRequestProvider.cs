@@ -8,7 +8,20 @@ public sealed record ChangeCheck(string Name, string Head, string Status, string
 
 /// <summary>A pull request and its complete check inventory. Incomplete observations never authorize a merge.</summary>
 public sealed record PullRequestObservation(string Number, string Branch, string Target, string Head, string State,
-    string? MergeCommit, IReadOnlyList<ChangeCheck> Checks, bool Complete = true);
+    string? MergeCommit, IReadOnlyList<ChangeCheck> Checks, bool Complete = true)
+{
+    /// <summary>
+    /// The pull request's title as the host reports it, which the message of its merge commit carries (CODE-81); null when the provider
+    /// does not report it.
+    /// </summary>
+    public string? Title { get; init; }
+
+    /// <summary>
+    /// The pull request's description as the host reports it, which a merge queue's merge commit may carry where the repository's
+    /// setting adds it (CODE-81); null when the provider does not report it.
+    /// </summary>
+    public string? Body { get; init; }
+}
 
 /// <summary>The target branch's push runs at the exact merge commit, including their jobs.</summary>
 public sealed record TargetObservation(string Branch, string Head, IReadOnlyList<ChangeCheck> Checks, bool Complete = true)
@@ -75,12 +88,19 @@ public interface IPullRequestProvider
     /// <summary>Merges immediately only if the pull request still has this head; an ambiguous receipt throws uncertainty.</summary>
     ChangeReceipt Merge(string destination, string number, string head);
 
+    /// <summary>
+    /// As <see cref="Merge(string, string, string)"/>, creating the merge commit with exactly this message, its first line the commit's
+    /// title and the rest its body (CODE-81): the message the runtime checked against the estate's blocked terms. A provider that does
+    /// not override this merges with the host's own message, which the runtime composes the same way but cannot hold the host to.
+    /// </summary>
+    ChangeReceipt Merge(string destination, string number, string head, string message) => Merge(destination, number, head);
+
     /// <summary>Observes push runs on the target branch at the merge commit, never the branch's latest commit.</summary>
     TargetObservation ObserveTarget(string destination, string branch, string commit);
 
     /// <summary>
     /// Observes whether the pull request's target branch requires a merge queue, and the pull request's place in it (CODE-71). A
-    /// provider that does not override this reports that no queue is required, so merges go through <see cref="Merge"/> as before.
+    /// provider that does not override this reports that no queue is required, so merges go through <see cref="Merge(string, string, string)"/> as before.
     /// </summary>
     MergeQueueObservation ObserveQueue(string destination, string number) => new(false, "absent");
 
@@ -141,7 +161,7 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
         {
             if (Observe(destination, branch) is not null) throw new ProviderRefusedException("A pull request already exists for this branch.");
             string number = (++nextNumber).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            pulls[destination + "#" + number] = new(number, branch, target, head, "open", null, Checks.ToArray());
+            pulls[destination + "#" + number] = new(number, branch, target, head, "open", null, Checks.ToArray()) { Title = title, Body = body };
             Effects++;
             return new(number);
         }
@@ -186,6 +206,20 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
             pulls[destination + "#" + number] = pull with { State = "merged", MergeCommit = MergeCommit };
             Effects++;
             return new(number, MergeCommit);
+        }
+    }
+
+    /// <summary>The message the last merge with a message created its merge commit with, or null (CODE-81).</summary>
+    public string? MergeMessage { get; private set; }
+
+    /// <inheritdoc />
+    public ChangeReceipt Merge(string destination, string number, string head, string message)
+    {
+        lock (gate)
+        {
+            ChangeReceipt receipt = Merge(destination, number, head);
+            MergeMessage = message;
+            return receipt;
         }
     }
 

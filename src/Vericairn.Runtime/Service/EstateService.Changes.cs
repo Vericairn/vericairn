@@ -64,6 +64,7 @@ public sealed partial class EstateService
             SecretScan scan = scanner.Scan(directory, plan);
             claim.Body["scan"] = JsonSerializer.SerializeToNode(scan, ChangeJson);
             if (!scan.Passed(plan)) throw new ProviderRefusedException("The scan of exactly the push's commits did not pass.");
+            string? warned = CheckPushedMessages(claim, adapter, directory, plan);
             RefuseHeldDisclosure(claim, adapter, directory, plan);
             // The dispatch record precedes the push, which runs within its two-minute bound: the session must outlast it (ID-16).
             PresenceEffectAhead();
@@ -80,23 +81,149 @@ public sealed partial class EstateService
             }, out RecordWritten receipt);
             if (observed != request.Head) throw new ProviderUncertainException("The pushed head was not confirmed at the remote branch.");
             FinishChange(claim, "observed-success", "The scanned commit was observed at the remote branch.");
-            return ChangeAnswer(claim, true, "The exact scanned head was pushed and observed.") with { Observation = receipt };
+            return ChangeAnswer(claim, true, "The exact scanned head was pushed and observed." + (warned is null ? string.Empty : " " + warned)) with { Observation = receipt };
         });
     }
 
+    // CODE-81: every commit message the push carries, trailers included, is matched against the estate's blocked terms before anything
+    // is pushed, and each carries every trailer line the estate requires. A blocked term refuses, or warns where the estate configures
+    // it; a missing or altered trailer refuses. The refusal and the recorded evidence name the commit and the policy, never the matched
+    // text or the trailer. Returns the warning, if any.
+    private string? CheckPushedMessages(ChangeClaim claim, IPushAdapter adapter, string directory, PushPlan plan)
+    {
+        CommitMessages.Settings settings;
+        lock (gate) settings = CommitMessages.In(session.Load(), DateTimeOffset.UtcNow);
+        if (!settings.Checks) return null;
+        IReadOnlyList<PushedCommit> commits = adapter.CommitMessages(directory, plan)
+            ?? throw new ProviderRefusedException("The estate checks commit messages, and the push's messages could not be read to check them; nothing was pushed.");
+        if (commits.Any(c => c is null || !Patterns.Commit.IsMatch(c.Commit) || c.Message is null))
+            throw new ProviderRefusedException("The push's commit messages could not be read completely to check them; nothing was pushed.");
+        (CommitMessages.Finding? refusal, IReadOnlyList<CommitMessages.Finding> warnings) = CommitMessages.Check(settings, commits.Select(c => ("Commit `" + c.Commit + "`", c.Message)));
+        if (refusal is not null) throw new ProviderRefusedException(CommitMessages.Describe(refusal) + " Nothing was pushed; reword the commit and push again.");
+        string checkedWhat = (settings.Lists.IsEmpty ? string.Empty : "the estate's blocked terms") + (settings.Lists.IsEmpty || settings.Trailers.IsEmpty ? string.Empty : " and ")
+            + (settings.Trailers.IsEmpty ? string.Empty : "the trailer lines it requires");
+        string? warned = MessageWarning(settings, warnings, "pushed");
+        claim.Body["evidence"]!.AsArray().Add(new JsonObject
+        {
+            ["summary"] = $"The messages of the {commits.Count} {(commits.Count == 1 ? "commit" : "commits")} the push carries that the target branch does not hold were checked against {checkedWhat}" + (warned is null ? "; none was refused." : ". " + warned),
+        });
+        return warned;
+    }
+
+    // The warning a blocked term at the warn level gives: each commit and its list, and the policies that set the level.
+    private static string? MessageWarning(CommitMessages.Settings settings, IReadOnlyList<CommitMessages.Finding> warnings, string effect) => warnings.Count == 0 ? null
+        : "Warned, not refused, as estate policy " + string.Join(" and ", settings.LevelPolicies) + " sets blocked terms in commit messages to warn: "
+            + string.Join(" ", warnings.Take(5).Select(CommitMessages.Describe)) + (warnings.Count > 5 ? $" {warnings.Count - 5} more commits carry one too." : string.Empty)
+            + " The change was " + effect + ".";
+
     // A held work order's key and distinctive text stay out of a public repository until the release carrying it is published,
-    // whoever wrote the commits. A repository whose visibility is not recorded as public is not held to this check.
+    // whoever wrote the commits. A repository whose visibility is not recorded as public is not held to this check. Before then, one
+    // push may carry them (FIX-137): the carrying release's documentation set, with the held fixes it carries, once the operator has
+    // approved that release's Security section (DisclosureHolds.DocumentationSetRelease); the push must carry that set and nothing else
+    // but the release's held fixes.
     private void RefuseHeldDisclosure(ChangeClaim claim, IPushAdapter adapter, string directory, PushPlan plan)
     {
         if (EstateModel.BodyString(claim.Configuration.Repository, "visibility") != "public") return;
-        IReadOnlyList<DisclosureHolds.Hold> holds;
-        lock (gate) holds = DisclosureHolds.Active(session.Load());
+        List<(DisclosureHolds.Hold Hold, string? Release)> holds;
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            holds = [.. DisclosureHolds.Active(model).Select(h => (h, DisclosureHolds.DocumentationSetRelease(model, h, claim.Configuration.Product.Id)))];
+        }
         if (holds.Count == 0) return;
+        // The repository is read outside the gate, once for each release whose documentation set could let a hold pass.
+        Dictionary<string, string?> refusedSet = holds.Select(h => h.Release).OfType<string>().Distinct(StringComparer.Ordinal)
+            .ToDictionary(version => version, version => NotTheDocumentationSet(adapter, directory, plan, version,
+                [.. holds.Where(h => h.Release == version).Select(h => h.Hold)]), StringComparer.Ordinal);
+        List<DisclosureHolds.Hold> held = [.. holds.Where(h => h.Release is null || refusedSet[h.Release] is not null).Select(h => h.Hold)];
+        if (held.Count == 0) return;
         string text = adapter.PublishedText(directory, plan)
             ?? throw new ProviderRefusedException("A disclosure hold is in force, and the push's text could not be read to check it; nothing was pushed.");
-        if (DisclosureHolds.Disclosed(holds, text) is string key)
-            throw new ProviderRefusedException($"The push would disclose held work order {key} in a public repository before the release that carries it is published; nothing was pushed.");
+        if (DisclosureHolds.Disclosed(held, text) is string key)
+            throw new ProviderRefusedException($"The push would disclose held work order {key} in a public repository before the release that carries it is published; nothing was pushed."
+                + (holds.FirstOrDefault(h => h.Hold.Key == key && h.Release is not null).Release is string release
+                    ? " Only the push that carries that release's documentation set, with nothing but documentation and the release's held fixes, may carry it now; " + refusedSet[release] : string.Empty));
     }
+
+    // Why the push is not the release's documentation set, unmerged, and nothing else, or null when it is: its head holds the set's
+    // manifest for that version and the target branch's head holds none, as while the set's pull request is open; and every commit it
+    // carries that the target does not hold is one of the release's held fixes, whose subject begins with its held work order's key and
+    // a colon, or changes documentation only (DocumentationPath), Directory.Build.props only in its version. A manifest of another format
+    // or version is not the set, and a push carrying the manifest beside any other change is not the set. The reason names commits and
+    // paths, never held text.
+    private static string? NotTheDocumentationSet(IPushAdapter adapter, string directory, PushPlan plan, string version, IReadOnlyList<DisclosureHolds.Hold> held)
+    {
+        string path = DocumentationSetDirectory + version + "/manifest.json";
+        string? manifest = adapter.FileText(directory, plan, plan.Head, path);
+        if (manifest is null) return "the push's head holds no documentation set of that release.";
+        if (adapter.FileText(directory, plan, plan.TargetHead, path) is not null) return "the target branch already holds that release's documentation set.";
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(manifest);
+            if (document.RootElement.ValueKind != JsonValueKind.Object || ChangeText(document.RootElement, "format") != Vericairn.Runtime.Release.ReleaseFlow.DocumentationManifest
+                || ChangeText(document.RootElement, "version") != version) return "the push's manifest is not that release's documentation set.";
+        }
+        catch (JsonException)
+        {
+            return "the push's manifest is not that release's documentation set.";
+        }
+        // The messages and the paths are read separately, each within its own bound, so either one's failure is named for what it is.
+        IReadOnlyList<PushedCommit>? commits = adapter.CommitMessages(directory, plan);
+        if (commits is null || commits.Any(c => c is null || c.Message is null || !Patterns.Commit.IsMatch(c.Commit)))
+            return "the messages of the commits it carries could not be read.";
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? paths = adapter.ChangedPaths(directory, plan);
+        if (paths is null || paths.Count != commits.Count || commits.Any(c => !paths.ContainsKey(c.Commit) || paths[c.Commit] is null))
+            return "the paths its commits change could not be read.";
+        bool versioned = false;
+        foreach (PushedCommit commit in commits)
+        {
+            if (held.Any(h => DisclosureHolds.IsHeldFix(h, commit.Message))) continue;
+            if (paths[commit.Commit].Any(p => !DocumentationPath(p) && p != BuildProperties))
+                return $"commit `{commit.Commit}` changes a path outside the documentation set and is not a held fix of that release.";
+            versioned |= paths[commit.Commit].Contains(BuildProperties, StringComparer.Ordinal);
+        }
+        if (versioned && !VersionOnly(adapter.FileText(directory, plan, plan.Head, BuildProperties), adapter.FileText(directory, plan, plan.TargetHead, BuildProperties)))
+            return $"its {BuildProperties} differs from the target branch's in more than the version.";
+        return null;
+    }
+
+    // Where a software product's release keeps its documentation sets, one directory per version (the release flow's docs-set step).
+    private const string DocumentationSetDirectory = "docs/releases/";
+
+    // The MSBuild file every project imports, where the release flow sets the new version (VersionPrefix).
+    private const string BuildProperties = "Directory.Build.props";
+
+    // A path a documentation set's pull request changes that cannot carry code into the build: a Markdown, JSON or plain-text file
+    // under docs/, outside any hidden directory and other than a global.json, and the root's README.md and llms.txt.
+    private static bool DocumentationPath(string path)
+    {
+        if (path is "README.md" or "llms.txt") return true;
+        if (!path.StartsWith("docs/", StringComparison.Ordinal) || !Patterns.RelativePath.IsMatch(path)) return false;
+        string[] segments = path.Split('/');
+        string name = segments[^1];
+        return !segments.Any(s => s.StartsWith('.')) && !name.Equals("global.json", StringComparison.OrdinalIgnoreCase)
+            && (name.EndsWith(".md", StringComparison.Ordinal) || name.EndsWith(".json", StringComparison.Ordinal) || name.EndsWith(".txt", StringComparison.Ordinal));
+    }
+
+    // Whether Directory.Build.props at the push's head differs from the target branch's only in the VersionPrefix element's value: the
+    // same lines in the same order, but for one line each that holds that element alone. A file missing on either side differs.
+    private static bool VersionOnly(string? head, string? target)
+    {
+        if (head is null || target is null) return false;
+        string[] next = head.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'), prior = target.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        if (next.Length != prior.Length) return false;
+        int changed = 0;
+        for (int i = 0; i < next.Length; i++)
+        {
+            if (next[i] == prior[i]) continue;
+            if (!VersionLine().IsMatch(next[i]) || !VersionLine().IsMatch(prior[i]) || ++changed > 1
+                || next[i][..next[i].IndexOf('<', StringComparison.Ordinal)] != prior[i][..prior[i].IndexOf('<', StringComparison.Ordinal)]) return false;
+        }
+        return true;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[ \t]*<VersionPrefix>(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)</VersionPrefix>$")]
+    private static partial System.Text.RegularExpressions.Regex VersionLine();
 
     /// <summary>Opens only from a recorded successful push of the same repository, branch and exact head.</summary>
     public ChangeResponse ChangesOpen(ChangesOpenRequest request)
@@ -169,6 +296,7 @@ public sealed partial class EstateService
                 if (!ScannedPush(claim, pull.Branch, request.Head))
                     throw new ProviderRefusedException("No successful scanned push of this exact head to the pull request's branch is recorded; push it with vericairn changes push, which scans exactly its commits, before merging.");
             }
+            (string? message, string? warned) = CheckMergeMessage(claim, pull, queue.Required || pinnedToQueue);
             claim.Body["target"]!["pullRequest"] = pull.Number;
             claim.Body["target"]!["branch"] = pull.Branch;
             claim.Body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Checks observed before merge.", ["hash"] = observed.Hash, ["location"] = observed.Path });
@@ -178,18 +306,51 @@ public sealed partial class EstateService
                     throw new ProviderRefusedException("This merge was recorded through the target branch's merge queue, which the branch no longer requires; nothing was merged. Push a new head to merge it directly.");
                 if (queue.State is "queued" or "unmergeable")
                     throw new ProviderRefusedException("The pull request is already in the merge queue, enqueued outside this operation; nothing was requested.");
-                return EnqueueChange(claim, pull.Number);
+                ChangeResponse enqueued = EnqueueChange(claim, pull.Number);
+                return warned is null ? enqueued : enqueued with { Message = enqueued.Message + " " + warned };
             }
             PresenceEffectAhead();
             DispatchChange(claim);
             claim.EffectMayHaveStarted = true;
-            ChangeReceipt receipt = claim.Configuration.Provider.Merge(claim.Configuration.Destination, pull.Number, request.Head);
+            // Where the estate checks commit messages, the merge commit is created with exactly the message checked (CODE-81).
+            ChangeReceipt receipt = message is null ? claim.Configuration.Provider.Merge(claim.Configuration.Destination, pull.Number, request.Head)
+                : claim.Configuration.Provider.Merge(claim.Configuration.Destination, pull.Number, request.Head, message);
             if (receipt.PullRequest != pull.Number || receipt.MergeCommit is null || !Patterns.Commit.IsMatch(receipt.MergeCommit))
                 throw new ProviderUncertainException("The merge was requested but its exact merge commit was not confirmed.");
             claim.Body["target"]!["mergeCommit"] = receipt.MergeCommit;
             FinishChange(claim, "observed-success", "The host confirmed the merge of the pinned head.");
-            return ObserveChangeTarget(claim, receipt.MergeCommit);
+            ChangeResponse merged = ObserveChangeTarget(claim, receipt.MergeCommit);
+            return warned is null ? merged : merged with { Message = merged.Message + " " + warned };
         });
+    }
+
+    // CODE-81: the message of the merge commit this merge would create is matched against the estate's blocked terms at the estate's
+    // level before anything is merged. The trailer lines the estate requires apply to the commits a push carries, not to the merge commit
+    // the host creates. Returns the message to merge with, null where the estate checks no commit message, and the warning, if any.
+    private (string? Message, string? Warned) CheckMergeMessage(ChangeClaim claim, PullRequestObservation pull, bool queued)
+    {
+        CommitMessages.Settings settings;
+        lock (gate) settings = CommitMessages.In(session.Load(), DateTimeOffset.UtcNow);
+        if (settings.Lists.IsEmpty) return (null, null);
+        if (queued && (pull.Title is null || pull.Body is null))
+            throw new ProviderRefusedException("The estate checks commit messages, and the pull request's title and description, which the merge queue's merge commit may carry, could not be observed; nothing was merged.");
+        // As the host composes a merge commit's message: a title naming the pull request and its branch, then the pull request's title.
+        string message = $"Merge pull request #{pull.Number} from {claim.Configuration.Destination.Split('/')[0]}/{pull.Branch}"
+            + (string.IsNullOrEmpty(pull.Title) ? string.Empty : "\n\n" + pull.Title);
+        // A merge queue cannot be given the message: where the repository's setting adds the pull request's description, its merge commit
+        // carries that too, so the description is checked with the message before the change is enqueued.
+        string checkedText = queued && pull.Body!.Length > 0 ? message + "\n\n" + pull.Body : message;
+        (CommitMessages.Finding? refusal, IReadOnlyList<CommitMessages.Finding> warnings) =
+            CommitMessages.Check(settings, [("The merge commit of pull request " + pull.Number, checkedText)], trailers: false);
+        if (refusal is not null)
+            throw new ProviderRefusedException(CommitMessages.Describe(refusal) + (queued ? " Nothing was merged; reword the pull request's title or description and merge again." : " Nothing was merged; retitle the pull request and merge again."));
+        string? warned = MessageWarning(settings, warnings, queued ? "enqueued" : "merged");
+        claim.Body["evidence"]!.AsArray().Add(new JsonObject
+        {
+            ["summary"] = (queued ? "The message the merge queue composes for this change's merge commit, with the pull request's description it may add, was checked" : "The merge commit's message was checked, and the merge sets it exactly,")
+                + " against the estate's blocked terms" + (warned is null ? "; none was refused." : ". " + warned),
+        });
+        return (message, warned);
     }
 
     /// <summary>
