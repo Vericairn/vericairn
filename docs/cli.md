@@ -1201,23 +1201,25 @@ A key holds one assignment whoever records it, `records new assignment` included
 unless a person takes the occurrence over with `work takeover`, and a revision of an assignment keeps its occurrence exactly, so it
 never frees the key. Two clones that each recorded one leave both flagged `standing.duplicate`, which `status` lists among its
 reconcile tasks: record a reconciliation about either one that keeps one and withdraws the other (`records new reconciliation`, by
-the operator or under `local-engineering`). A new occurrence is carried only as its trigger makes it, while its agent is active and
-before its until time at the assignment's own time: a schedule's latest due interval (missed ticks coalesce), an event's record of
-the trigger's type and filters recorded after the trigger was activated, never the agent's own, a condition failing over the
-records its item names, a duty occurrence's exact identity with its due time and deadline, and a request by its own requester. A
-settled occurrence, its result completed or partial and not returned by a review, runs again only when a review returns its result,
-on the assignment that holds it; a blocked or abandoned result settles nothing, and its assignment goes on within its attempts.
+the operator or under `local-engineering`). A reconciliation settles only such a duplicate, two or more assignments holding the key
+that are not stranded, and keeps one of them; a result on any assignment of the key, a withdrawn one included, still settles it. A
+new occurrence is carried only as its trigger makes it, while its agent is active and before its until time at the assignment's own
+time: a schedule's latest due interval (missed ticks coalesce), an event's record of the trigger's type and filters recorded after
+the trigger was activated, never the agent's own, a condition failing over the records its item names, a duty occurrence's exact
+identity with its due time and deadline, and a request by its own requester. A settled occurrence, its result completed or partial
+and not returned by a review, runs again only when a review returns its result, on the assignment that holds it; a blocked or
+abandoned result settles nothing, and its assignment goes on within its attempts.
 
 Every assignment of the standing work order names an occurrence. Nothing is dispatched while the goal is not active or past its
 until time; when a period's cap is reached its occurrences defer and `goal step` asks the sponsor once in the period; while results
 awaiting review reach the plan's `awaitingReview` (`--awaiting-review`, three when unset) dispatch defers; while the runs in flight
 fill the budget's concurrency (one when it states none) occurrences wait; and after the goal's `limits.consecutiveFailures` failed
 runs in a row (three when it sets none), each run counted once by its result, failed when blocked or abandoned whatever its
-harness's exit, or with no result by its settlement as a known failure, `goal step` asks the sponsor once and dispatches nothing
-until a decision answers it. A run's intent is refused at the record, whatever route starts it, for a run on no occurrence or on a
-settled one, past the until time, during the failure pause, past the period's runs or while results awaiting review reach their
-cap, each judged by the records before the intent. A second standing agent of one role over one subject is never activated, nor
-one past its until time.
+harness's exit, or with no result by its settlement as a known failure unless a principal asked it to stop (`--stop-runs`, `goal
+stop`), `goal step` asks the sponsor once and dispatches nothing until a decision answers it. A run's intent is refused at the
+record, whatever route starts it, for a run on no occurrence or on a settled one, past the until time, during the failure pause,
+past the period's runs or while results awaiting review reach their cap, each judged by the records before the intent. A second
+standing agent of one role over one subject is never activated, nor one past its until time.
 
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]

@@ -114,8 +114,8 @@ internal sealed class StandingFixture : IDisposable
     /// <summary>The intent of an agent run carrying an assignment of the goal, with a cap of ten minutes.</summary>
     public RecordEnvelope RunIntent(RecordEnvelope assignment, string identity) => Add("operation", RunBody(assignment, identity, "not-started"));
 
-    /// <summary>A run's settlement: its intent's revision with the status, observed and charged five minutes.</summary>
-    public RecordEnvelope Settle(RecordEnvelope intent, string status)
+    /// <summary>A run's settlement: its intent's revision with the status, observed and charged five minutes, and the stop asked of it when one was.</summary>
+    public RecordEnvelope Settle(RecordEnvelope intent, string status, string? stoppedBy = null)
     {
         RecordEnvelope assignment = Estate.Load().ById[intent.Body.GetProperty("target").GetProperty("assignment").GetString()!];
         JsonObject dispatched = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, "dispatched");
@@ -125,6 +125,11 @@ internal sealed class StandingFixture : IDisposable
         body["dispatchedAt"] = intent.At;
         body["observed"] = new JsonObject { ["summary"] = "The run ended.", ["at"] = RecordParser.FormatTimestamp(Estate.Clock) };
         body["usage"] = new JsonObject { ["wallMinutes"] = 5, ["unreported"] = new JsonArray() };
+        if (stoppedBy is not null)
+        {
+            body["stop"] = new JsonObject { ["requestedAt"] = running.At, ["requestedBy"] = stoppedBy, ["reason"] = "Asked to stop.", ["containedAt"] = RecordParser.FormatTimestamp(Estate.Clock) };
+        }
+
         return Add("operation", body, supersedes: running.Id);
     }
 

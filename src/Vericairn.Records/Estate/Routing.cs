@@ -370,7 +370,7 @@ public static class Routing
 
     /// <summary>
     /// The current assignments of a work order that hold its step, any revision of it, oldest first; the last one holds the step. An
-    /// assignment routing stored without the record it was routed with holds nothing (<see cref="Stranded"/>).
+    /// assignment routing stored without the record it was routed with holds nothing (<see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/>).
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order)
     {
@@ -402,13 +402,21 @@ public static class Routing
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(assignment);
+        return Stranded(model, assignment, model.Chain(model.Latest(assignment)), before);
+    }
+
+    /// <summary>
+    /// <see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/> over an explicit chain of the assignment's revisions: a
+    /// reconciliation judges each assignment it names on its own chain, not on the kept one's that a withdrawal folds it into.
+    /// </summary>
+    internal static bool Stranded(EstateModel model, RecordEnvelope assignment, IReadOnlyList<string> chain, RecordEnvelope? before)
+    {
         string? with = EstateModel.BodyString(assignment, "routedWith");
         if (with is null)
         {
             return false;
         }
 
-        IReadOnlyList<string> chain = model.Chain(model.Latest(assignment));
         bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
         return with switch
         {

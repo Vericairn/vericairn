@@ -116,7 +116,7 @@ public sealed class ReconciliationType : IRecordType
 
         if (occurrence)
         {
-            SettledOccurrence(context, subject!, withdrawn.Append(kept).ToList());
+            SettledOccurrence(context, subject!, withdrawn.Append(kept).ToList(), kept);
         }
 
         foreach (string id in identity || occurrence ? [] : withdrawn.Append(kept))
@@ -175,11 +175,14 @@ public sealed class ReconciliationType : IRecordType
     }
 
     // Every record kept or withdrawn is an assignment naming the subject's occurrence, the latest revision of its own chain, and no two of
-    // them are revisions of one assignment.
-    private static void SettledOccurrence(ValidationContext context, RecordEnvelope subject, List<string> named)
+    // them are revisions of one assignment. It settles a real duplicate only, as standing.duplicate reports one: two or more of them hold
+    // the key when it is recorded (recorded before it, withdrawn by no earlier reconciliation, and not stranded, since a stranded
+    // assignment holds nothing), and the one kept is one of those, so the key stays held and a settled occurrence stays settled.
+    private static void SettledOccurrence(ValidationContext context, RecordEnvelope subject, List<string> named, string kept)
     {
         string? key = Estate.StandingAgents.KeyOf(subject);
         var chains = new HashSet<string>(StringComparer.Ordinal);
+        var holders = new HashSet<string>(StringComparer.Ordinal);
         foreach (string id in named)
         {
             RecordEnvelope? record = context.Find(id);
@@ -199,7 +202,30 @@ public sealed class ReconciliationType : IRecordType
             {
                 context.Error("reconciliation.occurrence", $"{id} revises an assignment the reconciliation already names; it settles independent assignments, one revision each.");
             }
+            else if (HoldsAt(context, record))
+            {
+                holders.Add(id);
+            }
         }
+
+        if (holders.Count < 2)
+        {
+            context.Error("reconciliation.occurrence", $"Occurrence {key} is held by {holders.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} of the assignments named, not a duplicate: a reconciliation settles an occurrence only while two or more current assignments that are not stranded hold its key.");
+        }
+        else if (!holders.Contains(kept))
+        {
+            context.Error("reconciliation.occurrence", $"{kept} does not hold occurrence {key}: it is stranded, withdrawn or later than this reconciliation, and the kept assignment is one that holds the key.");
+        }
+    }
+
+    // An assignment holds its occurrence's key when a reconciliation is recorded: recorded before it, withdrawn by no earlier
+    // reconciliation, and not stranded as the records then stood.
+    private static bool HoldsAt(ValidationContext context, RecordEnvelope assignment)
+    {
+        RecordEnvelope reconciliation = context.Record;
+        bool withdrawn = context.Model.OfType("reconciliation").Any(r => r.Id != reconciliation.Id && Estate.GoalRules.Before(r, reconciliation)
+            && EstateModel.BodyString(r, "kept") != assignment.Id && Named(r).Contains(assignment.Id, StringComparer.Ordinal));
+        return Estate.GoalRules.Before(assignment, reconciliation) && !withdrawn && !Estate.Routing.Stranded(context.Model, assignment, context.Model.Chain(assignment), reconciliation);
     }
 
     // Every record kept or withdrawn names an operation under the subject's identity, the latest revision of its own operation, and

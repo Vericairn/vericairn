@@ -229,7 +229,7 @@ internal static class StandingAgents
 
     /// <summary>The consecutive failed runs that pause a standing agent: its goal's limits.consecutiveFailures, or three.</summary>
     public static int FailureLimit(RecordEnvelope goal) =>
-        TJson.Object(goal.Body, "limits") is { ValueKind: JsonValueKind.Object } limits && limits.TryGetProperty("consecutiveFailures", out JsonElement limit) && limit.TryGetInt32(out int allowed) && allowed > 0
+        TJson.Object(goal.Body, "limits") is { ValueKind: JsonValueKind.Object } limits && limits.TryGetProperty("consecutiveFailures", out JsonElement limit) && limit.ValueKind == JsonValueKind.Number && limit.TryGetInt32(out int allowed) && allowed > 0
             ? allowed : DefaultConsecutiveFailures;
 
     /// <summary>
@@ -280,7 +280,7 @@ internal static class StandingAgents
     /// <summary>The item's part of a key, from the item an assignment records; null when the item does not fit its kind.</summary>
     public static string? ItemKey(string kind, JsonElement item) => kind switch
     {
-        "schedule" => item.TryGetProperty("interval", out JsonElement n) && n.TryGetInt64(out long number) ? "interval-" + number.ToString(CultureInfo.InvariantCulture) : null,
+        "schedule" => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("interval", out JsonElement n) && n.ValueKind == JsonValueKind.Number && n.TryGetInt64(out long number) ? "interval-" + number.ToString(CultureInfo.InvariantCulture) : null,
         "event" => TJson.Object(item, "record") is { ValueKind: JsonValueKind.Object } record && TJson.Text(record, "id") is string id && TJson.Text(record, "hash") is string hash ? $"record-{id}@{hash}" : null,
         "condition" => TJson.Text(item, "failing") is string failing ? "failing-" + failing : null,
         "request" => TJson.Text(item, "at") is string at && TJson.Text(item, "by") is string by ? $"request-{at}-{by}" : null,
@@ -310,7 +310,7 @@ internal static class StandingAgents
     /// <summary>A schedule trigger's tick: the anchor plus the interval number times its every, in days of 86,400 seconds or calendar months, the last day of a shorter month standing for the anchor's.</summary>
     public static DateTimeOffset? Tick(JsonElement trigger, long number)
     {
-        if (number < 0 || Time(TJson.Text(trigger, "firstAt")) is not { } anchor || !trigger.TryGetProperty("every", out JsonElement e) || !e.TryGetInt64(out long every) || every <= 0)
+        if (number < 0 || Time(TJson.Text(trigger, "firstAt")) is not { } anchor || !trigger.TryGetProperty("every", out JsonElement e) || e.ValueKind != JsonValueKind.Number || !e.TryGetInt64(out long every) || every <= 0)
         {
             return null;
         }
@@ -417,7 +417,7 @@ internal static class StandingAgents
         Period? period = PeriodOf(model, current, runs, asOf);
         (int failures, RecordEnvelope? failure) = Failures(model, current, assignments, runs);
         int awaitingCap = AwaitingReviewCap(current);
-        int awaiting = assignments.GroupBy(a => KeyOf(a)!, StringComparer.Ordinal).Select(g => g.Last()).Count(a => Settled(model, a) is RecordEnvelope settledBy && Awaiting(model, settledBy, null));
+        int awaiting = AwaitingCount(model, order, null);
         int limit = FailureLimit(current);
         int inFlight = runs.Count(r => r.InFlight);
         (string state, string reason) = status switch
@@ -609,7 +609,8 @@ internal static class StandingAgents
         {
             IReadOnlyList<string> chain = holders!.SelectMany(model.Chain).ToList();
             AgentRuns.Run? run = runs.LastOrDefault(r => r.Assignment is not null && chain.Contains(r.Assignment));
-            RecordEnvelope? result = WorkView.AttemptsOf(model, holder) is { Count: > 0 } attempts ? WorkView.ResultOf(model, attempts[^1]) : null;
+            // The occurrence's latest result, on whichever assignment of its key recorded it, so a revision or a withdrawal unsettles nothing.
+            RecordEnvelope? result = LatestResult(model, occurrence.Key, null);
             string contributor = Routing.NameOf(model, EstateModel.BodyString(holder, "contributor"));
             if (run is { InFlight: true })
             {
@@ -651,6 +652,13 @@ internal static class StandingAgents
             }
 
             return Gate(new(occurrence, "due", run is null ? $"assignment {holder.Id} holds it and goes on with a run" : $"assignment {holder.Id} holds it and goes on with another run after run {run.Id} ended {run.Status}", holder, run, null));
+        }
+
+        // No current assignment holds it, yet a result on one withdrawn since settles it: it stays settled, and nothing carries it again.
+        if (Settled(model, occurrence.Key, null) is RecordEnvelope settled)
+        {
+            bool reviewed = WorkView.ResultState(model, settled) == "accepted" || Passed(model, settled);
+            return new(occurrence, reviewed ? "disposed" : "settled", reviewed ? $"its result {settled.Id} is reviewed" : $"its result {settled.Id} waits for review; it reruns only when a review returns it", null, null, settled);
         }
 
         return Gate(new(occurrence, "due", occurrence.Summary, null, null, null));
@@ -722,7 +730,7 @@ internal static class StandingAgents
             return null;
         }
 
-        int every = spec.TryGetProperty("every", out JsonElement e) && e.TryGetInt32(out int n) && n > 0 ? n : 1;
+        int every = spec.TryGetProperty("every", out JsonElement e) && e.ValueKind == JsonValueKind.Number && e.TryGetInt32(out int n) && n > 0 ? n : 1;
         (DateTimeOffset start, DateTimeOffset end) = PeriodAt(unit, every, at);
         var caps = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (string name in new[] { "runs", "wallMinutes", "tokens", "currency" })
@@ -750,8 +758,9 @@ internal static class StandingAgents
     /// The goal's consecutive failed runs that count toward the failure pause, judged from the records before a record when one is given:
     /// one outcome for each settled run, in the order the runs were started: the latest result recorded on its assignment between its start
     /// and the next run of that assignment, failed when blocked or abandoned, whatever the harness's exit; or, with no result, its settlement,
-    /// failed when a known failure; a run that settled with neither a result nor a failure counts for nothing. Only the failures after the last
-    /// success, and after the failure its sponsor last answered the pause's ask about, count; the latest of them first.
+    /// failed when a known failure, unless a principal asked it to stop (its sponsor's pause or stop, or an operator's), when the failure is
+    /// theirs and not the agent's; a run that settled with neither a result nor a failure counts for nothing. Only the failures after the
+    /// last success, and after the failure its sponsor last answered the pause's ask about, count; the latest of them first.
     /// </summary>
     private static (int Count, RecordEnvelope? Latest) Failures(EstateModel model, RecordEnvelope goal, IReadOnlyList<RecordEnvelope> assignments, IReadOnlyList<AgentRuns.Run> runs, RecordEnvelope? before = null)
     {
@@ -772,7 +781,7 @@ internal static class StandingAgents
             {
                 outcomes.Add((result, EstateModel.BodyString(result, "outcome") is "blocked" or "abandoned"));
             }
-            else if (run.Status == "known-failure")
+            else if (run.Status == "known-failure" && !StopRequested(run))
             {
                 outcomes.Add((run.Latest, true));
             }
@@ -795,17 +804,42 @@ internal static class StandingAgents
         return (trailing.Count, trailing.Count == 0 ? null : trailing[0].Record);
     }
 
+    /// <summary>True when a principal asked a run to stop, not the worker for a cap the run reached.</summary>
+    private static bool StopRequested(AgentRuns.Run run) =>
+        run.Revisions.Any(r => TJson.Text(TJson.Object(r.Body, "stop"), "requestedBy") is string by && by != "worker");
+
     /// <summary>
-    /// The result that settles the occurrence an assignment holds, judged from the records before a record when one is given: its latest
-    /// result, completed or partial, unless a review by another principal than its author returns it (findings or fail) and no later
-    /// acceptance stands; null while nothing settles it.
+    /// Every assignment that names an occurrence key, in any revision, current, withdrawn by a reconciliation or stranded: a result on any
+    /// of them is the occurrence's, so nothing withdrawn or revised since unsettles it.
+    /// </summary>
+    private static IEnumerable<RecordEnvelope> Carriers(EstateModel model, string key) =>
+        model.OfType("assignment").Where(a => string.Equals(KeyOf(a), key, StringComparison.Ordinal));
+
+    /// <summary>The latest result recorded on any assignment of an occurrence key, judged from the records before a record when one is given.</summary>
+    private static RecordEnvelope? LatestResult(EstateModel model, string key, RecordEnvelope? before)
+    {
+        bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
+        return Carriers(model, key).SelectMany(a => WorkView.AttemptsOf(model, a)).SelectMany(attempt => model.About(attempt.Id, "result")).Where(Counts)
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+    }
+
+    /// <summary>
+    /// The result that settles the occurrence an assignment holds, judged from the records before a record when one is given: the latest
+    /// result recorded on any assignment of its key, whichever holds it now or was withdrawn, completed or partial, unless a review by
+    /// another principal than its author returns it (findings or fail) and no later acceptance stands; null while nothing settles it.
     /// </summary>
     internal static RecordEnvelope? Settled(EstateModel model, RecordEnvelope assignment, RecordEnvelope? before = null)
     {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        return KeyOf(assignment) is string key ? Settled(model, key, before) : null;
+    }
+
+    /// <summary>The result that settles an occurrence key, as <see cref="Settled(EstateModel, RecordEnvelope, RecordEnvelope?)"/> judges it.</summary>
+    internal static RecordEnvelope? Settled(EstateModel model, string key, RecordEnvelope? before = null)
+    {
         bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
-        RecordEnvelope? result = model.Chain(assignment).Where(model.ById.ContainsKey).Select(id => model.ById[id]).SelectMany(a => WorkView.AttemptsOf(model, a))
-            .SelectMany(attempt => model.About(attempt.Id, "result")).Where(Counts)
-            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+        RecordEnvelope? result = LatestResult(model, key, before);
         if (result is null || EstateModel.BodyString(result, "outcome") is "blocked" or "abandoned")
         {
             // A blocked or abandoned result settles nothing: the occurrence goes on, within its attempts, and the failure pause counts it.
@@ -817,6 +851,23 @@ internal static class StandingAgents
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
         bool accepted = chain.SelectMany(id => model.About(id, "acceptance")).Any(Counts);
         return review is not null && EstateModel.BodyString(review, "outcome") is "findings" or "fail" && !accepted ? null : result;
+    }
+
+    /// <summary>
+    /// The occurrences of a work order whose settling result awaits review, judged from the records before a record when one is given:
+    /// each key once, whichever of its assignments carried the result, one withdrawn by a reconciliation included.
+    /// </summary>
+    private static int AwaitingCount(EstateModel model, RecordEnvelope? order, RecordEnvelope? before)
+    {
+        if (order is null)
+        {
+            return 0;
+        }
+
+        IReadOnlyList<string> chain = model.Chain(model.Latest(order));
+        return model.OfType("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && (before is null || GoalRules.Before(a, before)))
+            .Select(KeyOf).OfType<string>().Distinct(StringComparer.Ordinal)
+            .Count(key => Settled(model, key, before) is RecordEnvelope result && Awaiting(model, result, before));
     }
 
     /// <summary>True when a settling result awaits review: no review by another principal than its author, and no acceptance, before the record.</summary>
@@ -898,7 +949,7 @@ internal static class StandingAgents
         }
 
         // Results awaiting review hold dispatch at the goal's cap (§ 10).
-        int awaiting = assignments.Count(a => Settled(model, a, before) is RecordEnvelope result && Awaiting(model, result, before));
+        int awaiting = AwaitingCount(model, FlowRuns.Work(model, goal), before);
         int cap = AwaitingReviewCap(goal);
         if (awaiting >= cap)
         {
@@ -1288,7 +1339,7 @@ internal static class StandingAgents
         switch (trigger.Kind)
         {
             case "schedule":
-                long number = item.TryGetProperty("interval", out JsonElement n) && n.TryGetInt64(out long value) ? value : -1;
+                long number = item.TryGetProperty("interval", out JsonElement n) && n.ValueKind == JsonValueKind.Number && n.TryGetInt64(out long value) ? value : -1;
                 if (Tick(trigger.Declaration, number) is not { } due || due > at || Time(TJson.Text(item, "dueAt")) != due)
                 {
                     context.Error("assignment.occurrence", $"Interval {number.ToString(CultureInfo.InvariantCulture)} of schedule {trigger.Key} is not due when this assignment is recorded, or its dueAt is not the schedule's: an occurrence is never carried before it is due.");
@@ -1348,7 +1399,7 @@ internal static class StandingAgents
         GoalPredicates.Verdict verdict = GoalPredicates.EvaluatePredicate(context.Model, predicate, context.Record.AtTime);
         string set = string.Join("\n", verdict.Read.Select(r => r.Id + " " + r.Hash).Order(StringComparer.Ordinal));
         bool fits = verdict.Value == "not-met" && TJson.Text(item, "failing") == ContentHash.Sha256(Encoding.UTF8.GetBytes(set))
-            && item.TryGetProperty("records", out JsonElement count) && count.TryGetInt32(out int records) && records == verdict.Read.Count;
+            && item.TryGetProperty("records", out JsonElement count) && count.ValueKind == JsonValueKind.Number && count.TryGetInt32(out int records) && records == verdict.Read.Count;
         if (fits)
         {
             return;
@@ -1401,28 +1452,35 @@ internal static class StandingAgents
             return "its duty's subject is not in this estate";
         }
 
+        // The schedule item is the duty's own, built from the policy's schedule as its evaluation builds it (kind with number, at or
+        // publication, nothing else), and the item must be it exactly in canonical form: an extra key or a changed value is another item.
         JsonElement schedule = PolicyRecords.Property(parameters, "schedule");
         JsonElement occurrence = TJson.Object(item, "schedule");
-        DateTimeOffset? due = TJson.Text(occurrence, "kind") switch
+        (JsonElement Item, DateTimeOffset Due)? own = PolicyRecords.Text(schedule, "kind") switch
         {
-            "interval" when PolicyRecords.Text(schedule, "kind") == "interval" && occurrence.TryGetProperty("number", out JsonElement n) && n.TryGetInt64(out long number) => DutyRecords.IntervalDue(schedule, number),
-            "date" when PolicyRecords.Text(schedule, "kind") == "date" && TJson.Text(occurrence, "at") == PolicyRecords.Text(schedule, "at") => DutyRecords.DateDue(schedule),
-            "release" when PolicyRecords.Text(schedule, "kind") == "release" && TJson.Text(TJson.Object(occurrence, "publication"), "id") is string release && model.ById.TryGetValue(release, out RecordEnvelope? published)
-                && published.Type == "release" && EstateModel.BodyString(published, "status") == "published" && published.ComputedHash == TJson.Text(TJson.Object(occurrence, "publication"), "hash") => published.AtTime,
+            "interval" when occurrence.ValueKind == JsonValueKind.Object && occurrence.TryGetProperty("number", out JsonElement n) && n.ValueKind == JsonValueKind.Number && n.TryGetInt64(out long number) && number >= 0
+                && DutyRecords.IntervalDue(schedule, number) is { } intervalDue => (JsonSerializer.SerializeToElement(new { kind = "interval", number }), intervalDue),
+            "date" when DutyRecords.DateDue(schedule) is { } dateDue => (JsonSerializer.SerializeToElement(new { kind = "date", at = PolicyRecords.Text(schedule, "at") }), dateDue),
+            "release" when TJson.Text(TJson.Object(occurrence, "publication"), "id") is string release && model.ById.TryGetValue(release, out RecordEnvelope? published)
+                && published.Type == "release" && EstateModel.BodyString(published, "status") == "published"
+                => (JsonSerializer.SerializeToElement(new { kind = "release", publication = new { type = published.Type, id = published.Id, hash = published.ComputedHash } }), published.AtTime),
             _ => null,
         };
-        if (due is null)
+        if (own is not { } expectedItem || occurrence.ValueKind != JsonValueKind.Object || CanonicalJson.Serialize(occurrence) != CanonicalJson.Serialize(expectedItem.Item))
         {
-            return "its schedule item is not one of the duty's schedule";
+            return own is null
+                ? "its schedule item is not one of the duty's schedule"
+                : $"its schedule item is not the duty's own, {CanonicalJson.Serialize(own.Value.Item)}, exactly";
         }
 
-        string expected = $"{policy.Id}:{PolicyRecords.Identity(model, subject)}:{CanonicalJson.Serialize(occurrence)}";
+        DateTimeOffset? due = expectedItem.Due;
+        string expected = $"{policy.Id}:{PolicyRecords.Identity(model, subject)}:{CanonicalJson.Serialize(expectedItem.Item)}";
         if (TJson.Text(item, "occurrence") != expected)
         {
             return $"its identity is not the duty occurrence's, {expected}";
         }
 
-        long grace = parameters.TryGetProperty("graceDays", out JsonElement days) && days.TryGetInt64(out long value) ? value : 0;
+        long grace = parameters.TryGetProperty("graceDays", out JsonElement days) && days.ValueKind == JsonValueKind.Number && days.TryGetInt64(out long value) ? value : 0;
         if (Time(TJson.Text(item, "dueAt")) != due || Time(TJson.Text(item, "deadline")) != due.Value.AddDays(grace))
         {
             return "its due time or deadline is not the schedule's";

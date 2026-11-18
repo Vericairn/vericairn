@@ -234,6 +234,44 @@ public class StandingAgentRoutingTests
     }
 
     [Fact]
+    public void AReconciliationKeepingAStrandedAssignmentNeverReleasesASettledOccurrenceForASecondRun()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Standing(run);
+        GoalStepResponse first = Step(run, goal, "first");
+        Assert.True(first.Ok, first.Message);
+        run.Settled(first.Run!.Run);
+        FlowStepRoutingTests.Done(run, first.Assignment!.Id, ("findings", FlowFixture.Hash('a'), "text/markdown"));
+        EstateModel model = run.Estate.Load();
+        RecordEnvelope holder = model.ById[first.Assignment.Id];
+        RecordEnvelope order = model.Current("work-order").Single(o => EstateModel.BodyString(o, "key") == "RES-1");
+
+        // An assignment of the same key routed with a run and stored without it holds nothing, so the write boundary accepts it beside the holder.
+        JsonObject body = JsonNode.Parse(holder.Body.GetRawText())!.AsObject();
+        body["routedWith"] = "run";
+        string stranded = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("assignment", op, JsonSerializer.SerializeToElement(body), $"work-order:{order.Id}:{order.ComputedHash}"))).Id;
+        RecordEnvelope strandedRecord = run.Estate.Load().ById[stranded];
+
+        // It is no duplicate, so the operator's reconciliation keeping it and withdrawing the holder is refused and nothing is recorded; one
+        // keeping the holder is refused too, each assignment judged on its own revisions, not on the kept one's it would be withdrawn into.
+        WriteOutcome released = run.Service.NewRecord(new NewRecordRequest("reconciliation", op, RunEstate.Json($$"""{"kept":"{{stranded}}","withdrawn":["{{holder.Id}}"],"note":"Keep the stranded one."}"""), $"assignment:{stranded}:{strandedRecord.ComputedHash}"));
+        Assert.False(released.Ok);
+        Assert.Contains(released.Problem!.Findings, f => f.Code == "reconciliation.occurrence");
+        WriteOutcome kept = run.Service.NewRecord(new NewRecordRequest("reconciliation", op, RunEstate.Json($$"""{"kept":"{{holder.Id}}","withdrawn":["{{stranded}}"],"note":"Keep the holder."}"""), $"assignment:{stranded}:{strandedRecord.ComputedHash}"));
+        Assert.False(kept.Ok);
+        Assert.Contains(kept.Problem!.Findings, f => f.Code == "reconciliation.occurrence" && f.Message.Contains("is held by 1 of the assignments named", StringComparison.Ordinal));
+        Assert.DoesNotContain(run.Estate.Load().OfType("reconciliation"), r => r.Subject?.Id == stranded);
+
+        // The occurrence stays settled: goal step dispatches no second run of it, and the estate has no errors.
+        GoalStepResponse again = Step(run, goal, "again");
+        Assert.Null(again.Run);
+        Assert.False(File.Exists(run.Report("again")));
+        Assert.Equal("settled", Assert.Single(run.Service.GoalDue(goal)!.Json.GetProperty("occurrences").EnumerateArray(), o => o.GetProperty("key").GetString() == StandingAgents.KeyOf(holder)).GetProperty("state").GetString());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void ABackdatedNowNeverDispatchesALapsedAgentsOccurrenceToAPerson()
     {
         using var run = new RunEstate(recordFormat: 3);
@@ -261,6 +299,9 @@ public class StandingAgentRoutingTests
         Assert.Contains(paused.Notices!, n => n.Contains(first.Run!.Run, StringComparison.Ordinal));
         Assert.Equal("known-failure", run.Settled(first.Run!.Run).Status);
         RunEstate.Ok(run.Service.GoalResume(goal, new GoalActionRequest(op)));
+
+        // The sponsor asked that run to stop: its known failure is not the agent's, so the failure pause counts nothing.
+        Assert.Equal(0, run.Service.GoalDue(goal)!.Json.GetProperty("failures").GetProperty("consecutive").GetInt32());
 
         GoalStepResponse second = Step(run, goal, "running-again", scenario: "ack-stop");
         Assert.True(second.Ok, second.Message);
