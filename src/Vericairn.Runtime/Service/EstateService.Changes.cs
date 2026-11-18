@@ -96,7 +96,7 @@ public sealed partial class EstateService
         if (!settings.Checks) return null;
         IReadOnlyList<PushedCommit> commits = adapter.CommitMessages(directory, plan)
             ?? throw new ProviderRefusedException("The estate checks commit messages, and the push's messages could not be read to check them; nothing was pushed.");
-        if (commits.Any(c => c is null || !Patterns.Commit.IsMatch(c.Commit) || c.Message is null) || commits.Count == 0 && plan.Base != plan.Head)
+        if (commits.Any(c => c is null || !Patterns.Commit.IsMatch(c.Commit) || c.Message is null))
             throw new ProviderRefusedException("The push's commit messages could not be read completely to check them; nothing was pushed.");
         (CommitMessages.Finding? refusal, IReadOnlyList<CommitMessages.Finding> warnings) = CommitMessages.Check(settings, commits.Select(c => ("Commit `" + c.Commit + "`", c.Message)));
         if (refusal is not null) throw new ProviderRefusedException(CommitMessages.Describe(refusal) + " Nothing was pushed; reword the commit and push again.");
@@ -105,7 +105,7 @@ public sealed partial class EstateService
         string? warned = MessageWarning(settings, warnings, "pushed");
         claim.Body["evidence"]!.AsArray().Add(new JsonObject
         {
-            ["summary"] = $"The messages of the push's {commits.Count} {(commits.Count == 1 ? "commit" : "commits")} were checked against {checkedWhat}" + (warned is null ? "; none was refused." : ". " + warned),
+            ["summary"] = $"The messages of the {commits.Count} {(commits.Count == 1 ? "commit" : "commits")} the push carries that the target branch does not hold were checked against {checkedWhat}" + (warned is null ? "; none was refused." : ". " + warned),
         });
         return warned;
     }
@@ -271,18 +271,22 @@ public sealed partial class EstateService
         CommitMessages.Settings settings;
         lock (gate) settings = CommitMessages.In(session.Load(), DateTimeOffset.UtcNow);
         if (settings.Lists.IsEmpty) return (null, null);
-        if (queued && pull.Title is null)
-            throw new ProviderRefusedException("The estate checks commit messages, and the pull request's title, which its merge commit's message carries, could not be observed; nothing was merged.");
+        if (queued && (pull.Title is null || pull.Body is null))
+            throw new ProviderRefusedException("The estate checks commit messages, and the pull request's title and description, which the merge queue's merge commit may carry, could not be observed; nothing was merged.");
         // As the host composes a merge commit's message: a title naming the pull request and its branch, then the pull request's title.
         string message = $"Merge pull request #{pull.Number} from {claim.Configuration.Destination.Split('/')[0]}/{pull.Branch}"
             + (string.IsNullOrEmpty(pull.Title) ? string.Empty : "\n\n" + pull.Title);
+        // A merge queue cannot be given the message: where the repository's setting adds the pull request's description, its merge commit
+        // carries that too, so the description is checked with the message before the change is enqueued.
+        string checkedText = queued && pull.Body!.Length > 0 ? message + "\n\n" + pull.Body : message;
         (CommitMessages.Finding? refusal, IReadOnlyList<CommitMessages.Finding> warnings) =
-            CommitMessages.Check(settings, [("The merge commit of pull request " + pull.Number, message)], trailers: false);
-        if (refusal is not null) throw new ProviderRefusedException(CommitMessages.Describe(refusal) + " Nothing was merged; retitle the pull request and merge again.");
+            CommitMessages.Check(settings, [("The merge commit of pull request " + pull.Number, checkedText)], trailers: false);
+        if (refusal is not null)
+            throw new ProviderRefusedException(CommitMessages.Describe(refusal) + (queued ? " Nothing was merged; reword the pull request's title or description and merge again." : " Nothing was merged; retitle the pull request and merge again."));
         string? warned = MessageWarning(settings, warnings, queued ? "enqueued" : "merged");
         claim.Body["evidence"]!.AsArray().Add(new JsonObject
         {
-            ["summary"] = (queued ? "The message the merge queue composes for this change's merge commit was checked" : "The merge commit's message was checked, and the merge sets it exactly,")
+            ["summary"] = (queued ? "The message the merge queue composes for this change's merge commit, with the pull request's description it may add, was checked" : "The merge commit's message was checked, and the merge sets it exactly,")
                 + " against the estate's blocked terms" + (warned is null ? "; none was refused." : ". " + warned),
         });
         return (message, warned);

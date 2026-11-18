@@ -60,8 +60,10 @@ public interface IPushAdapter
     string? FileText(string directory, PushPlan plan, string commit, string path) => null;
 
     /// <summary>
-    /// Every commit the plan's range carries, merge commits included, each with its whole message. Null when the adapter cannot read
-    /// them, which refuses a push while the estate checks commit messages for blocked terms or required trailers (CODE-81, from 0.9.4).
+    /// Every commit the plan's range carries that its target branch's head does not already hold, merge commits included, each with
+    /// its whole message: a commit the target already holds is in the repository already, so taking the target into a branch adds
+    /// none of its commits. Null when the adapter cannot read them, which refuses a push while the estate checks commit messages for
+    /// blocked terms or required trailers (CODE-81, from 0.9.4).
     /// </summary>
     IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan) => null;
 }

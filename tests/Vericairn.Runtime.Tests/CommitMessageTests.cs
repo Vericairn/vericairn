@@ -237,12 +237,17 @@ public sealed class CommitMessageTests
     }
 
     [Theory]
-    [InlineData("clean", "refuse", false, true)]
-    [InlineData("term", "refuse", false, false)]
-    [InlineData("term", "refuse", true, false)]
-    [InlineData("term", "warn", false, true)]
-    [InlineData("trailer-only", "refuse", false, true)]
-    public void AMergeChecksTheMessageOfTheMergeCommitItWouldCreate(string title, string level, bool queued, bool merged)
+    [InlineData("clean", "Plain notes.", "refuse", false, true)]
+    [InlineData("term", "Plain notes.", "refuse", false, false)]
+    [InlineData("term", "Plain notes.", "refuse", true, false)]
+    [InlineData("term", "Plain notes.", "warn", false, true)]
+    [InlineData("trailer-only", "Plain notes.", "refuse", false, true)]
+    // A merge queue's merge commit may carry the pull request's description, so the queue path checks it; a direct merge sets its message.
+    [InlineData("clean", "Notes from a Tern session.", "refuse", true, false)]
+    [InlineData("clean", "Notes from a Tern session.", "refuse", false, true)]
+    [InlineData("clean", "Plain notes.", "refuse", true, true)]
+    [InlineData("clean", null, "refuse", true, false)]
+    public void AMergeChecksTheMessageOfTheMergeCommitItWouldCreate(string title, string? description, string level, bool queued, bool merged)
     {
         using var f = new ChangesFlowTests.Fixture();
         using var signing = new Signing(f.Estate);
@@ -253,17 +258,24 @@ public sealed class CommitMessageTests
         Assert.True(f.Service.ChangesPush(f.Push).Ok);
         f.Provider.Memory.QueueRequired = queued;
         string pullTitle = title == "term" ? "The widget, from a Tern session" : "Add the widget";
-        f.Provider.Memory.Set("Example/widget", new("1", "work/change", "main", ChangesFlowTests.Head, "open", null, ChangesFlowTests.Checks(ChangesFlowTests.Head)) { Title = pullTitle });
+        f.Provider.Memory.Set("Example/widget", new("1", "work/change", "main", ChangesFlowTests.Head, "open", null, ChangesFlowTests.Checks(ChangesFlowTests.Head))
+            { Title = pullTitle, Body = description });
         ChangeResponse response = f.Service.ChangesMerge(f.Merge);
-        Assert.Equal(merged, response.Ok || response.Status == "observed-success");
+        Assert.Equal(merged, response.Status != "known-failure");
         AssertNoTermRecorded(f.Service);
         if (!merged)
         {
-            Assert.Equal("known-failure", response.Status);
             Assert.Null(f.Provider.MergedHead);
             Assert.Null(f.Provider.EnqueuedHead);
-            Assert.StartsWith("The merge commit of pull request 1 carries a term", response.Message, StringComparison.Ordinal);
             Assert.DoesNotContain("tern", response.Message, StringComparison.OrdinalIgnoreCase);
+            if (description is null) Assert.Contains("could not be observed", response.Message, StringComparison.Ordinal);
+            else Assert.StartsWith("The merge commit of pull request 1 carries a term", response.Message, StringComparison.Ordinal);
+            return;
+        }
+        if (queued)
+        {
+            Assert.Equal(ChangesFlowTests.Head, f.Provider.EnqueuedHead);
+            Assert.Equal("queued", response.CheckStatus);
             return;
         }
         Assert.Equal(ChangesFlowTests.Head, f.Provider.MergedHead);

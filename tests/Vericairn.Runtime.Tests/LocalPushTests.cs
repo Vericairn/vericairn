@@ -152,6 +152,37 @@ public sealed class LocalPushTests : IDisposable
         Assert.Equal("Add checked content\n\nWhy it changed.\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == first).Message);
     }
 
+    // CODE-81: a commit the target branch already holds is in the repository already, so a pushed branch that takes in a newer target
+    // carries none of its commits to the message check, such as the merge commits a checked merge creates without the push's trailer.
+    [Fact]
+    public void AMessageReadLeavesOutTheCommitsTheTargetAlreadyHolds()
+    {
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        File.WriteAllText(Path.Combine(repository, "addition.txt"), "Checked addition.\n");
+        Git(repository, "add", "addition.txt");
+        Git(repository, "commit", "-m", "Add checked content\n\nSigned-off-by: Test <test@example.invalid>");
+        string pushed = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "push", remote, "work/change");
+        Git(repository, "checkout", "main");
+        File.WriteAllText(Path.Combine(repository, "other.txt"), "Other content.\n");
+        Git(repository, "add", "other.txt");
+        Git(repository, "commit", "-m", "Merge pull request #2 from Example/work/other");
+        string landed = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "push", remote, "main");
+        Git(repository, "checkout", "work/change");
+        Git(repository, "merge", "--no-ff", "-m", "Take in main\n\nSigned-off-by: Test <test@example.invalid>", "main");
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        Assert.Equal((pushed, landed), (plan.Base, plan.TargetHead));
+        Assert.Equal(head, Assert.Single(adapter.CommitMessages(repository, plan)!).Commit);
+    }
+
     // The adapter isolates its own git processes. Only its read of the user's credential settings sees this test's stand-in
     // for the user's global configuration.
     private GitPushAdapter Adapter() => new(info =>

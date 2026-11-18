@@ -131,7 +131,7 @@ public sealed class PullRequestProviderTests
         Assert.Contains(output.Calls, c => c[0] == "pr" && c[1] == "create");
     }
 
-    // CODE-81: both implementations report the pull request's title and create the merge commit with exactly the message given, its
+    // CODE-81: both implementations report the pull request's title and description and create the merge commit with exactly the message given, its
     // first line the commit's title and the rest its body, so the repository's default message never replaces the message checked.
     [Theory]
     [InlineData(false)]
@@ -142,7 +142,8 @@ public sealed class PullRequestProviderTests
         var memory = new MemoryPullRequestProvider { Checks = [new("tests", Head, "completed", "success")] };
         IPullRequestProvider provider = github ? new GitHubPullRequestProvider(recorded.Run) : memory;
         provider.Open("Example/widget", "work/change", "main", Head, "Checked change", "Review it.");
-        Assert.Equal("Checked change", provider.Observe("Example/widget", "1")!.Title);
+        PullRequestObservation observed = provider.Observe("Example/widget", "1")!;
+        Assert.Equal(("Checked change", "Review it."), (observed.Title, observed.Body));
         ChangeReceipt merged = provider.Merge("Example/widget", "1", Head, "Merge pull request #1 from Example/work/change\n\nChecked change");
         Assert.Equal(MergeCommit, merged.MergeCommit);
         if (!github)
@@ -413,7 +414,7 @@ public sealed class PullRequestProviderTests
             }
             if (args[0] == "pr" && args[1] == "view")
                 return Success(JsonSerializer.Serialize(new { number = 1, headRefOid = CurrentHead, headRefName = "work/change", baseRefName = "main",
-                    state = merged ? "MERGED" : "OPEN", mergeCommit = merged ? new { oid = MergeCommit } : null, isCrossRepository = false, title = "Checked change" }));
+                    state = merged ? "MERGED" : "OPEN", mergeCommit = merged ? new { oid = MergeCommit } : null, isCrossRepository = false, title = "Checked change", body = "Review it." }));
             if (args[0] == "api")
             {
                 if (args[1].Contains("/check-runs?", StringComparison.Ordinal))

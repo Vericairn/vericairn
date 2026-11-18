@@ -15,6 +15,12 @@ public sealed record PullRequestObservation(string Number, string Branch, string
     /// does not report it.
     /// </summary>
     public string? Title { get; init; }
+
+    /// <summary>
+    /// The pull request's description as the host reports it, which a merge queue's merge commit may carry where the repository's
+    /// setting adds it (CODE-81); null when the provider does not report it.
+    /// </summary>
+    public string? Body { get; init; }
 }
 
 /// <summary>The target branch's push runs at the exact merge commit, including their jobs.</summary>
@@ -155,7 +161,7 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
         {
             if (Observe(destination, branch) is not null) throw new ProviderRefusedException("A pull request already exists for this branch.");
             string number = (++nextNumber).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            pulls[destination + "#" + number] = new(number, branch, target, head, "open", null, Checks.ToArray()) { Title = title };
+            pulls[destination + "#" + number] = new(number, branch, target, head, "open", null, Checks.ToArray()) { Title = title, Body = body };
             Effects++;
             return new(number);
         }

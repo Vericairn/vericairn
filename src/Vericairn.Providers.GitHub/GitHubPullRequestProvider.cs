@@ -84,7 +84,7 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
     {
         Destination(destination);
         using JsonDocument document = Read("pr", "view", numberOrBranch, "--repo", destination, "--json",
-            "number,headRefOid,headRefName,baseRefName,state,mergeCommit,isCrossRepository,title");
+            "number,headRefOid,headRefName,baseRefName,state,mergeCommit,isCrossRepository,title,body");
         try
         {
             JsonElement p = document.RootElement;
@@ -94,7 +94,10 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
             string? merged = p.TryGetProperty("mergeCommit", out JsonElement m) && m.ValueKind == JsonValueKind.Object ? Text(m, "oid") : null;
             return new(p.GetProperty("number").GetInt64().ToString(CultureInfo.InvariantCulture), Text(p, "headRefName"), Text(p, "baseRefName"),
                 head, Text(p, "state").ToLowerInvariant(), merged, checks, !p.GetProperty("isCrossRepository").GetBoolean())
-            { Title = p.TryGetProperty("title", out JsonElement title) && title.ValueKind == JsonValueKind.String ? title.GetString() : null };
+            {
+                Title = p.TryGetProperty("title", out JsonElement title) && title.ValueKind == JsonValueKind.String ? title.GetString() : null,
+                Body = p.TryGetProperty("body", out JsonElement body) && body.ValueKind == JsonValueKind.String ? body.GetString() : null,
+            };
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {

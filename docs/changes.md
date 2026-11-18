@@ -151,12 +151,15 @@ the release's own documentation set when it carried a held fix's guide text.
 
 ### Commit messages (0.9.4)
 
-From 0.9.4 (CODE-81), a checked push reads every commit message it carries, merge commits and trailers included, before
-anything is pushed, and matches it against the estate's [blocked terms](policies.md#blocked-terms-090), the same list and the
-same whole-term matching that records and generated documents meet. A match refuses the push, to any repository, public or
-not. Where an estate policy sets the level to `warn` ([commit messages](policies.md#commit-messages-094)), the push goes ahead,
-and its response and recorded evidence say which commits carried a term. A term only in a file's content is not this check's
-concern; the secret scan and the disclosure hold read the pushed lines.
+From 0.9.4 (CODE-81), a checked push reads the message of every commit it carries that its target branch does not already
+hold, merge commits and trailers included, before anything is pushed, and matches it against the estate's [blocked
+terms](policies.md#blocked-terms-090), the same list and the same whole-term matching that records and generated documents
+meet. A match refuses the push, to any repository, public or not. Where an estate policy sets the level to `warn` ([commit
+messages](policies.md#commit-messages-094)), the push goes ahead, and its response and recorded evidence say which commits
+carried a term. A term only in a file's content is not this check's concern; the secret scan and the disclosure hold read the
+pushed lines. A commit the target branch already holds, as the remote reported its head when the push was prepared, is in the
+repository already: a branch that takes in a newer target, with its merge commits that carry no required trailer, is checked
+only for its own commits.
 
 An estate policy may also require an exact trailer line, such as a `Signed-off-by:` line, on every pushed commit. A commit
 whose closing paragraph lacks that exact line is refused, as is one whose closing paragraph carries the line's token with other
@@ -165,19 +168,21 @@ The exact required line is exempt from the blocked terms, since the estate requi
 
 The refusal names the commit and the estate policy whose list or trailer it concerns, by the policy's identity, and never the
 matched text or the trailer, so the operation that records the refusal never repeats a term. The push's operation records, as
-evidence, how many commits were checked and, at the `warn` level, the commits that carried a term and the policies that set
-the level. The push adapter reads the messages (`IPushAdapter.CommitMessages`); while the estate declares a blocked term or a
-required trailer, a push whose messages cannot be read, as with an adapter that does not implement it, is refused. With
-neither declared, no message is read.
+evidence, how many of its commits were checked and, at the `warn` level, the commits that carried a term and the policies
+that set the level. The push adapter reads the messages (`IPushAdapter.CommitMessages`); while the estate declares a blocked
+term or a required trailer, a push whose messages cannot be read, as with an adapter that does not implement it, is refused.
+With neither declared, no message is read.
 
 `changes merge` matches the message of the merge commit it would create against the same terms at the same level, before
-anything is merged: `Merge pull request #<number> from <owner>/<branch>`, then the pull request's title as the host reports it.
-While the estate declares a blocked term, the merge creates its merge commit with exactly that message, so the repository's
-default message, which may add the pull request's description, never replaces the message checked. A merge through a required
-merge queue cannot set the message; the check then reads the message the queue composes from the same number, branch and title,
-and a pull request whose title cannot be observed is refused. The required trailer applies to the commits a push carries, not
-to the merge commit the host creates. `operator record` pushes and merges through the same checks, and its commit ends with the
-estate's required trailer lines, so its push meets the requirement.
+anything is merged: `Merge pull request #<number> from <owner>/<branch>`, then the pull request's title as the host reports
+it. While the estate declares a blocked term, the merge creates its merge commit with exactly that message, so the
+repository's default message, which may add the pull request's description, never replaces the message checked. A merge
+through a required merge queue cannot set the message, and the queue's merge commit may carry the pull request's description
+where the repository's setting adds it: the check then reads that message with the description, as the host reports both when
+the merge observes the pull request, and a pull request whose title or description cannot be observed is refused. A title or
+description edited after that observation, before the queue builds its merge commit, is not checked. The required trailer
+applies to the commits a push carries, not to the merge commit the host creates. `operator record` pushes and merges through
+the same checks, and its commit ends with the estate's required trailer lines, so its push meets the requirement.
 
 ## Merge and observe
 
