@@ -162,7 +162,8 @@ public static partial class NextEligible
     /// passes its own assignments and asks, and admits only the candidates its role allows.
     /// </summary>
     private static Route RouteOf(EstateModel model, RecordEnvelope goal, string status, AgentRuns.Ledger ledger, string role, string? reserved, IReadOnlyList<RecordEnvelope> assignments,
-        IReadOnlyList<RecordEnvelope> asks, List<AgentRuns.Run> runs, Routing.Machine machine, Func<Routing.Candidate, Routing.Candidate>? admit, (IReadOnlyList<string> Principals, Routing.Source Source)? named = null)
+        IReadOnlyList<RecordEnvelope> asks, List<AgentRuns.Run> runs, Routing.Machine machine, Func<Routing.Candidate, Routing.Candidate>? admit, (IReadOnlyList<string> Principals, Routing.Source Source)? named = null,
+        bool resultGoesOn = false)
     {
         admit ??= candidate => candidate;
         (IReadOnlyList<string> principals, Routing.Source source) = named ?? Routing.Principals(model, goal, role);
@@ -187,7 +188,8 @@ public static partial class NextEligible
         // An agent's result goes to review; a review that finds what to change sends the step back to the agent for another attempt.
         RecordEnvelope? result = holder is null ? null : ResultOfLatestAttempt(model, holder);
         RecordEnvelope? findings = result is null ? null : Findings(model, result);
-        if (result is not null && findings is null)
+        // From 0.9.4 (GOAL-07) a standing agent's occurrence whose result is blocked or abandoned goes on with its assignment instead.
+        if (result is not null && findings is null && !resultGoesOn)
         {
             return Held("review", contributor, $"the result {result.Id} of {Routing.NameOf(model, result.By)} on assignment {holder!.Id} is {WorkView.ResultState(model, result)}; a principal other than its author reviews it");
         }

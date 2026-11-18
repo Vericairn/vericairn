@@ -70,9 +70,11 @@ public static partial class NextEligible
                 .Where(a => EstateModel.BodyString(a, "goal") is string g && goals.Contains(g)
                     && (EstateModel.BodyString(a, "assignment") is string named ? held.Contains(named) : a.Subject is not null && orders.Contains(a.Subject.Id)))
                 .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
+            // A due occurrence whose latest result is blocked or abandoned goes on with the assignment that holds it.
+            bool goesOn = occurrence.Result is RecordEnvelope latest && EstateModel.BodyString(latest, "outcome") is "blocked" or "abandoned";
             Route route = RouteOf(model, current, status, ledger, step.Role, step.Reserved ?? Routing.ReservedAction(step.Role), assignments, asks, runs, machine, candidate => person && candidate.IsAgent
                 ? candidate with { Available = false, Reasons = [.. candidate.Reasons, $"the flow marks the {step.Role} role a person's, and an agent never holds it"] }
-                : candidate);
+                : candidate, resultGoesOn: goesOn);
             routes.Add(new OccurrenceRoute(occurrence, route));
         }
 

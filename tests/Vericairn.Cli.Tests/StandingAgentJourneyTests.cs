@@ -76,6 +76,16 @@ public class StandingAgentJourneyTests
 
             // status shows the agent; the MCP read tool reads goal due's view.
             Assert.Contains("Standing agents: 1", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
+
+            // goal pause --standing pauses every active standing agent the caller may pause, and names it; one goal or --standing, never both.
+            Refused(root, "name no goal with it", ["goal", "pause", goal, "--standing", "--by", op]);
+            Refused(root, "Name the goal to pause", ["goal", "pause", "--by", op]);
+            CliHarness.Outcome paused = CliHarness.Ok("--estate", root, "goal", "pause", "--standing", "--stop-runs", "--by", op);
+            Assert.Contains($"paused  {goal}  Research the widget", paused.Out, StringComparison.Ordinal);
+            Assert.Contains("No run of the goal was in flight.", paused.Out, StringComparison.Ordinal);
+            Assert.Equal("paused", CliHarness.Ok("--estate", root, "--json", "goal", "due", goal).Json.GetProperty("state").GetString());
+            Assert.Contains("No standing agent is active.", CliHarness.Ok("--estate", root, "goal", "pause", "--standing", "--by", op).Out, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "goal", "resume", goal, "--by", op);
             using EstateService api = EstateService.Open(root);
             var registry = new ToolRegistry(api, null);
             ToolCallResult text = registry.Call("goal_due", new JsonObject { ["goal"] = goal });

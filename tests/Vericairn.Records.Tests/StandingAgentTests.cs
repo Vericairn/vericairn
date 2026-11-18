@@ -76,7 +76,7 @@ public class StandingAgentTests
 
         // A second assignment of the key is refused whoever records it, the operator included.
         FindingList duplicate = Validate(fixture, "assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId), fixture.Work.Reference);
-        Assert.Contains(duplicate, f => f.Code == "assignment.duplicate" && f.Message.Contains(assignment.Id, StringComparison.Ordinal));
+        Assert.Contains(duplicate, f => f.Code == "standing.duplicate" && f.Message.Contains(assignment.Id, StringComparison.Ordinal));
 
         // The occurrence settles with its result, and runs again only when a review returns it, on the assignment that holds it.
         RecordEnvelope result = fixture.Result(assignment);
@@ -86,7 +86,7 @@ public class StandingAgentTests
         StandingAgents.OccurrenceState returned = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences);
         Assert.Equal("due", returned.State);
         Assert.Contains($"assignment {assignment.Id} goes on with another attempt", returned.Reason, StringComparison.Ordinal);
-        Assert.Contains(Validate(fixture, "assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId), fixture.Work.Reference), f => f.Code == "assignment.duplicate");
+        Assert.Contains(Validate(fixture, "assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId), fixture.Work.Reference), f => f.Code == "standing.duplicate");
         RecordEnvelope again = fixture.Result(assignment);
         fixture.Review(again, "pass");
         Assert.Equal("disposed", Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).State);
@@ -207,25 +207,9 @@ public class StandingAgentTests
         RecordEnvelope later = RecordAuthor.Create(new RecordDraft("goal-status", fixture.Estate.OperatorId, Element(new JsonObject { ["status"] = "paused", ["note"] = "A time after until." }), fixture.Goal.Reference, null, At("2026-12-02T00:00:00Z"), null, 3)).Envelope;
         Assert.Contains(StandingAgents.RunRefusals(fixture.Estate.Load(), fixture.Goal, null, later), r => r.Message.Contains("until time", StringComparison.Ordinal));
 
-        // Three blocked results in a row pause it with an ask; the sponsor's answer lets it go on.
+        // The failure pause itself runs in a run's real order: see AFailurePauseCountsEachRunsResultInTheOrderRunsHappen.
         StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
-        RecordEnvelope assignment = fixture.Assign(occurrence);
-        fixture.Result(assignment, "blocked");
-        fixture.Result(assignment, "abandoned");
-        RecordEnvelope third = fixture.Result(assignment, "blocked");
-        StandingAgents.Agent held = fixture.Agent(fixture.Estate.Clock);
-        Assert.Equal(("held", 3, third.Id), (held.State, held.Failures, held.FailureTrigger!.Id));
-        Assert.Contains(StandingAgents.RunRefusals(fixture.Estate.Load(), fixture.Goal, assignment.Id, null), r => r.Message.Contains("failed in a row", StringComparison.Ordinal));
-        RecordEnvelope ask = fixture.Add("ask", new JsonObject
-        {
-            ["to"] = fixture.Estate.OperatorId, ["question"] = "Required attention in goal Research the widget: its runs failed. How does the run go on?", ["recommendation"] = "Let it go on.",
-            ["consequence"] = "Nothing is dispatched.", ["goal"] = fixture.Goal.Id, ["state"] = "open",
-        }, subject: third.Reference);
-        Assert.Equal("held", fixture.Agent(fixture.Estate.Clock).State);
-        JsonObject answer = fixture.Policies.DecisionBody();
-        answer["answers"] = new JsonArray(ask.Id);
-        fixture.Add("decision", answer);
-        Assert.Equal(("active", 0), (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures));
+        fixture.Assign(occurrence);
 
         // Paused, nothing is dispatched and what is due waits.
         fixture.Add("goal-status", new JsonObject { ["status"] = "paused", ["note"] = "Paused for the test." }, subject: fixture.Goal.Reference);
@@ -304,7 +288,7 @@ public class StandingAgentTests
         StandingAgents.OccurrenceState kept = Assert.Single(StandingAgents.Derive(fixture.Estate.Load(), renewed, fixture.Estate.Clock).Occurrences);
         Assert.Equal((occurrence.Key, "due"), (kept.Occurrence.Key, kept.State));
         Assert.NotNull(kept.Assignment);
-        Assert.Contains(Validate(fixture, "assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId), fixture.Work.Reference), f => f.Code == "assignment.duplicate");
+        Assert.Contains(Validate(fixture, "assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId), fixture.Work.Reference), f => f.Code == "standing.duplicate");
 
         RecordEnvelope changed = fixture.Add("goal", fixture.GoalBody(triggers: new JsonArray(StandingFixture.Monthly(firstAt: "2026-10-02T00:00:00Z")), until: "2027-09-01T00:00:00Z"), supersedes: renewed.Id);
         fixture.Activate(changed);
@@ -312,5 +296,176 @@ public class StandingAgentTests
         Assert.Equal(changed.Id, trigger.Revision);
         Assert.Contains(StandingAgents.Derive(fixture.Estate.Load(), changed, fixture.Estate.Clock).Occurrences, o => o.Occurrence.Key == $"{fixture.Goal.Id}/monthly/{changed.Id}/interval-0" && o.State == "due");
         Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings));
+    }
+
+    private static readonly JsonObject Roomy = new() { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 };
+
+    /// <summary>The sponsor's answer to the failure pause's ask about a record.</summary>
+    private static void AnswerPause(StandingFixture fixture, RecordEnvelope about)
+    {
+        RecordEnvelope ask = fixture.Add("ask", new JsonObject
+        {
+            ["to"] = fixture.Estate.OperatorId, ["question"] = "Required attention in goal Research the widget: its runs failed. How does the run go on?", ["recommendation"] = "Let it go on.",
+            ["consequence"] = "Nothing is dispatched.", ["goal"] = fixture.Goal.Id, ["state"] = "open",
+        }, subject: about.Reference);
+        JsonObject answer = fixture.Policies.DecisionBody();
+        answer["answers"] = new JsonArray(ask.Id);
+        fixture.Add("decision", answer);
+    }
+
+    [Fact]
+    public void AFailurePauseCountsEachRunsResultInTheOrderRunsHappenAndNeverInvalidatesAnEarlierIntent()
+    {
+        using var fixture = new StandingFixture(budget: Roomy.DeepClone().AsObject(), period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 });
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+
+        // Each run records a blocked or abandoned result and its harness then exits 0: the run settles as observed-success after its result,
+        // and still counts as a failure. A known failure whose result is also blocked counts once.
+        RecordEnvelope? last = null;
+        foreach ((string outcome, string settled) in new[] { ("blocked", "observed-success"), ("abandoned", "observed-success"), ("blocked", "known-failure") })
+        {
+            RecordEnvelope intent = fixture.RunIntent(assignment, "run-" + outcome + "-" + settled);
+            last = fixture.Result(assignment, outcome);
+            fixture.Settle(intent, settled);
+        }
+
+        // The third blocked result leaves every earlier intent valid: each is judged by what was recorded before it.
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings));
+        StandingAgents.Agent held = fixture.Agent(fixture.Estate.Clock);
+        Assert.Equal(("held", 3, last!.Id), (held.State, held.Failures, held.FailureTrigger!.Id));
+        Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+
+        // The sponsor's answer lets it go on: the next intent is accepted; a success resets the count.
+        AnswerPause(fixture, last);
+        Assert.Equal(("active", 0), (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures));
+        Assert.DoesNotContain(Validate(fixture, "operation", fixture.RunBody(assignment, "run-after", "not-started")), f => f.Severity == Severity.Error);
+    }
+
+    [Fact]
+    public void ARunIntentIsRefusedPastUntilDuringThePausePastThePeriodsRunsAndOnASettledOccurrenceWhoeverRecordsIt()
+    {
+        using var fixture = new StandingFixture(budget: Roomy.DeepClone().AsObject(), period: new JsonObject { ["unit"] = "months", ["runs"] = 2, ["wallMinutes"] = 200 }, until: "2026-10-13T13:00:00Z");
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+        Assert.DoesNotContain(Validate(fixture, "operation", fixture.RunBody(assignment, "run-ok", "not-started")), f => f.Severity == Severity.Error);
+
+        // Two runs spend the period's runs: a third intent is refused.
+        fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
+        fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
+        Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-3", "not-started")), f => f.Code == "operation.budget" && f.Message.Contains("runs in the period", StringComparison.Ordinal));
+
+        // Past its until time, an intent is refused at the record whatever route records it.
+        fixture.Estate.SetClock(At("2026-10-13T13:00:00Z"));
+        Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-late", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("until time", StringComparison.Ordinal));
+        StandingAgents.Trigger monthly = Assert.Single(StandingAgents.Triggers(fixture.Estate.Load(), fixture.Goal));
+        var late = new StandingAgents.Occurrence(occurrence.Key, "monthly", "schedule", monthly.Revision, occurrence.Item, occurrence.DueAt, [], "late");
+        Assert.Contains(Validate(fixture, "assignment", StandingFixture.AssignmentBody(late, fixture.Estate.BuilderId), fixture.Work.Reference),
+            f => f.Code == "assignment.occurrence" && f.Message.Contains("has passed when this assignment is recorded", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ASettledOccurrenceRunsAgainOnlyWhenAReviewReturnsItsResultAndResultsAwaitingReviewHoldDispatchAtTheirCap()
+    {
+        using var fixture = new StandingFixture(budget: Roomy.DeepClone().AsObject(), triggers: new JsonArray(StandingFixture.Monthly(), new JsonObject { ["key"] = "asked", ["kind"] = "request" }));
+        JsonObject capped = fixture.GoalBody(budget: Roomy.DeepClone().AsObject(), triggers: new JsonArray(StandingFixture.Monthly(), new JsonObject { ["key"] = "asked", ["kind"] = "request" }));
+        capped["plan"]!["standing"]!["awaitingReview"] = 1;
+        RecordEnvelope goal = fixture.Add("goal", capped, supersedes: fixture.Goal.Id);
+        fixture.Activate(goal);
+        StandingAgents.Occurrence occurrence = Assert.Single(StandingAgents.Derive(fixture.Estate.Load(), goal, fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+        RecordEnvelope result = fixture.Result(assignment);
+
+        // Its result awaits review: a run of it is refused at the record, and the cap of one result awaiting review holds every other run.
+        Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-again", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("is settled", StringComparison.Ordinal));
+        StandingAgents.Trigger asked = StandingAgents.Triggers(fixture.Estate.Load(), goal).Single(t => t.Key == "asked");
+        StandingAgents.Occurrence request = StandingAgents.Request(goal.Id == fixture.Goal.Id ? goal.Id : fixture.Estate.Load().Chain(goal)[0], asked, fixture.Estate.OperatorId, fixture.Estate.Clock);
+        RecordEnvelope other = fixture.Assign(request, fixture.Estate.BuilderId);
+        Assert.Contains(Validate(fixture, "operation", fixture.RunBody(other, "run-other", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("await review, its cap of 1", StringComparison.Ordinal));
+        StandingAgents.Agent agent = StandingAgents.Derive(fixture.Estate.Load(), goal, fixture.Estate.Clock);
+        Assert.Contains(agent.Occurrences, o => o.Occurrence.Key == request.Key && o.State == "deferred" && o.Reason.Contains("await review, its cap of 1", StringComparison.Ordinal));
+
+        // A review returns the result: the occurrence runs again on its assignment, and nothing awaits review.
+        fixture.Review(result, "findings");
+        Assert.DoesNotContain(Validate(fixture, "operation", fixture.RunBody(assignment, "run-returned", "not-started")), f => f.Severity == Severity.Error);
+        Assert.DoesNotContain(Validate(fixture, "operation", fixture.RunBody(other, "run-free", "not-started")), f => f.Severity == Severity.Error);
+    }
+
+    [Fact]
+    public void ARevisionKeepsItsOccurrenceSoItsKeyStaysHeldAndAMergedDuplicateIsAReconcileTaskSettledByAReconciliation()
+    {
+        using var fixture = new StandingFixture(triggers: new JsonArray(StandingFixture.Monthly(), new JsonObject { ["key"] = "asked", ["kind"] = "request" }));
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+        fixture.Result(assignment);
+
+        // A revision naming another occurrence is refused; one keeping it is accepted, and the key stays held.
+        StandingAgents.Trigger asked = StandingAgents.Triggers(fixture.Estate.Load(), fixture.Goal).Single(t => t.Key == "asked");
+        StandingAgents.Occurrence request = StandingAgents.Request(fixture.Goal.Id, asked, fixture.Estate.OperatorId, fixture.Estate.Clock);
+        Assert.Contains(Validate(fixture, "assignment", StandingFixture.AssignmentBody(request, fixture.Estate.BuilderId), fixture.Work.Reference, supersedes: assignment.Id),
+            f => f.Code == "assignment.occurrence" && f.Message.Contains("a revision keeps its occurrence exactly", StringComparison.Ordinal));
+        JsonObject kept = StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId);
+        kept["note"] = "Narrowed.";
+        RecordEnvelope revised = fixture.Add("assignment", kept, subject: fixture.Work.Reference, supersedes: assignment.Id);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings));
+        Assert.Contains(Validate(fixture, "assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId), fixture.Work.Reference), f => f.Code == "standing.duplicate" && f.Message.Contains(revised.Id, StringComparison.Ordinal));
+
+        // Two clones' merge leaves a second assignment of the key: both are flagged, status lists them as reconcile tasks, and a
+        // reconciliation keeping one settles it.
+        RecordEnvelope merged = fixture.Add("assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.BuilderId), subject: fixture.Work.Reference);
+        EstateModel model = fixture.Estate.Load();
+        Assert.Equal(2, model.Findings.Count(f => f.Code == "standing.duplicate"));
+        Assert.Equal(2, EstateStatus.ReconcileTasks(model.Findings).Count(f => f.Code == "standing.duplicate"));
+        Assert.Contains(Validate(fixture, "reconciliation", new JsonObject { ["kept"] = revised.Id, ["withdrawn"] = new JsonArray(merged.Id, fixture.Policies.Decision.Id), ["note"] = "Keep the first." }, merged.Reference),
+            f => f.Code == "reconciliation.occurrence");
+        fixture.Add("reconciliation", new JsonObject { ["kept"] = revised.Id, ["withdrawn"] = new JsonArray(merged.Id), ["note"] = "Keep the first clone's assignment of the occurrence." }, subject: merged.Reference);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings));
+    }
+
+    [Fact]
+    public void AnOccurrenceIsCarriedOnlyAsItsTriggerMakesItWhileItsAgentIsActive()
+    {
+        RecordEnvelope? policy = null;
+        JsonObject duty = new() { ["key"] = "maintenance", ["kind"] = "duty", ["policy"] = "01M7ASMJ43WMQ5VDASDYVZ7BGV", ["rule"] = "monthly" };
+        using var fixture = new StandingFixture(activate: false);
+        policy = fixture.Policies.Policy();
+        duty["policy"] = policy.Id;
+        JsonObject condition = new() { ["key"] = "no-open-bugs", ["kind"] = "condition", ["record"] = new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["title"] = "Open bug" }, ["max"] = 0 } };
+        JsonObject events = new() { ["key"] = "bugs", ["kind"] = "event", ["recordType"] = "work-order", ["fields"] = new JsonObject { ["title"] = "Open bug" } };
+        RecordEnvelope goal = fixture.Add("goal", fixture.GoalBody(triggers: new JsonArray(StandingFixture.Monthly(firstAt: "2026-07-01T00:00:00Z"), duty, condition, events)), supersedes: fixture.Goal.Id);
+        fixture.Activate(goal);
+        fixture.Estate.SetClock(At("2026-11-14T00:00:00Z"));
+        StandingAgents.Trigger Trigger(string key) => StandingAgents.Triggers(fixture.Estate.Load(), goal).Single(t => t.Key == key);
+        FindingList Carry(StandingAgents.Trigger trigger, JsonNode item) =>
+            Validate(fixture, "assignment", StandingFixture.AssignmentBody(new StandingAgents.Occurrence(StandingAgents.Key(fixture.Goal.Id, trigger, StandingAgents.ItemKey(trigger.Kind, Element(item)) ?? "x"), trigger.Key, trigger.Kind, trigger.Revision, Element(item), fixture.Estate.Clock, [], "probe"), fixture.Estate.BuilderId), fixture.Work.Reference);
+
+        // Missed ticks coalesce: only the latest interval is carried.
+        StandingAgents.Trigger monthly = Trigger("monthly");
+        Assert.Contains(Carry(monthly, new JsonObject { ["interval"] = 2, ["dueAt"] = "2026-09-01T00:00:00Z" }), f => f.Code == "assignment.occurrence" && f.Message.Contains("coalesced into interval 4", StringComparison.Ordinal));
+        Assert.DoesNotContain(Carry(monthly, new JsonObject { ["interval"] = 4, ["dueAt"] = "2026-11-01T00:00:00Z" }), f => f.Severity == Severity.Error);
+
+        // A duty occurrence is the duty's exact identity: a near miss or a made-up one is refused.
+        StandingAgents.Trigger owed = Trigger("maintenance");
+        JsonElement rule = Assert.Single(policy.Body.GetProperty("rules").EnumerateArray(), r => r.GetProperty("key").GetString() == "monthly");
+        string subject = fixture.Estate.Load().Chain(fixture.Estate.Load().ById[rule.GetProperty("parameters").GetProperty("subject").GetProperty("id").GetString()!])[0];
+        string identity = $"{policy.Id}:{subject}:{{\"kind\":\"interval\",\"number\":0}}";
+        JsonObject Duty(string occurrenceIdentity) => new()
+        {
+            ["occurrence"] = occurrenceIdentity, ["policy"] = PolicyFixture.Ref(policy), ["rule"] = "monthly", ["dueAt"] = "2026-10-13T13:00:00Z", ["deadline"] = "2026-10-16T13:00:00Z",
+            ["schedule"] = new JsonObject { ["kind"] = "interval", ["number"] = 0 },
+        };
+        Assert.DoesNotContain(Carry(owed, Duty(identity)), f => f.Severity == Severity.Error);
+        Assert.Contains(Carry(owed, Duty(identity + " ")), f => f.Code == "assignment.occurrence" && f.Message.Contains("its identity is not the duty occurrence's", StringComparison.Ordinal));
+        Assert.Contains(Carry(owed, Duty("anything-at-all")), f => f.Code == "assignment.occurrence");
+
+        // A condition's failing set, and an event's record, are the trigger's as the records stand: the write boundary refuses others.
+        fixture.Add("work-order", new JsonObject { ["key"] = "BUG-1", ["kind"] = "ordinary", ["title"] = "Open bug", ["intent"] = "Fix it.", ["scope"] = new JsonArray("path:fix/"), ["exitQuestion"] = "Fixed?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("fix") });
+        Assert.Contains(Carry(Trigger("no-open-bugs"), new JsonObject { ["failing"] = FlowFixture.Hash('9'), ["records"] = 1 }), f => f.Code == StandingAgents.BoundaryCode);
+        RecordEnvelope own = fixture.Add("work-order", new JsonObject { ["key"] = "BUG-2", ["kind"] = "ordinary", ["title"] = "Open bug", ["intent"] = "Fix it.", ["scope"] = new JsonArray("path:fix/"), ["exitQuestion"] = "Fixed?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("fix") }, builder: true);
+        Assert.Contains(Carry(Trigger("bugs"), new JsonObject { ["record"] = PolicyFixture.Ref(own) }), f => f.Code == StandingAgents.BoundaryCode && f.Message.Contains("the agent's own", StringComparison.Ordinal));
+
+        // Paused, no new occurrence is carried, whatever time its triggers were evaluated at.
+        fixture.Add("goal-status", new JsonObject { ["status"] = "paused", ["note"] = "Paused for the test." }, subject: goal.Reference);
+        Assert.Contains(Carry(monthly, new JsonObject { ["interval"] = 4, ["dueAt"] = "2026-11-01T00:00:00Z" }), f => f.Code == "assignment.occurrence" && f.Message.Contains("is paused when this assignment is recorded", StringComparison.Ordinal));
     }
 }

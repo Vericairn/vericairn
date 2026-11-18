@@ -518,7 +518,15 @@ public sealed record GoalProposeRequest(string By, JsonElement Body, string? Sup
 /// <summary>Activate, pause, resume or stop a goal.</summary>
 /// <param name="By">The principal acting: the goal's sponsor, or an operator for a goal an agent sponsors.</param>
 /// <param name="Note">Why, and what remains; a sentence naming the action when omitted.</param>
-public sealed record GoalActionRequest(string By, string? Note = null);
+public sealed record GoalActionRequest(string By, string? Note = null)
+{
+    /// <summary>
+    /// From 0.9.4, with a pause: also ask every run of the goal in flight to stop. A standing agent's stop always asks them, and retires its
+    /// work order.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool StopRuns { get; init; }
+}
 
 /// <summary>Evaluate a goal: the runtime gives each record predicate its verdict, and the evaluator each evidence statement.</summary>
 /// <param name="By">The evaluating principal, who authored none of the goal's steps.</param>

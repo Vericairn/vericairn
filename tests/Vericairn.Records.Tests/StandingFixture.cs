@@ -111,6 +111,30 @@ internal sealed class StandingFixture : IDisposable
         }, builder: builder, subject: attempt.Reference);
     }
 
+    /// <summary>The intent of an agent run carrying an assignment of the goal, with a cap of ten minutes.</summary>
+    public RecordEnvelope RunIntent(RecordEnvelope assignment, string identity) => Add("operation", RunBody(assignment, identity, "not-started"));
+
+    /// <summary>A run's settlement: its intent's revision with the status, observed and charged five minutes.</summary>
+    public RecordEnvelope Settle(RecordEnvelope intent, string status)
+    {
+        RecordEnvelope assignment = Estate.Load().ById[intent.Body.GetProperty("target").GetProperty("assignment").GetString()!];
+        JsonObject dispatched = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, "dispatched");
+        dispatched["dispatchedAt"] = intent.At;
+        RecordEnvelope running = Add("operation", dispatched, supersedes: intent.Id);
+        JsonObject body = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, status);
+        body["dispatchedAt"] = intent.At;
+        body["observed"] = new JsonObject { ["summary"] = "The run ended.", ["at"] = RecordParser.FormatTimestamp(Estate.Clock) };
+        body["usage"] = new JsonObject { ["wallMinutes"] = 5, ["unreported"] = new JsonArray() };
+        return Add("operation", body, supersedes: running.Id);
+    }
+
+    public JsonObject RunBody(RecordEnvelope assignment, string identity, string status) => new()
+    {
+        ["provider"] = "stand-in", ["action"] = "agent-run", ["identity"] = identity, ["intent"] = "Carry the occurrence.",
+        ["target"] = new JsonObject { ["assignment"] = assignment.Id, ["principal"] = Estate.BuilderId, ["workspace"] = "research, branch work/res-1", ["goal"] = Goal.Id },
+        ["status"] = status, ["evidence"] = new JsonArray(), ["cap"] = new JsonObject { ["wallMinutes"] = 10, ["attemptsPerStep"] = Goal.Body.GetProperty("budget").GetProperty("attemptsPerStep").GetInt32() },
+    };
+
     /// <summary>The operator's review of a result.</summary>
     public RecordEnvelope Review(RecordEnvelope result, string outcome) => Add("review", new JsonObject
     {

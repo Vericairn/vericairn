@@ -1015,7 +1015,7 @@ public static class OpenApiDocument
                 },
             },
             ["GoalProposeRequest"] = Object(("by", "string"), ("body", "object"), ("supersedes", "string")),
-            ["GoalActionRequest"] = Object(("by", "string"), ("note", "string")),
+            ["GoalActionRequest"] = Object(("by", "string"), ("note", "string"), ("stopRuns", "boolean")),
             ["GoalEvaluateRequest"] = Object(("by", "string"), ("summary", "string"), ("verdicts", "array")),
             ["GoalVerdict"] = Object(("condition", "integer"), ("verdict", "string"), ("reason", "string"), ("read", "array")),
             ["GoalAcceptRequest"] = Object(("by", "string"), ("statement", "string"), ("reason", "string"), ("stepReasons", "array")),

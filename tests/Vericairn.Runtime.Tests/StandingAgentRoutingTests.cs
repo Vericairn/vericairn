@@ -52,7 +52,7 @@ public class StandingAgentRoutingTests
         duplicate.Remove("routedWith");
         WriteOutcome twice = run.Service.NewRecord(new NewRecordRequest("assignment", op, JsonSerializer.SerializeToElement(duplicate), $"work-order:{assignment.Subject!.Id}:{assignment.Subject.Hash}"));
         Assert.False(twice.Ok);
-        Assert.Contains(twice.Problem!.Findings, f => f.Code == "assignment.duplicate");
+        Assert.Contains(twice.Problem!.Findings, f => f.Code == "standing.duplicate");
         duplicate.Remove("occurrence");
         WriteOutcome bare = run.Service.NewRecord(new NewRecordRequest("assignment", op, JsonSerializer.SerializeToElement(duplicate), $"work-order:{assignment.Subject.Id}:{assignment.Subject.Hash}"));
         Assert.Contains(bare.Problem!.Findings, f => f.Code == "assignment.occurrence");
@@ -106,8 +106,8 @@ public class StandingAgentRoutingTests
         RecordEnvelope held = Assert.Single(model.OfType("assignment"), a => StandingAgents.KeyOf(a) == key);
         Assert.Single(responses, r => r.Outcome == "run");
         GoalStepResponse other = Assert.Single(responses, r => r.Outcome != "run");
-        Assert.True(other.Problem?.Findings.Any(f => f.Code == "assignment.duplicate") == true || other.Message.Contains("Nothing to dispatch", StringComparison.Ordinal)
-            || other.Message.Contains("assignment.duplicate", StringComparison.Ordinal) || other.Message.Contains("is held by assignment", StringComparison.Ordinal), other.Message);
+        Assert.True(other.Problem?.Findings.Any(f => f.Code == "standing.duplicate") == true || other.Message.Contains("Nothing to dispatch", StringComparison.Ordinal)
+            || other.Message.Contains("standing.duplicate", StringComparison.Ordinal) || other.Message.Contains("is held by assignment", StringComparison.Ordinal), other.Message);
         foreach (GoalStepResponse started in responses.Where(r => r.Outcome == "run"))
         {
             run.Settled(started.Run!.Run!);
@@ -189,6 +189,156 @@ public class StandingAgentRoutingTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void BlockedResultsOfRunsThatExitCleanlyPauseTheAgentAndADirectRunIsRefusedThenAsGoalStepIs()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 });
+        string? assignment = null;
+        for (int i = 0; i < 3; i++)
+        {
+            // Each run's harness exits 0 and its agent's result is blocked: every result is recorded, the earlier intents staying valid.
+            GoalStepResponse step = Step(run, goal, "clean-" + i);
+            Assert.True(step.Run is not null, step.Message);
+            Assert.Equal("observed-success", run.Settled(step.Run!.Run).Status);
+            assignment ??= step.Assignment!.Id;
+            Blocked(run, assignment);
+        }
+
+        GoalDueResponse held = run.Service.GoalDue(goal)!;
+        Assert.Equal(("held", 3), (held.Json.GetProperty("state").GetString(), held.Json.GetProperty("failures").GetProperty("consecutive").GetInt32()));
+        Assert.Equal(0, run.Service.Check().Errors);
+
+        // A run started outside goal step is refused at its intent while the pause holds.
+        RunResponse direct = run.Service.RunStart(new RunStartRequest(assignment!, "claude-code", run.Estate.BuilderId, op, run.Resource, WallMinutes: 10, Settings: Command(run, "direct")));
+        Assert.False(direct.Ok);
+        Assert.Contains("failed in a row", direct.Message, StringComparison.Ordinal);
+        Assert.Equal(("ask", "attention"), (Step(run, goal, "ask").Outcome, "attention"));
+    }
+
+    [Fact]
+    public void ASettledOccurrenceIsNotRunAgainByADirectRunStart()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Standing(run);
+        GoalStepResponse first = Step(run, goal, "first");
+        Assert.True(first.Ok, first.Message);
+        run.Settled(first.Run!.Run);
+        FlowStepRoutingTests.Done(run, first.Assignment!.Id, ("findings", FlowFixture.Hash('a'), "text/markdown"));
+        RunResponse again = run.Service.RunStart(new RunStartRequest(first.Assignment.Id, "claude-code", run.Estate.BuilderId, op, run.Resource, WallMinutes: 10, Settings: Command(run, "again")));
+        Assert.False(again.Ok);
+        Assert.Contains("is settled", again.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(run.Report("again")));
+    }
+
+    [Fact]
+    public void ABackdatedNowNeverDispatchesALapsedAgentsOccurrenceToAPerson()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        DateTimeOffset until = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddDays(10).ToUnixTimeSeconds());
+        string goal = Standing(run, until: RecordParser.FormatTimestamp(until), holder: op);
+        run.Service.FlowClock = new FixedClock(until.AddMinutes(1));
+        GoalStepResponse backdated = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource) { Now = RecordParser.FormatTimestamp(until.AddMinutes(-1)) });
+        Assert.Equal("refused", backdated.Problem?.Code);
+        Assert.Contains("whatever time --now names", backdated.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Estate.Load().OfType("assignment"), a => StandingAgents.KeyOf(a) is not null);
+    }
+
+    [Fact]
+    public void PausingWithStopRunsAndStoppingAStandingAgentAskItsRunsToStopAndStoppingRetiresItsWork()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Standing(run);
+        GoalStepResponse first = Step(run, goal, "running", scenario: "ack-stop");
+        Assert.True(first.Ok, first.Message);
+        run.WaitUntil(() => run.Row(first.Run!.Run).Observed && File.Exists(run.Report("running")), "the run and its stand-in to be ready");
+        WriteOutcome paused = run.Service.GoalPause(goal, new GoalActionRequest(op) { StopRuns = true });
+        Assert.True(paused.Ok, paused.Problem?.Message);
+        Assert.Contains(paused.Notices!, n => n.Contains(first.Run!.Run, StringComparison.Ordinal));
+        Assert.Equal("known-failure", run.Settled(first.Run!.Run).Status);
+        RunEstate.Ok(run.Service.GoalResume(goal, new GoalActionRequest(op)));
+
+        GoalStepResponse second = Step(run, goal, "running-again", scenario: "ack-stop");
+        Assert.True(second.Ok, second.Message);
+        run.WaitUntil(() => run.Row(second.Run!.Run).Observed && File.Exists(run.Report("running-again")), "the second run and its stand-in to be ready");
+        WriteOutcome stopped = run.Service.GoalStop(goal, new GoalActionRequest(op, "The widget was withdrawn."));
+        Assert.True(stopped.Ok, stopped.Problem?.Message);
+        Assert.Contains(stopped.Notices!, n => n.StartsWith("Work order RES-1 is retired", StringComparison.Ordinal));
+        Assert.Equal("known-failure", run.Settled(second.Run!.Run).Status);
+        Assert.Equal("stopped", run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString());
+        Assert.Equal("retired", Assert.Single(run.Service.Status().Json.GetProperty("workOrders").EnumerateArray(), w => w.GetProperty("key").GetString() == "RES-1").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void TheRenewalAskComesOnceBeforeTheUntilTimeAndDispatchesNothing()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        // A term of six hours asks within its last three, half of it; the clock is controlled to an hour before its until time.
+        DateTimeOffset until = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddHours(6).ToUnixTimeSeconds());
+        string goal = Standing(run, until: RecordParser.FormatTimestamp(until));
+        run.Service.FlowClock = new FixedClock(until.AddHours(-1));
+        GoalStepResponse renewal = Step(run, goal, "renewal");
+        Assert.True(renewal.Ok, renewal.Message);
+        Assert.Equal(("ask", "attention"), (renewal.Outcome, renewal.Route));
+        Assert.Null(renewal.Run);
+        Assert.StartsWith(StandingAgents.RenewalAsk + " Research the widget before its until time", EstateModel.BodyString(run.Estate.Load().ById[renewal.Ask!.Id], "question"), StringComparison.Ordinal);
+        GoalStepResponse next = Step(run, goal, "after-renewal");
+        Assert.True(next.Outcome == "run", next.Message);
+        run.Settled(next.Run!.Run);
+    }
+
+    [Fact]
+    public void TheWriteBoundaryRefusesAConditionsOccurrenceThatDoesNotFailOverTheRecordsItNames()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Standing(run, triggers: new JsonArray(new JsonObject { ["key"] = "no-open-bugs", ["kind"] = "condition", ["record"] = new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["title"] = "Open bug" }, ["max"] = 0 } }));
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"BUG-1","kind":"ordinary","title":"Open bug","intent":"Fix it.","scope":["path:fix/"],"exitQuestion":"Fixed?","inputs":[],"deliverables":["fix"]}"""))));
+        JsonElement due = Assert.Single(run.Service.GoalDue(goal)!.Json.GetProperty("occurrences").EnumerateArray());
+        RecordEnvelope order = run.Estate.Load().Current("work-order").Single(o => EstateModel.BodyString(o, "key") == "RES-1");
+        JsonObject Body(string failing)
+        {
+            JsonObject item = JsonNode.Parse(due.GetProperty("item").GetRawText())!.AsObject();
+            item["failing"] = failing;
+            string key = due.GetProperty("key").GetString()!;
+            return new JsonObject
+            {
+                ["contributor"] = run.Estate.BuilderId, ["brief"] = JsonNode.Parse(RunEstate.Brief.Replace("path:widget/", "path:research/", StringComparison.Ordinal)),
+                ["occurrence"] = new JsonObject { ["key"] = key[..(key.LastIndexOf('-') + 1)] + failing, ["trigger"] = "no-open-bugs", ["revision"] = due.GetProperty("revision").GetString(), ["item"] = item },
+            };
+        }
+
+        JsonObject madeUp = Body(FlowFixture.Hash('9'));
+        madeUp["brief"]!["repository"] = run.Resource;
+        WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("assignment", op, JsonSerializer.SerializeToElement(madeUp), $"work-order:{order.Id}:{order.ComputedHash}"));
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, f => f.Code == StandingAgents.BoundaryCode);
+        JsonObject real = Body(due.GetProperty("item").GetProperty("failing").GetString()!);
+        real["brief"]!["repository"] = run.Resource;
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("assignment", op, JsonSerializer.SerializeToElement(real), $"work-order:{order.Id}:{order.ComputedHash}")));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    /// <summary>The builder's attempt and blocked result on an assignment.</summary>
+    private static void Blocked(RunEstate run, string assignment)
+    {
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(assignment, run.Estate.BuilderId, "research repository, a work branch", "Research."))).Id;
+        var body = new JsonObject
+        {
+            ["outcome"] = "blocked", ["summary"] = "Blocked on a source.", ["outputs"] = new JsonArray(), ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(),
+            ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(), ["nextStep"] = "Find another source.",
+        };
+        RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, run.Estate.BuilderId, JsonSerializer.SerializeToElement(body))));
+    }
+
+    private static Dictionary<string, string> Command(RunEstate run, string report) =>
+        new(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", run.Report(report)) };
+
     /// <summary>A fixed clock, the runtime's controlled time.</summary>
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
@@ -199,7 +349,7 @@ public class StandingAgentRoutingTests
     /// Installs the researcher flow and a standing agent of it the operator sponsors and activates: a daily schedule whose first tick was
     /// two days ago, the request trigger, the builder in the researcher role; returns the goal's id.
     /// </summary>
-    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null)
+    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null)
     {
         string op = run.Estate.OperatorId;
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}"""), Supersedes: run.Estate.BuilderId)));
@@ -211,14 +361,14 @@ public class StandingAgentRoutingTests
             ["title"] = "Research the widget", ["objective"] = "Keep researching the widget between releases.",
             ["completion"] = new JsonArray(new JsonObject { ["record"] = FlowFixture.Marker("RESEARCHED") }), ["constraints"] = new JsonArray("nothing outside research/"),
             ["kind"] = "stewardship", ["sponsor"] = op, ["budget"] = budget ?? new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 3 },
-            ["roles"] = new JsonArray(FlowFixture.Role("researcher", run.Estate.BuilderId)),
+            ["roles"] = new JsonArray(FlowFixture.Role("researcher", holder ?? run.Estate.BuilderId)),
             ["plan"] = new JsonObject
             {
                 ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(order),
                 ["standing"] = new JsonObject
                 {
                     ["pin"] = FlowFixture.Pin(flow), ["subject"] = new JsonObject { ["topic"] = "the widget" },
-                    ["triggers"] = new JsonArray(
+                    ["triggers"] = triggers ?? new JsonArray(
                         new JsonObject { ["key"] = "daily", ["kind"] = "schedule", ["unit"] = "days", ["every"] = 1, ["firstAt"] = RecordParser.FormatTimestamp(first) },
                         new JsonObject { ["key"] = "asked", ["kind"] = "request" }),
                     ["period"] = period ?? new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 300 },

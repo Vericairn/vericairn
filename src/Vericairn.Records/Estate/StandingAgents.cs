@@ -33,11 +33,20 @@ internal static class StandingAgents
     /// <summary>Consecutive failed runs that pause a standing agent with an ask when its goal's limits set none (§ 10).</summary>
     public const int DefaultConsecutiveFailures = 3;
 
+    /// <summary>The results awaiting review that defer a standing agent's dispatch when its plan sets none (§ 10).</summary>
+    public const int DefaultAwaitingReview = 3;
+
     /// <summary>The days until a standing agent returns to its sponsor when its proposal names no until time (§ 5).</summary>
     public const int DefaultDays = 30;
 
     /// <summary>The most occurrences one trigger shows, oldest first; an event burst past it waits for the next evaluation.</summary>
     public const int MaximumOccurrences = 200;
+
+    /// <summary>The words that open the renewal ask, once for each goal revision before its until time.</summary>
+    public const string RenewalAsk = "Renew standing agent";
+
+    /// <summary>How long before its until time a standing agent asks its sponsor to renew it, at most half of its term.</summary>
+    public static readonly TimeSpan RenewalLead = TimeSpan.FromDays(3);
 
     /// <summary>The words that open the ask a period cap raises, once in each period.</summary>
     public const string PeriodAsk = "A period cap of standing agent";
@@ -119,6 +128,12 @@ internal static class StandingAgents
         DateTimeOffset? Until, string? RunsOn, Period? Period, int InFlight, int Concurrency, int Failures, int FailureLimit, RecordEnvelope? FailureTrigger,
         IReadOnlyList<Trigger> Triggers, IReadOnlyDictionary<string, DateTimeOffset?> Next, IReadOnlyList<OccurrenceState> Occurrences)
     {
+        /// <summary>Its occurrences whose result awaits review.</summary>
+        public int Awaiting { get; init; }
+
+        /// <summary>The results awaiting review that defer its dispatch.</summary>
+        public int AwaitingCap { get; init; } = DefaultAwaitingReview;
+
         /// <summary>The occurrences that may be carried now, oldest first.</summary>
         public IEnumerable<OccurrenceState> Due => Occurrences.Where(o => o.State == "due");
 
@@ -401,6 +416,8 @@ internal static class StandingAgents
         AgentRuns.Ledger ledger = AgentRuns.Of(model, current);
         Period? period = PeriodOf(model, current, runs, asOf);
         (int failures, RecordEnvelope? failure) = Failures(model, current, assignments, runs);
+        int awaitingCap = AwaitingReviewCap(current);
+        int awaiting = assignments.GroupBy(a => KeyOf(a)!, StringComparer.Ordinal).Select(g => g.Last()).Count(a => Settled(model, a) is RecordEnvelope settledBy && Awaiting(model, settledBy, null));
         int limit = FailureLimit(current);
         int inFlight = runs.Count(r => r.InFlight);
         (string state, string reason) = status switch
@@ -420,10 +437,14 @@ internal static class StandingAgents
         var states = new List<OccurrenceState>();
         foreach (Occurrence occurrence in occurrences)
         {
-            states.Add(StateOf(model, ledger, occurrence, byKey.GetValueOrDefault(occurrence.Key), runs, state, reason, period, inFlight));
+            states.Add(StateOf(model, ledger, occurrence, byKey.GetValueOrDefault(occurrence.Key), runs, state, reason, period, inFlight, awaiting, awaitingCap));
         }
 
-        return new Agent(current, status, state, reason, asOf, flow, step, unavailable, order, until, TJson.Text(plan, "runsOn"), period, inFlight, ledger.Concurrency, failures, limit, failure, triggers, next, states);
+        return new Agent(current, status, state, reason, asOf, flow, step, unavailable, order, until, TJson.Text(plan, "runsOn"), period, inFlight, ledger.Concurrency, failures, limit, failure, triggers, next, states)
+        {
+            Awaiting = awaiting,
+            AwaitingCap = awaitingCap,
+        };
     }
 
     /// <summary>The principals whose records never trigger the agent itself: the contributors of its occurrences and the agents its role names.</summary>
@@ -581,7 +602,7 @@ internal static class StandingAgents
     }
 
     /// <summary>An occurrence's state from the assignment that holds its key, its runs and its result, then the agent's gates.</summary>
-    private static OccurrenceState StateOf(EstateModel model, AgentRuns.Ledger ledger, Occurrence occurrence, List<RecordEnvelope>? holders, List<AgentRuns.Run> runs, string agent, string agentReason, Period? period, int inFlight)
+    private static OccurrenceState StateOf(EstateModel model, AgentRuns.Ledger ledger, Occurrence occurrence, List<RecordEnvelope>? holders, List<AgentRuns.Run> runs, string agent, string agentReason, Period? period, int inFlight, int awaiting, int awaitingCap)
     {
         RecordEnvelope? holder = holders is { Count: > 0 } ? holders[^1] : null;
         if (holder is not null)
@@ -593,6 +614,16 @@ internal static class StandingAgents
             if (run is { InFlight: true })
             {
                 return new(occurrence, "running", $"run {run.Id} of {contributor} on assignment {holder.Id} is in flight ({run.Status})", holder, run, result);
+            }
+
+            if (result is not null && EstateModel.BodyString(result, "outcome") is "blocked" or "abandoned")
+            {
+                if (AgentRuns.Exhausted(model, ledger, holder.Id).FirstOrDefault(r => r.StartsWith("The step has had", StringComparison.Ordinal)) is string used)
+                {
+                    return new(occurrence, "held", $"its result {result.Id} is {EstateModel.BodyString(result, "outcome")}, assignment {holder.Id} holds it and {used} Its sponsor decides: a person takes it over (vericairn work takeover {holder.Id} --by <person>)", holder, run, result);
+                }
+
+                return Gate(new(occurrence, "due", $"its result {result.Id} on assignment {holder.Id} is {EstateModel.BodyString(result, "outcome")}: the assignment goes on with another run, and the failure pause counts it", holder, run, result));
             }
 
             if (result is not null)
@@ -624,11 +655,11 @@ internal static class StandingAgents
 
         return Gate(new(occurrence, "due", occurrence.Summary, null, null, null));
 
-        OccurrenceState Gate(OccurrenceState due) => Gated(agent, agentReason, period, inFlight, ledger.Concurrency, due);
+        OccurrenceState Gate(OccurrenceState due) => Gated(agent, agentReason, period, inFlight, ledger.Concurrency, awaiting, awaitingCap, due);
     }
 
     /// <summary>An occurrence the agent's gates defer: anything but an active agent, a period whose caps are reached, or runs in flight at its concurrency.</summary>
-    private static OccurrenceState Gated(string agent, string agentReason, Period? period, int inFlight, int concurrency, OccurrenceState due)
+    private static OccurrenceState Gated(string agent, string agentReason, Period? period, int inFlight, int concurrency, int awaiting, int awaitingCap, OccurrenceState due)
     {
         if (agent != "active")
         {
@@ -638,6 +669,11 @@ internal static class StandingAgents
         if (period is not null && period.Reached.Count > 0)
         {
             return due with { State = "deferred", Reason = $"{due.Reason}; deferred: the period from {RecordParser.FormatTimestamp(period.Start)} to {RecordParser.FormatTimestamp(period.End)} has reached its caps ({string.Join(", ", period.Reached)})" };
+        }
+
+        if (awaiting >= awaitingCap)
+        {
+            return due with { State = "deferred", Reason = $"{due.Reason}; deferred: {awaiting.ToString(CultureInfo.InvariantCulture)} of its results await review, its cap of {awaitingCap.ToString(CultureInfo.InvariantCulture)}" };
         }
 
         if (inFlight >= concurrency)
@@ -653,7 +689,7 @@ internal static class StandingAgents
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(occurrence);
-        OccurrenceState state = Gated(agent.State, agent.Reason, agent.Period, agent.InFlight, agent.Concurrency, new OccurrenceState(occurrence, "due", occurrence.Summary, null, null, null));
+        OccurrenceState state = Gated(agent.State, agent.Reason, agent.Period, agent.InFlight, agent.Concurrency, agent.Awaiting, agent.AwaitingCap, new OccurrenceState(occurrence, "due", occurrence.Summary, null, null, null));
         return agent with { Occurrences = [.. agent.Occurrences, state] };
     }
 
@@ -711,44 +747,107 @@ internal static class StandingAgents
     }
 
     /// <summary>
-    /// The goal's consecutive failed runs that count toward the failure pause: each run that settled as a known failure and each result
-    /// blocked or abandoned since its last success, after the failure its sponsor last answered an ask about, newest first.
+    /// The goal's consecutive failed runs that count toward the failure pause, judged from the records before a record when one is given:
+    /// one outcome for each settled run, in the order the runs were started: the latest result recorded on its assignment between its start
+    /// and the next run of that assignment, failed when blocked or abandoned, whatever the harness's exit; or, with no result, its settlement,
+    /// failed when a known failure; a run that settled with neither a result nor a failure counts for nothing. Only the failures after the last
+    /// success, and after the failure its sponsor last answered the pause's ask about, count; the latest of them first.
     /// </summary>
-    private static (int Count, RecordEnvelope? Latest) Failures(EstateModel model, RecordEnvelope goal, IReadOnlyList<RecordEnvelope> assignments, IReadOnlyList<AgentRuns.Run> runs)
+    private static (int Count, RecordEnvelope? Latest) Failures(EstateModel model, RecordEnvelope goal, IReadOnlyList<RecordEnvelope> assignments, IReadOnlyList<AgentRuns.Run> runs, RecordEnvelope? before = null)
     {
-        var events = new List<(DateTimeOffset At, RecordEnvelope Record, bool Failed)>();
-        foreach (AgentRuns.Run run in runs.Where(r => r.IsSettled))
+        bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
+        List<AgentRuns.Run> settled = [.. runs.Where(r => r.IsSettled && Counts(r.Latest)).OrderBy(r => r.Intent.At, StringComparer.Ordinal).ThenBy(r => r.Intent.Id, StringComparer.Ordinal)];
+        var outcomes = new List<(RecordEnvelope Record, bool Failed)>();
+        foreach (AgentRuns.Run run in settled)
         {
-            events.Add((run.Latest.AtTime, run.Latest, run.Status == "known-failure"));
-        }
-
-        foreach (RecordEnvelope assignment in assignments)
-        {
-            foreach (RecordEnvelope attempt in WorkView.AttemptsOf(model, assignment))
+            RecordEnvelope? carried = run.Assignment is string id && model.ById.TryGetValue(id, out RecordEnvelope? found) ? model.Latest(found) : null;
+            IReadOnlyList<string> chain = carried is null ? [] : model.Chain(carried);
+            AgentRuns.Run? next = runs.Where(r => r.Assignment is not null && chain.Contains(r.Assignment) && GoalRules.Before(run.Intent, r.Intent))
+                .OrderBy(r => r.Intent.At, StringComparer.Ordinal).ThenBy(r => r.Intent.Id, StringComparer.Ordinal).FirstOrDefault();
+            RecordEnvelope? result = carried is null ? null : chain.Select(c => model.ById[c]).SelectMany(a => WorkView.AttemptsOf(model, a))
+                .SelectMany(attempt => model.About(attempt.Id, "result"))
+                .Where(r => Counts(r) && GoalRules.Before(run.Intent, r) && (next is null || GoalRules.Before(r, next.Intent)))
+                .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+            if (result is not null)
             {
-                if (WorkView.ResultOf(model, attempt) is RecordEnvelope result)
-                {
-                    events.Add((result.AtTime, result, EstateModel.BodyString(result, "outcome") is "blocked" or "abandoned"));
-                }
+                outcomes.Add((result, EstateModel.BodyString(result, "outcome") is "blocked" or "abandoned"));
+            }
+            else if (run.Status == "known-failure")
+            {
+                outcomes.Add((run.Latest, true));
             }
         }
 
-        List<(DateTimeOffset At, RecordEnvelope Record, bool Failed)> ordered = events.OrderBy(e => e.At).ThenBy(e => e.Record.Id, StringComparer.Ordinal).ToList();
-        // A failure an answered ask names, and every event before it, no longer counts: the sponsor's answer lets the agent go on.
-        IReadOnlyList<RecordEnvelope> asks = Routing.AsksOf(model, goal);
+        // A failure an answered ask of the pause names, and every outcome before it, no longer counts: the sponsor's answer lets the agent go on.
+        List<RecordEnvelope> asks = [.. Routing.AsksOf(model, goal).Where(a => Counts(a) && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(NextEligible.AttentionQuestion, StringComparison.Ordinal)
+            && Asks.State(model, a) is { State: "answered" } state && state.Answers.Any(Counts))];
         int cut = -1;
-        for (int i = 0; i < ordered.Count; i++)
+        for (int i = 0; i < outcomes.Count; i++)
         {
-            IReadOnlyList<string> chain = model.Chain(ordered[i].Record);
-            if (asks.Any(a => model.Latest(a).Subject is RecordReference subject && chain.Contains(subject.Id) && Asks.State(model, a).State == "answered"
-                && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(NextEligible.AttentionQuestion, StringComparison.Ordinal)))
+            IReadOnlyList<string> named = model.Chain(outcomes[i].Record);
+            if (asks.Any(a => model.Latest(a).Subject is RecordReference subject && named.Contains(subject.Id)))
             {
                 cut = i;
             }
         }
 
-        List<(DateTimeOffset At, RecordEnvelope Record, bool Failed)> trailing = ordered.Skip(cut + 1).Reverse().TakeWhile(e => e.Failed).ToList();
+        List<(RecordEnvelope Record, bool Failed)> trailing = [.. outcomes.Skip(cut + 1).Reverse().TakeWhile(o => o.Failed)];
         return (trailing.Count, trailing.Count == 0 ? null : trailing[0].Record);
+    }
+
+    /// <summary>
+    /// The result that settles the occurrence an assignment holds, judged from the records before a record when one is given: its latest
+    /// result, completed or partial, unless a review by another principal than its author returns it (findings or fail) and no later
+    /// acceptance stands; null while nothing settles it.
+    /// </summary>
+    internal static RecordEnvelope? Settled(EstateModel model, RecordEnvelope assignment, RecordEnvelope? before = null)
+    {
+        bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
+        RecordEnvelope? result = model.Chain(assignment).Where(model.ById.ContainsKey).Select(id => model.ById[id]).SelectMany(a => WorkView.AttemptsOf(model, a))
+            .SelectMany(attempt => model.About(attempt.Id, "result")).Where(Counts)
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+        if (result is null || EstateModel.BodyString(result, "outcome") is "blocked" or "abandoned")
+        {
+            // A blocked or abandoned result settles nothing: the occurrence goes on, within its attempts, and the failure pause counts it.
+            return null;
+        }
+
+        IReadOnlyList<string> chain = model.Chain(result);
+        RecordEnvelope? review = model.OfType("review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && r.By != result.By && Counts(r))
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+        bool accepted = chain.SelectMany(id => model.About(id, "acceptance")).Any(Counts);
+        return review is not null && EstateModel.BodyString(review, "outcome") is "findings" or "fail" && !accepted ? null : result;
+    }
+
+    /// <summary>True when a settling result awaits review: no review by another principal than its author, and no acceptance, before the record.</summary>
+    private static bool Awaiting(EstateModel model, RecordEnvelope result, RecordEnvelope? before)
+    {
+        bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
+        IReadOnlyList<string> chain = model.Chain(result);
+        return !model.OfType("review").Any(r => r.Subject is not null && chain.Contains(r.Subject.Id) && r.By != result.By && Counts(r))
+            && !chain.SelectMany(id => model.About(id, "acceptance")).Any(Counts);
+    }
+
+    /// <summary>The results awaiting review that hold a standing agent's dispatch: its plan's awaitingReview, or three.</summary>
+    public static int AwaitingReviewCap(RecordEnvelope goal) =>
+        TJson.Object(Plan(goal), "awaitingReview") is { ValueKind: JsonValueKind.Number } cap && cap.TryGetInt32(out int value) && value > 0 ? value : DefaultAwaitingReview;
+
+    /// <summary>
+    /// True when a standing agent is due to ask for renewal: its until time is within three days, or half of its term since its revision
+    /// was activated when that is shorter, and has not passed.
+    /// </summary>
+    public static bool RenewalDue(EstateModel model, RecordEnvelope goal, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        if (Until(goal) is not { } until || now >= until
+            || GoalRules.Statuses(model, goal).FirstOrDefault(s => EstateModel.BodyString(s, "status") == "active") is not RecordEnvelope activation)
+        {
+            return false;
+        }
+
+        TimeSpan lead = TimeSpan.FromTicks(Math.Min(RenewalLead.Ticks, Math.Max((until - activation.AtTime).Ticks / 2, 0)));
+        return now >= until - lead;
     }
 
     /// <summary>The open ask the failure pause or a period cap raised, when one waits, so goal step records no second.</summary>
@@ -785,11 +884,25 @@ internal static class StandingAgents
         IReadOnlyList<RecordEnvelope> assignments = FlowRuns.Work(model, goal) is RecordEnvelope order
             ? Routing.Assignments(model, order).Where(a => KeyOf(a) is not null && (before is null || GoalRules.Before(a, before))).ToList()
             : [];
-        (int failures, _) = Failures(model, goal, assignments, runs);
+        (int failures, _) = Failures(model, goal, assignments, runs, before);
         int limit = FailureLimit(goal);
         if (failures >= limit)
         {
             refusals.Add(("operation.standing", $"{failures.ToString(CultureInfo.InvariantCulture)} of standing agent {goal.Id}'s runs failed in a row, its limit of {limit.ToString(CultureInfo.InvariantCulture)}: no run starts until its sponsor answers the ask about it."));
+        }
+
+        // A settled occurrence runs again only when a review returns its result, on the assignment that holds it (§ 10).
+        if (assignment is not null && model.ById.TryGetValue(assignment, out RecordEnvelope? holder) && Settled(model, model.Latest(holder), before) is RecordEnvelope waiting)
+        {
+            refusals.Add(("operation.standing", $"Occurrence {KeyOf(model.Latest(holder))} is settled: its result {waiting.Id} awaits review or is reviewed, and it runs again only when a review returns that result."));
+        }
+
+        // Results awaiting review hold dispatch at the goal's cap (§ 10).
+        int awaiting = assignments.Count(a => Settled(model, a, before) is RecordEnvelope result && Awaiting(model, result, before));
+        int cap = AwaitingReviewCap(goal);
+        if (awaiting >= cap)
+        {
+            refusals.Add(("operation.standing", $"{awaiting.ToString(CultureInfo.InvariantCulture)} of standing agent {goal.Id}'s results await review, its cap of {cap.ToString(CultureInfo.InvariantCulture)}: no run starts until they are reviewed."));
         }
 
         if (PeriodOf(model, goal, runs, at) is { Caps.Count: > 0 } period && period.Caps.TryGetValue("runs", out long allowed) && period.Spent.GetValueOrDefault("runs") >= allowed)
@@ -866,6 +979,7 @@ internal static class StandingAgents
         BodyReader? period = standing.Nested("period", true);
         string? until = standing.Timestamp("until", true);
         standing.Hash("runsOn", false);
+        standing.Number("awaitingReview", false, 1, 100);
         standing.NoOtherKeys();
         if (kind != "stewardship")
         {
@@ -1089,7 +1203,17 @@ internal static class StandingAgents
         string identity = context.Model.Chain(goal)[0];
         Trigger? trigger = Triggers(context.Model, goal).FirstOrDefault(t => t.Key == triggerKey);
         RecordEnvelope? handedOver = Routing.TakesOverFrom(context.Model, context.Record);
-        if (handedOver is not null)
+        RecordEnvelope? revised = context.Record.Supersedes is string prior && context.Find(prior) is { Type: "assignment" } earlierRevision && KeyOf(earlierRevision) is not null ? earlierRevision : null;
+        if (revised is not null)
+        {
+            // A revision keeps the occurrence its assignment carries, exactly: the chain holds that key until the occurrence settles, so a
+            // revision never frees it for a second assignment, nor moves the assignment to another occurrence.
+            if (CanonicalJson.Serialize(TJson.Object(revised.Body, "occurrence")) != CanonicalJson.Serialize(occurrence.Element))
+            {
+                context.Error("assignment.occurrence", $"This assignment revises assignment {revised.Id}, which carries occurrence {KeyOf(revised)}: a revision keeps its occurrence exactly, and another occurrence is a new assignment.");
+            }
+        }
+        else if (handedOver is not null)
         {
             // A hand-over carries the occurrence the agent's assignment named, exactly, whatever the goal declares now.
             if (CanonicalJson.Serialize(TJson.Object(handedOver.Body, "occurrence")) != CanonicalJson.Serialize(occurrence.Element))
@@ -1115,6 +1239,18 @@ internal static class StandingAgents
                 context.Error("assignment.occurrence", $"Trigger {triggerKey}'s revision is {trigger.Revision} when this assignment is recorded, not {revision}.");
             }
 
+            // A new occurrence is carried only while its agent is active and before its until time, as of the record's own time, whatever time
+            // its triggers were evaluated at.
+            string status = GoalRules.Status(context.Model, goal, context.Record);
+            if (status != "active")
+            {
+                context.Error("assignment.occurrence", $"Standing agent {goal.Id} is {status} when this assignment is recorded: a new occurrence is carried only while it is active.");
+            }
+            else if (Until(goal) is { } until && context.Record.AtTime >= until)
+            {
+                context.Error("assignment.occurrence", $"Standing agent {goal.Id}'s until time {RecordParser.FormatTimestamp(until)} has passed when this assignment is recorded: it returns to its sponsor, and a renewal is a goal revision its sponsor activates.");
+            }
+
             Due(context, goal, trigger, item.Element);
         }
 
@@ -1122,8 +1258,9 @@ internal static class StandingAgents
         // assignments race, or two clones' merged, are refused whichever is stored second; only a person's hand-over of the same occurrence,
         // and an assignment stored without the record it was routed with, which holds nothing, stand beside it.
         bool known = context.Model.ById.ContainsKey(context.Record.Id);
-        if (known && Routing.Stranded(context.Model, context.Record))
+        if (known && (!context.Model.IsCurrent(context.Record) || Routing.Stranded(context.Model, context.Record)))
         {
+            // An earlier revision is held by its chain's current one, and a withdrawn or stranded assignment holds nothing.
             return;
         }
 
@@ -1139,7 +1276,7 @@ internal static class StandingAgents
                 continue;
             }
 
-            context.Error("assignment.duplicate", $"Occurrence {named} is held by assignment {other.Id}: a key holds one assignment, whoever records it. A settled occurrence runs again only when a review returns its result, and the assignment that holds it goes on.");
+            context.Error("standing.duplicate", $"Occurrence {named} is held by assignment {other.Id}: a key holds one assignment, whoever records it. A settled occurrence runs again only when a review returns its result, and the assignment that holds it goes on; where two clones each recorded one, record a reconciliation that keeps one and withdraws the other.");
             break;
         }
     }
@@ -1156,6 +1293,10 @@ internal static class StandingAgents
                 {
                     context.Error("assignment.occurrence", $"Interval {number.ToString(CultureInfo.InvariantCulture)} of schedule {trigger.Key} is not due when this assignment is recorded, or its dueAt is not the schedule's: an occurrence is never carried before it is due.");
                 }
+                else if (LatestTick(trigger.Declaration, at) is long latest && latest != number)
+                {
+                    context.Error("assignment.occurrence", $"Interval {number.ToString(CultureInfo.InvariantCulture)} of schedule {trigger.Key} coalesced into interval {latest.ToString(CultureInfo.InvariantCulture)} before this assignment was recorded: missed ticks are carried once, as the latest.");
+                }
 
                 break;
             case "event":
@@ -1169,7 +1310,20 @@ internal static class StandingAgents
                 {
                     context.Error("assignment.occurrence", $"The event's record is not a {type} record of trigger {trigger.Key}'s filters, at its exact hash, recorded after the trigger was activated and before this assignment.");
                 }
+                else if (named!.By is string author && (OwnAuthors(context.Model, goal, Routing.Assignments(context.Model, FlowRuns.Work(context.Model, goal)!).Where(a => KeyOf(a) is not null).ToList(), Resolve(context.Model, goal).Flow is FlowDefinition flow ? WorkStep(flow) : null).Contains(author)
+                    || !Admitted(context.Model, named, [.. TJson.Strings(trigger.Declaration, "roles")])))
+                {
+                    // Who counts as the agent's own, and which agents' records trigger it, are read as the records stand: the write boundary refuses
+                    // a new assignment for them, and assignments already in the estate keep their reading.
+                    context.Findings.Info(BoundaryCode, context.Location, $"The event's record {named.Id} is the agent's own, or an agent's that trigger {trigger.Key} does not admit: an agent's records trigger only another agent whose trigger names its role, to depth two, and never the agent itself.");
+                }
 
+                break;
+            case "condition":
+                Condition(context, trigger, item);
+                break;
+            case "duty":
+                Duty(context, trigger, item);
                 break;
             case "request":
                 if (Time(TJson.Text(item, "at")) is not { } asked || asked > at || TJson.Text(item, "by") != context.Record.By)
@@ -1179,6 +1333,102 @@ internal static class StandingAgents
 
                 break;
         }
+    }
+
+    /// <summary>The code of the occurrence checks the write boundary refuses for a new assignment, read as the records stand.</summary>
+    public const string BoundaryCode = "assignment.occurrence-now";
+
+    /// <summary>
+    /// A condition's item: its predicate fails when the assignment is recorded, over the set of records its hash and count name, read over
+    /// the current records and as status derives states now, which the write boundary holds a new assignment to.
+    /// </summary>
+    private static void Condition(ValidationContext context, Trigger trigger, JsonElement item)
+    {
+        JsonElement predicate = TJson.Object(trigger.Declaration, "record");
+        GoalPredicates.Verdict verdict = GoalPredicates.EvaluatePredicate(context.Model, predicate, context.Record.AtTime);
+        string set = string.Join("\n", verdict.Read.Select(r => r.Id + " " + r.Hash).Order(StringComparer.Ordinal));
+        bool fits = verdict.Value == "not-met" && TJson.Text(item, "failing") == ContentHash.Sha256(Encoding.UTF8.GetBytes(set))
+            && item.TryGetProperty("records", out JsonElement count) && count.TryGetInt32(out int records) && records == verdict.Read.Count;
+        if (fits)
+        {
+            return;
+        }
+
+        // The current records and their derived states change after the assignment, so the write boundary refuses a mismatch and
+        // assignments already in the estate keep their reading.
+        context.Findings.Info(BoundaryCode, context.Location, $"Condition {trigger.Key} does not fail over the records this occurrence names when the assignment is recorded: its item is the hash and count of the set the predicate reads while it fails ({verdict.Value}: {verdict.Reason}).");
+    }
+
+    /// <summary>
+    /// A duty's item: the duty occurrence's exact identity, the originating revision of the trigger's policy and its rule, the subject's
+    /// identity and the schedule item in canonical form, and the due time and deadline the schedule gives, due when the assignment is
+    /// recorded, so one deadline has one key. Whether the policy's evaluation still owes it is the runtime's, before dispatch.
+    /// </summary>
+    private static void Duty(ValidationContext context, Trigger trigger, JsonElement item)
+    {
+        string? why = DutyRefusal(context.Model, trigger, item, context.Record.AtTime);
+        if (why is not null)
+        {
+            context.Error("assignment.occurrence", $"The duty occurrence is not one trigger {trigger.Key} makes: {why}.");
+        }
+    }
+
+    private static string? DutyRefusal(EstateModel model, Trigger trigger, JsonElement item, DateTimeOffset at)
+    {
+        JsonElement named = TJson.Object(item, "policy");
+        if (TJson.Text(named, "type") != "estate-policy" || TJson.Text(named, "id") is not string id || !model.ById.TryGetValue(id, out RecordEnvelope? policy) || policy.Type != "estate-policy"
+            || policy.ComputedHash != TJson.Text(named, "hash"))
+        {
+            return "its policy is not an estate policy at its exact hash";
+        }
+
+        if (TJson.Text(trigger.Declaration, "policy") is not string declared || !model.ById.TryGetValue(declared, out RecordEnvelope? declaredPolicy) || PolicyRecords.Identity(model, policy) != PolicyRecords.Identity(model, declaredPolicy))
+        {
+            return "its policy is not the trigger's";
+        }
+
+        string? key = TJson.Text(item, "rule");
+        JsonElement rule = DutyRecords.Rule(policy, key);
+        if (key != TJson.Text(trigger.Declaration, "rule") || !DutyRecords.IsDuty(rule) || DutyRecords.Origin(model, policy, key).Id != policy.Id)
+        {
+            return "its rule is not the trigger's recurring duty at its originating revision";
+        }
+
+        JsonElement parameters = PolicyRecords.Property(rule, "parameters");
+        JsonElement selected = PolicyRecords.Property(parameters, "subject");
+        if (PolicyRecords.Text(selected, "id") is not string subjectId || !model.ById.TryGetValue(subjectId, out RecordEnvelope? subject))
+        {
+            return "its duty's subject is not in this estate";
+        }
+
+        JsonElement schedule = PolicyRecords.Property(parameters, "schedule");
+        JsonElement occurrence = TJson.Object(item, "schedule");
+        DateTimeOffset? due = TJson.Text(occurrence, "kind") switch
+        {
+            "interval" when PolicyRecords.Text(schedule, "kind") == "interval" && occurrence.TryGetProperty("number", out JsonElement n) && n.TryGetInt64(out long number) => DutyRecords.IntervalDue(schedule, number),
+            "date" when PolicyRecords.Text(schedule, "kind") == "date" && TJson.Text(occurrence, "at") == PolicyRecords.Text(schedule, "at") => DutyRecords.DateDue(schedule),
+            "release" when PolicyRecords.Text(schedule, "kind") == "release" && TJson.Text(TJson.Object(occurrence, "publication"), "id") is string release && model.ById.TryGetValue(release, out RecordEnvelope? published)
+                && published.Type == "release" && EstateModel.BodyString(published, "status") == "published" && published.ComputedHash == TJson.Text(TJson.Object(occurrence, "publication"), "hash") => published.AtTime,
+            _ => null,
+        };
+        if (due is null)
+        {
+            return "its schedule item is not one of the duty's schedule";
+        }
+
+        string expected = $"{policy.Id}:{PolicyRecords.Identity(model, subject)}:{CanonicalJson.Serialize(occurrence)}";
+        if (TJson.Text(item, "occurrence") != expected)
+        {
+            return $"its identity is not the duty occurrence's, {expected}";
+        }
+
+        long grace = parameters.TryGetProperty("graceDays", out JsonElement days) && days.TryGetInt64(out long value) ? value : 0;
+        if (Time(TJson.Text(item, "dueAt")) != due || Time(TJson.Text(item, "deadline")) != due.Value.AddDays(grace))
+        {
+            return "its due time or deadline is not the schedule's";
+        }
+
+        return due > at ? "it is not due when the assignment is recorded" : null;
     }
 
     /// <summary>A UTC timestamp, or null.</summary>

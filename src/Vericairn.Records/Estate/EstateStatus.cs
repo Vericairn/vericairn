@@ -396,9 +396,10 @@ public static class EstateStatus
     /// Codes that mean two clones diverged and a person or an authorized agent must settle it, never merged silently; and, from 0.6.0,
     /// batch.incomplete, a batch of records this machine stopped storing part-way, which the runtime reports from its journal;
     /// and batch.unreadable, a local recovery journal the runtime cannot safely judge; and, from 0.9.2, operation.duplicate-identity, which
-    /// a reconciliation now settles.
+    /// a reconciliation now settles; and, from 0.9.4, standing.duplicate, one occurrence of a standing agent held by two assignments, as
+    /// two clones' merge leaves it, which a reconciliation keeping one of them settles.
     /// </summary>
-    public static readonly ImmutableArray<string> ReconcileCodes = ["reconcile.successors", "work.duplicate-key", "result.duplicate", "estate.multiple", "record.duplicate-id", "batch.incomplete", "batch.unreadable", "communication.conflict", "operation.duplicate-identity"];
+    public static readonly ImmutableArray<string> ReconcileCodes = ["reconcile.successors", "work.duplicate-key", "result.duplicate", "estate.multiple", "record.duplicate-id", "batch.incomplete", "batch.unreadable", "communication.conflict", "operation.duplicate-identity", "standing.duplicate"];
 
     /// <summary>The findings that are reconcile tasks, sorted.</summary>
     public static IReadOnlyList<Finding> ReconcileTasks(FindingList findings)

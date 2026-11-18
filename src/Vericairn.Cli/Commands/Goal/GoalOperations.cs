@@ -177,9 +177,9 @@ internal sealed class GoalOperations(CommandContext context)
             return context.Fail("--subject, --flow-option and --until configure a run, and go with --flow or --standing.");
         }
 
-        if (!standing && ((proposal.Triggers?.Length ?? 0) > 0 || (proposal.Period?.Length ?? 0) > 0 || proposal.RunsOn is not null))
+        if (!standing && ((proposal.Triggers?.Length ?? 0) > 0 || (proposal.Period?.Length ?? 0) > 0 || proposal.RunsOn is not null || proposal.AwaitingReview is not null))
         {
-            return context.Fail("--trigger, --period and --runs-on configure a standing agent, and go with --standing.");
+            return context.Fail("--trigger, --period, --awaiting-review and --runs-on configure a standing agent, and go with --standing.");
         }
 
         return context.WithApi(root, api =>
@@ -390,6 +390,11 @@ internal sealed class GoalOperations(CommandContext context)
             plan["runsOn"] = proposal.RunsOn;
         }
 
+        if (proposal.AwaitingReview is long awaiting)
+        {
+            plan["awaitingReview"] = awaiting;
+        }
+
         body["plan"]!["standing"] = plan;
         return null;
     }
@@ -402,6 +407,54 @@ internal sealed class GoalOperations(CommandContext context)
     private static JsonElement ResolvedSubject(IReadOnlyList<TemplateDto> offered, TemplateDto flow) =>
         FlowDefinition.Resolve(TemplateDefinition.Read(flow.Definition), pin => TemplateCatalog.Resolve(pin, offered
             .Where(t => t.Pin.Id == pin.Id && t.Pin.Version == pin.Version && t.Pin.Hash == pin.Hash).Select(t => TemplateDefinition.Read(t.Definition)))).Subject;
+
+    /// <summary>
+    /// Pauses one goal, or from 0.9.4 with <paramref name="standing"/> every active standing agent the acting principal may pause, each
+    /// pause asking the goal's runs in flight to stop with <paramref name="stopRuns"/>.
+    /// </summary>
+    public int GoalPause(string root, string? goal, string by, string? note, bool standing, bool stopRuns, bool json)
+    {
+        if (standing == (goal is not null))
+        {
+            return context.Fail(standing ? "--standing pauses every standing agent you may pause; name no goal with it." : "Name the goal to pause, or pause every standing agent you may pause with --standing.");
+        }
+
+        if (!standing)
+        {
+            return context.WithApi(root, api => context.ReportOutcome(api.GoalPause(goal!, new GoalActionRequest(by, note) { StopRuns = stopRuns }), json));
+        }
+
+        return context.WithApi(root, api =>
+        {
+            var paused = new List<object>();
+            foreach (GoalRow row in api.Goals().Where(g => g.Status == "active"))
+            {
+                if (api.Goal(row.Id) is not GoalResponse shown || !shown.Json.TryGetProperty("standing", out _))
+                {
+                    continue;
+                }
+
+                WriteOutcome outcome = api.GoalPause(row.Id, new GoalActionRequest(by, note) { StopRuns = stopRuns });
+                paused.Add(new { goal = row.Id, title = row.Title, paused = outcome.Ok, record = outcome.Written?.Id, notices = outcome.Notices, problem = outcome.Problem?.Message });
+                if (!json)
+                {
+                    context.Output.WriteLine(outcome.Ok ? $"paused  {row.Id}  {row.Title}  goal-status {outcome.Written!.Id}" : $"not paused  {row.Id}  {row.Title}: {outcome.Problem?.Message}");
+                    foreach (string notice in outcome.Notices ?? []) context.Output.WriteLine("  " + notice);
+                }
+            }
+
+            if (json)
+            {
+                context.Output.WriteLine(JsonSerializer.Serialize(new { standing = paused }, ProtocolJson.Options));
+            }
+            else if (paused.Count == 0)
+            {
+                context.Output.WriteLine("No standing agent is active.");
+            }
+
+            return Clean;
+        });
+    }
 
     /// <summary>Activates, pauses, resumes or stops a goal.</summary>
     public int GoalAction(string root, string action, string goal, string by, string? note, bool json) => context.WithApi(root, api =>

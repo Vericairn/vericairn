@@ -16,4 +16,7 @@ internal sealed record GoalProposal(string By, string Title, string Objective, s
 
     /// <summary>From 0.9.4, the runtime that dispatches a standing agent unattended, by its identity's public-key hash.</summary>
     public string? RunsOn { get; init; }
+
+    /// <summary>From 0.9.4, the results awaiting review that defer a standing agent's dispatch; three when omitted.</summary>
+    public long? AwaitingReview { get; init; }
 }

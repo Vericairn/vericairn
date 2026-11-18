@@ -119,6 +119,12 @@ public sealed partial class EstateService
             asOf = chosen;
         }
 
+        // The until time is judged at the runtime's clock whatever time the triggers are evaluated at: a lapsed agent dispatches nothing.
+        if (StandingAgents.Until(current) is { } until && now >= until)
+        {
+            return (null, StepProblem(current.Id, "refused", $"Standing agent {current.Id} is lapsed: its until time {RecordParser.FormatTimestamp(until)} has passed at this runtime's clock, whatever time --now names; it returns to its sponsor, and a renewal is a goal revision its sponsor activates. Nothing was recorded."));
+        }
+
         StandingAgents.Agent agent = StandingAgents.Derive(model, current, asOf, Duties(model, current, asOf));
         if (agent.State is not ("active" or "held"))
         {
@@ -132,6 +138,13 @@ public sealed partial class EstateService
             return failure.Route.State == "attention"
                 ? (null, AttentionAsk(model, current, new Taken(agent.Order!, "the standing agent", "the standing agent's failure pause", failure.Route, Attention: failure.Attention), request))
                 : (null, new GoalStepResponse(current.Id, "none", $"Nothing to dispatch: standing agent {title} is paused by its failures ({failure.Route.Reason}).", true));
+        }
+
+        // One ask before the until time summarizes the period and the evaluation and asks the sponsor to renew it (§ 5).
+        if (StandingAgents.RenewalDue(model, current, now) && !Routing.AsksOf(model, current).Any(a => a.Subject?.Id == current.Id
+            && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(StandingAgents.RenewalAsk, StringComparison.Ordinal)))
+        {
+            return (null, Renewal(model, current, agent, request));
         }
 
         StandingAgents.OccurrenceState? chosenState;
@@ -191,6 +204,46 @@ public sealed partial class EstateService
 
         string what = agent.Step is FlowStep step ? $"{step.Title}, for {chosenState.Occurrence.Summary}" : chosenState.Occurrence.Summary;
         return (new Taken(agent.Order!, chosenState.Occurrence.Key, what, route) { Standing = agent, Occurrence = chosenState.Occurrence }, null);
+    }
+
+    /// <summary>
+    /// The renewal ask (design/standing-agents.md § 5): once for the goal's revision, before its until time, to who decides for it,
+    /// summarizing the period, its occurrences and the current evaluation, and recommending renewal by a revision with a later until time,
+    /// activated again; the agent lapses without one. Nothing is dispatched by this call.
+    /// </summary>
+    private GoalStepResponse Renewal(EstateModel model, RecordEnvelope goal, StandingAgents.Agent agent, GoalStepRequest request)
+    {
+        string title = EstateModel.BodyString(goal, "title") ?? goal.Id;
+        string? sponsor = Routing.Asked(model, goal, null, FlowClock.GetUtcNow());
+        if (sponsor is null)
+        {
+            return StepProblem(goal.Id, "refused", $"Standing agent {title} is due for renewal, and the estate names no one who decides for it: it has no charter operator. Nothing was recorded.");
+        }
+
+        string period = agent.Period is StandingAgents.Period p
+            ? $"this period it has had {p.Spent.GetValueOrDefault("runs").ToString(CultureInfo.InvariantCulture)} of {p.Caps.GetValueOrDefault("runs").ToString(CultureInfo.InvariantCulture)} runs and {p.Spent.GetValueOrDefault("wallMinutes").ToString(CultureInfo.InvariantCulture)} of {p.Caps.GetValueOrDefault("wallMinutes").ToString(CultureInfo.InvariantCulture)} minutes"
+            : "it states no period";
+        string occurrences = $"{agent.Occurrences.Count(o => o.State == "disposed").ToString(CultureInfo.InvariantCulture)} occurrences reviewed, {agent.Occurrences.Count(o => o.State == "settled").ToString(CultureInfo.InvariantCulture)} awaiting review, {agent.Occurrences.Count(o => o.State is "due" or "deferred").ToString(CultureInfo.InvariantCulture)} due or deferred";
+        string evaluation = GoalRules.CurrentEvaluation(model, goal) is RecordEnvelope current
+            ? $"its current evaluation {current.Id} reads {EstateModel.BodyString(current, "outcome")}: {EstateModel.BodyString(current, "summary")}"
+            : "it has no evaluation of this revision";
+        var ask = new JsonObject
+        {
+            ["to"] = sponsor,
+            ["question"] = Clip($"{StandingAgents.RenewalAsk} {title} before its until time {RecordParser.FormatTimestamp(agent.Until!.Value)}? {char.ToUpperInvariant(period[0])}{period[1..]}; {occurrences}; {evaluation}.", 4000),
+            ["recommendation"] = Clip("Renew it if its findings were worth their review: propose a revision with a later until time and activate it. Otherwise let it lapse, or stop it.", 4000),
+            ["consequence"] = Clip("At its until time it lapses and dispatches nothing until a revision you activate renews it; duty occurrences stay owed.", 2000),
+            ["goal"] = goal.Id,
+            ["state"] = "open",
+        };
+        WriteOutcome written = WriteLocked(new RecordDraft("ask", request.By, Element(ask), new RecordReference(goal.Type, goal.Id, goal.ComputedHash)), model);
+        if (!written.Ok)
+        {
+            return new GoalStepResponse(goal.Id, "none", "Not recorded: " + written.Problem!.Message, false, Problem: written.Problem);
+        }
+
+        return new GoalStepResponse(goal.Id, "ask", $"Standing agent {title} is due for renewal before {RecordParser.FormatTimestamp(agent.Until!.Value)}: {PrincipalName(model, sponsor)} is asked once (ask {written.Written!.Id}). Nothing was dispatched; goal step carries its occurrences again from the next call.",
+            true, null, "attention", sponsor, null, written.Written);
     }
 
     /// <summary>

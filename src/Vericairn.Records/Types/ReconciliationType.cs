@@ -56,6 +56,9 @@ public sealed class ReconciliationType : IRecordType
         // From 0.9.2 (FIX-100), operations recorded independently under one identity, such as two runtimes' concurrent intents, are
         // settled like independent first communication profiles: one kept current, the others closed with the settling principal's note.
         bool identity = SettlesIdentity(context.Model, context.Record);
+        // From 0.9.4 (GOAL-07), assignments recorded independently for one occurrence of a standing agent, as two clones' merge leaves them,
+        // are settled the same way: one kept, the others withdrawn, so the key is held by one assignment again.
+        bool occurrence = SettlesOccurrence(context.Model, context.Record);
         if (context.Principal(context.Record.By) is null)
         {
             context.Error("reconciliation.author", $"Reconciling principal {context.Record.By} has no principal record.");
@@ -67,6 +70,14 @@ public sealed class ReconciliationType : IRecordType
         else if (policyGrant)
         {
             if (!PolicyAuthority.OperatorAt(context.Model, context.Record)) context.Error("policy.authority", "Only the operator reconciles bounded policy grants and their revocations.");
+        }
+        else if (occurrence)
+        {
+            // The authority that assigns work settles which assignment of an occurrence stands; administration alone does not.
+            if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
+            {
+                context.Error("reconciliation.author", "Assignments of one occurrence are settled by the operator or under the 'local-engineering' scope, the authority that assigns work.");
+            }
         }
         else if (identity)
         {
@@ -103,7 +114,12 @@ public sealed class ReconciliationType : IRecordType
             SettledIdentity(context, subject!, withdrawn.Append(kept).ToList());
         }
 
-        foreach (string id in identity ? [] : withdrawn.Append(kept))
+        if (occurrence)
+        {
+            SettledOccurrence(context, subject!, withdrawn.Append(kept).ToList());
+        }
+
+        foreach (string id in identity || occurrence ? [] : withdrawn.Append(kept))
         {
             RecordEnvelope? successor = context.Find(id);
             if (successor is null)
@@ -140,6 +156,50 @@ public sealed class ReconciliationType : IRecordType
 
         List<string> named = Named(reconciliation);
         return named.Count > 0 && named.All(id => !model.ById.TryGetValue(id, out RecordEnvelope? record) || record.Supersedes != subject.Id);
+    }
+
+    /// <summary>
+    /// Whether a reconciliation settles assignments recorded independently for one occurrence (from 0.9.4, GOAL-07): its subject is an
+    /// assignment naming an occurrence and none of the records it keeps or withdraws is a revision of that subject.
+    /// </summary>
+    internal static bool SettlesOccurrence(EstateModel model, RecordEnvelope reconciliation)
+    {
+        if (reconciliation.Type != "reconciliation" || reconciliation.Subject is not { } reference || !model.ById.TryGetValue(reference.Id, out RecordEnvelope? subject)
+            || subject.Type != "assignment" || Estate.StandingAgents.KeyOf(subject) is null)
+        {
+            return false;
+        }
+
+        List<string> named = Named(reconciliation);
+        return named.Count > 0 && named.All(id => !model.ById.TryGetValue(id, out RecordEnvelope? record) || record.Supersedes != subject.Id);
+    }
+
+    // Every record kept or withdrawn is an assignment naming the subject's occurrence, the latest revision of its own chain, and no two of
+    // them are revisions of one assignment.
+    private static void SettledOccurrence(ValidationContext context, RecordEnvelope subject, List<string> named)
+    {
+        string? key = Estate.StandingAgents.KeyOf(subject);
+        var chains = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string id in named)
+        {
+            RecordEnvelope? record = context.Find(id);
+            if (record is null)
+            {
+                context.Error("reconciliation.successor", $"{id} does not exist.");
+            }
+            else if (record.Type != "assignment" || Estate.StandingAgents.KeyOf(record) != key)
+            {
+                context.Error("reconciliation.occurrence", $"{id} is not an assignment of occurrence {key}; a reconciliation settles only the assignments of the subject's occurrence.");
+            }
+            else if (context.Model.OfType("assignment").Any(a => a.Supersedes == id))
+            {
+                context.Error("reconciliation.occurrence", $"{id} is an earlier revision of its assignment; name the assignment's latest revision.");
+            }
+            else if (!chains.Add(context.Model.Chain(record)[0]))
+            {
+                context.Error("reconciliation.occurrence", $"{id} revises an assignment the reconciliation already names; it settles independent assignments, one revision each.");
+            }
+        }
     }
 
     // Every record kept or withdrawn names an operation under the subject's identity, the latest revision of its own operation, and
