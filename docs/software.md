@@ -1071,10 +1071,17 @@ assignment it runs permits it, with `"retrieval": "public"` (record format 3); n
 a run whose brief does not gets no web tool: a harness that uses one anyway is stopped as a tool outside its admitted
 inventory. Before anything is recorded, and again at the intent and before dispatch, an interim check refuses a retrieval run
 where the records show something private in reach: the workspace's repository resource is not `public`; the estate's own
-repository resource is not `public`, or no repository resource records the estate's own repository by its origin remote or root
-commit, or the runtime cannot observe that repository, since unknown counts as private; or the run's records name a
-credential, a `credential-reference` among the assignment's sources or step inputs or the work order's or goal's inputs. The
-refusal names every reason. What the run's operating-system user can read on the machine is not checked until confined reads
+repository resource is not `public`, or no repository resource records the estate's own repository, or the runtime cannot
+observe that repository, since unknown counts as private; or the run's records name a credential, a `credential-reference`
+among the assignment's sources or step inputs or the work order's or goal's inputs. The estate's own repository is matched
+by its recorded identity: where it has an origin remote, only a resource whose `github` or
+`url` names that remote, and whose `rootCommit`, if it records one, agrees; where it has none, only a resource that records
+no remote, by its root commit. A root commit alone never stands for it, since a fork shares its upstream's. The run's own
+context package and the searches its intent fixes are judged too, once assembled and again on the intent just before it is
+written: any `credential-reference` they name, a search-selected one among them, refuses. The refusal names every reason.
+The check reads records as recorded: a resource's visibility is trusted, not verified at the forge; a credential named only
+inside another record the run reads (two hops away) is not found; and a repository that turns private after dispatch does
+not stop the run. What the run's operating-system user can read on the machine is not checked until confined reads
 are qualified; the run's `execution.reach` shows it. Only the `claude-code` launcher enables retrieval: it adds `WebFetch` and
 `WebSearch` to `--tools`, allows exactly those two in the run's `--settings`, and admits them in the inventory with the route
 `public-web`, which the intent's `execution.retrieval: "public"` alone allows. The `codex` launcher keeps web search disabled and
@@ -1084,9 +1091,15 @@ to the harness, as for every run. The worker reads each invocation of an admitte
 the agent from the event stream and retains that result, exactly as reported, as an untrusted original in the run's custody:
 `sources/<content hash>.txt` and a `sources.jsonl` log in the run's owner-only directory, at most 8 MiB a source and 64 MiB a
 run. It fetches nothing itself, so the original is what the agent received; for `WebFetch` that is the harness's own reduction
-of the page, not the page's bytes. A web tool asked for an address that is not public (this machine, a private, link-local or
-local-only host, user information in the address, or a scheme other than http or https) raises a critical `network` signal
-and the run is stopped; a public name that resolves to a private address is not caught. Settlement records `sourcesObserved`:
+of the page, not the page's bytes. A web tool asked for an address that is not public raises a critical `network` signal and
+the run is stopped. The address is read as a WHATWG URL parser, which a harness's fetch uses, reads it: tabs and newlines
+removed, backslashes as slashes, the host percent-decoded and its trailing dots removed, IPv4 in every form that parser
+accepts (decimal, octal or hexadecimal parts, one to four of them) and IPv6 with its IPv4-mapped and embedded forms. Loopback,
+private, shared, link-local and metadata, unique-local, multicast, unspecified, documentation and reserved ranges, names only a
+local resolver answers, user information, a scheme other than http or https and anything that does not parse are not public.
+A non-ASCII host, which that parser maps by Unicode normalization and IDNA (full-width or ideographic dots, enclosed digits),
+is refused rather than mapped, so an internationalized name must be given in its `xn--` form. A public name that resolves to a
+private address is not caught, and the stop follows the event, which can arrive after the tool ran. Settlement records `sourcesObserved`:
 each source's tool, its address or query (withheld when it would fail the estate's content check), its time, whether it was
 retained and its content hash and size, at most 100 in full with the count and digest of all, and whether the log was
 complete. Retrieved text never enters a record, a repository or the agent's instructions. The log is not tamper-evident: a

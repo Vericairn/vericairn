@@ -61,56 +61,217 @@ internal static class RetrievalAdmission
         return reasons;
     }
 
-    /// <summary>The repository resources whose location records the estate's own repository: its origin remote, or its root commit.</summary>
+    /// <summary>
+    /// Every credential reference a run's own documents name (its assembled context package, its intent, the searches the intent fixes):
+    /// any object whose type is credential-reference, and any value that is the id of a credential-reference record here. An original's
+    /// base64 content is not decoded, so a credential named only inside a pinned record's own text, two hops away, is not found.
+    /// </summary>
+    internal static IReadOnlyList<string> NamedCredentials(EstateModel model, params JsonElement[] documents)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(documents);
+        var named = new SortedSet<string>(StringComparer.Ordinal);
+        var pending = new Stack<JsonElement>(documents);
+        while (pending.Count > 0)
+        {
+            JsonElement value = pending.Pop();
+            switch (value.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    if (Text(value, "type") == "credential-reference" && Text(value, "id") is string declared) named.Add(declared);
+                    foreach (JsonProperty property in value.EnumerateObject())
+                    {
+                        if (property.Name != "content") pending.Push(property.Value);
+                    }
+
+                    break;
+                case JsonValueKind.Array:
+                    foreach (JsonElement item in value.EnumerateArray()) pending.Push(item);
+                    break;
+                case JsonValueKind.String:
+                    if (value.GetString() is { Length: Records.Identity.Ulid.Length } id && model.ById.TryGetValue(id, out RecordEnvelope? target) && target.Type == "credential-reference")
+                        named.Add(id);
+                    break;
+            }
+        }
+
+        return [.. named];
+    }
+
+    /// <summary>
+    /// The repository resources whose recorded identity is the estate's own repository. Where the estate's repository has a network
+    /// remote, a resource matches only by that remote (its github or url), and a root commit it also records must agree; a root commit
+    /// alone never stands in for it, since a fork shares its upstream's. Where it has no remote, only a resource that records no
+    /// remote matches, by root commit. Nothing else counts, so an estate no resource records this way is unknown, which refuses.
+    /// </summary>
     internal static RecordEnvelope[] EstateResources(EstateModel model, RepositoryObservation estate)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(estate);
         string? remote = Address(estate.Remote);
         return [.. model.Current("resource").Where(r => EstateModel.BodyString(r, "kind") == "repository" && r.Body.TryGetProperty("location", out JsonElement location)
-            && location.ValueKind == JsonValueKind.Object
-            && ((remote is not null && ((Text(location, "github") is string github && "github.com/" + github.ToLowerInvariant() == remote) || Address(Text(location, "url")) == remote))
-                || (Text(location, "rootCommit") is string root && root == estate.RootCommit)))
+            && location.ValueKind == JsonValueKind.Object && Matches(location))
             .GroupBy(r => model.Chain(r)[0], StringComparer.Ordinal).Select(g => g.Last())];
+
+        bool Matches(JsonElement location)
+        {
+            string? github = Text(location, "github") is string named ? "github.com/" + named.ToLowerInvariant() : null;
+            string? url = Address(Text(location, "url"));
+            string? root = Text(location, "rootCommit");
+            if (remote is not null) return (github == remote || url == remote) && (root is null || root == estate.RootCommit);
+            return github is null && url is null && root is not null && root == estate.RootCommit && estate.Remote is null;
+        }
     }
 
     /// <summary>
-    /// Whether an address a web tool was asked for is a public one: an absolute http or https address with no user information, whose
-    /// host is not this machine, a private, link-local or otherwise special address, or a name that only a local resolver answers.
-    /// A public name that resolves to a private address is not caught here.
+    /// Whether an address a web tool was asked for is a public one, judged as a WHATWG URL parser, which a harness's fetch uses, would
+    /// read its host: ASCII tab and newline removed, leading and trailing controls and spaces trimmed, backslashes as slashes, the host
+    /// percent-decoded, trailing dots removed, and IPv4 in every form that parser accepts (decimal, octal and hexadecimal parts, one to
+    /// four of them) or IPv6 with its embedded IPv4 forms. A host that parser would map through Unicode normalization and IDNA, any
+    /// non-ASCII host (full-width or ideographic dots, enclosed or full-width digits), is refused outright rather than mapped here. So
+    /// are user information, a scheme other than http or https, loopback, private, link-local, shared, metadata, unique-local,
+    /// multicast, unspecified, documentation and reserved ranges, names only a local resolver answers, and anything that does not
+    /// parse. A public name that resolves to a private address is not caught here.
     /// </summary>
     internal static bool PublicAddress(string? address)
     {
-        if (string.IsNullOrWhiteSpace(address) || address.Length > 2000 || !Uri.TryCreate(address, UriKind.Absolute, out Uri? uri)
-            || uri.Scheme is not ("http" or "https") || uri.UserInfo.Length != 0 || string.IsNullOrEmpty(uri.IdnHost))
+        if (string.IsNullOrEmpty(address) || address.Length > 2000) return false;
+        string input = new([.. address.Trim().Where(c => c is not ('\t' or '\n' or '\r'))]);
+        input = input.Trim(TrimmedControls);
+        int colon = input.IndexOf(':', StringComparison.Ordinal);
+        if (colon <= 0 || !char.IsAsciiLetter(input[0]) || !input[..colon].All(c => char.IsAsciiLetterOrDigit(c) || c is '+' or '-' or '.')) return false;
+        if (input[..colon].ToLowerInvariant() is not ("http" or "https")) return false;
+        string rest = input[(colon + 1)..].TrimStart('/', '\\');
+        int end = rest.IndexOfAny(['/', '\\', '?', '#']);
+        string authority = end < 0 ? rest : rest[..end];
+        if (authority.Contains('@', StringComparison.Ordinal)) return false;
+        string host;
+        string? port = null;
+        if (authority.StartsWith('['))
         {
-            return false;
+            int close = authority.IndexOf(']', StringComparison.Ordinal);
+            if (close < 0) return false;
+            host = authority[..(close + 1)];
+            if (close + 1 < authority.Length)
+            {
+                if (authority[close + 1] != ':') return false;
+                port = authority[(close + 2)..];
+            }
+        }
+        else
+        {
+            int separator = authority.IndexOf(':', StringComparison.Ordinal);
+            host = separator < 0 ? authority : authority[..separator];
+            port = separator < 0 ? null : authority[(separator + 1)..];
         }
 
-        string host = uri.IdnHost.TrimEnd('.').ToLowerInvariant();
-        if (uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6)
-        {
-            return IPAddress.TryParse(host.Trim('[', ']'), out IPAddress? ip) && PublicIp(ip);
-        }
-
-        return host.Contains('.', StringComparison.Ordinal) && host != "localhost" && !host.EndsWith(".localhost", StringComparison.Ordinal)
-            && !host.EndsWith(".local", StringComparison.Ordinal) && !host.EndsWith(".internal", StringComparison.Ordinal)
-            && !host.EndsWith(".lan", StringComparison.Ordinal) && !host.EndsWith(".home.arpa", StringComparison.Ordinal);
+        if (port is not null && !port.All(char.IsAsciiDigit)) return false;
+        if (host.Length == 0) return false;
+        if (host[0] == '[') return host.Length > 2 && PublicIpv6(host[1..^1]);
+        string? decoded = PercentDecoded(host);
+        // A non-ASCII host is one a WHATWG parser maps by NFKC and IDNA (full-width dots, enclosed digits); it is refused, not mapped.
+        if (decoded is null || decoded.Any(c => c > '\u007f')) return false;
+        string name = decoded.ToLowerInvariant().TrimEnd('.');
+        if (name.Length == 0 || !name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_')) return false;
+        string[] labels = name.Split('.');
+        if (labels.Any(l => l.Length == 0)) return false;
+        if (EndsInNumber(labels[^1])) return Ipv4(labels) is uint ipv4 && PublicIpv4(ipv4);
+        return labels.Length > 1 && !LocalNames.Any(local => name == local || name.EndsWith("." + local, StringComparison.Ordinal));
     }
 
-    private static bool PublicIp(IPAddress ip)
+    private static readonly char[] TrimmedControls = [.. Enumerable.Range(0, 0x21).Select(c => (char)c)];
+
+    // Names only a local resolver answers, and their subdomains.
+    private static readonly string[] LocalNames = ["localhost", "localdomain", "local", "internal", "intranet", "lan", "home.arpa", "corp", "private"];
+
+    // WHATWG's ends-in-a-number: a last label of digits, or a hexadecimal number with its 0x prefix.
+    private static bool EndsInNumber(string label) => label.All(char.IsAsciiDigit)
+        || (label.StartsWith("0x", StringComparison.Ordinal) && label[2..].All(char.IsAsciiHexDigit));
+
+    // WHATWG's IPv4 parser: one to four parts, each decimal, octal (a leading 0) or hexadecimal (0x); every part but the last at most 255,
+    // the last filling the remaining bytes. Null for any other text, which that parser refuses and this check treats as not public.
+    private static uint? Ipv4(string[] parts)
     {
-        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
-        if (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any) || ip.Equals(IPAddress.Broadcast)) return false;
-        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+        if (parts.Length is 0 or > 4) return null;
+        var numbers = new ulong[parts.Length];
+        for (int i = 0; i < parts.Length; i++)
         {
-            return !ip.IsIPv6LinkLocal && !ip.IsIPv6SiteLocal && !ip.IsIPv6UniqueLocal && !ip.IsIPv6Multicast;
+            if (Ipv4Number(parts[i]) is not ulong number) return null;
+            numbers[i] = number;
         }
 
+        if (numbers[..^1].Any(n => n > 255) || numbers[^1] >= 1UL << (8 * (5 - parts.Length))) return null;
+        ulong value = numbers[^1];
+        for (int i = 0; i < parts.Length - 1; i++) value += numbers[i] << (8 * (3 - i));
+        return (uint)value;
+    }
+
+    private static ulong? Ipv4Number(string part)
+    {
+        int radix = 10;
+        string digits = part;
+        if (digits.StartsWith("0x", StringComparison.Ordinal)) { radix = 16; digits = digits[2..]; }
+        else if (digits.Length > 1 && digits[0] == '0') { radix = 8; digits = digits[1..]; }
+        if (digits.Length == 0) return 0;
+        ulong value = 0;
+        foreach (char c in digits)
+        {
+            int digit = char.IsAsciiDigit(c) ? c - '0' : char.IsAsciiHexDigitLower(c) ? c - 'a' + 10 : -1;
+            if (digit < 0 || digit >= radix) return null;
+            value = value * (ulong)radix + (ulong)digit;
+            if (value > uint.MaxValue) return value; // Too large for any part; the range check refuses it.
+        }
+
+        return value;
+    }
+
+    private static string? PercentDecoded(string host)
+    {
+        if (!host.Contains('%', StringComparison.Ordinal)) return host;
+        var bytes = new List<byte>();
+        for (int i = 0; i < host.Length; i++)
+        {
+            if (host[i] == '%' && i + 2 < host.Length && char.IsAsciiHexDigit(host[i + 1]) && char.IsAsciiHexDigit(host[i + 2]))
+            {
+                bytes.Add(Convert.ToByte(host.Substring(i + 1, 2), 16));
+                i += 2;
+            }
+            else if (host[i] > '\u007f')
+            {
+                return null;
+            }
+            else
+            {
+                bytes.Add((byte)host[i]);
+            }
+        }
+
+        try { return new System.Text.UTF8Encoding(false, true).GetString([.. bytes]); }
+        catch (System.Text.DecoderFallbackException) { return null; }
+    }
+
+    private static bool PublicIpv4(uint address)
+    {
+        byte a = (byte)(address >> 24), b = (byte)(address >> 16), c = (byte)(address >> 8);
+        return !(a is 0 or 10 or 127 || a >= 224 || (a == 100 && b is >= 64 and <= 127) || (a == 169 && b == 254) || (a == 172 && b is >= 16 and <= 31)
+            || (a == 192 && b == 168) || (a == 192 && b == 0 && c is 0 or 2) || (a == 192 && b == 88 && c == 99) || (a == 198 && b is 18 or 19)
+            || (a == 198 && b == 51 && c == 100) || (a == 203 && b == 0 && c == 113));
+    }
+
+    // IPv6 as .NET parses it; a form WHATWG accepts and .NET does not is refused. Zone identifiers are refused, as WHATWG refuses them.
+    private static bool PublicIpv6(string text)
+    {
+        if (text.Contains('%', StringComparison.Ordinal) || !IPAddress.TryParse(text, out IPAddress? ip) || ip.AddressFamily != AddressFamily.InterNetworkV6) return false;
         byte[] b = ip.GetAddressBytes();
-        return !(b[0] == 10 || b[0] == 0 || b[0] >= 224 || (b[0] == 172 && b[1] is >= 16 and <= 31) || (b[0] == 192 && b[1] == 168)
-            || (b[0] == 169 && b[1] == 254) || (b[0] == 100 && b[1] is >= 64 and <= 127) || (b[0] == 192 && b[1] == 0 && b[2] is 0 or 2)
-            || (b[0] == 198 && b[1] is 18 or 19) || (b[0] == 198 && b[1] == 51 && b[2] == 100) || (b[0] == 203 && b[1] == 0 && b[2] == 113));
+        bool Zero(int from, int to) => b[from..to].All(x => x == 0);
+        uint Embedded(int at) => (uint)(b[at] << 24 | b[at + 1] << 16 | b[at + 2] << 8 | b[at + 3]);
+        if (Zero(0, 10) && b[10] == 0xff && b[11] == 0xff) return PublicIpv4(Embedded(12)); // IPv4-mapped
+        if (Zero(0, 12)) return false; // unspecified, loopback and the IPv4-compatible forms
+        if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b) return Zero(4, 12) && PublicIpv4(Embedded(12)); // NAT64, and its local-use /48
+        if (b[0] == 0x20 && b[1] == 0x02) return PublicIpv4(Embedded(2)); // 6to4
+        if (b[0] == 0x20 && b[1] == 0x01 && (b[2] == 0x00 && b[3] == 0x00 || b[2] == 0x0d && b[3] == 0xb8)) return false; // Teredo, documentation
+        if (b[0] == 0x01 && Zero(1, 8)) return false; // discard-only
+        return !((b[0] & 0xfe) == 0xfc || b[0] == 0xfe && (b[1] & 0xc0) is 0x80 or 0xc0 || b[0] == 0xff); // unique-local, link- and site-local, multicast
     }
 
     // Every record reference the run's records carry, judged by its declared type and by what it resolves to here.

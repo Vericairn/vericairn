@@ -439,6 +439,11 @@ internal sealed class RunAdmissionService(
 
             body["identity"] = "agent-run:" + run;
             if (plan.PromptUse is not null) body["promptUse"] = plan.PromptUse.DeepClone();
+            // The intent is the run's record: judged whole, with the package it pins, just before it is written (RUN-04).
+            if (plan.Selection["retrieval"] is not null && RetrievalAdmission.NamedCredentials(model, Element(body), plan.Context) is { Count: > 0 } intended)
+            {
+                return Refused(RunProblem(pending, "not-started", "refused", RetrievalNamed(plan.Assignment, intended, "its intent or the package its intent pins") + " Nothing was recorded."));
+            }
             var draft = new RecordDraft("operation", request.By, Element(body), plan.Assignment.Reference, At: now, Id: run);
             if (routed is null)
             {
@@ -845,6 +850,11 @@ internal sealed class RunAdmissionService(
         selection["contextPackage"] = packageHash;
         // The intent records each dispatch-time search, with only the candidates every reader of the record may read.
         if (EstateService.RecordedSelections(package) is { Count: > 0 } searched) selection["contextSelections"] = searched;
+        // A retrieval run's own package and searches are records the run reads too: a credential reference named there refuses (RUN-04).
+        if (selection["retrieval"] is not null && RetrievalAdmission.NamedCredentials(model, package, Element(selection)) is { Count: > 0 } packaged)
+        {
+            return (null, RetrievalNamed(assignment, packaged, "its context package or the searches its intent fixes"), null);
+        }
         JsonElement accounting = package.GetProperty("payload").GetProperty("accounting");
         selection["allocation"]!["context"] = new JsonObject
         {
@@ -886,6 +896,9 @@ internal sealed class RunAdmissionService(
         return reasons.Count == 0 ? null
             : $"The brief of assignment {assignment.Id} permits retrieval of public sources, and the check before retrieval refuses it: {string.Join("; ", reasons)}. Until a launcher qualifies confined reads, a run retrieves only where its records show nothing private in reach; run work that needs no retrieval under a brief that does not permit it.";
     }
+
+    private static string RetrievalNamed(RecordEnvelope assignment, IReadOnlyList<string> credentials, string where) =>
+        $"The brief of assignment {assignment.Id} permits retrieval of public sources, and the check before retrieval refuses it: {where} names credential reference {string.Join(", ", credentials)}. Until a launcher qualifies confined reads, a run retrieves only where its records show nothing private in reach; run work that needs no retrieval under a brief that does not permit it.";
 
     // Whether the run's retrieval still stands as admitted: its assignment's current brief permits exactly what the plan admitted, and the
     // interim check still admits it against the records as they are now.

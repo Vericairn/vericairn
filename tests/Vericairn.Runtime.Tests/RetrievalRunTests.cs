@@ -9,6 +9,7 @@ using Vericairn.Packs.Software;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
@@ -120,6 +121,77 @@ public class RetrievalRunTests
     }
 
     [Fact]
+    public void ACredentialReferenceTheRunsOwnSearchSelectsRefusesRetrievalBeforeItsIntent()
+    {
+        using NativeRun fixture = Fixture("claude");
+        RunEstate run = fixture.Run;
+        string credential = Credential(run, "Publishes the widget calibration releases.");
+        int operations = run.Service.Records("operation").Count;
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("native-claude", fixture.Probe.Report) };
+        RunResponse started = run.Service.RunStart(new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, Settings: settings)
+        { Search = ["widget calibration releases"] });
+        Assert.False(started.Ok, started.Message);
+        Assert.Contains("permits retrieval of public sources, and the check before retrieval refuses it", started.Message, StringComparison.Ordinal);
+        Assert.Contains("names credential reference " + credential, started.Message, StringComparison.Ordinal);
+        Assert.Equal(operations, run.Service.Records("operation").Count);
+        Assert.False(File.Exists(fixture.Probe.Report));
+    }
+
+    [Theory]
+    [InlineData(1, "revoke", "no longer permits retrieval of public sources")]
+    [InlineData(1, "credential", "names credential reference")]
+    [InlineData(1, "workspace-private", "the workspace's repository resource widget")]
+    [InlineData(2, "revoke", "no longer permits retrieval of public sources")]
+    [InlineData(2, "credential", "names credential reference")]
+    [InlineData(2, "workspace-private", "the workspace's repository resource widget")]
+    [InlineData(2, "estate-private", "the estate's repository resource estate")]
+    public void TheCheckIsMadeAgainAtTheIntentAndBeforeDispatch(int probe, string change, string reason)
+    {
+        using NativeRun fixture = Fixture("claude", afterProbe: (self, count) =>
+        {
+            if (count != probe) return;
+            RunEstate run = self.Run;
+            switch (change)
+            {
+                case "revoke" or "credential":
+                    RecordEnvelope assignment = run.Estate.Load().Latest(run.Estate.Load().ById[run.Assignment]);
+                    JsonObject brief = JsonNode.Parse(assignment.Body.GetRawText())!.AsObject();
+                    if (change == "revoke") brief["brief"]!.AsObject().Remove("retrieval");
+                    else brief["brief"]!["sources"] = new JsonArray(new JsonObject { ["type"] = "credential-reference", ["id"] = Credential(run, "Publishes releases.") });
+                    RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("assignment", run.Estate.OperatorId, JsonSerializer.SerializeToElement(brief),
+                        $"work-order:{assignment.Subject!.Id}:{assignment.Subject.Hash}", assignment.Id)));
+                    break;
+                default:
+                    RecordEnvelope resource = change == "workspace-private" ? run.Estate.Load().Latest(run.Estate.Load().ById[run.Resource])
+                        : run.Estate.Load().Current("resource").Single(r => EstateModel.BodyString(r, "name") == "estate");
+                    JsonObject body = JsonNode.Parse(resource.Body.GetRawText())!.AsObject();
+                    body["visibility"] = "private";
+                    RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("resource", run.Estate.OperatorId, JsonSerializer.SerializeToElement(body), Supersedes: resource.Id)));
+                    break;
+            }
+        });
+        int operations = fixture.Run.Service.Records("operation").Count;
+        RunResponse started = fixture.Start();
+        Assert.False(started.Ok, started.Message);
+        Assert.Contains(reason, started.Message, StringComparison.Ordinal);
+        if (probe == 1)
+        {
+            // Refused at the intent: nothing recorded.
+            Assert.Equal(operations, fixture.Run.Service.Records("operation").Count);
+        }
+        else
+        {
+            // Refused before dispatch: the intent stands, settled as a known failure that spent nothing.
+            Assert.Equal("known-failure", fixture.Run.Row(started.Run).Status);
+        }
+
+        Assert.False(File.Exists(fixture.Probe.Report));
+    }
+
+    private static string Credential(RunEstate run, string purpose) => RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("credential-reference", run.Estate.OperatorId,
+        RunEstate.Json($$"""{"name":"release-token-{{Ulid.NewUlid().Value.ToLowerInvariant()[..8]}}","purpose":"{{purpose}}","kind":"api-token","holder":"{{run.Estate.OperatorId}}","store":"an Actions secret","scopes":["publish"],"status":"active"}""")))).Id;
+
+    [Fact]
     public void CodexKeepsWebSearchDisabledAndRefusesARetrievalRunBeforeItsIntent()
     {
         using NativeRun fixture = Fixture("codex");
@@ -186,18 +258,96 @@ public class RetrievalRunTests
     [InlineData("http://service.internal/", false)]
     [InlineData("http://intranet/", false)]
     [InlineData("not an address", false)]
+    // The Reviewer's spellings, each a metadata, loopback or private IPv4 address under a WHATWG parser.
+    [InlineData("http://169.254.169.254./latest/meta-data/", false)]
+    [InlineData("http://127.0.0.1./", false)]
+    [InlineData("http://10.0.0.1./", false)]
+    [InlineData("http://127\u30020\u30020\u30021/", false)]
+    [InlineData("http://\u2460\u2461\u2466.0.0.1/", false)]
+    // Unicode spellings a WHATWG parser maps by NFKC and IDNA: full-width and half-width ideographic dots, full-width digits and letters.
+    [InlineData("http://169\uFF0E254\uFF0E169\uFF0E254/", false)]
+    [InlineData("http://10\uFF6110\uFF6110\uFF6110/", false)]
+    [InlineData("http://\uFF11\uFF12\uFF17.0.0.1/", false)]
+    [InlineData("http://\uFF4C\uFF4F\uFF43\uFF41\uFF4C\uFF48\uFF4F\uFF53\uFF54/", false)]
+    [InlineData("http://%EF%BC%91%EF%BC%92%EF%BC%97.0.0.1/", false)]
+    // IPv4 in every form WHATWG accepts: one to four parts, decimal, octal and hexadecimal, with trailing dots and percent-encoding.
+    [InlineData("http://2130706433/", false)]
+    [InlineData("http://2852039166/", false)]
+    [InlineData("http://0177.0.0.1/", false)]
+    [InlineData("http://0x7f.0.0.1/", false)]
+    [InlineData("http://0x7f000001/", false)]
+    [InlineData("http://0X7F.1/", false)]
+    [InlineData("http://127.1/", false)]
+    [InlineData("http://10.1/", false)]
+    [InlineData("http://192.168.257/", false)]
+    [InlineData("http://0/", false)]
+    [InlineData("http://0.0.0.0/", false)]
+    [InlineData("http://127.0.0.%31/", false)]
+    [InlineData("http://%31%32%37.0.0.1/", false)]
+    [InlineData("http://169.254.169.254../", false)]
+    [InlineData("http://0251.0376.0251.0376/", false)]
+    [InlineData("http://100.100.100.200/", false)]
+    [InlineData("http://255.255.255.255/", false)]
+    [InlineData("http://224.0.0.1/", false)]
+    [InlineData("http://09.0.0.1/", false)]
+    [InlineData("http://1.2.3.4.5/", false)]
+    [InlineData("http://example.1/", false)]
+    // IPv6, with its IPv4-mapped and embedded forms.
+    [InlineData("http://[::]/", false)]
+    [InlineData("http://[0:0:0:0:0:0:0:1]/", false)]
+    [InlineData("http://[::ffff:7f00:1]/", false)]
+    [InlineData("http://[::ffff:169.254.169.254]/", false)]
+    [InlineData("http://[::127.0.0.1]/", false)]
+    [InlineData("http://[64:ff9b::a9fe:a9fe]/", false)]
+    [InlineData("http://[2002:7f00:1::]/", false)]
+    [InlineData("http://[fd00:ec2::254]/", false)]
+    [InlineData("http://[ff02::1]/", false)]
+    [InlineData("http://[fe80::1%25en0]/", false)]
+    [InlineData("http://[2001:db8::1]/", false)]
+    // Other shapes that never reach a public host: backslashes, tabs, a host after user information, case, local-only names.
+    [InlineData("http:\\\\127.0.0.1\\", false)]
+    [InlineData("http://127.0.0.\t1/", false)]
+    [InlineData("http://example.org@127.0.0.1/", false)]
+    [InlineData("HTTP://127.0.0.1:80/", false)]
+    [InlineData("http://LOCALHOST./", false)]
+    [InlineData("http://foo.localhost/", false)]
+    [InlineData("http://metadata.google.internal/", false)]
+    [InlineData("http://example.org:port/", false)]
+    [InlineData("http://exa mple.org/", false)]
+    // Public: names, a trailing dot on a name, public addresses in any spelling, punycode, public IPv6, IPv4-mapped public.
+    [InlineData("https://Example.ORG./path", true)]
+    [InlineData("http://8.8.8.8/", true)]
+    [InlineData("http://0x8.0x8.0x8.0x8/", true)]
+    [InlineData("http://134744072/", true)]
+    [InlineData("https://xn--bcher-kva.example/", true)]
+    [InlineData("https://[2606:4700:4700::1111]/", true)]
+    [InlineData("https://[::ffff:8.8.8.8]/", true)]
+    [InlineData("https://example.org:8443/a?b#c", true)]
+    // A non-ASCII name is refused rather than mapped, public or not.
+    [InlineData("https://b\u00FCcher.example/", false)]
     public void OnlyAPublicAddressIsAPublicSource(string address, bool expected) => Assert.Equal(expected, RetrievalAdmission.PublicAddress(address));
 
     [Theory]
-    [InlineData("https://github.com/Example/Estate.git", "Example/Estate", true)]
-    [InlineData("git@github.com:Example/Estate.git", "example/estate", true)]
-    [InlineData("ssh://git@github.com/Example/Estate", "Example/Estate", true)]
-    [InlineData("https://github.com/Example/Other.git", "Example/Estate", false)]
-    public void TheEstatesRepositoryResourceIsFoundByItsRemote(string remote, string github, bool found)
+    [InlineData("https://github.com/Example/Estate.git", """{"github":"Example/Estate"}""", true)]
+    [InlineData("git@github.com:Example/Estate.git", """{"github":"example/estate"}""", true)]
+    [InlineData("ssh://git@github.com/Example/Estate", """{"github":"Example/Estate","rootCommit":"RRRR"}""", true)]
+    [InlineData("https://github.com/Example/Estate", """{"url":"https://github.com/Example/Estate.git"}""", true)]
+    [InlineData("https://github.com/Example/Other.git", """{"github":"Example/Estate"}""", false)]
+    // A recorded root commit that disagrees with the observed one: not the estate's repository.
+    [InlineData("https://github.com/Example/Estate.git", """{"github":"Example/Estate","rootCommit":"OOOO"}""", false)]
+    // The Reviewer's fork: a public upstream shares the private estate's root commit but not its remote.
+    [InlineData("https://github.com/example/private-estate.git", """{"github":"example/upstream","rootCommit":"RRRR"}""", false)]
+    // A root commit alone stands for the estate only where neither the estate nor the resource has a remote.
+    [InlineData("https://github.com/example/private-estate.git", """{"rootCommit":"RRRR"}""", false)]
+    [InlineData(null, """{"rootCommit":"RRRR"}""", true)]
+    [InlineData(null, """{"github":"example/upstream","rootCommit":"RRRR"}""", false)]
+    [InlineData("/a/local/path", """{"rootCommit":"RRRR"}""", false)]
+    public void TheEstatesRepositoryResourceIsFoundByItsRecordedIdentity(string? remote, string location, bool found)
     {
+        string root = new('b', 40);
         using var estate = new Records.Tests.TestEstate(3);
-        estate.Add("resource", estate.OperatorId, $$"""{"kind":"repository","name":"estate","role":"The estate.","location":{"github":"{{github}}"},"visibility":"public"}""");
-        RecordEnvelope[] matches = RetrievalAdmission.EstateResources(estate.Load(), new RepositoryObservation(new string('a', 40), "main", remote, new string('b', 40), true, 0, 0, [], [], "2026-11-17T00:00:00Z"));
+        estate.Add("resource", estate.OperatorId, $$"""{"kind":"repository","name":"estate","role":"The estate.","location":{{location.Replace("RRRR", root, StringComparison.Ordinal).Replace("OOOO", new string('c', 40), StringComparison.Ordinal)}},"visibility":"public"}""");
+        RecordEnvelope[] matches = RetrievalAdmission.EstateResources(estate.Load(), new RepositoryObservation(new string('a', 40), "main", remote, root, true, 0, 0, [], [], "2026-11-17T00:00:00Z"));
         Assert.Equal(found ? 1 : 0, matches.Length);
     }
 
@@ -215,10 +365,15 @@ public class RetrievalRunTests
     /// A run whose brief permits retrieval, in a format-3 estate whose own repository is a git repository recorded by a repository
     /// resource (public unless named otherwise), with the widget's resource public unless named otherwise.
     /// </summary>
-    private static NativeRun Fixture(string harness, bool workspacePublic = true, string? estate = "public")
+    private static NativeRun Fixture(string harness, bool workspacePublic = true, string? estate = "public", Action<NativeRun, int>? afterProbe = null)
     {
         TestPrerequisites.RequireGit();
-        var fixture = new NativeRun(harness, recordFormat: 3, brief: PermittingBrief, retrieval: harness == "claude");
+        NativeRun? self = null;
+        int probes = 0;
+        // The launcher's probes run before the intent and again before dispatch; a hook after each changes the records between them.
+        var fixture = new NativeRun(harness, recordFormat: 3, brief: PermittingBrief, retrieval: harness == "claude",
+            afterProbe: afterProbe is null ? null : () => afterProbe(self!, ++probes));
+        self = fixture;
         RunEstate run = fixture.Run;
         if (estate != "unobserved") run.Service.Providers.Register(new GitCommandAdapter());
         if (workspacePublic)
