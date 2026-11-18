@@ -603,6 +603,24 @@ format-3 field. `records describe assignment` and `records describe result`
 include this contract, and the generic record reader advances to
 `vericairn.records/readers/10`.
 
+## What a worker run can reach (0.9.4)
+
+CODE-82 adds one optional field to `harness-qualification` and one to an
+`agent-run` operation's `execution` within format 3, and no record type. A
+record without them is unchanged, and none is refused or warned for lacking one.
+
+| Record | Additive contract |
+| --- | --- |
+| `harness-qualification` | `reach: {file, host}`: what a probe in the harness's place reached during qualification. `file`, a marker planted outside the probe workspace and its temporary directory, is `readable`, `blocked` or `unknown`; `host`, a test host on the loopback interface, is `reachable`, `blocked` or `unknown`. It is no admission identity, so a revocation may omit it. |
+| `operation` (agent-run) | `execution.reach: {outsideFile, testHost, secretPaths, secretKinds, secretPathsComplete}`, fixed at intent with the rest of `execution`: the same measurement made before the run started, the count of secret-bearing paths its operating-system user could open for reading (at most 512), their kinds (`ssh-key`, `cloud-credentials`, `registry-credentials`, `forge-credentials`, `signing-key`, `harness-login`, `device-key`, `environment-file`, `keychain`; each named once and counted at least once) and whether that inventory was complete. The paths themselves stay in the run's custody on the machine that ran it, never in a record. |
+
+`unknown` means the probe did not run or report, never that it was blocked. A
+reader of format 3 that predates the fields refuses a record that carries one as
+an unknown key, as any later format-3 field, so the estate's pin keeps every
+machine on a release that reads them; a format-2 estate refuses them. `records
+describe harness-qualification` and `records describe operation` include these
+contracts, within `vericairn.records/readers/10`, which 0.9.4 introduces.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

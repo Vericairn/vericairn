@@ -91,6 +91,10 @@ public class PolicyGoldenFixtureTests
         JsonObject changed = PolicyFixture.ResultBody();
         changed["change"] = new JsonObject { ["repository"] = progress.Estate.Load().FirstEstate!.Id, ["base"] = new string('a', 40), ["head"] = new string('b', 40), ["target"] = "main" };
         progress.Estate.Add("result", progress.Estate.BuilderId, changed.ToJsonString(), progress.Attempt.Reference, supersedes: progressed.Id);
+        // From 0.9.4 (CODE-82) a qualification records what its reach probe found.
+        JsonObject qualification = JsonNode.Parse(HarnessQualificationTests.Body())!.AsObject();
+        qualification["reach"] = new JsonObject { ["file"] = "readable", ["host"] = "reachable" };
+        progress.Estate.Add("harness-qualification", progress.Estate.OperatorId, qualification.ToJsonString());
         EstateModel progressModel = progress.Estate.Load();
         Assert.False(progressModel.Findings.HasErrors, string.Join('\n', progressModel.Findings));
         // History checkpoints have their own golden estate.

@@ -12,10 +12,10 @@ namespace Vericairn.Runtime.Tests;
 internal sealed class NativeRun : IDisposable
 {
     public NativeRun(string harness, Action<NativeProbe, LaunchContext>? beforeDispatch = null, string? budget = null, bool keepOperatorKey = false,
-        bool newer = false, bool qualify = false, Action? afterProbe = null)
+        bool newer = false, bool qualify = false, Action? afterProbe = null, long recordFormat = 2, string? brief = null)
     {
         Probe = new(harness);
-        Run = new(budget: budget ?? """{"wallMinutes":60,"attemptsPerStep":3}""", keepOperatorKey: keepOperatorKey || qualify);
+        Run = new(budget: budget ?? """{"wallMinutes":60,"attemptsPerStep":3}""", keepOperatorKey: keepOperatorKey || qualify, recordFormat: recordFormat, brief: brief);
         if (newer) Probe.Behavior("version", harness == "codex" ? "codex-cli 0.160.0" : "2.1.297 (Claude Code)");
         var environment = new Dictionary<string, string>(Probe.Context.Environment, WorkerEnvironment.Names) { ["LANG"] = "C" };
         // Every run is given its own temporary directory, so the admitted inventory is inspected with one too.

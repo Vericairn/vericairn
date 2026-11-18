@@ -202,6 +202,22 @@ public sealed class RunDirectory
         File.WriteAllText(BriefFile, brief);
     }
 
+    /// <summary>
+    /// From 0.9.4 (CODE-82), what the run could reach before it started: the marker and test-host measurement and the secret-bearing
+    /// paths its operating-system user can read, by path and kind, never content. Kept here only, never in a record.
+    /// </summary>
+    internal string ReachFile => System.IO.Path.Combine(Path, "reach.json");
+
+    /// <summary>Retains a run's reach in its own custody, owner-only, beside its other local state.</summary>
+    internal void RetainReach(JsonObject reach)
+    {
+        ArgumentNullException.ThrowIfNull(reach);
+        var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using var stream = new FileStream(ReachFile, options);
+        stream.Write(Records.Canonical.CanonicalJson.SerializePrettyUtf8(JsonSerializer.SerializeToElement(reach)));
+    }
+
     /// <summary>True when this machine holds the run's directory.</summary>
     public bool Exists => Directory.Exists(Path);
 

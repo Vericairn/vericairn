@@ -15,4 +15,9 @@ if (Vericairn.Adapters.Git.WorkspaceScopeProbe.TryRun(args) is int scopeResult)
     return scopeResult;
 }
 
+if (Vericairn.Runtime.Workers.HarnessReach.TryRun(args) is int reachResult)
+{
+    return reachResult;
+}
+
 return CliApp.Build().Parse(args).Invoke();

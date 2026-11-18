@@ -1045,6 +1045,24 @@ judges once more immediately before the launch, under the runtime's gate, so not
 the start: an exception that lapsed after the intent, or a key of an operator or of the sponsor that arrived here, launches
 nothing, and the run is recorded `canceled` before dispatch, naming the devices and the exception, never charged.
 
+**What a run can reach (CODE-82).** From 0.9.4 each run's record shows what outside files and hosts it could reach. Neither
+native launcher confines its harness process: it runs as the operating-system user the worker runs as, and Codex's
+`workspace-write` sandbox confines only its shell commands' writes and network, never their reads or the harness process
+itself. So the worker measures before the run starts, after the inventory is admitted and before the intent. It plants a
+marker file in the run's own directory, outside the workspace and the run's temporary directory, and starts a test host on
+the loopback interface, then starts a probe in the harness's place: the vericairn executable with a private argument, as the
+same user, with the harness's environment and working directory. The probe reads the marker and connects to the host and
+reports what it read; nothing else runs. `readable` and `reachable` mean it returned the exact random token, `blocked` that
+the read or the connection was refused, and `unknown` that the probe did not run or report; unknown is never reported as
+blocked. The worker then lists the secret-bearing paths the user can open for reading: SSH keys, cloud, package-registry and
+forge credentials, GnuPG private keys, harness logins (the run's imported login among them), the Vericairn home's device keys,
+a home `.env` file and macOS keychain files, at conventional locations under the harness's home. Opening a file is the only
+test; no byte of it is read. The list, by path and kind, stays in the run's custody, `reach.json` in the run's owner-only
+directory on the machine that ran it, at every record format. From record format 3 the intent's `execution.reach` records
+`outsideFile`, `testHost`, `secretPaths` (the count), `secretKinds` and `secretPathsComplete`, never a path. The measurement
+shows reach; it blocks nothing and refuses no run: on today's launchers a run reads what its user can read. Run the worker as
+another operating-system user, one that cannot read those paths, to reduce it.
+
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed
 containment are separate facts: the worker that observes the run transmits the stop at its next heartbeat, by creating the
@@ -2061,6 +2079,11 @@ MCP server. The signed `harness-qualification` record is available from format 2
 | `login` | The permitted login boundary: presence for Codex, unmanaged subscription class for Claude Code. No credential content or credential digest. |
 | `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests the estate-only approval policy, whether it was reported, and reported authentication status. |
 
+From 0.9.4 (CODE-82), qualification also plants a marker file in its scratch directory, outside the probe workspace and its
+temporary directory, and a test host on the loopback interface, and runs the same reach probe as a run does, in the harness's
+place. A format-3 qualification records the outcome as `reach`: `file` (`readable`, `blocked` or `unknown`) and `host`
+(`reachable`, `blocked` or `unknown`). The reach is evidence about the installation, not an admission identity: admission
+still matches the six probe digests, and a revocation may omit it.
 Raw probe output, command bindings, machine paths and credential values never enter the qualification record.
 The MCP check first compares the actual local command, arguments and environment to the generated configuration;
 only then does its digest normalize run-specific paths and acting-principal bindings. A record from another machine

@@ -312,6 +312,11 @@ internal sealed class RunAdmissionService(
             RunSelection.ResolveRevision(plan.Selection, preflight.ModelRevision);
             plan.Selection["harnessVersion"] = preflight.HarnessVersion;
             plan.Selection["environment"] = RunEnvironment.Admit(environmentPolicy, preflight, environment, [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
+            // From 0.9.4 (CODE-82): what the run can reach outside its workspace, measured before it starts by a probe in the harness's
+            // place, with the secret-bearing paths its user can read kept by path in the run's custody. The intent carries the
+            // measurement and the paths' count and kinds from record format 3; the custody list is kept at every format.
+            JsonObject reach = HarnessReach.Observe(directory, launch.Workspace, environment, WorkerOptions.VericairnCommand(), WorkerOptions.Clock);
+            if (session.Manifest.RecordFormat >= 3) plan.Selection["reach"] = reach;
             launch = launch with { Execution = Element(plan.Selection) };
         }
         catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)

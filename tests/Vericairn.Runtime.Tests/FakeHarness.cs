@@ -60,6 +60,15 @@ internal static class FakeHarness
     internal static void Intercept()
     {
         string[] arguments = Environment.GetCommandLineArgs();
+        // The worker's reach probe (CODE-82) is the vericairn executable with a private argument; the test executable stands in for it
+        // wherever a test names it as the vericairn command, and runs the product's own probe.
+        int reach = Array.IndexOf(arguments, Vericairn.Runtime.Workers.HarnessReach.Marker);
+        if (reach > 0 && Vericairn.Runtime.Workers.HarnessReach.TryRun(arguments[reach..]) is int reached)
+        {
+            Console.Out.Flush();
+            Environment.Exit(reached);
+        }
+
         int at = Array.IndexOf(arguments, Marker);
         bool native = at < 0;
         if (native) at = Array.IndexOf(arguments, NativeMarker);

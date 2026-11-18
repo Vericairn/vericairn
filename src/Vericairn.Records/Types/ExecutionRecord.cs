@@ -12,6 +12,12 @@ namespace Vericairn.Records.Types;
 
 internal static class ExecutionRecord
 {
+    /// <summary>The most secret-bearing paths a run's reach counts (CODE-82).</summary>
+    internal const long MaxSecretPaths = 512;
+
+    /// <summary>The kinds of secret-bearing path a run's reach may name (CODE-82).</summary>
+    internal static readonly string[] SecretKinds = ["ssh-key", "cloud-credentials", "registry-credentials", "forge-credentials", "signing-key", "harness-login", "device-key", "environment-file", "keychain"];
+
     public static void Read(ValidationContext context, string? status)
     {
         BodyReader body = context.Body;
@@ -128,6 +134,20 @@ internal static class ExecutionRecord
                     component.NoOtherKeys();
                 }
                 environment.NoOtherKeys();
+            }
+
+            // From 0.9.4 (CODE-82), additive in format 3: what the run could reach outside its workspace, measured before it started.
+            if (execution.Since(3, "reach") && execution.Nested("reach", false) is BodyReader reach)
+            {
+                reach.Enum("outsideFile", true, [.. HarnessQualificationType.FileReach]);
+                reach.Enum("testHost", true, [.. HarnessQualificationType.HostReach]);
+                long? count = reach.Number("secretPaths", true, 0, MaxSecretPaths);
+                IReadOnlyList<string>? kinds = reach.StringArray("secretKinds", true, allowEmpty: true, maxItemLength: 40);
+                reach.Flag("secretPathsComplete", true);
+                reach.NoOtherKeys();
+                if (kinds is not null && (kinds.Any(k => !SecretKinds.Contains(k, StringComparer.Ordinal)) || kinds.Distinct(StringComparer.Ordinal).Count() != kinds.Count
+                    || (count == 0) != (kinds.Count == 0) || kinds.Count > count))
+                    context.Error("operation.execution", "A run's reach names each kind of secret-bearing path it counted once, from the known kinds, and counts at least one path for each.");
             }
             execution.NoOtherKeys();
             if (!context.Findings.HasErrors) Consistency(context, execution.Element);

@@ -38,7 +38,14 @@ public sealed class HarnessQualificationType : IRecordType
         new("version", "string", true, "The exact observed version, never a range.", 2),
         new("status", "qualified|revoked", true, "Qualified initially; revoked only by a superseding record preserving launcher, version and probes.", 2),
         new("probes", "object", true, "SHA-256 digests named version, flags, tools, configuration, login and mcp. No raw probe output.", 2),
+        new("reach", "object", false, "From 0.9.4 (CODE-82): what a probe in the harness's place reached during qualification, with the harness's environment and working directory: file, a marker planted outside the workspace and the temporary directory (readable, blocked or unknown), and host, a test host on the loopback interface (reachable, blocked or unknown). Unknown is never blocked. Not an admission identity; a revocation may omit it.", 3),
     ];
+
+    /// <summary>What the reach probe found for the marker file.</summary>
+    public static readonly ImmutableArray<string> FileReach = ["readable", "blocked", "unknown"];
+
+    /// <summary>What the reach probe found for the test host.</summary>
+    public static readonly ImmutableArray<string> HostReach = ["reachable", "blocked", "unknown"];
 
     /// <summary>Only a human operator or a human with the operator's explicit qualify grant may qualify or revoke.</summary>
     public static bool Authorized(EstateModel model, string principal, DateTimeOffset at)
@@ -67,6 +74,12 @@ public sealed class HarnessQualificationType : IRecordType
         {
             foreach (string name in ProbeNames) probes.Hash(name, true);
             probes.NoOtherKeys();
+        }
+        if (body.Since(3, "reach") && body.Nested("reach", false) is BodyReader reach)
+        {
+            reach.Enum("file", true, [.. FileReach]);
+            reach.Enum("host", true, [.. HostReach]);
+            reach.NoOtherKeys();
         }
         body.NoOtherKeys();
         if (!AuthorizedWhen(context.Model, context.Record))
