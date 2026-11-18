@@ -141,14 +141,21 @@ after Unicode NFKC normalization and full case folding computed by Vericairn its
 on every platform and build. A phrase shorter than 24 characters, or one another current work order also uses, such as a standard closing step,
 is not matched on its own. The check applies whoever authored the commits.
 
-From 0.9.4 (FIX-137, decision 01M7PNCMA3V2ZQG2ZK9V7NBEJK), the git adapter reads every added line and every message, whatever
-the clone's settings and attributes, or reads nothing and the push is refused. Messages are read in UTF-8 whatever the clone's
-`i18n.logOutputEncoding`, without notes or mailmap. Every file's diff is read as text: neither a NUL byte, a `-diff` or binary
-attribute, committed or the clone's own, nor a `core.bigFileThreshold` below the file's size turns its added lines into
-"Binary files differ"; renames and copies are not detected, so a moved file's lines read as added. A diff line is a file header
-only before the first hunk of its file, so an added line whose own text begins with `++` is read. Before 0.9.4 each of those
-let held text through: the added lines of a file git called binary, an added line beginning with `++`, and every message under
-a clone that set its log output encoding to UTF-16.
+From 0.9.4 (FIX-137, decision 01M7PNCMA3V2ZQG2ZK9V7NBEJK), the git adapter reads every message and every added line of every
+commit the push carries that its target branch does not already hold, whatever the clone's settings and attributes, or reads
+nothing and the push is refused. Each commit's own diff against its parent is read, so text one commit adds and a later one
+removes, which the push still publishes in its history, is read. A merge commit's own lines are read from its dense combined
+diff: a line added against every one of its parents is the merge's own text, read even when a later commit removes it, while a
+line one parent already holds was added by a commit of that parent, read on its own or already in the repository. Messages are
+read in UTF-8 whatever the clone's `i18n.logOutputEncoding`, without notes or mailmap. Every file is read as text: neither a NUL
+byte, a `-diff` or binary attribute, committed or the clone's own, nor a `core.bigFileThreshold` below the file's size turns its
+added lines into "Binary files differ"; renames and copies are not detected, so a moved file's lines read as added. A diff line
+is a file header only before the first hunk of its file, so an added line whose own text begins with `++` is read. An added
+line holding NUL characters, as each line of a UTF-16 or UTF-32 file does when read as UTF-8, is read again with them removed,
+so held text stored in such a file is matched by its letters; text without NUL characters reads only as itself, so this second
+reading adds nothing for an ordinary file. Before 0.9.4 each of those let held text through: text a later commit of the push
+removed, the added lines of a file git called binary, an added line beginning with `++`, held text in a UTF-16 or UTF-32 file,
+and every message under a clone that set its log output encoding to UTF-16.
 
 The hold ends when the release that carries the work order (its placement) is recorded as published; what that release
 discloses stays the operator's choice. A push to a private repository is not held. If a hold is in force and the push adapter

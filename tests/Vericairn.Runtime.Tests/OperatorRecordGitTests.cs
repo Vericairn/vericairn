@@ -211,6 +211,26 @@ public sealed class OperatorRecordGitTests : IDisposable
         Assert.Throws<ProviderRefusedException>(() => adapter.Commit(root, "operator/example", basis.Head, RecordFiles, NoReceipts));
     }
 
+    // FIX-137: a graft cannot make a commit whose real parent is an extra commit pass as the record's commit on its pinned base: the
+    // extra commit adds a file the record's commit removes, so only the parent check could tell, and it reads the real parents.
+    [Fact]
+    public void AGraftCannotHideAnExtraCommitFromTheRecoveredCommitCheck()
+    {
+        adapter.Branch(root, basis, "operator/example", RecordFiles);
+        Write("other.txt", "Additional content.\n");
+        Git("add", "other.txt");
+        Git("commit", "-m", "Another change");
+        Git("rm", "-q", "other.txt");
+        WriteRecord();
+        Git("add", "--", RecordPath);
+        Git("commit", "-m", "The record");
+        string head = Git("rev-parse", "HEAD");
+        Assert.Equal(RecordPath, Git("diff-tree", "--no-commit-id", "--name-only", "-r", basis.Head, head));
+        File.WriteAllText(Path.Combine(root, ".git", "info", "grafts"), head + " " + basis.Head + "\n");
+        Assert.Equal(basis.Head, Git("rev-parse", head + "^"));
+        Assert.Throws<ProviderRefusedException>(() => adapter.Verify(root, head, basis.Head, RecordFiles));
+    }
+
     [Fact]
     public void ABranchThatMovedOrHasExtraCommitsCannotResume()
     {

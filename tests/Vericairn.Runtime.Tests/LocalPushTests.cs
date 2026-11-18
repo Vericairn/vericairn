@@ -357,6 +357,10 @@ public sealed class LocalPushTests : IDisposable
     [InlineData("big-file-threshold")]
     [InlineData("plus-plus-line")]
     [InlineData("utf16-messages")]
+    [InlineData("utf16le-with-bom")]
+    [InlineData("utf16be")]
+    [InlineData("utf16le-without-bom")]
+    [InlineData("utf32")]
     public void ThePublishedTextHoldsEveryAddedFormWhateverTheClonesSettings(string form)
     {
         const string held = "the held phrase of FIX-90";
@@ -389,6 +393,19 @@ public sealed class LocalPushTests : IDisposable
             case "utf16-messages":
                 File.WriteAllText(Path.Combine(repository, "data.txt"), "Unrelated content.\n");
                 break;
+            // A file stored in UTF-16 or UTF-32 reads, as UTF-8, with NUL characters between its letters.
+            case "utf16le-with-bom":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nIt closes " + held + ".\n", new System.Text.UnicodeEncoding(false, true));
+                break;
+            case "utf16be":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nIt closes " + held + ".\n", new System.Text.UnicodeEncoding(true, true));
+                break;
+            case "utf16le-without-bom":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nIt closes " + held + ".\n", new System.Text.UnicodeEncoding(false, false));
+                break;
+            case "utf32":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nIt closes " + held + ".\n", new System.Text.UTF32Encoding(false, true));
+                break;
         }
         Git(repository, "add", "--all");
         Git(repository, "commit", "-m", form == "utf16-messages" ? "Add content\n\nIt closes " + held + "." : "Add content");
@@ -399,8 +416,69 @@ public sealed class LocalPushTests : IDisposable
         string? text = adapter.PublishedText(repository, plan);
         Assert.NotNull(text);
         Assert.Contains(held, text, StringComparison.Ordinal);
+        if (form.StartsWith("utf16le", StringComparison.Ordinal) || form is "utf16be" or "utf32")
+            Assert.DoesNotContain(held, text.Split('\n').First(l => l.Contains('\0', StringComparison.Ordinal)), StringComparison.Ordinal);
         IReadOnlyList<DisclosureHolds.Hold> holds = [new("FIX-90", "order", [])];
         Assert.Equal("FIX-90", DisclosureHolds.Disclosed(holds, text));
+    }
+
+    // FIX-137: each commit's own added lines are read, so text one commit adds and a later one removes, which the push still publishes
+    // in its history, is read; an evil merge's own lines are read, even once a later commit removes them, while a line its target
+    // parent already holds is not; and a clean push of several commits discloses nothing.
+    [Theory]
+    [InlineData("added-then-removed", true)]
+    [InlineData("evil-merge", true)]
+    [InlineData("clean", false)]
+    public void ThePublishedTextReadsEveryCommitsOwnAddedLines(string history, bool discloses)
+    {
+        const string held = "the held phrase of FIX-90";
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        File.WriteAllText(Path.Combine(repository, "data.txt"), history == "added-then-removed" ? "Notes.\n" + held + "\n" : "Notes.\n");
+        Git(repository, "add", "data.txt");
+        Git(repository, "commit", "-m", "Add notes");
+        if (history == "added-then-removed")
+        {
+            File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\n");
+            Git(repository, "commit", "-am", "Tidy notes");
+        }
+        if (history == "evil-merge")
+        {
+            // The target moves on with a line of its own, already in the remote; the branch takes it in by a merge that adds a line
+            // neither parent holds.
+            Git(repository, "checkout", "main");
+            File.WriteAllText(Path.Combine(repository, "main.txt"), "The target's own line.\n");
+            Git(repository, "add", "main.txt");
+            Git(repository, "commit", "-m", "Target change");
+            Git(repository, "push", remote, "main");
+            Git(repository, "checkout", "work/change");
+            Git(repository, "merge", "--no-ff", "--no-commit", "main");
+            File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\n" + held + "\n");
+            Git(repository, "add", "data.txt");
+            Git(repository, "commit", "-m", "Take in main");
+            // A later commit removes the merge's own line, so only the merge's own diff shows it.
+            File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\n");
+            Git(repository, "commit", "-am", "Tidy notes");
+        }
+        if (history == "clean")
+        {
+            File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nMore notes.\n");
+            Git(repository, "commit", "-am", "More notes");
+        }
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        string text = adapter.PublishedText(repository, plan)!;
+        Assert.NotNull(text);
+        IReadOnlyList<DisclosureHolds.Hold> holds = [new("FIX-90", "order", [])];
+        Assert.Equal(discloses ? "FIX-90" : null, DisclosureHolds.Disclosed(holds, text));
+        Assert.Contains("Notes.", text, StringComparison.Ordinal);
+        if (history == "evil-merge") Assert.DoesNotContain("The target's own line.", text, StringComparison.Ordinal);
+        if (history == "clean") Assert.Contains("More notes.", text, StringComparison.Ordinal);
     }
 
     // Commit one file at an exact author and committer date, so the commit-graph's generation numbers are predictable.

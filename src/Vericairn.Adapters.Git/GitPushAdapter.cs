@@ -87,40 +87,74 @@ public sealed class GitPushAdapter : IPushAdapter
 
     /// <inheritdoc />
     /// <remarks>
-    /// Every added line and every message is read, whatever the clone's settings and attributes, or the read returns null (FIX-137):
-    /// the messages in UTF-8 whatever the clone's output encoding, NUL-separated, with no signature verification, notes or mailmap; the
-    /// diff as text for every file, so neither a NUL byte, a <c>-diff</c> or binary attribute, committed or the clone's own, nor a low
-    /// <c>core.bigFileThreshold</c> turns a file's added lines into "Binary files differ", with no rename or copy detection, external
-    /// diff or text conversion; and a diff line is a file header only before the first hunk of its file, so an added line whose own
-    /// text begins with "++" is read.
+    /// Every added line and every message of every commit the push carries that its target branch does not already hold is read,
+    /// whatever the clone's settings and attributes, or the read returns null (FIX-137):
+    /// <list type="bullet">
+    /// <item>the messages in UTF-8 whatever the clone's output encoding, NUL-separated, with no signature verification, notes or mailmap;</item>
+    /// <item>each commit's own diff against its parent, so text one commit adds and a later one removes is still read; for a merge, its
+    /// dense combined diff, whose lines added against every parent are the merge's own text, while a line one parent already holds was
+    /// added by a commit of that parent, read on its own or already in the repository;</item>
+    /// <item>every file as text, so neither a NUL byte, a <c>-diff</c> or binary attribute, committed or the clone's own, nor a low
+    /// <c>core.bigFileThreshold</c> turns its added lines into "Binary files differ", with no rename or copy detection, external diff or
+    /// text conversion;</item>
+    /// <item>a diff line is a file header only before the first hunk of its file, so an added line whose own text begins with "++" is read;</item>
+    /// <item>and each added line holding NUL characters, as a UTF-16 or UTF-32 file's lines do, read a second time with them removed, after
+    /// the rest, so that held text stored in such a file reads as its letters.</item>
+    /// </list>
     /// </remarks>
     public string? PublishedText(string directory, PushPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head)) return null;
+        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head) || !Patterns.Commit.IsMatch(plan.TargetHead)) return null;
+        string[] range = [plan.Head, "^" + plan.Base, "^" + plan.TargetHead];
         ProcessResult messages = Invoke(directory, ["-c", "i18n.logOutputEncoding=UTF-8", "log", "--no-show-signature", "--no-mailmap", "--no-notes", "-z",
-            "--format=%H%n%B", plan.Range]);
-        ProcessResult diff = Invoke(directory, ["-c", "core.bigFileThreshold=" + TextThreshold, "diff", "--no-color", "--no-ext-diff", "--no-textconv",
-            "--no-renames", "--text", "--unified=0", plan.Base, plan.Head]);
-        if (messages is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } || diff is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
+            "--format=%H%n%B", .. range]);
+        ProcessResult patches = Invoke(directory, ["-c", "core.bigFileThreshold=" + TextThreshold, "-c", "i18n.logOutputEncoding=UTF-8", "log", "--no-show-signature",
+            "--no-mailmap", "--no-notes", "--format=%x01%H", "-p", "--cc", "--text", "--no-renames", "--no-ext-diff", "--no-textconv", "--unified=0", "--no-color", .. range]);
+        if (messages is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } || patches is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
         var text = new System.Text.StringBuilder();
+        var commits = new HashSet<string>(StringComparer.Ordinal);
         foreach (string entry in messages.StandardOutput.Split('\0'))
         {
             if (entry.Length == 0) continue;
             int split = entry.IndexOf('\n', StringComparison.Ordinal);
-            if (!Patterns.Commit.IsMatch(split < 0 ? entry : entry[..split])) return null;
+            string id = split < 0 ? entry : entry[..split];
+            if (!Patterns.Commit.IsMatch(id) || !commits.Add(id)) return null;
             text.Append(split < 0 ? string.Empty : entry[(split + 1)..]).Append('\n');
         }
-        bool hunk = false;
-        foreach (string line in diff.StandardOutput.Split('\n'))
+        var stripped = new System.Text.StringBuilder();
+        var patched = new HashSet<string>(StringComparer.Ordinal);
+        // Outside a hunk the columns are zero: a file's header runs from its diff line to its first hunk. A hunk header's at signs give
+        // the columns, one for each parent: a line is added when every column is a plus, and its text follows them.
+        int columns = 0;
+        foreach (string line in patches.StandardOutput.Split('\n'))
         {
-            // A file's header runs from its diff line to its first hunk; within a hunk every line carries its own prefix.
-            if (line.StartsWith("diff --git ", StringComparison.Ordinal)) hunk = false;
-            else if (line.StartsWith("@@", StringComparison.Ordinal)) hunk = true;
-            else if (hunk && line.StartsWith('+')) text.Append('\n').Append(line, 1, line.Length - 1);
-            else if (!hunk && line.StartsWith("Binary files ", StringComparison.Ordinal)) return null;
+            if (line.StartsWith('\u0001'))
+            {
+                if (!Patterns.Commit.IsMatch(line[1..]) || !patched.Add(line[1..])) return null;
+                columns = 0;
+            }
+            else if (line.StartsWith("diff --git ", StringComparison.Ordinal) || line.StartsWith("diff --cc ", StringComparison.Ordinal)
+                || line.StartsWith("diff --combined ", StringComparison.Ordinal)) columns = 0;
+            else if (line.StartsWith("@@", StringComparison.Ordinal))
+            {
+                columns = line.TakeWhile(c => c == '@').Count() - 1;
+                if (columns < 1) return null;
+            }
+            else if (columns == 0)
+            {
+                if (line.StartsWith("Binary files ", StringComparison.Ordinal)) return null;
+            }
+            else if (line.Length >= columns && line.Take(columns).All(c => c == '+'))
+            {
+                string added = line[columns..];
+                text.Append('\n').Append(added);
+                if (added.Contains('\0', StringComparison.Ordinal)) stripped.Append('\n').Append(added.Replace("\0", string.Empty, StringComparison.Ordinal));
+            }
         }
-        return text.ToString();
+        // Every commit's patch was read: a commit whose patch is missing could carry text nothing read.
+        if (!patched.SetEquals(commits)) return null;
+        return text.Append('\n').Append(stripped).ToString();
     }
 
     // The size up to which a diff reads a file as text, git's default; a larger file's diff exceeds the bounded output and is unreadable.
