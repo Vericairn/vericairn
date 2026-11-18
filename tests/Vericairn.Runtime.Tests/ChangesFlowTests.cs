@@ -861,6 +861,9 @@ public sealed class ChangesFlowTests
         internal IReadOnlyList<PushedCommit>? Commits { get; set; } = [];
         internal int MessageReads { get; private set; }
         public IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan) { MessageReads++; return Commits; }
+        internal IReadOnlyDictionary<string, IReadOnlyList<string>>? Paths { get; set; }
+        internal int PathReads { get; private set; }
+        public IReadOnlyDictionary<string, IReadOnlyList<string>>? ChangedPaths(string directory, PushPlan plan) { PathReads++; return Paths; }
         internal Dictionary<(string Commit, string Path), string> Files { get; } = [];
         internal int FileReads { get; private set; }
         public string? FileText(string directory, PushPlan plan, string commit, string path)

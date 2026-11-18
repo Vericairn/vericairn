@@ -150,10 +150,40 @@ public sealed class LocalPushTests : IDisposable
         Assert.Equal(new[] { head, other, first }.Order(StringComparer.Ordinal), commits.Select(c => c.Commit).Order(StringComparer.Ordinal));
         Assert.Equal("Merge main into the change\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == head).Message);
         Assert.Equal("Add checked content\n\nWhy it changed.\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == first).Message);
-        // FIX-137: each commit's paths, a clean merge naming none, since none differs from every one of its parents.
-        Assert.Equal(["addition.txt"], Assert.Single(commits, c => c.Commit == first).Paths!);
-        Assert.Equal(["other.txt"], Assert.Single(commits, c => c.Commit == other).Paths!);
-        Assert.Empty(Assert.Single(commits, c => c.Commit == head).Paths!);
+        // FIX-137: each commit's paths, read on their own, a clean merge naming none, since none differs from every one of its parents.
+        IReadOnlyDictionary<string, IReadOnlyList<string>> paths = adapter.ChangedPaths(repository, plan)!;
+        Assert.Equal(new[] { head, other, first }.Order(StringComparer.Ordinal), paths.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["addition.txt"], paths[first]);
+        Assert.Equal(["other.txt"], paths[other]);
+        Assert.Empty(paths[head]);
+    }
+
+    // FIX-137: a path is kept exactly as git names it with -z: a directory whose name begins with a line break is not docs/.
+    [Fact]
+    public void APathIsReadExactlyAsGitNamesIt()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows file names cannot hold a line break.");
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "docs/set");
+        Directory.CreateDirectory(Path.Combine(repository, "\ndocs"));
+        File.WriteAllText(Path.Combine(repository, "\ndocs", "code.cs"), "class Code { }\n");
+        Directory.CreateDirectory(Path.Combine(repository, "docs"));
+        File.WriteAllText(Path.Combine(repository, "docs", "guide.md"), "A guide.\n");
+        Git(repository, "add", "--", "\ndocs/code.cs");
+        Git(repository, "commit", "-m", "Add code under a line-break directory");
+        string first = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "add", "--", "docs/guide.md");
+        Git(repository, "commit", "-m", "Add a guide");
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "docs/set", "main", head);
+        IReadOnlyDictionary<string, IReadOnlyList<string>> paths = adapter.ChangedPaths(repository, plan)!;
+        Assert.Equal(["\ndocs/code.cs"], paths[first]);
+        Assert.Equal(["docs/guide.md"], paths[head]);
     }
 
     // CODE-81: a commit the target branch already holds is in the repository already, so a pushed branch that takes in a newer target

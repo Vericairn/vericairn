@@ -74,25 +74,32 @@ public static class DisclosureHolds
         order = model.Latest(order);
         if (Carrying(order) is not (string carrier, string placed, string version) || !Patterns.SemanticVersion.IsMatch(version)
             || LivingDocuments.ProductIdentity(model, placed) != LivingDocuments.ProductIdentity(model, product)) return null;
-        return SecuritySectionApproved(model, carrier, order) ? version : null;
+        return SecuritySectionApproved(model, carrier, order, version, hold.Key) ? version : null;
     }
 
     /// <summary>
-    /// Whether the operator has approved, for <paramref name="order"/>, the Security section of the release that
-    /// <paramref name="carrier"/> carries: an ask about the carrier whose question names the release's Security section
-    /// (<see cref="SecuritySection"/>) is answered by the operator's decision, that decision names the held work order among the work
-    /// orders it affects, and it was decided and recorded after the work order's current revision, so that a section approved before
-    /// a fix joined the hold never covers it; and, as the release flow's <c>security-section</c> trap reads it, no ask about the carrier
-    /// still waits, open or notified. An answer to any other question about the carrier, such as when to submit, approves nothing.
+    /// Whether the operator has approved, for <paramref name="order"/> under <paramref name="key"/>, the Security section of the release
+    /// <paramref name="version"/> that <paramref name="carrier"/> carries, in the forms the release practice writes:
+    /// <list type="bullet">
+    /// <item>an ask whose subject is the carrier and whose question begins exactly with <see cref="ApprovalQuestion"/>;</item>
+    /// <item>answered by the operator's decision that records the approval as an effect exactly <see cref="ApprovalEffect"/> and names
+    /// the held work order among the work orders it affects;</item>
+    /// <item>decided and recorded after the work order's current revision, so that a section approved before a fix joined the hold never
+    /// covers it;</item>
+    /// <item>and, as the release flow's <c>security-section</c> trap reads it, with no ask about the carrier still waiting.</item>
+    /// </list>
+    /// An answer to any other question about the carrier, and a decision that does not record that effect, such as one declining the
+    /// section, approves nothing. The records still say nothing of the section's bytes.
     /// </summary>
-    internal static bool SecuritySectionApproved(EstateModel model, string carrier, RecordEnvelope order)
+    internal static bool SecuritySectionApproved(EstateModel model, string carrier, RecordEnvelope order, string version, string key)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
-        if (!model.ById.TryGetValue(carrier, out RecordEnvelope? record) || record.Type != "work-order") return false;
+        if (!model.ById.TryGetValue(carrier, out RecordEnvelope? record) || record.Type != "work-order" || key.Length == 0) return false;
         HashSet<string> carriers = [.. model.Chain(model.Latest(record))];
         HashSet<string> held = [.. model.Chain(order)];
         DateTimeOffset since = order.AtTime;
+        string question = ApprovalQuestion(version), effect = ApprovalEffect(version, key);
         List<(RecordEnvelope Ask, string State, IReadOnlyList<RecordEnvelope> Answers)> asks = [.. model.Current("ask")
             .Where(a => a.Subject is { Type: "work-order" } subject && carriers.Contains(subject.Id))
             .Select(a =>
@@ -101,22 +108,38 @@ public static class DisclosureHolds
                 return (a, state, answers);
             })];
         if (asks.Any(a => Asks.IsWaiting(a.State))) return false;
-        return asks.Any(a => a.State == "answered" && ContainsWord(Normalize(EstateModel.BodyString(a.Ask, "question") ?? ""), SecuritySection)
+        return asks.Any(a => a.State == "answered" && (EstateModel.BodyString(a.Ask, "question") ?? "").StartsWith(question, StringComparison.Ordinal)
             && a.Answers.Any(d => model.HasRole(EstateModel.BodyString(d, "decidedBy"), Roles.Operator) && d.AtTime > since && Decided(d) > since
-                && d.Body.TryGetProperty("affects", out JsonElement affects) && affects.ValueKind == JsonValueKind.Array
-                && affects.EnumerateArray().Any(id => id.ValueKind == JsonValueKind.String && held.Contains(id.GetString()!))));
+                && Strings(d.Body, "effects").Any(e => e.Trim() == effect) && Strings(d.Body, "affects").Any(held.Contains)));
     }
 
-    /// <summary>The words an ask's question uses to name the release's Security section, matched whole, ignoring case and compatibility forms.</summary>
-    internal const string SecuritySection = "security section";
+    /// <summary>
+    /// How the ask that requests the operator's approval of a release's Security section begins its question, for example
+    /// "Approve the Security section of 9.9.9" followed by what it covers; the release practice writes it so.
+    /// </summary>
+    internal static string ApprovalQuestion(string version) => "Approve the Security section of " + version;
 
-    /// <summary>Whether the text names the hold's key as a whole word, as a held fix's commit message does (FIX-137).</summary>
-    internal static bool Names(Hold hold, string text)
+    /// <summary>
+    /// The effect, exactly, by which the operator's decision records that it approves a release's Security section for one held work
+    /// order, for example "The Security section of 9.9.9 is approved for FIX-90."; one effect for each held work order it covers.
+    /// </summary>
+    internal static string ApprovalEffect(string version, string key) => "The Security section of " + version + " is approved for " + key + ".";
+
+    /// <summary>
+    /// Whether a commit is one of the hold's held fixes: its subject line begins with the hold's key and a colon, exactly as the
+    /// estate's commit rules write a work order's commits, such as "FIX-90: Close the cache's path" (FIX-137). A mention of the key
+    /// anywhere else, in another case or form, or joined to more characters is not.
+    /// </summary>
+    internal static bool IsHeldFix(Hold hold, string message)
     {
         ArgumentNullException.ThrowIfNull(hold);
-        ArgumentNullException.ThrowIfNull(text);
-        return hold.Key.Length > 0 && ContainsWord(Normalize(text), Normalize(hold.Key));
+        ArgumentNullException.ThrowIfNull(message);
+        return hold.Key.Length > 0 && message.StartsWith(hold.Key + ":", StringComparison.Ordinal);
     }
+
+    private static IEnumerable<string> Strings(JsonElement body, string name) =>
+        body.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!) : [];
 
     // The hold ends when the release that carries the work order is published.
     private static bool Released(EstateModel model, RecordEnvelope order) => Carrying(order) is (_, string product, string version)

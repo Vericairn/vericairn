@@ -142,24 +142,37 @@ a held fix's guide text.
 - **The set, unmerged.** The push must be a checked push of the product the release belongs to. Its head holds
   `docs/releases/<version>/manifest.json`, a `vericairn.docs/1` manifest of the carrying release's version, and its target
   branch's head holds none, as while the set's pull request is open.
-- **Nothing but the set and its held fixes.** Every commit the push carries that its target branch does not already hold
-  either changes only documentation, which is paths under `docs/` and the root's `README.md`, `llms.txt` and
-  `Directory.Build.props`, where the release flow sets the new version, or is a held fix of that release: its message names, as
-  a whole word, the key of a work order held and placed in that release, and it may change any path. A merge commit counts only
-  for the paths that differ from every one of its parents, so taking in the target adds nothing. A push that carries the
-  manifest beside any other change is not the set, whatever its branch.
-- **The approval.** The operator approves the Security section for a held work order by answering an ask about the release's
-  carrier work order whose question names the release's Security section, the words "Security section" in any case, with a
-  decision that names the held work order among the work orders it affects. The decision must be decided and recorded after
-  the held work order's current revision, and no ask about the carrier may still wait, open or notified. An answer to any
-  other question about the carrier, such as when to submit, approves nothing, and so does a decision that does not name the
-  held work order; one made before the work order was last revised, such as before it was placed in the release or marked
-  held, does not cover it: ask the operator again.
-- **The reads.** The push adapter reads the manifest at the head and the target head only, without the clone's filters, and
-  each carried commit's message and paths (`IPushAdapter.FileText` and `IPushAdapter.CommitMessages`); an adapter that reads
-  either not at all never lets a set pass, and a read that fails refuses the push. A refusal of a push while such an approval
-  stands says that only the push carrying the set, with nothing but documentation and the release's held fixes, may carry the
-  held text.
+- **Nothing but the set and its held fixes.** Every commit the push carries that its target branch does not already hold is
+  either a held fix of that release, whose subject line begins with the key of a work order held and placed in that release and
+  a colon, exactly as the estate's commits are titled (`FIX-90: ...`), or changes documentation only. A held fix may change any
+  path; a mention of the key elsewhere, in another case or joined to more characters (`fix-90:`, `FIX-90_followup:`) is not a
+  held fix. Documentation is a Markdown, JSON or plain-text file under `docs/` outside any hidden directory, other than a
+  `global.json`, and the root's `README.md` and `llms.txt`, none of which can bring code into the build; and the root's
+  `Directory.Build.props`, which the release flow changes to set the new version, only when the head's file differs from the
+  target branch's file in nothing but the value of its one `<VersionPrefix>` line. A merge commit counts only for the paths
+  that differ from every one of its parents, so taking in the target adds nothing. A push that carries the manifest beside any
+  other change is not the set, whatever its branch; a version change with other build settings rides in a held fix or a
+  separate push.
+- **The approval.** The operator approves the Security section for each held work order in the forms the release practice
+  writes. The ask's subject is the release's carrier work order and its question begins exactly with
+  `Approve the Security section of <version>`, for example
+  `Approve the Security section of 9.9.9 as drafted, covering FIX-90?`. The operator's decision answering it records, among
+  its effects, exactly `The Security section of <version> is approved for <key>.` for each held work order it covers, such
+  as `The Security section of 9.9.9 is approved for FIX-90.`, and names those work orders among the work orders it affects.
+  The decision must be decided and recorded after the held work order's current revision, and no ask about the carrier may
+  still wait, open or notified. An answer to any other question about the carrier, such as one that mentions the Security
+  section in passing, approves nothing; neither does a decision without that effect for the work order, such as one that
+  declines the section, nor one that does not name it, nor one made before the work order was last revised, such as before
+  it was placed in the release or marked held: ask the operator again. The forms are read, not the section's bytes, which
+  `insert --expected-hash` checks when the set is prepared.
+- **The reads.** The push adapter reads the manifest and `Directory.Build.props` at the head and the target head only,
+  without the clone's filters, and the carried commits' messages and paths separately, each within its own bound
+  (`IPushAdapter.FileText`, `CommitMessages` and `ChangedPaths`); paths are read only while an approval could let a set pass,
+  and exactly as git names them. An adapter that reads any of them not at all never lets a set pass, and a read that fails
+  refuses the push. A refusal of a push while such an approval stands says that only the push carrying the set, with nothing
+  but documentation and the release's held fixes, may carry the held text, and why this push is not it: no set or a merged
+  one, an unreadable read, a commit by its id that is not a held fix and changes more than documentation, or a build file
+  that changes more than the version.
 
 ### Commit messages (0.9.4)
 

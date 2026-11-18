@@ -225,6 +225,22 @@ public sealed class CommitMessageTests
         }
     }
 
+    // The message check reads messages alone: a list of paths too long to read, as for a commit naming tens of thousands of paths,
+    // never stands in the way of checking them, and no path is read where no documentation set could pass a hold.
+    [Fact]
+    public void TheMessageCheckReadsNoPaths()
+    {
+        using var f = new ChangesFlowTests.Fixture();
+        using var signing = new Signing(f.Estate);
+        Declare(f.Estate, signing, "model-names", Rule("terms", BlockedTerms.Kind, new JsonObject { ["terms"] = new JsonArray("Tern") }));
+        f.Adapter.Commits = [new(ChangesFlowTests.Head, "Add the widget")];
+        f.Adapter.Paths = null;
+        ChangeResponse response = f.Service.ChangesPush(f.Push);
+        Assert.True(response.Ok, response.Message);
+        Assert.Equal(1, f.Adapter.MessageReads);
+        Assert.Equal(0, f.Adapter.PathReads);
+    }
+
     [Fact]
     public void WithNothingToCheckThePushReadsNoMessages()
     {

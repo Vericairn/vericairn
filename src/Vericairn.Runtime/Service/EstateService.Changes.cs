@@ -132,50 +132,98 @@ public sealed partial class EstateService
         }
         if (holds.Count == 0) return;
         // The repository is read outside the gate, once for each release whose documentation set could let a hold pass.
-        Dictionary<string, bool> carried = holds.Select(h => h.Release).OfType<string>().Distinct(StringComparer.Ordinal)
-            .ToDictionary(version => version, version => CarriesDocumentationSet(adapter, directory, plan, version,
+        Dictionary<string, string?> refusedSet = holds.Select(h => h.Release).OfType<string>().Distinct(StringComparer.Ordinal)
+            .ToDictionary(version => version, version => NotTheDocumentationSet(adapter, directory, plan, version,
                 [.. holds.Where(h => h.Release == version).Select(h => h.Hold)]), StringComparer.Ordinal);
-        List<DisclosureHolds.Hold> held = [.. holds.Where(h => h.Release is null || !carried[h.Release]).Select(h => h.Hold)];
+        List<DisclosureHolds.Hold> held = [.. holds.Where(h => h.Release is null || refusedSet[h.Release] is not null).Select(h => h.Hold)];
         if (held.Count == 0) return;
         string text = adapter.PublishedText(directory, plan)
             ?? throw new ProviderRefusedException("A disclosure hold is in force, and the push's text could not be read to check it; nothing was pushed.");
         if (DisclosureHolds.Disclosed(held, text) is string key)
             throw new ProviderRefusedException($"The push would disclose held work order {key} in a public repository before the release that carries it is published; nothing was pushed."
-                + (holds.Any(h => h.Hold.Key == key && h.Release is not null)
-                    ? " Only the push that carries that release's documentation set, with nothing but documentation and the release's held fixes, may carry it now." : string.Empty));
+                + (holds.FirstOrDefault(h => h.Hold.Key == key && h.Release is not null).Release is string release
+                    ? " Only the push that carries that release's documentation set, with nothing but documentation and the release's held fixes, may carry it now; " + refusedSet[release] : string.Empty));
     }
 
-    // Whether the push is the release's documentation set, unmerged, and nothing else: its head holds the set's manifest for that version
-    // and the target branch's head holds none, as while the set's pull request is open; and every commit it carries that the target does
-    // not hold changes documentation only, or is one of the release's held fixes, whose message names its held work order's key. A
-    // manifest of another format or version is not the set, and a push carrying the manifest beside any other change is not the set.
-    private static bool CarriesDocumentationSet(IPushAdapter adapter, string directory, PushPlan plan, string version, IReadOnlyList<DisclosureHolds.Hold> held)
+    // Why the push is not the release's documentation set, unmerged, and nothing else, or null when it is: its head holds the set's
+    // manifest for that version and the target branch's head holds none, as while the set's pull request is open; and every commit it
+    // carries that the target does not hold is one of the release's held fixes, whose subject begins with its held work order's key and
+    // a colon, or changes documentation only (DocumentationPath), Directory.Build.props only in its version. A manifest of another format
+    // or version is not the set, and a push carrying the manifest beside any other change is not the set. The reason names commits and
+    // paths, never held text.
+    private static string? NotTheDocumentationSet(IPushAdapter adapter, string directory, PushPlan plan, string version, IReadOnlyList<DisclosureHolds.Hold> held)
     {
         string path = DocumentationSetDirectory + version + "/manifest.json";
         string? manifest = adapter.FileText(directory, plan, plan.Head, path);
-        if (manifest is null || adapter.FileText(directory, plan, plan.TargetHead, path) is not null) return false;
+        if (manifest is null) return "the push's head holds no documentation set of that release.";
+        if (adapter.FileText(directory, plan, plan.TargetHead, path) is not null) return "the target branch already holds that release's documentation set.";
         try
         {
             using JsonDocument document = JsonDocument.Parse(manifest);
             if (document.RootElement.ValueKind != JsonValueKind.Object || ChangeText(document.RootElement, "format") != Vericairn.Runtime.Release.ReleaseFlow.DocumentationManifest
-                || ChangeText(document.RootElement, "version") != version) return false;
+                || ChangeText(document.RootElement, "version") != version) return "the push's manifest is not that release's documentation set.";
         }
         catch (JsonException)
         {
-            return false;
+            return "the push's manifest is not that release's documentation set.";
         }
+        // The messages and the paths are read separately, each within its own bound, so either one's failure is named for what it is.
         IReadOnlyList<PushedCommit>? commits = adapter.CommitMessages(directory, plan);
-        return commits is not null && commits.All(c => c is { Paths: not null, Message: not null } && Patterns.Commit.IsMatch(c.Commit)
-            && (c.Paths.All(DocumentationPath) || held.Any(h => DisclosureHolds.Names(h, c.Message))));
+        if (commits is null || commits.Any(c => c is null || c.Message is null || !Patterns.Commit.IsMatch(c.Commit)))
+            return "the messages of the commits it carries could not be read.";
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? paths = adapter.ChangedPaths(directory, plan);
+        if (paths is null || paths.Count != commits.Count || commits.Any(c => !paths.ContainsKey(c.Commit) || paths[c.Commit] is null))
+            return "the paths its commits change could not be read.";
+        bool versioned = false;
+        foreach (PushedCommit commit in commits)
+        {
+            if (held.Any(h => DisclosureHolds.IsHeldFix(h, commit.Message))) continue;
+            if (paths[commit.Commit].Any(p => !DocumentationPath(p) && p != BuildProperties))
+                return $"commit `{commit.Commit}` changes a path outside the documentation set and is not a held fix of that release.";
+            versioned |= paths[commit.Commit].Contains(BuildProperties, StringComparer.Ordinal);
+        }
+        if (versioned && !VersionOnly(adapter.FileText(directory, plan, plan.Head, BuildProperties), adapter.FileText(directory, plan, plan.TargetHead, BuildProperties)))
+            return $"its {BuildProperties} differs from the target branch's in more than the version.";
+        return null;
     }
 
     // Where a software product's release keeps its documentation sets, one directory per version (the release flow's docs-set step).
     private const string DocumentationSetDirectory = "docs/releases/";
 
-    // A path a documentation set's pull request changes: the guides and sets under docs/, and the root files the set's preparation
-    // updates, its README.md and llms.txt, and Directory.Build.props, where the release flow sets the new version.
-    private static bool DocumentationPath(string path) => path.StartsWith("docs/", StringComparison.Ordinal) && Patterns.RelativePath.IsMatch(path)
-        || path is "README.md" or "llms.txt" or "Directory.Build.props";
+    // The MSBuild file every project imports, where the release flow sets the new version (VersionPrefix).
+    private const string BuildProperties = "Directory.Build.props";
+
+    // A path a documentation set's pull request changes that cannot carry code into the build: a Markdown, JSON or plain-text file
+    // under docs/, outside any hidden directory and other than a global.json, and the root's README.md and llms.txt.
+    private static bool DocumentationPath(string path)
+    {
+        if (path is "README.md" or "llms.txt") return true;
+        if (!path.StartsWith("docs/", StringComparison.Ordinal) || !Patterns.RelativePath.IsMatch(path)) return false;
+        string[] segments = path.Split('/');
+        string name = segments[^1];
+        return !segments.Any(s => s.StartsWith('.')) && !name.Equals("global.json", StringComparison.OrdinalIgnoreCase)
+            && (name.EndsWith(".md", StringComparison.Ordinal) || name.EndsWith(".json", StringComparison.Ordinal) || name.EndsWith(".txt", StringComparison.Ordinal));
+    }
+
+    // Whether Directory.Build.props at the push's head differs from the target branch's only in the VersionPrefix element's value: the
+    // same lines in the same order, but for one line each that holds that element alone. A file missing on either side differs.
+    private static bool VersionOnly(string? head, string? target)
+    {
+        if (head is null || target is null) return false;
+        string[] next = head.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'), prior = target.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        if (next.Length != prior.Length) return false;
+        int changed = 0;
+        for (int i = 0; i < next.Length; i++)
+        {
+            if (next[i] == prior[i]) continue;
+            if (!VersionLine().IsMatch(next[i]) || !VersionLine().IsMatch(prior[i]) || ++changed > 1
+                || next[i][..next[i].IndexOf('<', StringComparison.Ordinal)] != prior[i][..prior[i].IndexOf('<', StringComparison.Ordinal)]) return false;
+        }
+        return true;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[ \t]*<VersionPrefix>(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)</VersionPrefix>$")]
+    private static partial System.Text.RegularExpressions.Regex VersionLine();
 
     /// <summary>Opens only from a recorded successful push of the same repository, branch and exact head.</summary>
     public ChangeResponse ChangesOpen(ChangesOpenRequest request)

@@ -107,37 +107,53 @@ public sealed class GitPushAdapter : IPushAdapter
         ProcessResult log = Invoke(directory, ["-c", "i18n.logOutputEncoding=UTF-8", "log", "--no-show-signature", "--no-mailmap", "--no-notes", "-z",
             "--format=%H%n%B", plan.Head, "^" + plan.Base, "^" + plan.TargetHead]);
         if (log is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
-        // The same commits again, each with the paths it changes, without renames, external diffs or text conversion; a merge commit
-        // names only the paths that differ from every one of its parents, as a combined diff does.
-        ProcessResult names = Invoke(directory, ["log", "--no-show-signature", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--name-only", "--cc",
-            "--format=%x01%H", plan.Head, "^" + plan.Base, "^" + plan.TargetHead]);
-        if (names is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
-        var paths = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        List<string>? current = null;
-        foreach (string token in names.StandardOutput.Split('\0'))
-        {
-            string item = token.TrimStart('\n');
-            if (item.StartsWith('\u0001'))
-            {
-                if (!Patterns.Commit.IsMatch(item[1..]) || paths.ContainsKey(item[1..])) return null;
-                paths[item[1..]] = current = [];
-            }
-            else if (item.Length > 0)
-            {
-                if (current is null) return null;
-                current.Add(item);
-            }
-        }
         var commits = new List<PushedCommit>();
         foreach (string entry in log.StandardOutput.Split('\0'))
         {
             if (entry.Length == 0) continue;
             int split = entry.IndexOf('\n', StringComparison.Ordinal);
             string id = split < 0 ? entry : entry[..split];
-            if (!Patterns.Commit.IsMatch(id) || !paths.TryGetValue(id, out List<string>? changed)) return null;
-            commits.Add(new(id, split < 0 ? string.Empty : entry[(split + 1)..]) { Paths = changed });
+            if (!Patterns.Commit.IsMatch(id)) return null;
+            commits.Add(new(id, split < 0 ? string.Empty : entry[(split + 1)..]));
         }
-        return commits.Count == paths.Count ? commits : null;
+        return commits;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, IReadOnlyList<string>>? ChangedPaths(string directory, PushPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head) || !Patterns.Commit.IsMatch(plan.TargetHead)) return null;
+        // The commits CommitMessages reads, each as a header line of its id, then the paths it changes, NUL-separated and unquoted,
+        // without renames, external diffs or text conversion; a merge commit names only the paths that differ from every one of its
+        // parents, as a combined diff does. git separates the header from the first path by one line break, which is all that is removed.
+        ProcessResult names = Invoke(directory, ["log", "--no-show-signature", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--name-only", "--cc",
+            "--format=%x01%H", plan.Head, "^" + plan.Base, "^" + plan.TargetHead]);
+        if (names is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
+        var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        List<string>? current = null;
+        bool header = false;
+        foreach (string token in names.StandardOutput.Split('\0'))
+        {
+            if (token.StartsWith('\u0001'))
+            {
+                string id = token[1..];
+                if (!Patterns.Commit.IsMatch(id) || paths.ContainsKey(id)) return null;
+                paths[id] = current = [];
+                header = true;
+                continue;
+            }
+            if (token.Length == 0)
+            {
+                header = false;
+                continue;
+            }
+            if (current is null || header && !token.StartsWith('\n')) return null;
+            string path = header ? token[1..] : token;
+            header = false;
+            if (path.Length > 0) current.Add(path);
+        }
+        return paths;
     }
 
     /// <inheritdoc />
