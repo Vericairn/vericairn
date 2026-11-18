@@ -14,6 +14,7 @@ internal sealed class GoalCommand : Command
         SetAction(parseResult => operations.Goal(parseResult.GetValue(context.EstateOption)!, null, parseResult.GetValue(context.JsonOption)));
         Subcommands.Add(new GoalShowCommand(context));
         Subcommands.Add(new GoalNextCommand(context));
+        Subcommands.Add(new GoalDueCommand(context));
         Subcommands.Add(new GoalProposeCommand(context));
         Subcommands.Add(new GoalActivateCommand(context));
         Subcommands.Add(new GoalPauseCommand(context));

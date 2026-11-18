@@ -1599,6 +1599,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("The acting principal must be a ULID.");
         }
 
+        WriteOutcome outcome;
+        List<string> flying = [];
+        var notices = new List<string>();
         lock (gate)
         {
             EstateModel model = session.Load();
@@ -1647,8 +1650,40 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             };
             var body = new JsonObject { ["status"] = next, ["note"] = string.IsNullOrWhiteSpace(request.Note) ? note : request.Note };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("goal-status", request.By, document.RootElement, current.Reference), model);
+            outcome = WriteLocked(new RecordDraft("goal-status", request.By, document.RootElement, current.Reference), model);
+            // From 0.9.4 (GOAL-07; design/standing-agents.md § 5): a pause with stop-runs asks the goal's runs in flight to stop, and a standing
+            // agent's stop asks them always and retires its work order; the stops are asked once the status is recorded.
+            bool standing = StandingAgents.IsStanding(current);
+            if (!outcome.Ok || !((action == "pause" && request.StopRuns) || (action == "stop" && standing)))
+            {
+                return outcome;
+            }
+
+            if (action == "stop" && standing && FlowRuns.Work(model, current) is RecordEnvelope order
+                && EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status is not ("accepted" or "retired"))
+            {
+                var retiring = new JsonObject { ["status"] = "retired", ["note"] = $"Retired with standing agent {current.Id}, which its sponsor stopped: no occurrence of it is carried again." };
+                using JsonDocument retired = JsonDocument.Parse(retiring.ToJsonString());
+                WriteOutcome retirement = WriteLocked(new RecordDraft("work-status", request.By, retired.RootElement, order.Reference), session.Load());
+                notices.Add(retirement.Ok ? $"Work order {EstateModel.BodyString(order, "key") ?? order.Id} is retired (work-status {retirement.Written!.Id})." : $"Work order {EstateModel.BodyString(order, "key") ?? order.Id} was not retired: {retirement.Problem!.Message}");
+            }
+
+            IReadOnlyList<string> goals = model.Chain(current);
+            flying = [.. AgentRuns.All(model).Where(r => r.InFlight && r.Goal is not null && goals.Contains(r.Goal)).Select(r => r.Id)];
         }
+
+        foreach (string run in flying)
+        {
+            RunStopResponse stop = RunStop(run, new RunStopRequest(request.By, action == "stop" ? "its goal was stopped" : "its goal was paused with its runs stopped"));
+            notices.Add(stop.Message);
+        }
+
+        if (flying.Count == 0)
+        {
+            notices.Add("No run of the goal was in flight.");
+        }
+
+        return outcome with { Notices = [.. outcome.Notices ?? [], .. notices] };
     }
 
     /// <summary>
@@ -3216,6 +3251,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         // From 0.9.3, a new goal-status of impossible stands on the evaluator's verdict of impossible (FIX-116); statuses already in the
         // estate keep their reading.
         foreach (Finding finding in model.Findings.Where(f => f.Code == GoalRules.ImpossibleVerdictCode && records.Any(r => f.Location == r.RelativePath + "#body.status")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.4 (GOAL-07), a new assignment's occurrence is one its trigger makes as the records stand: an event never the agent's own,
+        // and a condition failing over the records it names; assignments already in the estate keep their reading.
+        foreach (Finding finding in model.Findings.Where(f => f.Code == StandingAgents.BoundaryCode && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }

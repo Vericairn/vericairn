@@ -110,6 +110,12 @@ public static class AgentRuns
         /// <summary>The runs a step has had: those charged to an assignment of the step, any revision of it.</summary>
         public int Attempts(IReadOnlyCollection<string> step) => Runs.Count(r => r.Charged && r.Assignment is not null && step.Contains(r.Assignment));
 
+        /// <summary>
+        /// From 0.9.4 (GOAL-07), for a standing agent: each run's caps, its goal's budget by unit, while <see cref="Budget"/> and
+        /// <see cref="Spent"/> are the caps and charges of the period that holds the time the ledger is read at; null for any other goal.
+        /// </summary>
+        internal IReadOnlyDictionary<string, long>? PerRun { get; init; }
+
         /// <summary>A unit's budget, spend and what remains, in words.</summary>
         public string Describe(string unit) => unit == "currency"
             ? $"currency {Spent.GetValueOrDefault(unit).ToString(CultureInfo.InvariantCulture)} of {Budget.GetValueOrDefault(unit).ToString(CultureInfo.InvariantCulture)} minor units of {Currency}"
@@ -206,6 +212,15 @@ public static class AgentRuns
         }
 
         long? concurrency = Amount(budget, "concurrency");
+        // From 0.9.4 (GOAL-07; design/standing-agents.md § 10): a standing agent's budget caps each run, and its period's caps bound what
+        // the runs started in the UTC-anchored period that holds the time spend together; unknown usage is charged at its cap.
+        if (StandingAgents.IsStanding(goal) && StandingAgents.PeriodOf(model, goal, runs, before?.AtTime ?? DateTimeOffset.UtcNow) is StandingAgents.Period period)
+        {
+            var periodCaps = ChargedUnits.Where(period.Caps.ContainsKey).ToDictionary(u => u, u => period.Caps[u], StringComparer.Ordinal);
+            var periodSpent = ChargedUnits.ToDictionary(u => u, u => period.Spent.GetValueOrDefault(u), StringComparer.Ordinal);
+            return new Ledger(goal, periodCaps, CurrencyUnit(budget), (int)(Amount(budget, "attemptsPerStep") ?? 0), (int)(concurrency ?? DefaultConcurrency), concurrency is not null, periodSpent, runs) { PerRun = granted };
+        }
+
         return new Ledger(goal, granted, CurrencyUnit(budget), (int)(Amount(budget, "attemptsPerStep") ?? 0), (int)(concurrency ?? DefaultConcurrency), concurrency is not null, spent, runs);
     }
 
@@ -238,7 +253,7 @@ public static class AgentRuns
     public static JsonObject CapFor(Ledger ledger, long? wallMinutes = null)
     {
         ArgumentNullException.ThrowIfNull(ledger);
-        long remaining = Math.Max(ledger.Remaining("wallMinutes") ?? 0, 0);
+        long remaining = Within(ledger, "wallMinutes", Math.Max(ledger.Remaining("wallMinutes") ?? 0, 0));
         var cap = new JsonObject
         {
             ["wallMinutes"] = wallMinutes is long asked ? Math.Min(asked, remaining) : remaining,
@@ -246,16 +261,20 @@ public static class AgentRuns
         };
         if (ledger.Remaining("tokens") is long tokens)
         {
-            cap["tokens"] = Math.Max(tokens, 0);
+            cap["tokens"] = Within(ledger, "tokens", Math.Max(tokens, 0));
         }
 
         if (ledger.Remaining("currency") is long amount)
         {
-            cap["currency"] = new JsonObject { ["amount"] = Math.Max(amount, 0), ["unit"] = ledger.Currency };
+            cap["currency"] = new JsonObject { ["amount"] = Within(ledger, "currency", Math.Max(amount, 0)), ["unit"] = ledger.Currency };
         }
 
         return cap;
     }
+
+    /// <summary>What remains of a unit, no more than a standing agent's run may take of it (from 0.9.4, GOAL-07).</summary>
+    private static long Within(Ledger ledger, string unit, long remaining) =>
+        ledger.PerRun is { } perRun && perRun.TryGetValue(unit, out long each) ? Math.Min(remaining, each) : remaining;
 
     /// <summary>
     /// Why a run with a cap may not start now on an assignment of a goal revision, judged from the records before a record when one is
@@ -316,6 +335,24 @@ public static class AgentRuns
             {
                 refusals.Add(("operation.budget", $"The run's cap of {capped.ToString(CultureInfo.InvariantCulture)} {unit} is more than the {remaining.ToString(CultureInfo.InvariantCulture)} that remain of the goal's budget ({ledger.Describe(unit)})."));
             }
+        }
+
+        // From 0.9.4 (GOAL-07): a standing agent's run takes no more than its budget gives each run, carries an occurrence, and starts only
+        // before its until time, outside its failure pause and within its period's runs.
+        if (ledger.PerRun is { } perRun)
+        {
+            foreach ((string unit, long each) in perRun)
+            {
+                if (Amount(cap, unit) is long capped && capped > each)
+                {
+                    refusals.Add(("operation.budget", $"The run's cap of {capped.ToString(CultureInfo.InvariantCulture)} {unit} is more than the {each.ToString(CultureInfo.InvariantCulture)} the standing agent's budget gives each run."));
+                }
+            }
+        }
+
+        if (StandingAgents.IsStanding(goal))
+        {
+            refusals.AddRange(StandingAgents.RunRefusals(model, goal, assignment, before));
         }
 
         if (ConcurrencyRefusal(ledger) is string busy)

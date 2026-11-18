@@ -23,7 +23,8 @@ public sealed partial class EstateService
 {
     /// <summary>The assignment routing writes for the step it takes: a work order's, or a run's flow step's.</summary>
     private static JsonObject Routed(EstateModel model, RecordEnvelope goal, Taken taken, string workspace, string routedWith) =>
-        taken.Step is null ? RoutedAssignment(model, goal, taken.Order, taken.Route, workspace, routedWith)
+        taken.Occurrence is not null ? RoutedOccurrenceAssignment(model, goal, taken, workspace, routedWith)
+            : taken.Step is null ? RoutedAssignment(model, goal, taken.Order, taken.Route, workspace, routedWith)
             : taken.Review is not null ? RoutedReviewAssignment(model, goal, taken, workspace, routedWith)
             : RoutedFlowAssignment(model, goal, taken, workspace, routedWith);
 

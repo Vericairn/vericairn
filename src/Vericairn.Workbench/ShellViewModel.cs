@@ -106,6 +106,12 @@ public sealed partial class ShellViewModel : Observable
     /// <summary>When the stops shown were derived: as of the estate's newest record, from canonical status.</summary>
     public string StopsAsOf { get; private set; } = string.Empty;
 
+    /// <summary>From 0.9.4 (GOAL-07), the estate's standing agents, from status: each one's state, next occurrence, deferrals and period spend.</summary>
+    public ObservableCollection<StandingRow> Standing { get; } = [];
+
+    /// <summary>True while the estate has a standing agent to show.</summary>
+    public bool HasStanding => Standing.Count > 0;
+
     /// <summary>From 0.9.4 (PROC-18), the due times of the estate's runs, from status: each step whose timing gates its start, before it runs.</summary>
     public ObservableCollection<DueRow> Due { get; } = [];
 
@@ -352,6 +358,8 @@ public sealed partial class ShellViewModel : Observable
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
             Replace(Stops, estate.Stops);
+            Replace(Standing, estate.Standing);
+            Raise(nameof(HasStanding));
             Replace(Due, estate.Due);
             Replace(Decisions, estate.Decisions);
             StopsAsOf = estate.StopsAsOf;

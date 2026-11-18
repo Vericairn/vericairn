@@ -382,6 +382,16 @@ public sealed record GoalResponse(string Text, JsonElement Json)
 public sealed record NextResponse(string Text, JsonElement Json);
 
 /// <summary>
+/// From 0.9.4: a standing agent's occurrences as of an explicit UTC time (goal due): its state, its triggers and when each is next due,
+/// its period's caps and spend, its concurrency and failure pause, and each occurrence with its key and state (due, deferred with its
+/// reason, running, assigned, settled, disposed or held). The same on every machine for the same records and time; reading it records
+/// nothing.
+/// </summary>
+/// <param name="Text">Human form.</param>
+/// <param name="Json">Machine form, canonical: format vericairn.due/1.</param>
+public sealed record GoalDueResponse(string Text, JsonElement Json);
+
+/// <summary>
 /// From 0.9.4 (CODE-73; the estate's design/measured-work.md § 5): the overlap check's view. The active assignments by repository, each
 /// with its effective permitted paths (its interpretable patterns less its exclusions, and in the estate's own repository less records/
 /// and objects/) and why it is active, and every overlap of two of them with its patterns, its witnesses (up to 20 tracked paths at the
@@ -420,6 +430,20 @@ public sealed record GoalStepRequest(string By, string? Repository = null, IRead
 {
     /// <summary>For an agent's step, up to five search queries whose top three new candidates each join the run's package as optional sources.</summary>
     public IReadOnlyList<string>? Search { get; init; }
+
+    /// <summary>
+    /// From 0.9.4, for a standing agent: the occurrence to carry, by its key as goal due lists it, or request for an occurrence of its
+    /// request trigger made now; the oldest due occurrence when omitted.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Occurrence { get; init; }
+
+    /// <summary>
+    /// From 0.9.4, for a standing agent: the explicit UTC time its triggers are evaluated at, never later than the runtime's clock; the
+    /// runtime's clock when omitted.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Now { get; init; }
 }
 
 /// <summary>What taking a goal's next step did: what was recorded and started, never more. A problem means nothing was dispatched.</summary>
@@ -494,7 +518,15 @@ public sealed record GoalProposeRequest(string By, JsonElement Body, string? Sup
 /// <summary>Activate, pause, resume or stop a goal.</summary>
 /// <param name="By">The principal acting: the goal's sponsor, or an operator for a goal an agent sponsors.</param>
 /// <param name="Note">Why, and what remains; a sentence naming the action when omitted.</param>
-public sealed record GoalActionRequest(string By, string? Note = null);
+public sealed record GoalActionRequest(string By, string? Note = null)
+{
+    /// <summary>
+    /// From 0.9.4, with a pause: also ask every run of the goal in flight to stop. A standing agent's stop always asks them, and retires its
+    /// work order.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool StopRuns { get; init; }
+}
 
 /// <summary>Evaluate a goal: the runtime gives each record predicate its verdict, and the evaluator each evidence statement.</summary>
 /// <param name="By">The evaluating principal, who authored none of the goal's steps.</param>

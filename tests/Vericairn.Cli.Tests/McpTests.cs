@@ -229,7 +229,7 @@ public class McpTests
             var registry = new ToolRegistry(api, builder);
             foreach (string name in new[] { "document_sections", "section_brief" })
                 Assert.False(registry.Visible().Single(t => t.Name == name).Writes);
-            Assert.Equal(["goal_decide", "goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(["goal_decide", "goal_due", "goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
             Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal) && t.Name != "goal_decide"), t => Assert.False(t.Writes));
             Assert.Equal(["document_review", "goal_decide", "work_amend", "work_attempt", "work_progress", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
 

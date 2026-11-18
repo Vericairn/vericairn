@@ -36,6 +36,15 @@ public sealed partial class EstateService
                 return null;
             }
 
+            // From 0.9.4 (GOAL-07) a standing agent's steps are its occurrences, evaluated now and routed by the role of its flow's work step.
+            if (StandingAgents.IsStanding(current))
+            {
+                StandingAgents.Agent agent = StandingAgents.Derive(model, current, FlowClock.GetUtcNow(), Duties(model, current, FlowClock.GetUtcNow()));
+                NextEligible.StandingRoutes standing = NextEligible.Standing(model, agent, Machine(model));
+                using JsonDocument rendered = JsonDocument.Parse(NextEligible.RenderJson(model, standing));
+                return new NextResponse(NextEligible.RenderText(model, standing), rendered.RootElement.Clone());
+            }
+
             // A run's steps are its flow's, routed by each step's role (design/flow.md § 6). From 0.9.4 (CODE-73) the overlaps of the goal's
             // work follow, and those a new assignment of its next step would have.
             if (FlowRuns.IsRun(current))
@@ -75,7 +84,14 @@ public sealed partial class EstateService
     /// <param name="Review">For a run, a review before hand-off of the step's items, which its assignment carries; null for the step itself.</param>
     /// <param name="Attention">For a run, the required attention its sponsor is asked about; null for a step to carry.</param>
     private sealed record Taken(RecordEnvelope Order, string Key, string Title, NextEligible.Route Route, FlowPosition.Position? Flow = null, FlowPosition.StepInstance? Step = null,
-        FlowPosition.PendingReview? Review = null, FlowPosition.Attention? Attention = null);
+        FlowPosition.PendingReview? Review = null, FlowPosition.Attention? Attention = null)
+    {
+        /// <summary>From 0.9.4 (GOAL-07), for a standing agent, the agent as of the time it was evaluated at.</summary>
+        public StandingAgents.Agent? Standing { get; init; }
+
+        /// <summary>From 0.9.4 (GOAL-07), for a standing agent, the occurrence its assignment carries.</summary>
+        public StandingAgents.Occurrence? Occurrence { get; init; }
+    }
 
     /// <inheritdoc />
     public GoalStepResponse GoalStep(string goal, GoalStepRequest request)
@@ -121,7 +137,18 @@ public sealed partial class EstateService
             }
 
             Taken taken;
-            if (FlowRuns.IsRun(current))
+            if (StandingAgents.IsStanding(current))
+            {
+                // From 0.9.4 (GOAL-07): a standing agent carries one occurrence per call, evaluated again from the records now.
+                (Taken? occurrence, GoalStepResponse? response) = StandingTaken(model, current, request);
+                if (response is not null)
+                {
+                    return response;
+                }
+
+                taken = occurrence!;
+            }
+            else if (FlowRuns.IsRun(current))
             {
                 NextEligible.FlowRunRoutes flow = NextEligible.FlowRoutes(model, current, Machine(model));
                 if (flow.Position.Flow is null || flow.Position.Work is null)
@@ -229,7 +256,9 @@ public sealed partial class EstateService
                 carried = routed.Envelope.Id;
             }
 
-            run = new RunStartRequest(carried, route.Launcher!, route.Principal!, request.By, request.Repository!, goalId, request.Branch, request.Base, request.WallMinutes, request.Settings, request.Configuration, request.Execution, request.Allocation, request.ContextPackage)
+            // An occurrence's runs share one work branch of its own, so that two occurrences never share a branch (GOAL-07).
+            string? branch = request.Branch ?? (taken.Occurrence is StandingAgents.Occurrence carriedOccurrence ? OccurrenceBranch(taken.Order, carriedOccurrence) : null);
+            run = new RunStartRequest(carried, route.Launcher!, route.Principal!, request.By, request.Repository!, goalId, branch, request.Base, request.WallMinutes, request.Settings, request.Configuration, request.Execution, request.Allocation, request.ContextPackage)
             { Search = request.Search };
         }
 
@@ -271,7 +300,9 @@ public sealed partial class EstateService
             RecordEnvelope? order = WorkView.OrderOfAssignment(model, held) is RecordEnvelope pinned ? model.Latest(pinned) : null;
             // A run's assignments hold its steps one by one: a hand-over takes over one step, from the assignment that holds that step.
             FlowRuns.StepRef? step = FlowRuns.StepOf(held);
-            IReadOnlyList<RecordEnvelope> assignments = order is null ? [] : Routing.Assignments(model, order, step);
+            // From 0.9.4 (GOAL-07) a standing agent's assignments hold its occurrences one by one: a hand-over takes over one occurrence.
+            string? occurrence = StandingAgents.KeyOf(held);
+            List<RecordEnvelope> assignments = order is null ? [] : Routing.Assignments(model, order, step).Where(a => StandingAgents.KeyOf(a) == occurrence).ToList();
             string orderStatus = order is null ? "?" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
             personName = PrincipalName(model, person);
             string? refusal = agentKind is not ("agent" or "service") ? $"Assignment {held.Id} is {PrincipalName(model, agent)}'s, not an agent's: a hand-over takes a step over from an agent."
@@ -303,6 +334,12 @@ public sealed partial class EstateService
             {
                 // The person carries the same step from the same inputs the agent's brief pinned.
                 body["step"] = JsonNode.Parse(held.Body.GetProperty("step").GetRawText());
+            }
+
+            if (occurrence is not null)
+            {
+                // The person carries the same occurrence, under the same key.
+                body["occurrence"] = JsonNode.Parse(held.Body.GetProperty("occurrence").GetRawText());
             }
 
             WriteOutcome outcome = WriteLocked(new RecordDraft("assignment", request.By, Element(body), order!.Reference), model);
@@ -532,7 +569,7 @@ public sealed partial class EstateService
         var ask = new JsonObject
         {
             ["to"] = route.Principal,
-            ["question"] = Clip($"Required attention in goal {goalTitle}{(run ? string.Empty : $", step {key}")}: {attention.Summary}. How does the run go on?", 4000),
+            ["question"] = Clip($"{NextEligible.AttentionQuestion}{goalTitle}{(run ? string.Empty : $", step {key}")}: {attention.Summary}. How does the run go on?", 4000),
             ["recommendation"] = Clip(recommendation, 4000),
             ["consequence"] = Clip(run ? "Nothing more of the run is dispatched until this ask is answered." : $"{key} waits, and only what depends on it waits; the run's other steps go on.", 2000),
             ["goal"] = goal.Id,

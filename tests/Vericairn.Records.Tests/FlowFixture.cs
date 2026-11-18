@@ -104,6 +104,36 @@ public sealed class FlowFixture : IDisposable
         RunClosings.Plan closing = RunClosings.Prepare(run.Estate.Load(), run.Goal, run.Estate.OperatorId, "The song is shelved.", [("shorts[intro]", "The intro has no clip.")], run.Estate.Clock);
         Assert.Empty(closing.Refusals);
         run.Add("goal-status", closing.Body(), subject: run.Goal.Reference);
+
+        // From 0.9.4 (GOAL-07) a standing agent's plan carries standing, and the assignment of its occurrence names the occurrence.
+        TemplateDefinition researcher = Install(run.Estate, StandingFlows.Researcher());
+        RecordEnvelope research = run.Add("work-order", new JsonObject
+        {
+            ["key"] = "RES-1", ["kind"] = "ordinary", ["title"] = "Research the song", ["intent"] = "Keep researching.", ["scope"] = new JsonArray("path:research/"),
+            ["exitQuestion"] = "Is each occurrence researched?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("findings"),
+        });
+        RecordEnvelope standing = run.Add("goal", new JsonObject
+        {
+            ["title"] = "Research the song", ["objective"] = "Keep researching the song.", ["completion"] = new JsonArray(new JsonObject { ["record"] = Marker("RESEARCHED") }),
+            ["constraints"] = new JsonArray(), ["kind"] = "stewardship", ["sponsor"] = run.Estate.OperatorId, ["budget"] = new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 2 },
+            ["roles"] = new JsonArray(Role("researcher", run.Estate.BuilderId)),
+            ["plan"] = new JsonObject
+            {
+                ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(research.Id),
+                ["standing"] = new JsonObject
+                {
+                    ["pin"] = Pin(researcher), ["subject"] = new JsonObject { ["topic"] = "the song" }, ["triggers"] = new JsonArray(StandingFlows.Monthly()),
+                    ["period"] = new JsonObject { ["unit"] = "months", ["runs"] = 4, ["wallMinutes"] = 120 }, ["until"] = "2027-06-01T00:00:00Z",
+                },
+            },
+            ["inputs"] = new JsonArray(),
+        });
+        run.Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, subject: standing.Reference);
+        StandingAgents.Occurrence occurrence = StandingAgents.Derive(run.Estate.Load(), standing, run.Estate.Clock).Occurrences[0].Occurrence;
+        JsonObject carried = AssignmentBody("research", run.Estate.BuilderId);
+        carried.Remove("step");
+        carried["occurrence"] = new JsonObject { ["key"] = occurrence.Key, ["trigger"] = occurrence.Trigger, ["revision"] = occurrence.Revision, ["item"] = JsonNode.Parse(occurrence.Item.GetRawText()) };
+        run.Add("assignment", carried, subject: research.Reference);
         return run;
     }
 
@@ -376,4 +406,27 @@ public sealed class FlowFixture : IDisposable
     public static JsonElement Element(JsonNode node) => JsonSerializer.SerializeToElement(node);
 
     public void Dispose() => Policies.Dispose();
+}
+
+/// <summary>The flows and triggers of standing agents' tests, shared with the runtime's tests.</summary>
+public static class StandingFlows
+{
+    /// <summary>The researcher flow: every trigger kind, the researcher role, one work step and a never line.</summary>
+    public static JsonObject Researcher() => new()
+    {
+        ["format"] = "vericairn.template/1", ["kind"] = "flow", ["id"] = "example/researcher", ["version"] = "1.0.0", ["purpose"] = "Research a subject between releases.",
+        ["subject"] = new JsonObject { ["summary"] = "what is researched", ["fields"] = new JsonArray(new JsonObject { ["name"] = "topic", ["type"] = "text" }) },
+        ["roles"] = new JsonArray(new JsonObject { ["id"] = "researcher", ["holder"] = "either", ["brief"] = "Research the subject and record what you find, citing each source." }),
+        ["triggers"] = new JsonArray(
+            new JsonObject { ["kind"] = "schedule", ["summary"] = "On a calendar." },
+            new JsonObject { ["kind"] = "event", ["summary"] = "When a record of a kind is made." },
+            new JsonObject { ["kind"] = "condition", ["summary"] = "When a condition fails." },
+            new JsonObject { ["kind"] = "duty", ["summary"] = "When a duty falls due." },
+            new JsonObject { ["kind"] = "request", ["summary"] = "On request." }),
+        ["never"] = new JsonArray("never publish anything outside the estate"),
+        ["steps"] = new JsonArray(FlowFixture.Step("research", "work", "researcher", outputs: new JsonArray(FlowFixture.FileItem("findings", "text/markdown")))),
+    };
+
+    /// <summary>A monthly schedule from the first day of October 2026.</summary>
+    public static JsonObject Monthly(string key = "monthly", string firstAt = "2026-10-01T00:00:00Z") => new() { ["key"] = key, ["kind"] = "schedule", ["unit"] = "months", ["every"] = 1, ["firstAt"] = firstAt };
 }

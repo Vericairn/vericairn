@@ -69,7 +69,8 @@
     "batch.incomplete",
     "batch.unreadable",
     "communication.conflict",
-    "operation.duplicate-identity"
+    "operation.duplicate-identity",
+    "standing.duplicate"
   ],
   "Vericairn.Records.Estate.FlowPosition.AttentionKinds": [
     "uncertain",

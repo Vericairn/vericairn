@@ -164,6 +164,17 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock Text="Standing agents: each one's state and next occurrence, from the records" FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="{Binding HasStanding}" />
+              <ListBox Name="StandingList" Focusable="True" ItemsSource="{Binding Standing}" MaxHeight="240" IsVisible="{Binding HasStanding}" AutomationProperties.Name="Standing agents">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="pres:StandingRow">
+                    <StackPanel MinHeight="32">
+                      <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
               <TextBlock Text="Due times of runs: when each timed step is due, from the records" FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="{Binding HasDue}" />
               <ListBox Name="DueList" Focusable="True" ItemsSource="{Binding Due}" MaxHeight="240" IsVisible="{Binding HasDue}" AutomationProperties.Name="Due times of runs">
                 <ListBox.ItemTemplate>
@@ -688,6 +699,17 @@
                     <ListBox ItemsSource="{Binding Decisions}" Focusable="True" MaxHeight="240" IsVisible="{Binding HasDecisions}" AutomationProperties.Name="Decisions">
                       <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="pres:DecisionRow">
+                          <StackPanel MinHeight="32">
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Text="Standing agent: its state and next occurrence; vericairn goal due lists each occurrence" FontWeight="SemiBold" IsVisible="{Binding HasStanding}" />
+                    <ListBox ItemsSource="{Binding Standing}" Focusable="True" MaxHeight="120" IsVisible="{Binding HasStanding}" AutomationProperties.Name="Standing agent">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="pres:StandingRow">
                           <StackPanel MinHeight="32">
                             <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
                             <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />

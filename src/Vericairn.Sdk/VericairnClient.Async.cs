@@ -350,6 +350,10 @@ public sealed partial class VericairnClient
     public Task<NextResponse?> GoalNextAsync(string goal, CancellationToken cancellationToken = default) =>
         RunOperationAsync<NextResponse?>(nameof(GoalNext), async token => (await GetAsync<NextResponse>(GoalPath(goal, "next"), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(GoalNext)), cancellationToken);
 
+    /// <summary>The cancellable GoalDue operation, with a deadline covering the complete response.</summary>
+    public Task<GoalDueResponse?> GoalDueAsync(string goal, string? asOf = null, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<GoalDueResponse?>(nameof(GoalDue), async token => (await GetAsync<GoalDueResponse>(GoalPath(goal, "due") + (asOf is null ? string.Empty : "?asOf=" + Uri.EscapeDataString(asOf)), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(GoalDue)), cancellationToken);
+
     /// <summary>The cancellable GoalStep operation, with a deadline covering the complete response.</summary>
     public Task<GoalStepResponse> GoalStepAsync(string goal, GoalStepRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<GoalStepResponse>(nameof(GoalStep), async token => (await PostAsync<GoalStepRequest, GoalStepResponse>(GoalPath(goal, "step"), request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(GoalStep)), cancellationToken);

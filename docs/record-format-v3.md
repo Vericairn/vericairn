@@ -619,7 +619,7 @@ reader of format 3 that predates the fields refuses a record that carries one as
 an unknown key, as any later format-3 field, so the estate's pin keeps every
 machine on a release that reads them; a format-2 estate refuses them. `records
 describe harness-qualification` and `records describe operation` include these
-contracts, within `vericairn.records/readers/10`, which 0.9.4 introduces.
+contracts.
 
 ## Public retrieval for research runs (0.9.4)
 
@@ -637,7 +637,61 @@ A reader of format 3 that predates these fields refuses a record that carries
 one as an unknown key, as any later format-3 field, so the estate's pin keeps
 every machine on a release that reads them; a format-2 estate refuses them.
 `records describe assignment` and `records describe operation` include these
-contracts, within `vericairn.records/readers/10`, which 0.9.4 introduces.
+contracts.
+
+## Standing agents (0.9.4)
+
+GOAL-07 adds a goal's `plan.standing` and an assignment's `occurrence` within
+format 3, and no record type: a standing agent is a stewardship goal, which
+already carries its sponsor, budget, lifecycle and ledger. A goal or assignment
+without them behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `goal` | Optional `plan.standing: {pin, subject, triggers, period, until, runsOn?}`, on a stewardship goal only and never beside `plan.flow`, with a `given` plan of exactly one ordinary work order (`standing.kind`, `standing.flow`, `standing.work`). `pin` is the exact `{id, version, hash}` of a flow that declares the trigger kinds the plan uses and exactly one routed step, of kind work (`standing.flow`, `standing.trigger`); `subject` binds the flow's subject as a run's does (`standing.subject`); each trigger has its own slug `key` and a `kind`: `schedule {unit: days|months, every, firstAt}`, `duty {policy, rule}`, `event {recordType, fields?, roles?}`, `condition {record}` with a record predicate, or `request` (`standing.trigger`); `period {unit: days|months, every?, runs, wallMinutes, tokens?, currency?}` caps the units the budget caps, which are then each run's caps (`standing.period`); `until` is after the goal is recorded (`standing.until`); optional `awaitingReview` (1 to 100, three when absent) is how many results may await review before dispatch defers; `runsOn` is a runtime identity's public-key hash. A flow's `triggers` declare kinds from the same five. |
+| `assignment` | Optional `occurrence: {key, trigger, revision, item}` on, and only on, an assignment of a standing agent's work order (`assignment.occurrence`). `revision` is the goal revision the trigger's declaration originates from; `item` is `{interval, dueAt}`, `{record: {type, id, hash}}`, `{failing, records}`, `{at, by}` or the duty's `{occurrence, policy, rule, dueAt, deadline, schedule}`; `key` is the goal's identity, the trigger, the revision and the item joined by `/`, or `duty/` and the duty occurrence's identity. A revision keeps its assignment's occurrence exactly, and a person's hand-over carries it exactly. A new occurrence is refused unless its agent is active and before its `until` at the assignment's time, and its item is one its trigger makes then: a schedule's latest due interval with its `dueAt`; an event's record of the trigger's type and filters, at its exact hash, recorded after the trigger was activated and before the assignment; a request by the assignment's author, no later than it; a duty occurrence's exact identity from the trigger's policy at its originating revision, its rule, its subject's identity and the duty's own schedule item (`{kind, number}`, `{kind, at}` or `{kind, publication}`, built from the policy's schedule, which the item's `schedule` equals exactly in canonical form; for a release schedule, the first published revision of a release of the schedule's product, published within the schedule's window, as the duty's evaluation opens one), with the schedule's due time, due by then, and its deadline. Any other current assignment naming the same key refuses it (`standing.duplicate`, a reconcile task) unless one is a person's hand-over of the other's step or holds nothing (an earlier revision, withdrawn by a reconciliation, or stored without the record it was routed with). |
+
+The runtime's write boundary also refuses a new assignment, with
+`assignment.occurrence-now`, whose event record is the agent's own or an agent's
+the trigger does not admit, or whose condition does not fail over the records its
+item names, read as the records stand; assignments already in the estate keep
+their reading. A `reconciliation` whose subject is an assignment naming an
+occurrence, keeping and withdrawing assignments of that occurrence (the latest
+revision of each, none a revision of the subject), settles `standing.duplicate`,
+recorded by the operator or under `local-engineering`, only while two or more of
+them hold the key (recorded before it, withdrawn by no earlier reconciliation and
+not stranded) and the one kept is one of those (`reconciliation.occurrence`). An
+occurrence's settlement is its key's: the latest result on any assignment of the
+key, a withdrawn one included, settles it and counts toward `awaitingReview`.
+
+`goal-status` with status `active` is refused for a standing agent past its
+`until`, or while another active standing agent of the same flow or work role
+carries the same subject (`goal-status.standing`). An `agent-run` operation whose
+goal is a standing agent is refused, judged by the records before it, past
+`until`, while its consecutive failed runs reach the goal's
+`limits.consecutiveFailures` (three when unset; each settled run counted once by
+its latest result between its start and the next run of its assignment, failed
+when blocked or abandoned, or without one by a known-failure settlement, unless
+its stop was requested by the goal's sponsor, when a person, or an operator, as
+they stood when the stop was recorded; any other principal's stop and the
+worker's for a cap count) and no
+answered ask of the pause about the latest lets it go on, past the period's
+`runs`, for an assignment naming no occurrence or a settled one, while results
+awaiting review reach `awaitingReview` (`operation.standing`, `operation.budget`),
+or with a cap above the budget's per-run cap; the ledger of a standing agent
+charges each period's runs against the period's caps.
+
+A reader of format 3 that predates these fields refuses an assignment that
+carries `occurrence` as an unknown key and refuses a goal whose plan carries
+`standing` as an unknown key of `plan`, as any later format-3 field, so the
+estate's pin keeps every machine on a release that reads them: such a reader
+shows neither record and dispatches nothing of the agent. A reader that reads
+them but cannot resolve the flow shows the goal with a warning
+(`standing.unavailable`) and dispatches none of its occurrences. A format-2
+estate refuses them. `records describe goal` and `records describe assignment`
+include this contract, and the generic record reader advances to
+`vericairn.records/readers/11`, which carries the fields of this section and the
+two before it.
 
 ## Security reports (0.9.2)
 

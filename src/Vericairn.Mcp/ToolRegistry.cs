@@ -310,6 +310,24 @@ public sealed partial class ToolRegistry
                 async (api, a, token) => OptionalArg(a, "goal") is string id ? (await api.GoalAsync(id, cancellationToken: token).ConfigureAwait(false)) is GoalResponse goal ? new ToolCallResult(goal.Json.GetRawText(), false) : NotFound("goal", id) : Json((await api.GoalsAsync(cancellationToken: token).ConfigureAwait(false)))),
             Read("goal_progress", "A goal's progress condition by condition, as vericairn goal show prints it: each record predicate's verdict (met, not-met or unknown) with its reason, each condition's verdict in the current evaluation, the steps, who accepts the goal and what still stands between it and its acceptance, which no tool records.", Arguments(("goal", "Goal record id (ULID), any revision.")), "goal",
                 async (api, a, token) => (await api.GoalAsync(Arg(a, "goal"), cancellationToken: token).ConfigureAwait(false)) is GoalResponse goal ? new ToolCallResult(goal.Text, false) : NotFound("goal", Arg(a, "goal"))),
+            Read("goal_due", "From 0.9.4: a standing agent's occurrences as of an explicit UTC time, the runtime's clock when asOf is omitted, as vericairn goal due shows them: its state, each trigger and when it is next due, its period's caps and spend, its concurrency and failure pause, and each occurrence with its key and state (due, deferred with its reason, running, assigned, settled, disposed or held). As text, or as JSON of format vericairn.due/1 when form is json. Reading it records nothing and carries no occurrence; goal step does.",
+                Arguments(("goal", "Goal record id (ULID), any revision."), ("asOf", "The UTC time its triggers are evaluated at, for example 2026-12-01T00:00:00Z; the runtime's clock when omitted."), ("form", "text (the default) or json.")), "goal",
+                async (api, a, token) =>
+                {
+                    GoalDueResponse? due = await api.GoalDueAsync(Arg(a, "goal"), OptionalArg(a, "asOf"), token).ConfigureAwait(false);
+                    if (due is null)
+                    {
+                        return NotFound("goal", Arg(a, "goal"));
+                    }
+
+                    bool problem = due.Json.ValueKind == JsonValueKind.Object && due.Json.TryGetProperty("problem", out _);
+                    return OptionalArg(a, "form") switch
+                    {
+                        null or "text" => new ToolCallResult(due.Text, problem),
+                        "json" => new ToolCallResult(due.Json.GetRawText(), problem),
+                        string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
+                    };
+                }),
             Write("goal_decide", "From 0.9.4: records the decision of a run's decision step by the acting principal, which holds the step's current assignment: the path or paths its transition takes, the reasons and the evidence by hash, as the result of that assignment, signed by its own device. The first decision of a round is final. Choosing a path performs nothing reserved and dispatches nothing; goal step takes the steps it makes eligible. A decision the flow requires of a person is refused for an agent, and a rule's decision is recorded by goal step, never here.",
                 DecideArguments(), ["goal", "step", "paths", "reasons"],
                 async (api, a, token) =>

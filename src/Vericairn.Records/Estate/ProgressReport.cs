@@ -50,6 +50,14 @@ public static class ProgressReport
         // From 0.9.4 (CODE-73), the open overlaps of active assignments, under the work, from the records alone.
         string overlaps = AssignmentOverlaps.StatusText(model, report.Overlaps);
         if (overlaps.Length > 0) text.Append('\n').Append(overlaps);
+        // From 0.9.4 (GOAL-07), each standing agent as of the estate's newest record: its state, next occurrence, deferrals and spend.
+        IReadOnlyList<StandingAgents.Agent> standing = EstateStatus.Standing(model, () => FlowStops.RecordedTime(model));
+        if (standing.Count > 0)
+        {
+            text.Append("\nStanding agents, as of the estate's newest record\n");
+            foreach (StandingAgents.Agent agent in standing) text.Append("  ").Append(StandingView.Line(agent)).Append('\n');
+        }
+
         Operator(text, report);
         return text.ToString();
     }
@@ -96,6 +104,13 @@ public static class ProgressReport
         if (report.Overlaps.Any(o => o.Open))
         {
             json["overlaps"] = AssignmentOverlaps.StatusJson(model, report.Overlaps);
+        }
+
+        // From 0.9.4 (GOAL-07): each standing agent as of the estate's newest record; absent when there is none.
+        IReadOnlyList<StandingAgents.Agent> standing = EstateStatus.Standing(model, () => FlowStops.RecordedTime(model));
+        if (standing.Count > 0)
+        {
+            json["standingAgents"] = new JsonArray([.. standing.Select(a => (JsonNode)StandingView.Summary(model, a))]);
         }
 
         using JsonDocument document = JsonDocument.Parse(json.ToJsonString());

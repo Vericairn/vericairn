@@ -224,6 +224,9 @@ public static partial class NextEligible
     }
 
     /// <summary>The current asks of a goal that name one of a step's assignments, oldest first.</summary>
+    /// <summary>The words that open the ask required attention becomes, which goal step records.</summary>
+    internal const string AttentionQuestion = "Required attention in goal ";
+
     private static List<RecordEnvelope> AsksNaming(EstateModel model, IReadOnlyList<string> goals, HashSet<string> held) =>
         model.Current("ask")
             .Where(a => EstateModel.BodyString(a, "goal") is string g && goals.Contains(g) && EstateModel.BodyString(a, "assignment") is string named && held.Contains(named))
@@ -251,11 +254,13 @@ public static partial class NextEligible
     /// The route of required attention (design/flow.md §§ 7 and 8): an ask to who decides for the goal, the sponsor, about the record
     /// that raised it; asked while an ask about that record waits, and answered once one is answered, so it is asked once.
     /// </summary>
-    private static Route AttentionOf(EstateModel model, RecordEnvelope goal, string status, string role, FlowPosition.Attention attention, Routing.Machine machine)
+    private static Route AttentionOf(EstateModel model, RecordEnvelope goal, string status, string role, FlowPosition.Attention attention, Routing.Machine machine, bool attentionOnly = false)
     {
         string? sponsor = Routing.Asked(model, goal, null, machine.Now);
         IReadOnlyList<string> trigger = model.Chain(attention.Trigger);
-        List<RecordEnvelope> asks = Routing.AsksOf(model, goal).Where(a => model.Latest(a).Subject is RecordReference subject && trigger.Contains(subject.Id)).ToList();
+        // From 0.9.4 (GOAL-07) a standing agent's failure pause counts only the ask goal step recorded for it, never another ask about the run.
+        List<RecordEnvelope> asks = Routing.AsksOf(model, goal).Where(a => model.Latest(a).Subject is RecordReference subject && trigger.Contains(subject.Id)
+            && (!attentionOnly || (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(AttentionQuestion, StringComparison.Ordinal))).ToList();
         IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
         var source = new Routing.Source(null, "who decides for the goal, its sponsor");
         RecordEnvelope? waiting = asks.LastOrDefault(a => Asks.IsWaiting(Asks.State(model, a).State));

@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class GoalStopCommand : Command
 {
     public GoalStopCommand(CommandContext context)
-        : base("stop", "Stop a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned and prevents new runs. Runs already in flight are not stopped; use 'vericairn worker stop' for each run that must stop.")
+        : base("stop", "Stop a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned and prevents new runs. Runs already in flight are not stopped; use 'vericairn worker stop' for each run that must stop. From 0.9.4 a standing agent's stop also asks each of its runs in flight to stop and retires its work order.")
     {
         var operations = new GoalOperations(context);
         var byOption = new Option<string>("--by") { Description = "Acting principal id (ULID).", Required = true };
