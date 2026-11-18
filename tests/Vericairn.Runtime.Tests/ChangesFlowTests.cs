@@ -858,6 +858,9 @@ public sealed class ChangesFlowTests
         public string? Observe(string directory, string remote, string branch) => RemoteHead;
         internal string? Text { get; set; } = "";
         public string? PublishedText(string directory, PushPlan plan) => Text;
+        internal IReadOnlyList<PushedCommit>? Commits { get; set; } = [];
+        internal int MessageReads { get; private set; }
+        public IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan) { MessageReads++; return Commits; }
         internal Dictionary<(string Commit, string Path), string> Files { get; } = [];
         internal int FileReads { get; private set; }
         public string? FileText(string directory, PushPlan plan, string commit, string path)
@@ -889,6 +892,8 @@ public sealed class ChangesFlowTests
         { Read(); return Memory.Observe(destination, numberOrBranch); }
         public ChangeReceipt Merge(string destination, string number, string head)
         { Effect("change-merge"); MergedHead = head; ChangeReceipt result = Memory.Merge(destination, number, head); AfterEffect?.Invoke(); return result; }
+        public ChangeReceipt Merge(string destination, string number, string head, string message)
+        { Effect("change-merge"); MergedHead = head; ChangeReceipt result = Memory.Merge(destination, number, head, message); AfterEffect?.Invoke(); return result; }
         public TargetObservation ObserveTarget(string destination, string branch, string commit)
         { Read(); ObservedTarget = commit; return Memory.ObserveTarget(destination, branch, commit); }
         internal string? EnqueuedHead { get; private set; }

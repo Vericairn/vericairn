@@ -98,6 +98,28 @@ public sealed class GitPushAdapter : IPushAdapter
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head)) return null;
+        // Every commit of the range, merges included, NUL-separated: its id, a line break and its raw message, in UTF-8 whatever the
+        // clone's own output encoding, with no signature verification, mailmap or notes.
+        ProcessResult log = Invoke(directory, ["-c", "i18n.logOutputEncoding=UTF-8", "log", "--no-show-signature", "--no-mailmap", "--no-notes", "-z",
+            "--format=%H%n%B", plan.Range]);
+        if (log is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
+        var commits = new List<PushedCommit>();
+        foreach (string entry in log.StandardOutput.Split('\0'))
+        {
+            if (entry.Length == 0) continue;
+            int split = entry.IndexOf('\n', StringComparison.Ordinal);
+            string id = split < 0 ? entry : entry[..split];
+            if (!Patterns.Commit.IsMatch(id)) return null;
+            commits.Add(new(id, split < 0 ? string.Empty : entry[(split + 1)..]));
+        }
+        return commits;
+    }
+
+    /// <inheritdoc />
     public string? FileText(string directory, PushPlan plan, string commit, string path)
     {
         ArgumentNullException.ThrowIfNull(plan);

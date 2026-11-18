@@ -19,6 +19,7 @@ internal static partial class FoundationPolicyKinds
     internal const string RevisionLine = "vericairn.estate/revision-line";
     internal const string Consistency = "vericairn.estate/work-state-consistency";
     internal const string Blocked = BlockedTerms.Kind;
+    internal const string Messages = CommitMessages.Kind;
     internal const string FlowSteps = FlowRuns.PolicyKind;
 
     internal static void Validate(PolicyRuleContext context)
@@ -34,6 +35,7 @@ internal static partial class FoundationPolicyKinds
             RevisionLine => Revisions(context, parametersOnly: true),
             Consistency => Consistencies(context, parametersOnly: true),
             Blocked => BlockedTermFindings(context, parametersOnly: true),
+            Messages => CommitMessageSettings(context),
             FlowSteps => RequiredSteps(context, parametersOnly: true),
             _ => throw new PolicyParameterException("This foundation parameter reader does not recognize the kind."),
         };
@@ -51,6 +53,7 @@ internal static partial class FoundationPolicyKinds
             RevisionLine => Revisions(context),
             Consistency => Consistencies(context),
             Blocked => BlockedTermFindings(context),
+            Messages => CommitMessageSettings(context),
             FlowSteps => RequiredSteps(context),
             _ => [context.Unavailable("The exact rule kind and version are not installed.")],
         };
@@ -103,6 +106,14 @@ internal static partial class FoundationPolicyKinds
             yield return context.Finding(PolicyWork.Target(context.Model, record), "terms", "unmet", $"This {record.Type} record, written after the policy began, holds a blocked term.",
                 "No blocked term outside a structured model selector.", "Leave the record unchanged; keep the term out of its successor and of new records.");
         }
+    }
+
+    // The level and trailers a checked push and merge apply to commit messages (CODE-81). The rule configures those checks and selects
+    // no records, so its evaluation reports only that no subject is selected.
+    private static IEnumerable<PolicyFinding> CommitMessageSettings(PolicyRuleContext context)
+    {
+        if (CommitMessages.Validate(context.Parameters) is string problem) throw new PolicyParameterException(problem);
+        yield break;
     }
 
     // The steps of a flow an estate requires (design/flow.md § 5). Validation refuses a configuration that turns one off or ends a run

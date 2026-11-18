@@ -64,6 +64,7 @@ public sealed partial class EstateService
             SecretScan scan = scanner.Scan(directory, plan);
             claim.Body["scan"] = JsonSerializer.SerializeToNode(scan, ChangeJson);
             if (!scan.Passed(plan)) throw new ProviderRefusedException("The scan of exactly the push's commits did not pass.");
+            string? warned = CheckPushedMessages(claim, adapter, directory, plan);
             RefuseHeldDisclosure(claim, adapter, directory, plan);
             // The dispatch record precedes the push, which runs within its two-minute bound: the session must outlast it (ID-16).
             PresenceEffectAhead();
@@ -80,9 +81,40 @@ public sealed partial class EstateService
             }, out RecordWritten receipt);
             if (observed != request.Head) throw new ProviderUncertainException("The pushed head was not confirmed at the remote branch.");
             FinishChange(claim, "observed-success", "The scanned commit was observed at the remote branch.");
-            return ChangeAnswer(claim, true, "The exact scanned head was pushed and observed.") with { Observation = receipt };
+            return ChangeAnswer(claim, true, "The exact scanned head was pushed and observed." + (warned is null ? string.Empty : " " + warned)) with { Observation = receipt };
         });
     }
+
+    // CODE-81: every commit message the push carries, trailers included, is matched against the estate's blocked terms before anything
+    // is pushed, and each carries every trailer line the estate requires. A blocked term refuses, or warns where the estate configures
+    // it; a missing or altered trailer refuses. The refusal and the recorded evidence name the commit and the policy, never the matched
+    // text or the trailer. Returns the warning, if any.
+    private string? CheckPushedMessages(ChangeClaim claim, IPushAdapter adapter, string directory, PushPlan plan)
+    {
+        CommitMessages.Settings settings;
+        lock (gate) settings = CommitMessages.In(session.Load(), DateTimeOffset.UtcNow);
+        if (!settings.Checks) return null;
+        IReadOnlyList<PushedCommit> commits = adapter.CommitMessages(directory, plan)
+            ?? throw new ProviderRefusedException("The estate checks commit messages, and the push's messages could not be read to check them; nothing was pushed.");
+        if (commits.Any(c => c is null || !Patterns.Commit.IsMatch(c.Commit) || c.Message is null) || commits.Count == 0 && plan.Base != plan.Head)
+            throw new ProviderRefusedException("The push's commit messages could not be read completely to check them; nothing was pushed.");
+        (CommitMessages.Finding? refusal, IReadOnlyList<CommitMessages.Finding> warnings) = CommitMessages.Check(settings, commits.Select(c => ("Commit `" + c.Commit + "`", c.Message)));
+        if (refusal is not null) throw new ProviderRefusedException(CommitMessages.Describe(refusal) + " Nothing was pushed; reword the commit and push again.");
+        string checkedWhat = (settings.Lists.IsEmpty ? string.Empty : "the estate's blocked terms") + (settings.Lists.IsEmpty || settings.Trailers.IsEmpty ? string.Empty : " and ")
+            + (settings.Trailers.IsEmpty ? string.Empty : "the trailer lines it requires");
+        string? warned = MessageWarning(settings, warnings, "pushed");
+        claim.Body["evidence"]!.AsArray().Add(new JsonObject
+        {
+            ["summary"] = $"The messages of the push's {commits.Count} {(commits.Count == 1 ? "commit" : "commits")} were checked against {checkedWhat}" + (warned is null ? "; none was refused." : ". " + warned),
+        });
+        return warned;
+    }
+
+    // The warning a blocked term at the warn level gives: each commit and its list, and the policies that set the level.
+    private static string? MessageWarning(CommitMessages.Settings settings, IReadOnlyList<CommitMessages.Finding> warnings, string effect) => warnings.Count == 0 ? null
+        : "Warned, not refused, as estate policy " + string.Join(" and ", settings.LevelPolicies) + " sets blocked terms in commit messages to warn: "
+            + string.Join(" ", warnings.Take(5).Select(CommitMessages.Describe)) + (warnings.Count > 5 ? $" {warnings.Count - 5} more commits carry one too." : string.Empty)
+            + " The change was " + effect + ".";
 
     // A held work order's key and distinctive text stay out of a public repository until the release carrying it is published,
     // whoever wrote the commits. A repository whose visibility is not recorded as public is not held to this check. Before then, one
@@ -203,6 +235,7 @@ public sealed partial class EstateService
                 if (!ScannedPush(claim, pull.Branch, request.Head))
                     throw new ProviderRefusedException("No successful scanned push of this exact head to the pull request's branch is recorded; push it with vericairn changes push, which scans exactly its commits, before merging.");
             }
+            (string? message, string? warned) = CheckMergeMessage(claim, pull, queue.Required || pinnedToQueue);
             claim.Body["target"]!["pullRequest"] = pull.Number;
             claim.Body["target"]!["branch"] = pull.Branch;
             claim.Body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Checks observed before merge.", ["hash"] = observed.Hash, ["location"] = observed.Path });
@@ -212,18 +245,47 @@ public sealed partial class EstateService
                     throw new ProviderRefusedException("This merge was recorded through the target branch's merge queue, which the branch no longer requires; nothing was merged. Push a new head to merge it directly.");
                 if (queue.State is "queued" or "unmergeable")
                     throw new ProviderRefusedException("The pull request is already in the merge queue, enqueued outside this operation; nothing was requested.");
-                return EnqueueChange(claim, pull.Number);
+                ChangeResponse enqueued = EnqueueChange(claim, pull.Number);
+                return warned is null ? enqueued : enqueued with { Message = enqueued.Message + " " + warned };
             }
             PresenceEffectAhead();
             DispatchChange(claim);
             claim.EffectMayHaveStarted = true;
-            ChangeReceipt receipt = claim.Configuration.Provider.Merge(claim.Configuration.Destination, pull.Number, request.Head);
+            // Where the estate checks commit messages, the merge commit is created with exactly the message checked (CODE-81).
+            ChangeReceipt receipt = message is null ? claim.Configuration.Provider.Merge(claim.Configuration.Destination, pull.Number, request.Head)
+                : claim.Configuration.Provider.Merge(claim.Configuration.Destination, pull.Number, request.Head, message);
             if (receipt.PullRequest != pull.Number || receipt.MergeCommit is null || !Patterns.Commit.IsMatch(receipt.MergeCommit))
                 throw new ProviderUncertainException("The merge was requested but its exact merge commit was not confirmed.");
             claim.Body["target"]!["mergeCommit"] = receipt.MergeCommit;
             FinishChange(claim, "observed-success", "The host confirmed the merge of the pinned head.");
-            return ObserveChangeTarget(claim, receipt.MergeCommit);
+            ChangeResponse merged = ObserveChangeTarget(claim, receipt.MergeCommit);
+            return warned is null ? merged : merged with { Message = merged.Message + " " + warned };
         });
+    }
+
+    // CODE-81: the message of the merge commit this merge would create is matched against the estate's blocked terms at the estate's
+    // level before anything is merged. The trailer lines the estate requires apply to the commits a push carries, not to the merge commit
+    // the host creates. Returns the message to merge with, null where the estate checks no commit message, and the warning, if any.
+    private (string? Message, string? Warned) CheckMergeMessage(ChangeClaim claim, PullRequestObservation pull, bool queued)
+    {
+        CommitMessages.Settings settings;
+        lock (gate) settings = CommitMessages.In(session.Load(), DateTimeOffset.UtcNow);
+        if (settings.Lists.IsEmpty) return (null, null);
+        if (queued && pull.Title is null)
+            throw new ProviderRefusedException("The estate checks commit messages, and the pull request's title, which its merge commit's message carries, could not be observed; nothing was merged.");
+        // As the host composes a merge commit's message: a title naming the pull request and its branch, then the pull request's title.
+        string message = $"Merge pull request #{pull.Number} from {claim.Configuration.Destination.Split('/')[0]}/{pull.Branch}"
+            + (string.IsNullOrEmpty(pull.Title) ? string.Empty : "\n\n" + pull.Title);
+        (CommitMessages.Finding? refusal, IReadOnlyList<CommitMessages.Finding> warnings) =
+            CommitMessages.Check(settings, [("The merge commit of pull request " + pull.Number, message)], trailers: false);
+        if (refusal is not null) throw new ProviderRefusedException(CommitMessages.Describe(refusal) + " Nothing was merged; retitle the pull request and merge again.");
+        string? warned = MessageWarning(settings, warnings, queued ? "enqueued" : "merged");
+        claim.Body["evidence"]!.AsArray().Add(new JsonObject
+        {
+            ["summary"] = (queued ? "The message the merge queue composes for this change's merge commit was checked" : "The merge commit's message was checked, and the merge sets it exactly,")
+                + " against the estate's blocked terms" + (warned is null ? "; none was refused." : ". " + warned),
+        });
+        return (message, warned);
     }
 
     /// <summary>

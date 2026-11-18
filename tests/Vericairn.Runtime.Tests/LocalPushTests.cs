@@ -121,6 +121,37 @@ public sealed class LocalPushTests : IDisposable
         Assert.Throws<ProviderRefusedException>(() => adapter.FileText(repository, plan, plan.Head, "docs/../readme.txt"));
     }
 
+    // CODE-81: a checked push reads every commit of its range, merge commits included, with its whole message, trailers included.
+    [Fact]
+    public void APushReadsEveryCommitMessageOfItsRangeIncludingMerges()
+    {
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        File.WriteAllText(Path.Combine(repository, "addition.txt"), "Checked addition.\n");
+        Git(repository, "add", "addition.txt");
+        Git(repository, "commit", "-m", "Add checked content\n\nWhy it changed.\n\nSigned-off-by: Test <test@example.invalid>");
+        string first = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "checkout", "main");
+        File.WriteAllText(Path.Combine(repository, "other.txt"), "Other content.\n");
+        Git(repository, "add", "other.txt");
+        Git(repository, "commit", "-m", "Other content");
+        string other = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "checkout", "work/change");
+        Git(repository, "merge", "--no-ff", "-m", "Merge main into the change\n\nSigned-off-by: Test <test@example.invalid>", "main");
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        IReadOnlyList<PushedCommit> commits = adapter.CommitMessages(repository, plan)!;
+        // The remote's main is still the initial commit, so the range holds both sides of the merge and the merge itself.
+        Assert.Equal(new[] { head, other, first }.Order(StringComparer.Ordinal), commits.Select(c => c.Commit).Order(StringComparer.Ordinal));
+        Assert.Equal("Merge main into the change\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == head).Message);
+        Assert.Equal("Add checked content\n\nWhy it changed.\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == first).Message);
+    }
+
     // The adapter isolates its own git processes. Only its read of the user's credential settings sees this test's stand-in
     // for the user's global configuration.
     private GitPushAdapter Adapter() => new(info =>

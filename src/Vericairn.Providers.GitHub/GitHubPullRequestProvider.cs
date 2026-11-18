@@ -84,7 +84,7 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
     {
         Destination(destination);
         using JsonDocument document = Read("pr", "view", numberOrBranch, "--repo", destination, "--json",
-            "number,headRefOid,headRefName,baseRefName,state,mergeCommit,isCrossRepository");
+            "number,headRefOid,headRefName,baseRefName,state,mergeCommit,isCrossRepository,title");
         try
         {
             JsonElement p = document.RootElement;
@@ -93,7 +93,8 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
             List<ChangeCheck> checks = CommitChecks(destination, head);
             string? merged = p.TryGetProperty("mergeCommit", out JsonElement m) && m.ValueKind == JsonValueKind.Object ? Text(m, "oid") : null;
             return new(p.GetProperty("number").GetInt64().ToString(CultureInfo.InvariantCulture), Text(p, "headRefName"), Text(p, "baseRefName"),
-                head, Text(p, "state").ToLowerInvariant(), merged, checks, !p.GetProperty("isCrossRepository").GetBoolean());
+                head, Text(p, "state").ToLowerInvariant(), merged, checks, !p.GetProperty("isCrossRepository").GetBoolean())
+            { Title = p.TryGetProperty("title", out JsonElement title) && title.ValueKind == JsonValueKind.String ? title.GetString() : null };
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {
@@ -102,7 +103,13 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
     }
 
     /// <inheritdoc />
-    public ChangeReceipt Merge(string destination, string number, string head)
+    public ChangeReceipt Merge(string destination, string number, string head) => MergeWith(destination, number, head, null);
+
+    /// <inheritdoc />
+    public ChangeReceipt Merge(string destination, string number, string head, string message) =>
+        MergeWith(destination, number, head, message ?? throw new ArgumentNullException(nameof(message)));
+
+    private ChangeReceipt MergeWith(string destination, string number, string head, string? message)
     {
         Destination(destination);
         Commit(head);
@@ -110,8 +117,17 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
             throw new ProviderRefusedException("The pull request must be named by its positive number.");
         // The synchronous merge endpoint compares sha atomically. Unlike the interactive merge command,
         // it cannot turn this request into auto-merge or enqueue a later merge; a required queue goes through Enqueue instead.
-        Effect("api", $"repos/{destination}/pulls/{number}/merge", "--method", "PUT", "--raw-field", "sha=" + head,
-            "--raw-field", "merge_method=merge");
+        // A given message is the merge commit's whole message, its first line the title and the rest the body, so the repository's
+        // default message, which may add the pull request's description, never replaces the message the runtime checked (CODE-81).
+        List<string> arguments = ["api", $"repos/{destination}/pulls/{number}/merge", "--method", "PUT", "--raw-field", "sha=" + head,
+            "--raw-field", "merge_method=merge"];
+        if (message is not null)
+        {
+            string[] parts = message.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n', 2);
+            if (parts[0].Trim().Length == 0) throw new ProviderRefusedException("A merge commit's message needs a title line; nothing was merged.");
+            arguments.AddRange(["--raw-field", "commit_title=" + parts[0], "--raw-field", "commit_message=" + (parts.Length > 1 ? parts[1].TrimStart('\n') : string.Empty)]);
+        }
+        Effect([.. arguments]);
         try
         {
             PullRequestObservation? observed = Observe(destination, number);

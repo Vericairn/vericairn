@@ -61,8 +61,16 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
         Commit(directory, branch, basis, files, receipts, NoneCarried);
 
     /// <inheritdoc />
-    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts, IReadOnlyDictionary<string, string> carried)
+    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts, IReadOnlyDictionary<string, string> carried) =>
+        Commit(directory, branch, basis, files, receipts, carried, []);
+
+    /// <inheritdoc />
+    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts,
+        IReadOnlyDictionary<string, string> carried, IReadOnlyList<string> trailers)
     {
+        ArgumentNullException.ThrowIfNull(trailers);
+        if (trailers.Any(t => string.IsNullOrWhiteSpace(t) || t.Any(char.IsControl) || t != t.Trim()))
+            throw new ProviderRefusedException("A required trailer is one line of text; nothing was committed.");
         ArgumentNullException.ThrowIfNull(receipts);
         string record = ValidateFiles(files);
         Dictionary<string, string> all = WithCarried(files, carried);
@@ -88,7 +96,8 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
         // --only names precisely the prepared record and members, and any carried trail records. Each record already carries its device signature.
         Read(directory, ["add", "--intent-to-add", "--", .. paths]);
         string message = "Record operator action " + Path.GetFileNameWithoutExtension(record)
-            + (carried.Count == 0 ? string.Empty : $" and carry {carried.Count} trail {(carried.Count == 1 ? "record" : "records")} of earlier actions");
+            + (carried.Count == 0 ? string.Empty : $" and carry {carried.Count} trail {(carried.Count == 1 ? "record" : "records")} of earlier actions")
+            + (trailers.Count == 0 ? string.Empty : "\n\n" + string.Join('\n', trailers));
         WithoutHooks(directory, ["commit", "--only", "--no-gpg-sign", "-m", message, "--", .. paths]);
         head = Head(directory);
         Verify(directory, head, basis, files, carried);

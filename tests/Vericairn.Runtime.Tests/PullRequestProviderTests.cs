@@ -40,6 +40,7 @@ public sealed class PullRequestProviderTests
             Assert.Equal("PUT", merge[Array.IndexOf(merge, "--method") + 1]);
             Assert.Contains("sha=" + Head, merge);
             Assert.Contains("merge_method=merge", merge);
+            Assert.DoesNotContain(merge, a => a.StartsWith("commit_", StringComparison.Ordinal));
             Assert.DoesNotContain("--auto", merge);
             Assert.Contains(recorded.Calls, c => c.Any(a => a.Contains("head_sha=" + MergeCommit, StringComparison.Ordinal) && a.Contains("event=push", StringComparison.Ordinal)));
             Assert.DoesNotContain(recorded.Calls, c => c.Contains("auth"));
@@ -128,6 +129,32 @@ public sealed class PullRequestProviderTests
             ? new(ProcessOutcome.TimedOut, true, null, string.Empty, string.Empty) : output.Run(info));
         Assert.Throws<ProviderUncertainException>(() => provider.Open("Example/widget", "work/change", "main", Head, "Change", "Body"));
         Assert.Contains(output.Calls, c => c[0] == "pr" && c[1] == "create");
+    }
+
+    // CODE-81: both implementations report the pull request's title and create the merge commit with exactly the message given, its
+    // first line the commit's title and the rest its body, so the repository's default message never replaces the message checked.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BothImplementationsReportTheTitleAndMergeWithExactlyTheGivenMessage(bool github)
+    {
+        var recorded = new RecordedGitHub();
+        var memory = new MemoryPullRequestProvider { Checks = [new("tests", Head, "completed", "success")] };
+        IPullRequestProvider provider = github ? new GitHubPullRequestProvider(recorded.Run) : memory;
+        provider.Open("Example/widget", "work/change", "main", Head, "Checked change", "Review it.");
+        Assert.Equal("Checked change", provider.Observe("Example/widget", "1")!.Title);
+        ChangeReceipt merged = provider.Merge("Example/widget", "1", Head, "Merge pull request #1 from Example/work/change\n\nChecked change");
+        Assert.Equal(MergeCommit, merged.MergeCommit);
+        if (!github)
+        {
+            Assert.Equal("Merge pull request #1 from Example/work/change\n\nChecked change", memory.MergeMessage);
+            return;
+        }
+        string[] merge = recorded.Calls.Single(c => c[0] == "api" && c[1] == "repos/Example/widget/pulls/1/merge");
+        Assert.Contains("sha=" + Head, merge);
+        Assert.Contains("merge_method=merge", merge);
+        Assert.Contains("commit_title=Merge pull request #1 from Example/work/change", merge);
+        Assert.Contains("commit_message=Checked change", merge);
     }
 
     [Theory]
@@ -386,7 +413,7 @@ public sealed class PullRequestProviderTests
             }
             if (args[0] == "pr" && args[1] == "view")
                 return Success(JsonSerializer.Serialize(new { number = 1, headRefOid = CurrentHead, headRefName = "work/change", baseRefName = "main",
-                    state = merged ? "MERGED" : "OPEN", mergeCommit = merged ? new { oid = MergeCommit } : null, isCrossRepository = false }));
+                    state = merged ? "MERGED" : "OPEN", mergeCommit = merged ? new { oid = MergeCommit } : null, isCrossRepository = false, title = "Checked change" }));
             if (args[0] == "api")
             {
                 if (args[1].Contains("/check-runs?", StringComparison.Ordinal))

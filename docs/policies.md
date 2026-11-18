@@ -166,6 +166,32 @@ Evaluating the rule reports each current record written after the policy began t
 older build or merged from another copy of the estate. Earlier records are left alone, and no record is rewritten. A finding
 never repeats the term, since findings are themselves rendered into generated documents.
 
+From 0.9.4 (CODE-81), a checked push also refuses a term in any commit message it carries, trailers included, and a checked merge
+one in the message of the merge commit it would create, as [checked repository changes](changes.md#commit-messages-094)
+describes, at the level the [commit messages](#commit-messages-094) rule sets.
+
+## Commit messages (0.9.4)
+
+From 0.9.4 (CODE-81), an estate configures how its checked pushes and merges treat commit messages with a rule of kind
+`vericairn.estate/commit-messages`, version 1, in an estate policy that applies to the estate. Its parameters set one or both
+of:
+
+- `blockedTerms`: `refuse` or `warn`, the level at which a blocked term in a commit message refuses the change or only warns.
+  Without a rule that sets it, the level is `refuse`; a policy at `refuse` outweighs any at `warn`, so a relaxation stands only
+  while no policy refuses.
+- `trailer`: one exact trailer line every pushed commit must carry in its closing paragraph, a token of letters, digits and
+  hyphens, a colon, a space and its value, of at most 500 characters, such as `Signed-off-by: A Person <person@example.org>`.
+  Each declared trailer is required.
+
+```json
+{ "key": "messages", "kind": "vericairn.estate/commit-messages", "version": 1, "parameters": { "blockedTerms": "refuse", "trailer": "Signed-off-by: A Person <person@example.org>" } }
+```
+
+The rule applies from its policy's `startsAt` while the policy is active, and like every estate policy it is declared, revised
+and retired with the operator's exact approval, so a relaxation to `warn` is always configured and recorded. A required
+trailer that names one of the estate's blocked terms is written in the same policy as the terms, since a policy is exempt
+only from the list it declares. The rule selects no records: evaluating it reports that no subject is selected.
+
 ## Required flow steps (0.9.2)
 
 An estate can require steps and items of a [flow](templates.md#flows-092) that a venture's configuration would otherwise turn

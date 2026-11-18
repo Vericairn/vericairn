@@ -18,6 +18,9 @@ public sealed record SecretScan(string Tool, string Version, string Range, strin
         && !string.IsNullOrWhiteSpace(Tool) && !string.IsNullOrWhiteSpace(Version) && Version != "unknown";
 }
 
+/// <summary>One commit a push carries, by its exact id, with its whole message, trailers included (CODE-81).</summary>
+public sealed record PushedCommit(string Commit, string Message);
+
 /// <summary>The secret scan contract, version 1. Implementations scan exactly the plan's commits and return only aggregate facts.</summary>
 public interface ISecretScanner
 {
@@ -55,4 +58,10 @@ public interface IPushAdapter
     /// a read that fails refuses. From 0.9.4 (FIX-137) a checked push reads whether it carries a release's documentation set this way.
     /// </summary>
     string? FileText(string directory, PushPlan plan, string commit, string path) => null;
+
+    /// <summary>
+    /// Every commit the plan's range carries, merge commits included, each with its whole message. Null when the adapter cannot read
+    /// them, which refuses a push while the estate checks commit messages for blocked terms or required trailers (CODE-81, from 0.9.4).
+    /// </summary>
+    IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan) => null;
 }
