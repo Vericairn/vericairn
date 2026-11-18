@@ -54,6 +54,7 @@ internal static class HarnessReach
     private static readonly TimeSpan ProbeDeadline = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ConnectDeadline = TimeSpan.FromSeconds(5);
     private const int ProbeOutputLimit = 4096;
+    private static readonly TimeSpan InventoryDeadline = TimeSpan.FromSeconds(10);
 
     // Conventional locations under the user's home. A directory entry lists the files directly in it that the filter keeps.
     private static readonly (string Kind, string Path, Func<string, bool>? Directory)[] Candidates =
@@ -165,6 +166,7 @@ internal static class HarnessReach
     {
         ArgumentNullException.ThrowIfNull(environment);
         complete = true;
+        long started = Stopwatch.GetTimestamp();
         var found = new List<SecretPath>();
         var seen = new HashSet<string>(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         string? home = environment.GetValueOrDefault("HOME") ?? environment.GetValueOrDefault("USERPROFILE");
@@ -197,6 +199,8 @@ internal static class HarnessReach
 
         bool Add(string kind, string path, Func<string, bool>? filter)
         {
+            // A slow file system cannot hold run admission: past the deadline the inventory stops and says it is incomplete.
+            if (Stopwatch.GetElapsedTime(started) > InventoryDeadline) return false;
             try
             {
                 if (filter is null)
@@ -209,7 +213,7 @@ internal static class HarnessReach
                 int entries = 0;
                 foreach (string entry in Directory.EnumerateFiles(path))
                 {
-                    if (++entries > MaxDirectoryEntries) return false;
+                    if (++entries > MaxDirectoryEntries || Stopwatch.GetElapsedTime(started) > InventoryDeadline) return false;
                     if (filter(Path.GetFileName(entry)) && Readable(entry) && seen.Add(entry)) found.Add(new(kind, entry));
                 }
 
@@ -256,9 +260,18 @@ internal static class HarnessReach
 
     private static bool Readable(string path)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Opening for reading tests access and reads nothing. The open never blocks: a named pipe or device at a conventional path
+            // would otherwise hold run admission until something wrote to it.
+            int descriptor = open(path, ReadOnly | (OperatingSystem.IsMacOS() ? 0x0004 | 0x20000 : 0x0800 | 0x0100));
+            if (descriptor < 0) return false;
+            _ = close(descriptor);
+            return true;
+        }
+
         try
         {
-            // Opening for reading tests access and reads nothing.
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.None);
             return true;
         }
@@ -267,6 +280,17 @@ internal static class HarnessReach
             return false;
         }
     }
+
+    private const int ReadOnly = 0;
+
+#pragma warning disable SYSLIB1054 // Runtime marshalling avoids requiring unsafe code in the project, as ContainedProcess does.
+    // O_NONBLOCK and O_NOCTTY: 0x0004 and 0x20000 on macOS, 0x0800 and 0x0100 on Linux.
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Ansi, BestFitMapping = false, ThrowOnUnmappableChar = true)]
+    private static extern int open(string path, int flags);
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int close(int descriptor);
+#pragma warning restore SYSLIB1054
 
     private static string Judge(string? reported, string token, string reached) => reported is null ? "blocked" : reported == token ? reached : "unknown";
 

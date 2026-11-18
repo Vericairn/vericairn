@@ -58,6 +58,38 @@ public class HarnessReachTests
         Assert.Empty(Directory.EnumerateFileSystemEntries(scratch.Plant));
     }
 
+    [Theory]
+    [InlineData("wrong", "unknown", "unknown")]
+    [InlineData("refused", "blocked", "blocked")]
+    [InlineData("extra", "unknown", "unknown")]
+    [InlineData("garbled", "unknown", "unknown")]
+    public void OnlyTheExactPlantedTokenIsReadableOrReachable(string report, string file, string host)
+    {
+        using var scratch = new Scratch();
+        // The stand-in probe reports what the scenario says, never what it read: any other text than the planted token is unknown.
+        ReachMeasurement measured = HarnessReach.Measure(scratch.Plant, scratch.Workspace, scratch.Environment(), [.. FakeHarness.ScopeCommand(), FakeHarness.ReachReport + report]);
+        Assert.Equal(new ReachMeasurement(file, host), measured);
+    }
+
+    [Fact]
+    public async Task ANamedPipeAtAConventionalPathDoesNotHoldTheInventory()
+    {
+        if (OperatingSystem.IsWindows()) return; // Named pipes live in their own namespace there, never at a home path.
+        using var scratch = new Scratch();
+        string pipe = Path.Combine(scratch.Home, ".netrc");
+        using (var mkfifo = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mkfifo", [pipe]) { UseShellExecute = false })!)
+        {
+            Assert.True(mkfifo.WaitForExit(TestTiming.HangTimeoutMilliseconds));
+            Assert.Equal(0, mkfifo.ExitCode);
+        }
+
+        string key = scratch.File(".ssh/id_stand_in", "synthetic key material");
+        // The inventory runs apart from the test, so a blocking open shows as the hang guard failing rather than a stuck test.
+        Task<IReadOnlyList<SecretPath>> inventory = Task.Run(() => HarnessReach.SecretPaths(scratch.Environment(), out _), TestContext.Current.CancellationToken);
+        IReadOnlyList<SecretPath> paths = await inventory.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.Contains(paths, p => p.Path == key);
+    }
+
     [Fact]
     public void TheProbeReadsOnlyItsMarkerAndHostArguments()
     {
@@ -140,7 +172,10 @@ public class HarnessReachTests
         Assert.DoesNotContain(home, run.Intent.Body.GetRawText(), StringComparison.Ordinal);
         Assert.Equal(0, fixture.Run.Service.Check().Errors);
 
-        string custody = File.ReadAllText(new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run).ReachFile);
+        var directory = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);
+        // The list stays out of the run's directory, whose temporary directory and stop file the harness is told of.
+        Assert.False(directory.ReachFile.StartsWith(directory.Path + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+        string custody = File.ReadAllText(directory.ReachFile);
         using JsonDocument kept = JsonDocument.Parse(custody);
         Assert.Contains(kept.RootElement.GetProperty("secretPaths").EnumerateArray(), p => p.GetProperty("path").GetString() == key && p.GetProperty("kind").GetString() == "ssh-key");
         Assert.DoesNotContain("synthetic-reach-key-material", custody, StringComparison.Ordinal);

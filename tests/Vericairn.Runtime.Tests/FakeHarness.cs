@@ -27,6 +27,7 @@ internal static class FakeHarness
     /// <summary>The argument that makes the test executable a stand-in harness.</summary>
     public const string Marker = "--vericairn-stand-in-harness";
     internal const string NativeMarker = "vericairn-native-stand-in";
+    internal const string ReachReport = "--vericairn-stand-in-reach-report=";
 
     /// <summary>The command line that starts the stand-in for a scenario, writing what it was given to the report.</summary>
     public static List<string> Command(string scenario, string report)
@@ -63,6 +64,20 @@ internal static class FakeHarness
         // The worker's reach probe (CODE-82) is the vericairn executable with a private argument; the test executable stands in for it
         // wherever a test names it as the vericairn command, and runs the product's own probe.
         int reach = Array.IndexOf(arguments, Vericairn.Runtime.Workers.HarnessReach.Marker);
+        // A probe that reports what a scenario says instead of what it read, so the worker's judgment of the report is tested alone.
+        if (reach > 0 && arguments[..reach].FirstOrDefault(a => a.StartsWith(ReachReport, StringComparison.Ordinal)) is string report)
+        {
+            Console.Out.Write(report[ReachReport.Length..] switch
+            {
+                "wrong" => """{"file":"not-the-planted-token","host":"not-the-planted-token"}""",
+                "refused" => """{"file":null,"host":null}""",
+                "extra" => """{"file":null,"host":null,"other":null}""",
+                _ => "not a report",
+            });
+            Console.Out.Flush();
+            Environment.Exit(0);
+        }
+
         if (reach > 0 && Vericairn.Runtime.Workers.HarnessReach.TryRun(arguments[reach..]) is int reached)
         {
             Console.Out.Flush();

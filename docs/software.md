@@ -1057,8 +1057,11 @@ the read or the connection was refused, and `unknown` that the probe did not run
 blocked. The worker then lists the secret-bearing paths the user can open for reading: SSH keys, cloud, package-registry and
 forge credentials, GnuPG private keys, harness logins (the run's imported login among them), the Vericairn home's device keys,
 a home `.env` file and macOS keychain files, at conventional locations under the harness's home. Opening a file is the only
-test; no byte of it is read. The list, by path and kind, stays in the run's custody, `reach.json` in the run's owner-only
-directory on the machine that ran it, at every record format. From record format 3 the intent's `execution.reach` records
+test, made without blocking, so a named pipe at one of those paths holds nothing up, and the inventory stops, saying it is
+incomplete, after ten seconds; no byte of a file is read. The list, by path and kind, stays in the run's custody on the
+machine that ran it, at every record format: `estates/<estate>/reach/<run>.json` under the Vericairn home, owner-only and
+outside the run's directory, whose temporary directory and stop file the harness is told of, so the run is not handed a map
+of those paths beside its own files. A process of the same user can still read it. From record format 3 the intent's `execution.reach` records
 `outsideFile`, `testHost`, `secretPaths` (the count), `secretKinds` and `secretPathsComplete`, never a path. The measurement
 shows reach; it blocks nothing and refuses no run: on today's launchers a run reads what its user can read. Run the worker as
 another operating-system user, one that cannot read those paths, to reduce it.

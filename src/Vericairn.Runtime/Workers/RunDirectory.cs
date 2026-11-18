@@ -118,6 +118,7 @@ public sealed class RunDirectory
         }
 
         Path = System.IO.Path.Combine(VericairnHome.Path(), "estates", estate, "runs", run);
+        ReachFile = System.IO.Path.Combine(VericairnHome.Path(), "estates", estate, "reach", run + ".json");
     }
 
     /// <summary>The directory.</summary>
@@ -204,9 +205,11 @@ public sealed class RunDirectory
 
     /// <summary>
     /// From 0.9.4 (CODE-82), what the run could reach before it started: the marker and test-host measurement and the secret-bearing
-    /// paths its operating-system user can read, by path and kind, never content. Kept here only, never in a record.
+    /// paths its operating-system user can read, by path and kind, never content. Kept on this machine only, never in a record, and
+    /// outside the run's directory, whose temporary directory and stop file the harness is told of, so the run is not handed a map of
+    /// those paths beside its own files; a process of the same user can still read it.
     /// </summary>
-    internal string ReachFile => System.IO.Path.Combine(Path, "reach.json");
+    internal string ReachFile { get; }
 
     /// <summary>From 0.9.4 (RUN-04), a retrieval run's log of its web tool invocations and the results it retained.</summary>
     internal string SourcesFile => System.IO.Path.Combine(Path, "sources.jsonl");
@@ -214,10 +217,13 @@ public sealed class RunDirectory
     /// <summary>From 0.9.4 (RUN-04), the retrieved originals of a retrieval run, each named by its content hash, never in a record.</summary>
     internal string SourcesDirectory => System.IO.Path.Combine(Path, "sources");
 
-    /// <summary>Retains a run's reach in its own custody, owner-only, beside its other local state.</summary>
+    /// <summary>Retains a run's reach in its own custody, owner-only, in the estate's reach directory on this machine.</summary>
     internal void RetainReach(JsonObject reach)
     {
         ArgumentNullException.ThrowIfNull(reach);
+        string directory = System.IO.Path.GetDirectoryName(ReachFile)!;
+        Directory.CreateDirectory(directory);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.None };
         if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         using var stream = new FileStream(ReachFile, options);
