@@ -69,6 +69,9 @@ public sealed class DisclosureHoldTests
     [InlineData("none", "carried", false, null)]
     [InlineData("answered-other-question", "carried", false, null)]
     [InlineData("answered-incidental", "carried", false, null)]
+    [InlineData("answered-longer-version", "carried", false, null)]
+    [InlineData("answered-prerelease-version", "carried", false, null)]
+    [InlineData("answered-version-at-sentence-end", "carried", true, null)]
     [InlineData("answered-declining", "carried", false, null)]
     [InlineData("answered-for-another-key", "carried", false, null)]
     [InlineData("answered-not-naming", "carried", false, null)]
@@ -115,6 +118,9 @@ public sealed class DisclosureHoldTests
         {
             "answered-other-question" => "Which day should 9.9.9 be submitted?",
             "answered-incidental" => "Should the Security section wait until after the submission date?",
+            "answered-longer-version" => "Approve the Security section of 9.9.90 as drafted, covering FIX-90?",
+            "answered-prerelease-version" => "Approve the Security section of 9.9.9-rc.1 as drafted, covering FIX-90?",
+            "answered-version-at-sentence-end" => "Approve the Security section of 9.9.9.",
             _ => "Approve the Security section of 9.9.9 as drafted, covering FIX-90?",
         };
         RecordEnvelope Ask() => f.Estate.Add("ask", op, $$"""
@@ -184,7 +190,7 @@ public sealed class DisclosureHoldTests
         Assert.Contains("held work order FIX-90", response.Message, StringComparison.Ordinal);
         // The repository is read only for a release whose Security section is approved; the refusal then names the one push that may
         // pass, and why this one is not it.
-        bool approved = approval == "answered";
+        bool approved = approval is "answered" or "answered-version-at-sentence-end";
         Assert.Equal(approved, f.Adapter.FileReads > 0);
         Assert.Equal(approved, response.Message.Contains("documentation set", StringComparison.Ordinal));
         if (reason is not null) Assert.Contains(reason, response.Message, StringComparison.Ordinal);

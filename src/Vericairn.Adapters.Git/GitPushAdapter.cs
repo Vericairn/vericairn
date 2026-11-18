@@ -86,21 +86,45 @@ public sealed class GitPushAdapter : IPushAdapter
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Every added line and every message is read, whatever the clone's settings and attributes, or the read returns null (FIX-137):
+    /// the messages in UTF-8 whatever the clone's output encoding, NUL-separated, with no signature verification, notes or mailmap; the
+    /// diff as text for every file, so neither a NUL byte, a <c>-diff</c> or binary attribute, committed or the clone's own, nor a low
+    /// <c>core.bigFileThreshold</c> turns a file's added lines into "Binary files differ", with no rename or copy detection, external
+    /// diff or text conversion; and a diff line is a file header only before the first hunk of its file, so an added line whose own
+    /// text begins with "++" is read.
+    /// </remarks>
     public string? PublishedText(string directory, PushPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head)) return null;
-        // No external diff, text conversion or signature verification runs; the clone's diff drivers cannot execute anything.
-        ProcessResult messages = Invoke(directory, ["log", "--no-show-signature", "--format=%B", plan.Range]);
-        ProcessResult diff = Invoke(directory, ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--unified=0", plan.Base, plan.Head]);
+        ProcessResult messages = Invoke(directory, ["-c", "i18n.logOutputEncoding=UTF-8", "log", "--no-show-signature", "--no-mailmap", "--no-notes", "-z",
+            "--format=%H%n%B", plan.Range]);
+        ProcessResult diff = Invoke(directory, ["-c", "core.bigFileThreshold=" + TextThreshold, "diff", "--no-color", "--no-ext-diff", "--no-textconv",
+            "--no-renames", "--text", "--unified=0", plan.Base, plan.Head]);
         if (messages is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } || diff is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
-        var text = new System.Text.StringBuilder(messages.StandardOutput);
+        var text = new System.Text.StringBuilder();
+        foreach (string entry in messages.StandardOutput.Split('\0'))
+        {
+            if (entry.Length == 0) continue;
+            int split = entry.IndexOf('\n', StringComparison.Ordinal);
+            if (!Patterns.Commit.IsMatch(split < 0 ? entry : entry[..split])) return null;
+            text.Append(split < 0 ? string.Empty : entry[(split + 1)..]).Append('\n');
+        }
+        bool hunk = false;
         foreach (string line in diff.StandardOutput.Split('\n'))
         {
-            if (line.StartsWith('+') && !line.StartsWith("+++", StringComparison.Ordinal)) text.Append('\n').Append(line, 1, line.Length - 1);
+            // A file's header runs from its diff line to its first hunk; within a hunk every line carries its own prefix.
+            if (line.StartsWith("diff --git ", StringComparison.Ordinal)) hunk = false;
+            else if (line.StartsWith("@@", StringComparison.Ordinal)) hunk = true;
+            else if (hunk && line.StartsWith('+')) text.Append('\n').Append(line, 1, line.Length - 1);
+            else if (!hunk && line.StartsWith("Binary files ", StringComparison.Ordinal)) return null;
         }
         return text.ToString();
     }
+
+    // The size up to which a diff reads a file as text, git's default; a larger file's diff exceeds the bounded output and is unreadable.
+    private const string TextThreshold = "512m";
 
     /// <inheritdoc />
     public IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan)

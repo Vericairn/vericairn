@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using Vericairn.Adapters.Git;
+using Vericairn.Records.Estate;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -345,6 +346,62 @@ public sealed class LocalPushTests : IDisposable
     }
 
     private static readonly string[] TernOnly = ["Tern"];
+
+    // FIX-137: the disclosure hold reads every added line and every message the push carries, whatever the clone's settings and
+    // attributes: a file git would call binary (a NUL byte, a -diff attribute committed or the clone's own, a big-file threshold below
+    // its size), an added line whose own text begins with "++", and messages under a clone's UTF-16 output encoding.
+    [Theory]
+    [InlineData("nul-byte")]
+    [InlineData("committed-attribute")]
+    [InlineData("clone-attribute")]
+    [InlineData("big-file-threshold")]
+    [InlineData("plus-plus-line")]
+    [InlineData("utf16-messages")]
+    public void ThePublishedTextHoldsEveryAddedFormWhateverTheClonesSettings(string form)
+    {
+        const string held = "the held phrase of FIX-90";
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        switch (form)
+        {
+            case "nul-byte":
+                File.WriteAllBytes(Path.Combine(repository, "data.txt"), [.. System.Text.Encoding.UTF8.GetBytes("prefix\0\n" + held + "\n")]);
+                break;
+            case "committed-attribute":
+                File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.txt -diff\n");
+                File.WriteAllText(Path.Combine(repository, "data.txt"), held + "\n");
+                break;
+            case "clone-attribute":
+                File.WriteAllText(Path.Combine(repository, ".git", "info", "attributes"), "*.txt -diff\n");
+                File.WriteAllText(Path.Combine(repository, "data.txt"), held + "\n");
+                break;
+            case "big-file-threshold":
+                Git(repository, "config", "core.bigFileThreshold", "16");
+                File.WriteAllText(Path.Combine(repository, "data.txt"), held + "\n");
+                break;
+            case "plus-plus-line":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "++ " + held + "\n");
+                break;
+            case "utf16-messages":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Unrelated content.\n");
+                break;
+        }
+        Git(repository, "add", "--all");
+        Git(repository, "commit", "-m", form == "utf16-messages" ? "Add content\n\nIt closes " + held + "." : "Add content");
+        if (form == "utf16-messages") Git(repository, "config", "i18n.logOutputEncoding", "UTF-16LE");
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        string? text = adapter.PublishedText(repository, plan);
+        Assert.NotNull(text);
+        Assert.Contains(held, text, StringComparison.Ordinal);
+        IReadOnlyList<DisclosureHolds.Hold> holds = [new("FIX-90", "order", [])];
+        Assert.Equal("FIX-90", DisclosureHolds.Disclosed(holds, text));
+    }
 
     // Commit one file at an exact author and committer date, so the commit-graph's generation numbers are predictable.
     private void CommitAt(string date, string file, string content, string message, params string[] before)

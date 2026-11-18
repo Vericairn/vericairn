@@ -81,7 +81,8 @@ public static class DisclosureHolds
     /// Whether the operator has approved, for <paramref name="order"/> under <paramref name="key"/>, the Security section of the release
     /// <paramref name="version"/> that <paramref name="carrier"/> carries, in the forms the release practice writes:
     /// <list type="bullet">
-    /// <item>an ask whose subject is the carrier and whose question begins exactly with <see cref="ApprovalQuestion"/>;</item>
+    /// <item>an ask whose subject is the carrier and whose question begins exactly with <see cref="ApprovalQuestion"/>, the version ending
+    /// there;</item>
     /// <item>answered by the operator's decision that records the approval as an effect exactly <see cref="ApprovalEffect"/> and names
     /// the held work order among the work orders it affects;</item>
     /// <item>decided and recorded after the work order's current revision, so that a section approved before a fix joined the hold never
@@ -108,9 +109,20 @@ public static class DisclosureHolds
                 return (a, state, answers);
             })];
         if (asks.Any(a => Asks.IsWaiting(a.State))) return false;
-        return asks.Any(a => a.State == "answered" && (EstateModel.BodyString(a.Ask, "question") ?? "").StartsWith(question, StringComparison.Ordinal)
+        return asks.Any(a => a.State == "answered" && Asked(EstateModel.BodyString(a.Ask, "question") ?? "", question)
             && a.Answers.Any(d => model.HasRole(EstateModel.BodyString(d, "decidedBy"), Roles.Operator) && d.AtTime > since && Decided(d) > since
                 && Strings(d.Body, "effects").Any(e => e.Trim() == effect) && Strings(d.Body, "affects").Any(held.Contains)));
+    }
+
+    // Whether a question begins with the approval form and its version ends there: the form is followed by the end of the text or by a
+    // character that cannot continue a version, so "Approve the Security section of 9.9.90" or "... of 9.9.9-rc.1" never asks about 9.9.9.
+    private static bool Asked(string text, string form)
+    {
+        if (!text.StartsWith(form, StringComparison.Ordinal)) return false;
+        if (text.Length == form.Length) return true;
+        char next = text[form.Length];
+        if (char.IsLetterOrDigit(next) || next == '_') return false;
+        return !(next is '.' or '-' or '+' && text.Length > form.Length + 1 && char.IsLetterOrDigit(text[form.Length + 1]));
     }
 
     /// <summary>
