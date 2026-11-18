@@ -75,6 +75,10 @@ public class PolicyGoldenFixtureTests
         using PolicyFixture searches = SearchSelectionRecordTests.RecordedFixture();
         EstateModel searchModel = searches.Estate.Load();
         Assert.False(searchModel.Findings.HasErrors, string.Join('\n', searchModel.Findings));
+        // From 0.9.4 (RUN-04) a settled retrieval run keeps the sources its web tools retrieved.
+        using PolicyFixture retrievals = RetrievalRecordTests.RecordedFixture();
+        EstateModel retrievalModel = retrievals.Estate.Load();
+        Assert.False(retrievalModel.Findings.HasErrors, string.Join('\n', retrievalModel.Findings));
         using var progress = new ProgressFixture();
         foreach (string scope in new[] { "estate", "roster", "goal", "brief" }) progress.Set(scope, ProgressRequestTests.FullRequest);
         RecordEnvelope completion = progress.Estate.Add("work-progress", progress.Estate.BuilderId,
@@ -91,6 +95,10 @@ public class PolicyGoldenFixtureTests
         JsonObject changed = PolicyFixture.ResultBody();
         changed["change"] = new JsonObject { ["repository"] = progress.Estate.Load().FirstEstate!.Id, ["base"] = new string('a', 40), ["head"] = new string('b', 40), ["target"] = "main" };
         progress.Estate.Add("result", progress.Estate.BuilderId, changed.ToJsonString(), progress.Attempt.Reference, supersedes: progressed.Id);
+        // From 0.9.4 (CODE-82) a qualification records what its reach probe found.
+        JsonObject qualification = JsonNode.Parse(HarnessQualificationTests.Body())!.AsObject();
+        qualification["reach"] = new JsonObject { ["file"] = "readable", ["host"] = "reachable" };
+        progress.Estate.Add("harness-qualification", progress.Estate.OperatorId, qualification.ToJsonString());
         EstateModel progressModel = progress.Estate.Load();
         Assert.False(progressModel.Findings.HasErrors, string.Join('\n', progressModel.Findings));
         // History checkpoints have their own golden estate.
@@ -101,9 +109,9 @@ public class PolicyGoldenFixtureTests
         foreach (IRecordType type in RecordTypeRegistry.All)
         {
             foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat == 3))
-                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)).Concat(firstPartyModel.OfType(type.Name)).Concat(lineModel.OfType(type.Name)).Concat(progressModel.OfType(type.Name)).Concat(revisionModel.OfType(type.Name)).Concat(flowModel.OfType(type.Name)).Concat(historyModel.OfType(type.Name)).Concat(searchModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
+                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)).Concat(firstPartyModel.OfType(type.Name)).Concat(lineModel.OfType(type.Name)).Concat(progressModel.OfType(type.Name)).Concat(revisionModel.OfType(type.Name)).Concat(flowModel.OfType(type.Name)).Concat(historyModel.OfType(type.Name)).Concat(searchModel.OfType(type.Name)).Concat(retrievalModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
         }
-        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))).Concat(firstPartyModel.Records.Select(r => (r, firstParty.Root))).Concat(lineModel.Records.Select(r => (r, lines.Estate.Root))).Concat(progressModel.Records.Select(r => (r, progress.Estate.Root))).Concat(revisionModel.Records.Select(r => (r, revisionHistory.Root))).Concat(flowModel.Records.Select(r => (r, flows.Estate.Root))).Concat(historyModel.Records.Select(r => (r, historyRoot))).Concat(searchModel.Records.Select(r => (r, searches.Estate.Root))))
+        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))).Concat(firstPartyModel.Records.Select(r => (r, firstParty.Root))).Concat(lineModel.Records.Select(r => (r, lines.Estate.Root))).Concat(progressModel.Records.Select(r => (r, progress.Estate.Root))).Concat(revisionModel.Records.Select(r => (r, revisionHistory.Root))).Concat(flowModel.Records.Select(r => (r, flows.Estate.Root))).Concat(historyModel.Records.Select(r => (r, historyRoot))).Concat(searchModel.Records.Select(r => (r, searches.Estate.Root))).Concat(retrievalModel.Records.Select(r => (r, retrievals.Estate.Root))))
         {
             byte[] original = File.ReadAllBytes(Path.Combine(directory, record.ExpectedPath));
             Assert.Equal(original, RecordAuthor.Format(original));

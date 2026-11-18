@@ -29,6 +29,40 @@ internal static class HarnessActions
             .Select(block => new HarnessAction(Required(block, "id"), Required(block, "name"), block.GetProperty("input").Clone())).ToArray();
     }
 
+    /// <summary>
+    /// Claude Code's tool results (RUN-04): each tool_result block of a user event, with the invocation it answers and its text, as the
+    /// harness gave it to the agent. A block's non-text parts are not retained.
+    /// </summary>
+    public static IReadOnlyList<HarnessToolResult> ClaudeResults(string line)
+    {
+        if (!line.TrimStart().StartsWith('{'))
+        {
+            return [];
+        }
+
+        using JsonDocument document = JsonDocument.Parse(line);
+        JsonElement root = document.RootElement;
+        if (Text(root, "type") != "user" || !root.TryGetProperty("message", out JsonElement message)
+            || !message.TryGetProperty("content", out JsonElement content) || content.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var results = new List<HarnessToolResult>();
+        foreach (JsonElement block in content.EnumerateArray().Where(b => Text(b, "type") == "tool_result"))
+        {
+            string text = !block.TryGetProperty("content", out JsonElement value) ? string.Empty
+                : value.ValueKind == JsonValueKind.String ? value.GetString()!
+                : value.ValueKind == JsonValueKind.Array ? string.Join('\n', value.EnumerateArray().Where(p => Text(p, "type") == "text").Select(p => Text(p, "text") ?? string.Empty))
+                : string.Empty;
+            bool error = block.TryGetProperty("is_error", out JsonElement failed) && failed.ValueKind == JsonValueKind.True;
+            // A result that names no invocation answers nothing the worker asked about; it is not retained.
+            if (Text(block, "tool_use_id") is string id) results.Add(new HarnessToolResult(id, text, error));
+        }
+
+        return results;
+    }
+
     public static IReadOnlyList<HarnessAction> Codex(string line)
     {
         if (!line.TrimStart().StartsWith('{'))

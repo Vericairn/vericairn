@@ -97,6 +97,40 @@ public class HarnessQualificationTests
         Assert.Contains(findings, f => f.Code == "harness-qualification.author" && f.Location == withdrawn.ExpectedPath);
     }
 
+    [Theory]
+    [InlineData(3, "readable", "reachable", null)]
+    [InlineData(3, "blocked", "blocked", null)]
+    [InlineData(3, "unknown", "unknown", null)]
+    [InlineData(3, "reachable", "reachable", "body.enum")]
+    [InlineData(3, "readable", "readable", "body.enum")]
+    [InlineData(3, "readable", null, "body.missing")]
+    [InlineData(2, "readable", "reachable", "body.format")]
+    public void AQualificationRecordsWhatItsReachProbeFoundFromFormatThree(int format, string file, string? host, string? expected)
+    {
+        using var estate = new TestEstate(recordFormat: format);
+        JsonObject body = JsonNode.Parse(Body())!.AsObject();
+        var reach = new JsonObject { ["file"] = file };
+        if (host is not null) reach["host"] = host;
+        body["reach"] = reach;
+        RecordEnvelope record = estate.Add("harness-qualification", estate.OperatorId, body.ToJsonString(), format: format);
+        Finding[] errors = estate.Load().Findings.Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.ExpectedPath, StringComparison.Ordinal)).ToArray();
+        if (expected is null) Assert.Empty(errors);
+        else Assert.Contains(errors, f => f.Code == expected);
+    }
+
+    [Fact]
+    public void ARevocationNeedNotRepeatTheReachItsQualificationRecorded()
+    {
+        using var estate = new TestEstate(recordFormat: 3);
+        JsonObject body = JsonNode.Parse(Body())!.AsObject();
+        body["reach"] = new JsonObject { ["file"] = "readable", ["host"] = "reachable" };
+        RecordEnvelope first = estate.Add("harness-qualification", estate.OperatorId, body.ToJsonString(), format: 3);
+        body.Remove("reach");
+        body["status"] = "revoked";
+        estate.Add("harness-qualification", estate.OperatorId, body.ToJsonString(), supersedes: first.Id, format: 3);
+        Assert.DoesNotContain(estate.Load().Findings, f => f.Severity == Severity.Error);
+    }
+
     internal static string Body() => new JsonObject
     {
         ["launcher"] = "codex", ["version"] = "0.160.0", ["status"] = "qualified",

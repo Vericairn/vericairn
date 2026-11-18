@@ -12,6 +12,18 @@ namespace Vericairn.Records.Types;
 
 internal static class ExecutionRecord
 {
+    /// <summary>The most secret-bearing paths a run's reach counts (CODE-82).</summary>
+    internal const long MaxSecretPaths = 512;
+
+    /// <summary>The logical route of a retrieval run's web tools (RUN-04), admitted only with execution.retrieval.</summary>
+    internal const string PublicWebDestination = "public-web";
+
+    /// <summary>The most retrieved sources a settlement records in full (RUN-04); the digest covers every one.</summary>
+    internal const int MaxRecordedSources = 100;
+
+    /// <summary>The kinds of secret-bearing path a run's reach may name (CODE-82).</summary>
+    internal static readonly string[] SecretKinds = ["ssh-key", "cloud-credentials", "registry-credentials", "forge-credentials", "signing-key", "harness-login", "device-key", "environment-file", "keychain"];
+
     public static void Read(ValidationContext context, string? status)
     {
         BodyReader body = context.Body;
@@ -129,6 +141,24 @@ internal static class ExecutionRecord
                 }
                 environment.NoOtherKeys();
             }
+
+            // From 0.9.4 (CODE-82), additive in format 3: what the run could reach outside its workspace, measured before it started.
+            if (execution.Since(3, "reach") && execution.Nested("reach", false) is BodyReader reach)
+            {
+                reach.Enum("outsideFile", true, [.. HarnessQualificationType.FileReach]);
+                reach.Enum("testHost", true, [.. HarnessQualificationType.HostReach]);
+                long? count = reach.Number("secretPaths", true, 0, MaxSecretPaths);
+                IReadOnlyList<string>? kinds = reach.StringArray("secretKinds", true, allowEmpty: true, maxItemLength: 40);
+                reach.Flag("secretPathsComplete", true);
+                reach.NoOtherKeys();
+                if (kinds is not null && (kinds.Any(k => !SecretKinds.Contains(k, StringComparer.Ordinal)) || kinds.Distinct(StringComparer.Ordinal).Count() != kinds.Count
+                    || (count == 0) != (kinds.Count == 0) || kinds.Count > count))
+                    context.Error("operation.execution", "A run's reach names each kind of secret-bearing path it counted once, from the known kinds, and counts at least one path for each.");
+            }
+            // From 0.9.4 (RUN-04), additive in format 3: the run's web tools retrieve public sources, which only its assignment's brief permits.
+            if (execution.Since(3, "retrieval") && execution.Enum("retrieval", false, AssignmentType.PublicRetrieval) is not null
+                && (context.Find(context.Record.Subject?.Id) is not { Type: "assignment" } assigned || !AssignmentType.PermitsRetrieval(assigned)))
+                context.Error("operation.retrieval", "A run retrieves public sources only when the assignment revision it runs permits retrieval in its brief.");
             execution.NoOtherKeys();
             if (!context.Findings.HasErrors) Consistency(context, execution.Element);
         }
@@ -203,6 +233,49 @@ internal static class ExecutionRecord
         if (context.Find(context.Record.Supersedes) is RecordEnvelope previous && EstateModel.BodyString(previous, "status") is "known-failure" or "observed-success"
             && !previous.Body.TryGetProperty("searchesObserved", out _))
             context.Error("operation.searches-observed", "Observed searches are recorded at settlement, never added afterwards.");
+    }
+
+    /// <summary>
+    /// A settled retrieval run's sources (RUN-04, format 3, additive): each web tool result the worker retained as an untrusted original,
+    /// recorded once at settlement by address or query, time, content hash and size; the text stays in the run's custody, never here.
+    /// </summary>
+    public static void ReadObservedSources(ValidationContext context, string? status)
+    {
+        BodyReader body = context.Body;
+        if (!body.Since(3, "sourcesObserved") || body.Nested("sourcesObserved", false) is not BodyReader observed) return;
+        IReadOnlyList<BodyReader> sources = observed.NestedArray("sources", true, allowEmpty: true) ?? [];
+        if (sources.Count > MaxRecordedSources)
+            observed.Error("operation.sources-observed", "sources", $"A settlement records at most {MaxRecordedSources} sources in full; the digest covers the rest.");
+        foreach (BodyReader source in sources)
+        {
+            Identity(source, "tool");
+            string? address = source.Text("address", false, 2000);
+            string? query = source.Text("query", false, 500);
+            bool withheld = source.Flag("withheld", false) == true;
+            if ((address is null ? 0 : 1) + (query is null ? 0 : 1) + (withheld ? 1 : 0) != 1)
+                context.Error("operation.sources-observed", "Each source names its address or its query, or says that it is withheld, and only one of these.");
+            if (address is not null && (!Uri.TryCreate(address, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https") || uri.UserInfo.Length != 0))
+                context.Error("operation.sources-observed", "A source's address is an absolute http or https address with no user information.");
+            source.Timestamp("at", true);
+            bool? retained = source.Flag("retained", true);
+            string? hash = source.Hash("hash", false);
+            long? bytes = source.Number("bytes", false, 0, CanonicalJson.MaxSafeInteger);
+            if ((hash is null) != (bytes is null) || (retained == true && hash is null))
+                context.Error("operation.sources-observed", "A source's content hash and size go together, and a retained source names both.");
+            source.NoOtherKeys();
+        }
+
+        observed.Flag("complete", true);
+        observed.Number("count", true, sources.Count, CanonicalJson.MaxSafeInteger);
+        observed.Hash("digest", true);
+        observed.NoOtherKeys();
+        bool retrieval = body.Element.TryGetProperty("execution", out JsonElement execution) && execution.ValueKind == JsonValueKind.Object
+            && execution.TryGetProperty("retrieval", out JsonElement value) && value.ValueKind == JsonValueKind.String;
+        if (EstateModel.BodyString(context.Record, "action") != OperationType.AgentRun || status is not ("known-failure" or "observed-success") || !retrieval)
+            context.Error("operation.sources-observed", "Retrieved sources belong to a settled agent run whose execution admitted retrieval.");
+        if (context.Find(context.Record.Supersedes) is RecordEnvelope previous && EstateModel.BodyString(previous, "status") is "known-failure" or "observed-success"
+            && !previous.Body.TryGetProperty("sourcesObserved", out _))
+            context.Error("operation.sources-observed", "Retrieved sources are recorded at settlement, never added afterwards.");
     }
 
     private static void Identity(BodyReader reader, string field, bool required = true)
@@ -300,6 +373,7 @@ internal static class ExecutionRecord
 
         JsonElement environment = execution.GetProperty("environment");
         JsonElement inventory = environment.GetProperty("inventory");
+        bool retrieval = execution.TryGetProperty("retrieval", out JsonElement retrieved) && retrieved.ValueKind == JsonValueKind.String && retrieved.GetString() == AssignmentType.PublicRetrieval;
         if (environment.GetProperty("inventoryHash").GetString() != Hashing.ContentHash.Sha256(CanonicalJson.SerializeUtf8(inventory))) Error("The admitted inventory hash identifies its exact canonical content.");
         HashSet<string> ids = inventory.EnumerateArray().Select(c => c.GetProperty("id").GetString()!).ToHashSet(StringComparer.Ordinal);
         HashSet<string> variables = environment.GetProperty("variables").EnumerateArray().Select(v => v.GetString()!).ToHashSet(StringComparer.Ordinal);
@@ -308,7 +382,8 @@ internal static class ExecutionRecord
         {
             if (component.GetProperty("dependencies").EnumerateArray().Any(d => !ids.Contains(d.GetString()!))
                 || component.GetProperty("environment").EnumerateArray().Any(v => !variables.Contains(v.GetString()!))
-                || component.GetProperty("destinations").EnumerateArray().Any(d => d.GetString() is not ("local" or "estate") && d.GetString() != requested.GetProperty("destination").GetString())) Error("Every admitted dependency, environment need and route is declared by the run.");
+                || component.GetProperty("destinations").EnumerateArray().Any(d => d.GetString() is not ("local" or "estate") && d.GetString() != requested.GetProperty("destination").GetString()
+                    && !(retrieval && d.GetString() == PublicWebDestination))) Error("Every admitted dependency, environment need and route is declared by the run; a public-web route only with retrieval.");
         }
 
         void Error(string message) => context.Error("operation.execution", message);

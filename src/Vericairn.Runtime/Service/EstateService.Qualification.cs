@@ -51,7 +51,8 @@ public sealed partial class EstateService
             File.WriteAllText(mcpFile, JsonSerializer.Serialize(new { mcpServers = new { vericairn = new { command = server[0], args = server.Skip(1), env = serverEnvironment } } }));
             var context = new LaunchContext(workspace, "Qualification probes only", "", mcpFile, server, serverEnvironment, settings, environment,
                 Execution: JsonSerializer.SerializeToElement(new { requested = new { model = "qualification-probe", effort = "provider-default" } }));
-            RunPreflight observed = launcher.Probe(launcher.Prepare(context));
+            LaunchContext prepared = launcher.Prepare(context);
+            RunPreflight observed = launcher.Probe(prepared);
             if (!observed.Complete || !observed.InheritsEnvironment || !HarnessQualificationType.ExactVersion(observed.HarnessVersion)
                 || observed.Probes is not { } probes || probes.Digests.Count != HarnessQualificationType.ProbeNames.Length
                 || HarnessQualificationType.ProbeNames.Any(n => !probes.Digests.TryGetValue(n, out string? digest) || !ContentHash.IsValid(digest)))
@@ -61,6 +62,14 @@ public sealed partial class EstateService
                 ["launcher"] = launcher.Launcher, ["version"] = observed.HarnessVersion, ["status"] = "qualified",
                 ["probes"] = JsonSerializer.SerializeToNode(probes.Digests),
             };
+            if (session.Manifest.RecordFormat >= 3)
+            {
+                // From 0.9.4 (CODE-82): a marker outside the workspace and a test host, read by a probe in the harness's place, with the
+                // harness's environment and working directory; the scratch root holds the workspace and the temporary directory, so the
+                // marker planted there is outside both.
+                ReachMeasurement reach = HarnessReach.Measure(scratch, workspace, prepared.Environment, WorkerOptions.VericairnCommand());
+                body["reach"] = new JsonObject { ["file"] = reach.OutsideFile, ["host"] = reach.TestHost };
+            }
             lock (gate)
             {
                 // Revalidate the person's authority and the whole estate after probing, under the write gate.

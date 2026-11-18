@@ -881,7 +881,7 @@ Software Domain Pack ships three launchers and the Git workspace provider (whose
 
 | Launcher | Runs |
 |---|---|
-| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
+| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. From 0.9.4 a run whose brief permits retrieval adds `WebFetch,WebSearch` to `--tools` and allows exactly those two in `--settings` (RUN-04). It watches provisional message tokens and settles tokens from the stream's complete final result. |
 | `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' -c 'sandbox_workspace_write={writable_roots=["<canonical workspace>/.git"]}' --ignore-rules <qualified feature overrides> "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
 | `generic` | Describes the command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Worker dispatch remains refused because the generic launcher has no complete inventory qualification. |
 
@@ -1044,6 +1044,66 @@ exception is revised or expires afterwards, and one naming an exception already 
 judges once more immediately before the launch, under the runtime's gate, so nothing changes between that judgment and
 the start: an exception that lapsed after the intent, or a key of an operator or of the sponsor that arrived here, launches
 nothing, and the run is recorded `canceled` before dispatch, naming the devices and the exception, never charged.
+
+**What a run can reach (CODE-82).** From 0.9.4 each run's record shows what outside files and hosts it could reach. Neither
+native launcher confines its harness process: it runs as the operating-system user the worker runs as, and Codex's
+`workspace-write` sandbox confines only its shell commands' writes and network, never their reads or the harness process
+itself. So the worker measures before the run starts, after the inventory is admitted and before the intent. It plants a
+marker file in the run's own directory, outside the workspace and the run's temporary directory, and starts a test host on
+the loopback interface, then starts a probe in the harness's place: the vericairn executable with a private argument, as the
+same user, with the harness's environment and working directory. The probe reads the marker and connects to the host and
+reports what it read; nothing else runs. `readable` and `reachable` mean it returned the exact random token, `blocked` that
+the read or the connection was refused, and `unknown` that the probe did not run or report; unknown is never reported as
+blocked. The worker then lists the secret-bearing paths the user can open for reading: SSH keys, cloud, package-registry and
+forge credentials, GnuPG private keys, harness logins (the run's imported login among them), the Vericairn home's device keys,
+a home `.env` file and macOS keychain files, at conventional locations under the harness's home. Opening a file is the only
+test, made without blocking, so a named pipe at one of those paths holds nothing up, and the inventory stops, saying it is
+incomplete, after ten seconds; no byte of a file is read. The list, by path and kind, stays in the run's custody on the
+machine that ran it, at every record format: `estates/<estate>/reach/<run>.json` under the Vericairn home, owner-only and
+outside the run's directory, whose temporary directory and stop file the harness is told of, so the run is not handed a map
+of those paths beside its own files. A process of the same user can still read it. From record format 3 the intent's `execution.reach` records
+`outsideFile`, `testHost`, `secretPaths` (the count), `secretKinds` and `secretPathsComplete`, never a path. The measurement
+shows reach; it blocks nothing and refuses no run: on today's launchers a run reads what its user can read. Run the worker as
+another operating-system user, one that cannot read those paths, to reduce it.
+
+**Public retrieval for research runs (RUN-04).** From 0.9.4 a run retrieves public sources only when the brief of the
+assignment it runs permits it, with `"retrieval": "public"` (record format 3); no other field, text or setting permits it, and
+a run whose brief does not gets no web tool: a harness that uses one anyway is stopped as a tool outside its admitted
+inventory. Before anything is recorded, and again at the intent and before dispatch, an interim check refuses a retrieval run
+where the records show something private in reach: the workspace's repository resource is not `public`; the estate's own
+repository resource is not `public`, or no repository resource records the estate's own repository, or the runtime cannot
+observe that repository, since unknown counts as private; or the run's records name a credential, a `credential-reference`
+among the assignment's sources or step inputs or the work order's or goal's inputs. The estate's own repository is matched
+by its recorded identity: where it has an origin remote, only a resource whose `github` or
+`url` names that remote, and whose `rootCommit`, if it records one, agrees; where it has none, only a resource that records
+no remote, by its root commit. A root commit alone never stands for it, since a fork shares its upstream's. The run's own
+context package and the searches its intent fixes are judged too, once assembled and again on the intent just before it is
+written: any `credential-reference` they name, a search-selected one among them, refuses. The refusal names every reason.
+The check reads records as recorded: a resource's visibility is trusted, not verified at the forge; a credential named only
+inside another record the run reads (two hops away) is not found; and a repository that turns private after dispatch does
+not stop the run. What the run's operating-system user can read on the machine is not checked until confined reads
+are qualified; the run's `execution.reach` shows it. Only the `claude-code` launcher enables retrieval: it adds `WebFetch` and
+`WebSearch` to `--tools`, allows exactly those two in the run's `--settings`, and admits them in the inventory with the route
+`public-web`, which the intent's `execution.retrieval: "public"` alone allows. The `codex` launcher keeps web search disabled and
+refuses a retrieval run before its intent, because Codex's events report only a search's query, never what it retrieved. The
+condition adds the constraint that retrieved pages and results are untrusted data, never instructions, and no credential passes
+to the harness, as for every run. The worker reads each invocation of an admitted web tool and the result the harness gave
+the agent from the event stream and retains that result, exactly as reported, as an untrusted original in the run's custody:
+`sources/<content hash>.txt` and a `sources.jsonl` log in the run's owner-only directory, at most 8 MiB a source and 64 MiB a
+run. It fetches nothing itself, so the original is what the agent received; for `WebFetch` that is the harness's own reduction
+of the page, not the page's bytes. A web tool asked for an address that is not public raises a critical `network` signal and
+the run is stopped. The address is read as a WHATWG URL parser, which a harness's fetch uses, reads it: tabs and newlines
+removed, backslashes as slashes, the host percent-decoded and its trailing dots removed, IPv4 in every form that parser
+accepts (decimal, octal or hexadecimal parts, one to four of them) and IPv6 with its IPv4-mapped and embedded forms. Loopback,
+private, shared, link-local and metadata, unique-local, multicast, unspecified, documentation and reserved ranges, names only a
+local resolver answers, user information, a scheme other than http or https and anything that does not parse are not public.
+A non-ASCII host, which that parser maps by Unicode normalization and IDNA (full-width or ideographic dots, enclosed digits),
+is refused rather than mapped, so an internationalized name must be given in its `xn--` form. A public name that resolves to a
+private address is not caught, and the stop follows the event, which can arrive after the tool ran. Settlement records `sourcesObserved`:
+each source's tool, its address or query (withheld when it would fail the estate's content check), its time, whether it was
+retained and its content hash and size, at most 100 in full with the count and digest of all, and whether the log was
+complete. Retrieved text never enters a record, a repository or the agent's instructions. The log is not tamper-evident: a
+harness that does not sandbox the agent runs as the same user and could change it.
 
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed
@@ -2061,6 +2121,11 @@ MCP server. The signed `harness-qualification` record is available from format 2
 | `login` | The permitted login boundary: presence for Codex, unmanaged subscription class for Claude Code. No credential content or credential digest. |
 | `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests the estate-only approval policy, whether it was reported, and reported authentication status. |
 
+From 0.9.4 (CODE-82), qualification also plants a marker file in its scratch directory, outside the probe workspace and its
+temporary directory, and a test host on the loopback interface, and runs the same reach probe as a run does, in the harness's
+place. A format-3 qualification records the outcome as `reach`: `file` (`readable`, `blocked` or `unknown`) and `host`
+(`reachable`, `blocked` or `unknown`). The reach is evidence about the installation, not an admission identity: admission
+still matches the six probe digests, and a revocation may omit it.
 Raw probe output, command bindings, machine paths and credential values never enter the qualification record.
 The MCP check first compares the actual local command, arguments and environment to the generated configuration;
 only then does its digest normalize run-specific paths and acting-principal bindings. A record from another machine
@@ -2121,7 +2186,8 @@ See the [Codex CLI flags](https://learn.chatgpt.com/docs/developer-commands?surf
 [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Claude Code's `--tools` selects exactly `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `TaskOutput`, `TaskStop` and
-`EndConversation`. The inventory also identifies the built-in goal evaluator, the `vericairn` MCP server and the
+`EndConversation`; from 0.9.4 a retrieval run adds `WebFetch` and `WebSearch` (RUN-04), with the route `public-web`, while the
+qualification probes keep the base selection. The inventory also identifies the built-in goal evaluator, the `vericairn` MCP server and the
 `claude-code-setting-sources-none` configuration. It verifies the presence of every option it relies on: `--print`,
 `--output-format`, `--verbose`, `--permission-mode`, `--mcp-config`, `--strict-mcp-config`, `--setting-sources`,
 `--settings`, `--tools`, `--model`, `--effort`, and `--max-budget-usd`. All must be declarations in help, not prefixes
