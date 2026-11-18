@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -60,10 +61,17 @@ public sealed class DisclosureHoldTests
         if (!pushed) Assert.Equal("known-failure", response.Status);
     }
 
-    // FIX-137: the carrying release's documentation set, unmerged, passes the hold once the operator has approved the release's Security
-    // section after the held work order's current revision, with no ask about the carrier still waiting; every other push stays held.
+    // FIX-137: the carrying release's documentation set, unmerged and carrying nothing but documentation and the release's held fixes,
+    // passes the hold once the operator has answered an ask about the release's Security section with a decision that names the held
+    // work order, after its current revision, with no ask about the carrier still waiting; every other push stays held.
     [Theory]
     [InlineData("none", "carried", false)]
+    [InlineData("answered-other-question", "carried", false)]
+    [InlineData("answered-not-naming", "carried", false)]
+    [InlineData("answered", "carried-with-fix", true)]
+    [InlineData("answered", "carried-with-other-change", false)]
+    [InlineData("answered", "carried-unreadable", false)]
+    [InlineData("answered", "carried-without-paths", false)]
     [InlineData("waiting", "carried", false)]
     [InlineData("withdrawn", "carried", false)]
     [InlineData("answered", "carried", true)]
@@ -92,11 +100,14 @@ public sealed class DisclosureHoldTests
             {"key":"FIX-90","kind":"ordinary","title":"Cache fix","intent":"{{Intent}}","scope":["{{Shared}}"],"exitQuestion":"Is it closed?","inputs":[],"deliverables":["The fix"],"disclosure":"held","placement":{"kind":"release","carrier":"{{carrier.Id}}","product":"{{product}}","version":"9.9.9"} }
             """;
         RecordEnvelope order = f.Estate.Add("work-order", op, held);
+        // The Reviewer's probe: a question about the carrier that is not the Security section's approval, answered after the revision.
+        string question = approval == "answered-other-question" ? "Which day should 9.9.9 be submitted?" : "Approve the Security section of the release notes of 9.9.9?";
         RecordEnvelope Ask() => f.Estate.Add("ask", op, $$"""
-            {"to":"{{op}}","question":"Approve the Security section of the release notes of 9.9.9?","recommendation":"Approve it as drafted.","consequence":"The documentation set waits.","state":"open"}
+            {"to":"{{op}}","question":"{{question}}","recommendation":"Approve it as drafted.","consequence":"The documentation set waits.","state":"open"}
             """, subject: carrier.Reference);
+        string affects = approval == "answered-not-naming" ? "" : "\"" + order.Id + "\"";
         void Answer(RecordEnvelope ask) => f.Estate.Add("decision", op, $$"""
-            {"title":"Security section approved","statement":"Approved.","summary":"The Security section of 9.9.9 is approved.","synthesis":"The operator approved the section as drafted.","effects":["The documentation set carries the section."],"affects":[],"decidedBy":"{{op}}","decidedAt":"{{f.Estate.Clock.AddSeconds(1):yyyy-MM-ddTHH:mm:ssZ}}","stake":"medium","notAuthorized":[],"answers":["{{ask.Id}}"]}
+            {"title":"Security section approved","statement":"Approved.","summary":"The Security section of 9.9.9 is approved.","synthesis":"The operator approved the section as drafted.","effects":["The documentation set carries the section."],"affects":[{{affects}}],"decidedBy":"{{op}}","decidedAt":"{{f.Estate.Clock.AddSeconds(1):yyyy-MM-ddTHH:mm:ssZ}}","stake":"medium","notAuthorized":[],"answers":["{{ask.Id}}"]}
             """);
         if (approval != "none")
         {
@@ -112,7 +123,16 @@ public sealed class DisclosureHoldTests
         Assert.False(f.Estate.Load().Findings.HasErrors, string.Join('\n', f.Estate.Load().Findings));
         const string path = "docs/releases/9.9.9/manifest.json";
         const string manifest = """{"format":"vericairn.docs/1","version":"9.9.9","documents":[]}""";
-        if (set is "carried" or "merged") f.Adapter.Files[(ChangesFlowTests.Head, path)] = manifest;
+        if (set.StartsWith("carried", StringComparison.Ordinal) || set == "merged") f.Adapter.Files[(ChangesFlowTests.Head, path)] = manifest;
+        PushedCommit setCommit = new(ChangesFlowTests.Head, "Release 9.9.9 documentation set") { Paths = [path, "docs/operator-guide.md", "docs/releases/frozen-sha256.json", "Directory.Build.props"] };
+        f.Adapter.Commits = set switch
+        {
+            "carried-with-fix" => [setCommit, new(new string('d', 40), "FIX-90: Close the cache's path") { Paths = ["src/Widget/Cache.cs", "tests/Widget/CacheTests.cs"] }],
+            "carried-with-other-change" => [setCommit, new(new string('d', 40), "Add an unrelated option") { Paths = ["src/Widget/Options.cs"] }],
+            "carried-unreadable" => null,
+            "carried-without-paths" => [new(ChangesFlowTests.Head, "Release 9.9.9 documentation set")],
+            _ => [setCommit],
+        };
         if (set == "merged") f.Adapter.Files[(ChangesFlowTests.Basis, path)] = manifest;
         if (set == "other-version") f.Adapter.Files[(ChangesFlowTests.Head, path)] = manifest.Replace("\"9.9.9\"", "\"9.9.8\"", StringComparison.Ordinal);
         if (set == "other-format") f.Adapter.Files[(ChangesFlowTests.Head, path)] = manifest.Replace("vericairn.docs/1", "vericairn.docs/9", StringComparison.Ordinal);

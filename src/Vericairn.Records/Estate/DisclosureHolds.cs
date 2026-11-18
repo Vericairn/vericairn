@@ -61,9 +61,9 @@ public static class DisclosureHolds
     /// <summary>
     /// The version of the release whose documentation set a checked push of <paramref name="product"/>'s repository may carry with this
     /// hold's text (FIX-137), or null when no push may before publication. It is the hold's carrying release, a release of that product,
-    /// once the operator has approved its Security section: an ask about the release's carrier, put to the operator, is answered by the
-    /// operator's decision, made after the held work order's current revision, and no ask about the carrier still waits, open or
-    /// notified. The caller then lets the push pass this hold only if the push carries that version's documentation set.
+    /// once the operator has approved its Security section for this held work order (<see cref="SecuritySectionApproved"/>). The caller
+    /// then lets the push pass this hold only if the push carries that version's documentation set and nothing else but the release's
+    /// held fixes.
     /// </summary>
     internal static string? DocumentationSetRelease(EstateModel model, Hold hold, string product)
     {
@@ -74,25 +74,48 @@ public static class DisclosureHolds
         order = model.Latest(order);
         if (Carrying(order) is not (string carrier, string placed, string version) || !Patterns.SemanticVersion.IsMatch(version)
             || LivingDocuments.ProductIdentity(model, placed) != LivingDocuments.ProductIdentity(model, product)) return null;
-        return SecuritySectionApproved(model, carrier, order.AtTime) ? version : null;
+        return SecuritySectionApproved(model, carrier, order) ? version : null;
     }
 
     /// <summary>
-    /// Whether the operator has approved the Security section of the release that <paramref name="carrier"/> carries, after
-    /// <paramref name="since"/>: as the release flow's <c>security-section</c> trap reads it, an ask about the carrier answered by the
-    /// operator's decision, none still waiting; and, beyond the trap, at least one such answer, decided and recorded after
-    /// <paramref name="since"/>, so that a section approved before a fix joined the hold never covers it.
+    /// Whether the operator has approved, for <paramref name="order"/>, the Security section of the release that
+    /// <paramref name="carrier"/> carries: an ask about the carrier whose question names the release's Security section
+    /// (<see cref="SecuritySection"/>) is answered by the operator's decision, that decision names the held work order among the work
+    /// orders it affects, and it was decided and recorded after the work order's current revision, so that a section approved before
+    /// a fix joined the hold never covers it; and, as the release flow's <c>security-section</c> trap reads it, no ask about the carrier
+    /// still waits, open or notified. An answer to any other question about the carrier, such as when to submit, approves nothing.
     /// </summary>
-    internal static bool SecuritySectionApproved(EstateModel model, string carrier, DateTimeOffset since)
+    internal static bool SecuritySectionApproved(EstateModel model, string carrier, RecordEnvelope order)
     {
         ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
         if (!model.ById.TryGetValue(carrier, out RecordEnvelope? record) || record.Type != "work-order") return false;
         HashSet<string> carriers = [.. model.Chain(model.Latest(record))];
-        List<(string State, IReadOnlyList<RecordEnvelope> Answers)> asks = [.. model.Current("ask")
-            .Where(a => a.Subject is { Type: "work-order" } subject && carriers.Contains(subject.Id)).Select(a => Asks.State(model, a))];
+        HashSet<string> held = [.. model.Chain(order)];
+        DateTimeOffset since = order.AtTime;
+        List<(RecordEnvelope Ask, string State, IReadOnlyList<RecordEnvelope> Answers)> asks = [.. model.Current("ask")
+            .Where(a => a.Subject is { Type: "work-order" } subject && carriers.Contains(subject.Id))
+            .Select(a =>
+            {
+                (string state, IReadOnlyList<RecordEnvelope> answers) = Asks.State(model, a);
+                return (a, state, answers);
+            })];
         if (asks.Any(a => Asks.IsWaiting(a.State))) return false;
-        return asks.Any(a => a.State == "answered" && a.Answers.Any(d => model.HasRole(EstateModel.BodyString(d, "decidedBy"), Roles.Operator)
-            && d.AtTime > since && Decided(d) > since));
+        return asks.Any(a => a.State == "answered" && ContainsWord(Normalize(EstateModel.BodyString(a.Ask, "question") ?? ""), SecuritySection)
+            && a.Answers.Any(d => model.HasRole(EstateModel.BodyString(d, "decidedBy"), Roles.Operator) && d.AtTime > since && Decided(d) > since
+                && d.Body.TryGetProperty("affects", out JsonElement affects) && affects.ValueKind == JsonValueKind.Array
+                && affects.EnumerateArray().Any(id => id.ValueKind == JsonValueKind.String && held.Contains(id.GetString()!))));
+    }
+
+    /// <summary>The words an ask's question uses to name the release's Security section, matched whole, ignoring case and compatibility forms.</summary>
+    internal const string SecuritySection = "security section";
+
+    /// <summary>Whether the text names the hold's key as a whole word, as a held fix's commit message does (FIX-137).</summary>
+    internal static bool Names(Hold hold, string text)
+    {
+        ArgumentNullException.ThrowIfNull(hold);
+        ArgumentNullException.ThrowIfNull(text);
+        return hold.Key.Length > 0 && ContainsWord(Normalize(text), Normalize(hold.Key));
     }
 
     // The hold ends when the release that carries the work order is published.

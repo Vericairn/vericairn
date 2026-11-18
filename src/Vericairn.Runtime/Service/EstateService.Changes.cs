@@ -119,7 +119,8 @@ public sealed partial class EstateService
     // A held work order's key and distinctive text stay out of a public repository until the release carrying it is published,
     // whoever wrote the commits. A repository whose visibility is not recorded as public is not held to this check. Before then, one
     // push may carry them (FIX-137): the carrying release's documentation set, with the held fixes it carries, once the operator has
-    // approved that release's Security section (DisclosureHolds.DocumentationSetRelease); the push must carry that set itself.
+    // approved that release's Security section (DisclosureHolds.DocumentationSetRelease); the push must carry that set and nothing else
+    // but the release's held fixes.
     private void RefuseHeldDisclosure(ChangeClaim claim, IPushAdapter adapter, string directory, PushPlan plan)
     {
         if (EstateModel.BodyString(claim.Configuration.Repository, "visibility") != "public") return;
@@ -132,19 +133,23 @@ public sealed partial class EstateService
         if (holds.Count == 0) return;
         // The repository is read outside the gate, once for each release whose documentation set could let a hold pass.
         Dictionary<string, bool> carried = holds.Select(h => h.Release).OfType<string>().Distinct(StringComparer.Ordinal)
-            .ToDictionary(version => version, version => CarriesDocumentationSet(adapter, directory, plan, version), StringComparer.Ordinal);
+            .ToDictionary(version => version, version => CarriesDocumentationSet(adapter, directory, plan, version,
+                [.. holds.Where(h => h.Release == version).Select(h => h.Hold)]), StringComparer.Ordinal);
         List<DisclosureHolds.Hold> held = [.. holds.Where(h => h.Release is null || !carried[h.Release]).Select(h => h.Hold)];
         if (held.Count == 0) return;
         string text = adapter.PublishedText(directory, plan)
             ?? throw new ProviderRefusedException("A disclosure hold is in force, and the push's text could not be read to check it; nothing was pushed.");
         if (DisclosureHolds.Disclosed(held, text) is string key)
             throw new ProviderRefusedException($"The push would disclose held work order {key} in a public repository before the release that carries it is published; nothing was pushed."
-                + (holds.Any(h => h.Hold.Key == key && h.Release is not null) ? " Only the push that carries that release's documentation set may carry it now." : string.Empty));
+                + (holds.Any(h => h.Hold.Key == key && h.Release is not null)
+                    ? " Only the push that carries that release's documentation set, with nothing but documentation and the release's held fixes, may carry it now." : string.Empty));
     }
 
-    // Whether the push carries a release's documentation set, unmerged: its head holds the set's manifest for that version and the target
-    // branch's head holds none, as while the set's pull request is open. A manifest of another format or version is not the set.
-    private static bool CarriesDocumentationSet(IPushAdapter adapter, string directory, PushPlan plan, string version)
+    // Whether the push is the release's documentation set, unmerged, and nothing else: its head holds the set's manifest for that version
+    // and the target branch's head holds none, as while the set's pull request is open; and every commit it carries that the target does
+    // not hold changes documentation only, or is one of the release's held fixes, whose message names its held work order's key. A
+    // manifest of another format or version is not the set, and a push carrying the manifest beside any other change is not the set.
+    private static bool CarriesDocumentationSet(IPushAdapter adapter, string directory, PushPlan plan, string version, IReadOnlyList<DisclosureHolds.Hold> held)
     {
         string path = DocumentationSetDirectory + version + "/manifest.json";
         string? manifest = adapter.FileText(directory, plan, plan.Head, path);
@@ -152,17 +157,25 @@ public sealed partial class EstateService
         try
         {
             using JsonDocument document = JsonDocument.Parse(manifest);
-            return document.RootElement.ValueKind == JsonValueKind.Object && ChangeText(document.RootElement, "format") == Vericairn.Runtime.Release.ReleaseFlow.DocumentationManifest
-                && ChangeText(document.RootElement, "version") == version;
+            if (document.RootElement.ValueKind != JsonValueKind.Object || ChangeText(document.RootElement, "format") != Vericairn.Runtime.Release.ReleaseFlow.DocumentationManifest
+                || ChangeText(document.RootElement, "version") != version) return false;
         }
         catch (JsonException)
         {
             return false;
         }
+        IReadOnlyList<PushedCommit>? commits = adapter.CommitMessages(directory, plan);
+        return commits is not null && commits.All(c => c is { Paths: not null, Message: not null } && Patterns.Commit.IsMatch(c.Commit)
+            && (c.Paths.All(DocumentationPath) || held.Any(h => DisclosureHolds.Names(h, c.Message))));
     }
 
     // Where a software product's release keeps its documentation sets, one directory per version (the release flow's docs-set step).
     private const string DocumentationSetDirectory = "docs/releases/";
+
+    // A path a documentation set's pull request changes: the guides and sets under docs/, and the root files the set's preparation
+    // updates, its README.md and llms.txt, and Directory.Build.props, where the release flow sets the new version.
+    private static bool DocumentationPath(string path) => path.StartsWith("docs/", StringComparison.Ordinal) && Patterns.RelativePath.IsMatch(path)
+        || path is "README.md" or "llms.txt" or "Directory.Build.props";
 
     /// <summary>Opens only from a recorded successful push of the same repository, branch and exact head.</summary>
     public ChangeResponse ChangesOpen(ChangesOpenRequest request)

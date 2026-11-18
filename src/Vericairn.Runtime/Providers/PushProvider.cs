@@ -19,7 +19,14 @@ public sealed record SecretScan(string Tool, string Version, string Range, strin
 }
 
 /// <summary>One commit a push carries, by its exact id, with its whole message, trailers included (CODE-81).</summary>
-public sealed record PushedCommit(string Commit, string Message);
+public sealed record PushedCommit(string Commit, string Message)
+{
+    /// <summary>
+    /// The repository-relative paths the commit changes; for a merge commit, only those that differ from every one of its parents. A
+    /// checked push reads them to tell a release's documentation set from other changes (FIX-137). Null when the adapter does not read them.
+    /// </summary>
+    public IReadOnlyList<string>? Paths { get; init; }
+}
 
 /// <summary>The secret scan contract, version 1. Implementations scan exactly the plan's commits and return only aggregate facts.</summary>
 public interface ISecretScanner

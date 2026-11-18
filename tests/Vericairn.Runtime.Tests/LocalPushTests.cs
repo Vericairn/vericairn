@@ -150,6 +150,10 @@ public sealed class LocalPushTests : IDisposable
         Assert.Equal(new[] { head, other, first }.Order(StringComparer.Ordinal), commits.Select(c => c.Commit).Order(StringComparer.Ordinal));
         Assert.Equal("Merge main into the change\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == head).Message);
         Assert.Equal("Add checked content\n\nWhy it changed.\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == first).Message);
+        // FIX-137: each commit's paths, a clean merge naming none, since none differs from every one of its parents.
+        Assert.Equal(["addition.txt"], Assert.Single(commits, c => c.Commit == first).Paths!);
+        Assert.Equal(["other.txt"], Assert.Single(commits, c => c.Commit == other).Paths!);
+        Assert.Empty(Assert.Single(commits, c => c.Commit == head).Paths!);
     }
 
     // CODE-81: a commit the target branch already holds is in the repository already, so a pushed branch that takes in a newer target

@@ -133,21 +133,33 @@ discloses stays the operator's choice. A push to a private repository is not hel
 cannot read the push's text, the push is refused.
 
 From 0.9.4 (FIX-137), one push may carry the held text before then: the carrying release's documentation set, with the held
-fixes it carries, once the operator has approved that release's Security section, as the release procedure merges the set
-just before the candidate's submission. Every other push that would add the held text stays refused until the release is
-published, including one made after that approval. Before 0.9.4 the hold ended only at publication, so a checked push refused
-the release's own documentation set when it carried a held fix's guide text.
+fixes it carries, once the operator has approved that release's Security section for the held work order, as the release
+procedure merges the set just before the candidate's submission. Every other push that would add the held text stays refused
+until the release is published, including one made after that approval and one that carries the set beside other changes.
+Before 0.9.4 the hold ended only at publication, so a checked push refused the release's own documentation set when it carried
+a held fix's guide text.
 
-- **The set.** The push must be a checked push of the product the release belongs to, and carry the set unmerged: its head
-  holds `docs/releases/<version>/manifest.json`, a `vericairn.docs/1` manifest of the carrying release's version, and its
-  target branch's head holds none, as while the set's pull request is open. The push adapter reads the manifest at those
-  two commits only, without the clone's filters; an adapter that reads no files (`IPushAdapter.FileText`) never lets a set
-  pass, and a read that fails refuses the push.
-- **The approval.** The Security section counts as approved when an ask about the release's carrier work order, put to the
-  operator, is answered by the operator's decision, decided and recorded after the held work order's current revision, and
-  no ask about the carrier still waits, open or notified. A decision made before the work order was last revised, such as
-  before it was placed in the release or marked held, does not cover it: ask the operator again. A refusal of a push while
-  such an approval stands says that only the push carrying the set may carry the held text.
+- **The set, unmerged.** The push must be a checked push of the product the release belongs to. Its head holds
+  `docs/releases/<version>/manifest.json`, a `vericairn.docs/1` manifest of the carrying release's version, and its target
+  branch's head holds none, as while the set's pull request is open.
+- **Nothing but the set and its held fixes.** Every commit the push carries that its target branch does not already hold
+  either changes only documentation, which is paths under `docs/` and the root's `README.md`, `llms.txt` and
+  `Directory.Build.props`, where the release flow sets the new version, or is a held fix of that release: its message names, as
+  a whole word, the key of a work order held and placed in that release, and it may change any path. A merge commit counts only
+  for the paths that differ from every one of its parents, so taking in the target adds nothing. A push that carries the
+  manifest beside any other change is not the set, whatever its branch.
+- **The approval.** The operator approves the Security section for a held work order by answering an ask about the release's
+  carrier work order whose question names the release's Security section, the words "Security section" in any case, with a
+  decision that names the held work order among the work orders it affects. The decision must be decided and recorded after
+  the held work order's current revision, and no ask about the carrier may still wait, open or notified. An answer to any
+  other question about the carrier, such as when to submit, approves nothing, and so does a decision that does not name the
+  held work order; one made before the work order was last revised, such as before it was placed in the release or marked
+  held, does not cover it: ask the operator again.
+- **The reads.** The push adapter reads the manifest at the head and the target head only, without the clone's filters, and
+  each carried commit's message and paths (`IPushAdapter.FileText` and `IPushAdapter.CommitMessages`); an adapter that reads
+  either not at all never lets a set pass, and a read that fails refuses the push. A refusal of a push while such an approval
+  stands says that only the push carrying the set, with nothing but documentation and the release's held fixes, may carry the
+  held text.
 
 ### Commit messages (0.9.4)
 
