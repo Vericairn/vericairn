@@ -31,6 +31,7 @@ public sealed class AssignmentType : IRecordType
         new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests; from 0.9.4, optional repository (the identity of the estate or of a repository resource the work changes), excludedChanges (patterns in permittedChanges' grammar the work leaves out) and after (at most 20 assignment ids whose work it waits for, each followed to its current revision, never itself and never a cycle). A reader lacking these refuses the brief, which admits no unknown field."),
         new("note", "string", false, "Free text."),
         new("step", "object", false, "For an assignment of a run's work order, the flow step it carries: key, instance for a step that runs over a list under each, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do. A review before hand-off adds review: the items it reviews (none for a step that declares no items) and the exact subject {type, id, hash} that carries them; its contributor is never an author of the step's work unless every item takes a self review.", 3),
+        new("occurrence", "object", false, "From 0.9.4, for an assignment of a standing agent's work order, the occurrence it carries: key (the goal's identity, trigger, revision and item, or for a duty trigger duty/ and the duty occurrence's identity), trigger, revision (the goal revision the trigger's declaration originates from) and item (schedule {interval, dueAt}, event {record {type, id, hash}}, condition {failing, records}, request {at, by} or duty {occurrence, policy, rule, dueAt, deadline, schedule}). Every assignment of a standing agent's work order names one and only those do; a key holds one assignment, whoever records it, unless a person takes its step over. A reader lacking it refuses the assignment, which admits no unknown field.", 3),
         new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
     ];
 
@@ -205,6 +206,7 @@ public sealed class AssignmentType : IRecordType
             step.NoOtherKeys();
         }
 
+        BodyReader? occurrence = body.Since(3, "occurrence") ? body.Nested("occurrence", false) : null;
         if (body.Since(2, "routedWith"))
         {
             body.Enum("routedWith", false, RoutedWith);
@@ -244,6 +246,7 @@ public sealed class AssignmentType : IRecordType
         if (context.Format >= 3 && order is not null)
         {
             FlowRuns.ValidateStep(context, order, step);
+            StandingAgents.ValidateOccurrence(context, order, occurrence);
         }
 
         if (contributor is not null && context.Principal(contributor) is null)
