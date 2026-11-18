@@ -12,7 +12,7 @@ namespace Vericairn.Runtime.Tests;
 internal sealed class NativeRun : IDisposable
 {
     public NativeRun(string harness, Action<NativeProbe, LaunchContext>? beforeDispatch = null, string? budget = null, bool keepOperatorKey = false,
-        bool newer = false, bool qualify = false, Action? afterProbe = null, long recordFormat = 2, string? brief = null)
+        bool newer = false, bool qualify = false, Action? afterProbe = null, long recordFormat = 2, string? brief = null, bool retrieval = false)
     {
         Probe = new(harness);
         Run = new(budget: budget ?? """{"wallMinutes":60,"attemptsPerStep":3}""", keepOperatorKey: keepOperatorKey || qualify, recordFormat: recordFormat, brief: brief);
@@ -27,6 +27,8 @@ internal sealed class NativeRun : IDisposable
         foreach (string name in RunDirectory.TemporaryVariables) serverEnvironment[name] = environment[name];
         IReadOnlyList<string> server = [.. Probe.Context.McpServer, "--estate", Run.Estate.Root, "mcp", "serve", "--as", Run.Estate.BuilderId];
         LaunchContext inspection = Probe.Context with { Environment = environment, McpServer = server, McpEnvironment = serverEnvironment };
+        // A retrieval run's admitted inventory carries its web tools (RUN-04).
+        if (retrieval) inspection = inspection with { Execution = JsonSerializer.SerializeToElement(new { requested = new { model = "model-a", effort = "high" }, retrieval = "public" }) };
         File.WriteAllText(inspection.McpConfiguration, JsonSerializer.Serialize(new { mcpServers = new { vericairn = new { command = server[0], args = server.Skip(1), env = serverEnvironment } } }));
         Run.Service.Providers.Register(Probe.Launcher);
         Run.Service.WorkerOptions = Run.Service.WorkerOptions with { Environment = environment, Vericairn = Probe.Context.McpServer };

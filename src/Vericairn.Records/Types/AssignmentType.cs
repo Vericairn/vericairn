@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
+using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -28,7 +29,7 @@ public sealed class AssignmentType : IRecordType
         SavedPrompts.UseField,
         new("execution", "object", false, "Explicit execution choices and cumulative restrictions; launcher, roster, goal, assignment, then run precedence. Role restrictions remain binding.", 2),
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
-        new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests; from 0.9.4, optional repository (the identity of the estate or of a repository resource the work changes), excludedChanges (patterns in permittedChanges' grammar the work leaves out) and after (at most 20 assignment ids whose work it waits for, each followed to its current revision, never itself and never a cycle). A reader lacking these refuses the brief, which admits no unknown field."),
+        new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests; from 0.9.4, optional repository (the identity of the estate or of a repository resource the work changes), excludedChanges (patterns in permittedChanges' grammar the work leaves out) and after (at most 20 assignment ids whose work it waits for, each followed to its current revision, never itself and never a cycle); from 0.9.4 (RUN-04), optional retrieval: public, which permits the work's runs to retrieve public sources with their harness's web tools, never with credentials, each source retained as an untrusted original; no other field or text permits it. A reader lacking these refuses the brief, which admits no unknown field."),
         new("note", "string", false, "Free text."),
         new("step", "object", false, "For an assignment of a run's work order, the flow step it carries: key, instance for a step that runs over a list under each, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do. A review before hand-off adds review: the items it reviews (none for a step that declares no items) and the exact subject {type, id, hash} that carries them; its contributor is never an author of the step's work unless every item takes a self review.", 3),
         new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
@@ -108,6 +109,17 @@ public sealed class AssignmentType : IRecordType
         }
     }
 
+    /// <summary>The one retrieval a brief may permit (RUN-04): public sources, with the harness's web tools and no credential.</summary>
+    internal const string PublicRetrieval = "public";
+
+    /// <summary>Whether an assignment's brief permits its runs to retrieve public sources (RUN-04); nothing else permits it.</summary>
+    internal static bool PermitsRetrieval(RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(assignment);
+        return assignment.Format >= 3 && assignment.Body.TryGetProperty("brief", out JsonElement brief) && brief.ValueKind == JsonValueKind.Object
+            && brief.TryGetProperty("retrieval", out JsonElement retrieval) && retrieval.ValueKind == JsonValueKind.String && retrieval.GetString() == PublicRetrieval;
+    }
+
     /// <summary>The records routing stores an assignment together with.</summary>
     public static readonly ImmutableArray<string> RoutedWith = ["run", "ask"];
 
@@ -146,6 +158,7 @@ public sealed class AssignmentType : IRecordType
             if (context.Format >= 3)
                 brief.Text("reviewBrief", false, 1_000_000);
             Overlaps(context, brief);
+            if (brief.Since(3, "retrieval")) brief.Enum("retrieval", false, PublicRetrieval);
 
             ProgressReporting.Request(brief);
             brief.NoOtherKeys();

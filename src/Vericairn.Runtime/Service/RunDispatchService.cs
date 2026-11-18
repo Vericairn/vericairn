@@ -773,6 +773,7 @@ internal sealed partial class RunDispatchService(
             JsonObject body = JsonNode.Parse(found.Latest.Body.GetRawText())!.AsObject();
             change(body);
             ObserveSearches(found, body);
+            ObserveSources(found, body);
             var draft = new RecordDraft("operation", by, Element(body), found.Latest.Subject, found.Latest.Id);
             if (body["status"]?.GetValue<string>() is not ("observed-success" or "known-failure" or "canceled"))
             {
@@ -797,6 +798,23 @@ internal sealed partial class RunDispatchService(
             or Records.Canonical.CanonicalJsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {
             body["searchesObserved"] = Search.ObservedSearches.Incomplete();
+        }
+    }
+
+    // A retrieval run's sources (RUN-04) are recorded once, with whichever revision settles the run, from its log in the run's custody. A
+    // log this machine cannot read, or a run directory it does not hold, never holds the settlement: the list says it is incomplete.
+    private void ObserveSources(AgentRuns.Run run, JsonObject body)
+    {
+        if (session.Manifest.RecordFormat < 3 || body["sourcesObserved"] is not null || body["status"]?.GetValue<string>() is not ("observed-success" or "known-failure")
+            || EstateModel.BodyString(run.Latest, "status") is "observed-success" or "known-failure" or "canceled" || body["execution"]?["retrieval"] is null) return;
+        try
+        {
+            body["sourcesObserved"] = RunSources.Read(WorkerOptions.OpenRunDirectory(session.Manifest.Estate, run.Id)) ?? RunSources.Incomplete();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or JsonException
+            or Records.Canonical.CanonicalJsonException or InvalidOperationException or KeyNotFoundException or FormatException)
+        {
+            body["sourcesObserved"] = RunSources.Incomplete();
         }
     }
 

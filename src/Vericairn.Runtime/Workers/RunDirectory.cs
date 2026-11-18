@@ -208,6 +208,12 @@ public sealed class RunDirectory
     /// </summary>
     internal string ReachFile => System.IO.Path.Combine(Path, "reach.json");
 
+    /// <summary>From 0.9.4 (RUN-04), a retrieval run's log of its web tool invocations and the results it retained.</summary>
+    internal string SourcesFile => System.IO.Path.Combine(Path, "sources.jsonl");
+
+    /// <summary>From 0.9.4 (RUN-04), the retrieved originals of a retrieval run, each named by its content hash, never in a record.</summary>
+    internal string SourcesDirectory => System.IO.Path.Combine(Path, "sources");
+
     /// <summary>Retains a run's reach in its own custody, owner-only, beside its other local state.</summary>
     internal void RetainReach(JsonObject reach)
     {

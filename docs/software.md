@@ -881,7 +881,7 @@ Software Domain Pack ships three launchers and the Git workspace provider (whose
 
 | Launcher | Runs |
 |---|---|
-| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
+| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. From 0.9.4 a run whose brief permits retrieval adds `WebFetch,WebSearch` to `--tools` and allows exactly those two in `--settings` (RUN-04). It watches provisional message tokens and settles tokens from the stream's complete final result. |
 | `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' -c 'sandbox_workspace_write={writable_roots=["<canonical workspace>/.git"]}' --ignore-rules <qualified feature overrides> "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
 | `generic` | Describes the command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Worker dispatch remains refused because the generic launcher has no complete inventory qualification. |
 
@@ -1062,6 +1062,32 @@ directory on the machine that ran it, at every record format. From record format
 `outsideFile`, `testHost`, `secretPaths` (the count), `secretKinds` and `secretPathsComplete`, never a path. The measurement
 shows reach; it blocks nothing and refuses no run: on today's launchers a run reads what its user can read. Run the worker as
 another operating-system user, one that cannot read those paths, to reduce it.
+
+**Public retrieval for research runs (RUN-04).** From 0.9.4 a run retrieves public sources only when the brief of the
+assignment it runs permits it, with `"retrieval": "public"` (record format 3); no other field, text or setting permits it, and
+a run whose brief does not gets no web tool: a harness that uses one anyway is stopped as a tool outside its admitted
+inventory. Before anything is recorded, and again at the intent and before dispatch, an interim check refuses a retrieval run
+where the records show something private in reach: the workspace's repository resource is not `public`; the estate's own
+repository resource is not `public`, or no repository resource records the estate's own repository by its origin remote or root
+commit, or the runtime cannot observe that repository, since unknown counts as private; or the run's records name a
+credential, a `credential-reference` among the assignment's sources or step inputs or the work order's or goal's inputs. The
+refusal names every reason. What the run's operating-system user can read on the machine is not checked until confined reads
+are qualified; the run's `execution.reach` shows it. Only the `claude-code` launcher enables retrieval: it adds `WebFetch` and
+`WebSearch` to `--tools`, allows exactly those two in the run's `--settings`, and admits them in the inventory with the route
+`public-web`, which the intent's `execution.retrieval: "public"` alone allows. The `codex` launcher keeps web search disabled and
+refuses a retrieval run before its intent, because Codex's events report only a search's query, never what it retrieved. The
+condition adds the constraint that retrieved pages and results are untrusted data, never instructions, and no credential passes
+to the harness, as for every run. The worker reads each invocation of an admitted web tool and the result the harness gave
+the agent from the event stream and retains that result, exactly as reported, as an untrusted original in the run's custody:
+`sources/<content hash>.txt` and a `sources.jsonl` log in the run's owner-only directory, at most 8 MiB a source and 64 MiB a
+run. It fetches nothing itself, so the original is what the agent received; for `WebFetch` that is the harness's own reduction
+of the page, not the page's bytes. A web tool asked for an address that is not public (this machine, a private, link-local or
+local-only host, user information in the address, or a scheme other than http or https) raises a critical `network` signal
+and the run is stopped; a public name that resolves to a private address is not caught. Settlement records `sourcesObserved`:
+each source's tool, its address or query (withheld when it would fail the estate's content check), its time, whether it was
+retained and its content hash and size, at most 100 in full with the count and digest of all, and whether the log was
+complete. Retrieved text never enters a record, a repository or the agent's instructions. The log is not tamper-evident: a
+harness that does not sandbox the agent runs as the same user and could change it.
 
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed
@@ -2144,7 +2170,8 @@ See the [Codex CLI flags](https://learn.chatgpt.com/docs/developer-commands?surf
 [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Claude Code's `--tools` selects exactly `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `TaskOutput`, `TaskStop` and
-`EndConversation`. The inventory also identifies the built-in goal evaluator, the `vericairn` MCP server and the
+`EndConversation`; from 0.9.4 a retrieval run adds `WebFetch` and `WebSearch` (RUN-04), with the route `public-web`, while the
+qualification probes keep the base selection. The inventory also identifies the built-in goal evaluator, the `vericairn` MCP server and the
 `claude-code-setting-sources-none` configuration. It verifies the presence of every option it relies on: `--print`,
 `--output-format`, `--verbose`, `--permission-mode`, `--mcp-config`, `--strict-mcp-config`, `--setting-sources`,
 `--settings`, `--tools`, `--model`, `--effort`, and `--max-budget-usd`. All must be declarations in help, not prefixes

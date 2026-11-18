@@ -621,6 +621,24 @@ machine on a release that reads them; a format-2 estate refuses them. `records
 describe harness-qualification` and `records describe operation` include these
 contracts, within `vericairn.records/readers/10`, which 0.9.4 introduces.
 
+## Public retrieval for research runs (0.9.4)
+
+RUN-04 adds one optional field to an assignment's `brief`, one to an `agent-run`
+operation's `execution` and one top-level field to that operation within format
+3, and no record type. A record without them is unchanged.
+
+| Record | Additive contract |
+| --- | --- |
+| `assignment` | `brief.retrieval: "public"`: the work's runs may retrieve public sources with their harness's web tools, never with credentials. It is the only value, and nothing else permits retrieval. |
+| `operation` (agent-run) | `execution.retrieval: "public"`, fixed at intent: the run's web tools were admitted. Validation refuses it unless the brief of the assignment revision the operation names permits retrieval (`operation.retrieval`), and only with it may an inventory component name the route `public-web` (`operation.execution`). |
+| `operation` (agent-run) | `sourcesObserved: {sources, count, complete, digest}`, recorded at settlement only, on an `observed-success` or `known-failure` revision of a run whose execution admitted retrieval, and kept by every later revision (`operation.sources-observed`): each source, in the order invoked, with its `tool`, exactly one of `address` (absolute http or https, no user information), `query` or `withheld: true`, `at`, `retained`, and its content's `hash` and `bytes` when received (a retained source names both); at most 100 in full, `count` of every source, `complete` (false when the run's log was missing, unreadable or could not be written) and `digest`, SHA-256 of the canonical JSON array of every entry. The retrieved text stays in the run's custody, never in a record. |
+
+A reader of format 3 that predates these fields refuses a record that carries
+one as an unknown key, as any later format-3 field, so the estate's pin keeps
+every machine on a release that reads them; a format-2 estate refuses them.
+`records describe assignment` and `records describe operation` include these
+contracts, within `vericairn.records/readers/10`, which 0.9.4 introduces.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a
