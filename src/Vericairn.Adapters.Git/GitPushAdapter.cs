@@ -29,6 +29,11 @@ public sealed class GitPushAdapter : IPushAdapter
     // these caches; a clone that misreports ancestry in them cannot change where a push goes or what it carries.
     private static readonly string[] IgnoreDerived = ["-c", "core.commitGraph=false", "-c", "pack.useBitmaps=false", "-c", "core.multiPackIndex=false"];
 
+    // A clone's info/grafts rewrites parents as replace objects do, and turning replace objects off does not disable it: every git
+    // process the adapter runs reads grafts from a file that never exists instead, so its range, fast-forward check and message read
+    // follow the real objects alone.
+    private static readonly string NoGrafts = Path.Combine(Path.GetTempPath(), "vericairn-no-grafts-" + Guid.NewGuid().ToString("N"), "grafts");
+
     private readonly Func<ProcessStartInfo, ProcessResult> run;
 
     /// <summary>Each git process has bounded output and a two-minute deadline.</summary>
@@ -297,6 +302,7 @@ public sealed class GitPushAdapter : IPushAdapter
         foreach (string name in info.Environment.Keys.Where(Indexed).ToArray()) info.Environment.Remove(name);
         info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
         info.Environment["GIT_CONFIG_GLOBAL"] = string.Empty;
+        info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
         info.Environment["GIT_ATTR_NOSYSTEM"] = "1";
         info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
         info.Environment["GIT_NO_LAZY_FETCH"] = "1";

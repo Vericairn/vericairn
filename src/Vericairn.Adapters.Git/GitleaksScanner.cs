@@ -86,8 +86,31 @@ public sealed partial class GitleaksScanner : ISecretScanner
     {
         var info = new ProcessStartInfo("gitleaks") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
+        Isolate(info);
         return run(info);
+    }
+
+    // A clone's info/grafts, replace objects and derived object caches (the commit-graph, reachability bitmaps and the multi-pack-index)
+    // can each misreport a commit's parents, and so hide a commit of the range from the scan while the push, which reads the real objects,
+    // still delivers it. Every git process the scan starts, gitleaks' own included through the environment it passes on, reads grafts from
+    // a file that never exists and ignores replace objects and those caches, as the push adapter's reads do (CODE-81).
+    private static readonly string NoGrafts = Path.Combine(Path.GetTempPath(), "vericairn-no-grafts-" + Guid.NewGuid().ToString("N"), "grafts");
+
+    private static readonly (string Key, string Value)[] IgnoredCaches = [("core.commitGraph", "false"), ("pack.useBitmaps", "false"), ("core.multiPackIndex", "false")];
+
+    private static void Isolate(ProcessStartInfo info)
+    {
+        info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
+        info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
+        info.Environment.Remove("GIT_CONFIG_PARAMETERS");
+        foreach (string name in info.Environment.Keys.Where(n => n.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase)
+            || n.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase)).ToArray()) info.Environment.Remove(name);
+        info.Environment["GIT_CONFIG_COUNT"] = IgnoredCaches.Length.ToString(CultureInfo.InvariantCulture);
+        for (int i = 0; i < IgnoredCaches.Length; i++)
+        {
+            info.Environment["GIT_CONFIG_KEY_" + i.ToString(CultureInfo.InvariantCulture)] = IgnoredCaches[i].Key;
+            info.Environment["GIT_CONFIG_VALUE_" + i.ToString(CultureInfo.InvariantCulture)] = IgnoredCaches[i].Value;
+        }
     }
 
     private int? Count(string directory, string range)
@@ -96,6 +119,7 @@ public sealed partial class GitleaksScanner : ISecretScanner
         // before and after scanning, without asking git for patches or retaining any source text.
         var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         foreach (string argument in new[] { "--no-replace-objects", "rev-list", "--count", range }) info.ArgumentList.Add(argument);
+        Isolate(info);
         ProcessResult result = run(info);
         return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0
             && int.TryParse(result.StandardOutput.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int count) && count >= 0 ? count : null;

@@ -117,6 +117,19 @@ gh uses the user's own configuration and login. The runtime has no token
 parameter, does not request a token, and does not retain authentication
 output.
 
+From 0.9.4 (CODE-81), every git process of a checked push, the adapter's reads
+and pushes and the secret scan's reads, gitleaks' own git included, reads
+grafts from a file that never exists, so a clone's `info/grafts` cannot
+misreport a commit's parents. The scan's reads also ignore replace objects, the
+commit-graph, reachability bitmaps and the multi-pack-index, as the adapter's
+reads already did. Before 0.9.4 a graft in the clone could make the
+fast-forward check accept a remote head that was not an ancestor, so the leased
+push overwrote the remote branch, and could hide a commit of the range from the
+scan, the message check and the disclosure hold while the push, which reads the
+real objects, delivered it. A clone used with `changes push` before 0.9.4 can be
+checked for an `info/grafts` file, and each pushed branch compared with the head
+Vericairn recorded.
+
 ### Disclosure holds (0.9.0)
 
 A work order can carry `"disclosure": "held"`, for example a security fix whose nature must not be public before its release.

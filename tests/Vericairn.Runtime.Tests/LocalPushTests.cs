@@ -290,6 +290,62 @@ public sealed class LocalPushTests : IDisposable
         Assert.Equal(remoteOnly, Git(remote, "rev-parse", "refs/heads/work/change"));
     }
 
+    // CODE-81: a clone's info/grafts rewrites parents as replace objects do, and turning replace objects off does not disable it. A graft
+    // making the head's parent the base must not hide the middle commit, whose message carries a blocked term, from the message read,
+    // while the push, which reads the real objects, would still deliver it.
+    [Fact]
+    public void AGraftCannotHideACommitFromTheMessageRead()
+    {
+        CommitAt("2026-01-01T00:00:00Z", "readme.txt", "Initial content.\n", "init", "init", "--initial-branch=main");
+        string basis = Git(repository, "rev-parse", "HEAD");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        CommitAt("2026-01-02T00:00:00Z", "addition.txt", "First local commit.\n", "Add the widget\n\nWritten in a Tern session.");
+        string middle = Git(repository, "rev-parse", "HEAD");
+        CommitAt("2026-01-03T00:00:00Z", "addition.txt", "Second local commit.\n", "Tidy the widget");
+        string head = Git(repository, "rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(repository, ".git", "info", "grafts"), head + " " + basis + "\n");
+        Assert.Equal(basis, Git(repository, "rev-parse", "HEAD^"));
+
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        IReadOnlyList<PushedCommit> commits = adapter.CommitMessages(repository, plan)!;
+        Assert.Equal(new[] { head, middle }.Order(StringComparer.Ordinal), commits.Select(c => c.Commit).Order(StringComparer.Ordinal));
+        Assert.Equal(new[] { head, middle }.Order(StringComparer.Ordinal), adapter.ChangedPaths(repository, plan)!.Keys.Order(StringComparer.Ordinal));
+        Assert.Contains("Written in a Tern session.", adapter.PublishedText(repository, plan), StringComparison.Ordinal);
+        var settings = new Vericairn.Records.Estate.CommitMessages.Settings(Vericairn.Records.Estate.CommitMessages.Refuse, [],
+            [new("terms", Vericairn.Records.Estate.BlockedTerms.TermsOf(System.Text.Json.JsonSerializer.SerializeToElement(new { terms = TernOnly })))], []);
+        Assert.Equal(middle, Vericairn.Records.Estate.CommitMessages.Check(settings, commits.Select(c => (c.Commit, c.Message))).Refusal?.Commit);
+    }
+
+    // The same graft class against the fast-forward check: a graft claiming the remote branch's head as the middle commit's parent must
+    // not make a non-ancestor pass, so the leased push never overwrites the remote branch.
+    [Fact]
+    public void AGraftCannotMakeANonAncestorPassTheFastForwardCheck()
+    {
+        CommitAt("2026-01-01T00:00:00Z", "readme.txt", "Initial content.\n", "init", "init", "--initial-branch=main");
+        Git(repository, "checkout", "-b", "remote-only");
+        CommitAt("2026-01-01T00:00:01Z", "remote-only.txt", "A remote commit not in the local head.\n", "Remote-only commit");
+        string remoteOnly = Git(repository, "rev-parse", "HEAD");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(remote, "update-ref", "refs/heads/work/change", remoteOnly);
+        Git(repository, "checkout", "main");
+        Git(repository, "checkout", "-b", "work/change");
+        CommitAt("2026-01-02T00:00:00Z", "addition.txt", "First local commit.\n", "First local commit");
+        string middle = Git(repository, "rev-parse", "HEAD");
+        CommitAt("2026-01-03T00:00:00Z", "addition.txt", "Second local commit.\n", "Second local commit");
+        string head = Git(repository, "rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(repository, ".git", "info", "grafts"), middle + " " + remoteOnly + "\n");
+        Assert.Equal(remoteOnly, Git(repository, "rev-parse", middle + "^"));
+
+        var adapter = Adapter();
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(repository, remote, "work/change", "main", head));
+        Assert.Contains("not a known ancestor", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(remoteOnly, Git(remote, "rev-parse", "refs/heads/work/change"));
+    }
+
+    private static readonly string[] TernOnly = ["Tern"];
+
     // Commit one file at an exact author and committer date, so the commit-graph's generation numbers are predictable.
     private void CommitAt(string date, string file, string content, string message, params string[] before)
     {
