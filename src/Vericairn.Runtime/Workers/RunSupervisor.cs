@@ -77,6 +77,9 @@ public sealed class RunSupervisor
     private readonly Dictionary<string, long> usageSnapshots = new(StringComparer.Ordinal);
     private readonly Func<RunSignal, string?>? signalAttention;
     private long? failedStateWriteHeartbeat;
+    private readonly HashSet<string> retrievalTools;
+    private readonly HashSet<string> invokedSources = new(StringComparer.Ordinal);
+    private readonly HashSet<string> pendingSources = new(StringComparer.Ordinal);
 
     private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate, Func<RunSignal, string?>? signalAttention, JsonElement? execution, IReadOnlyDictionary<string, string> environment)
     {
@@ -93,6 +96,7 @@ public sealed class RunSupervisor
         this.permitted = permitted;
         this.environment = environment;
         watch = new RunWatch(watchSettings, tokenCap, historyRate, execution);
+        retrievalTools = RunSources.Tools(execution);
         this.signalAttention = signalAttention;
         state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
         LaunchedAt = launchedAt;
@@ -500,8 +504,12 @@ public sealed class RunSupervisor
                                 }
                             }
 
+                            // A retrieval run's admitted web tools reach public hosts by its brief's permission (RUN-04); what they were
+                            // asked for is judged below instead, and every other code of the audit still applies.
+                            bool retrieving = retrievalTools.Contains(action.Tool);
                             foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted, environment, options.BeforeCredentialCheck))
                             {
+                                if (retrieving && observation.Code == "network" && observation.Severity == "warning") continue;
                                 AddSignal(observation);
                             }
 
@@ -509,6 +517,26 @@ public sealed class RunSupervisor
                             {
                                 AddSignal(observation);
                             }
+
+                            if (retrieving && invokedSources.Add(action.Id))
+                            {
+                                DateTimeOffset now = options.Clock.GetUtcNow();
+                                if (RunSources.Address(action) is string address && !RetrievalAdmission.PublicAddress(address))
+                                {
+                                    AddSignal(new RunSignal("network", "critical", RecordParser.FormatTimestamp(now), "A web tool was asked for an address that is not public (this machine, a private, link-local or local-only host, user information, or a scheme other than http or https); the address stays in the run's custody."));
+                                }
+
+                                pendingSources.Add(action.Id);
+                                if (!RunSources.Invoked(directory, action, now)) SourcesIncomplete();
+                            }
+                        }
+                    }
+
+                    foreach (HarnessToolResult result in launcher.ReadToolResults(line))
+                    {
+                        lock (gate)
+                        {
+                            if (pendingSources.Remove(result.Id) && !RunSources.Retrieved(directory, result, options.Clock.GetUtcNow())) SourcesIncomplete();
                         }
                     }
                     if (launcher.ReadExecution(line) is HarnessExecution reported)
@@ -608,6 +636,13 @@ public sealed class RunSupervisor
         {
             // Output closure proves no exit; the whole launch boundary must be observed exited.
         }
+    }
+
+    // A source the worker could not retain or log leaves the run's sources incomplete, which settlement records.
+    private void SourcesIncomplete()
+    {
+        RunSources.MarkIncomplete(directory);
+        AddSignal(new RunSignal("audit-unverified", "warning", RecordParser.FormatTimestamp(options.Clock.GetUtcNow()), "The worker could not retain a retrieved source in the run's custody; the run's recorded sources are incomplete."));
     }
 
     private void Log(string line)

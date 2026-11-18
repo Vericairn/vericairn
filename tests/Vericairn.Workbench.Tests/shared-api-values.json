@@ -446,6 +446,16 @@
     "proposed-by-planner",
     "given"
   ],
+  "Vericairn.Records.Types.HarnessQualificationType.FileReach": [
+    "readable",
+    "blocked",
+    "unknown"
+  ],
+  "Vericairn.Records.Types.HarnessQualificationType.HostReach": [
+    "reachable",
+    "blocked",
+    "unknown"
+  ],
   "Vericairn.Records.Types.HarnessQualificationType.ProbeNames": [
     "version",
     "flags",

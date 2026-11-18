@@ -126,8 +126,15 @@ internal static class HarnessInventory
         throw new ProviderRefusedException("The inventory executable could not be resolved through the admitted PATH.");
     }
 
+    /// <summary>
+    /// Whether the run's admitted execution enables public retrieval (RUN-04): set by run admission only when the assignment's brief
+    /// permits it and the interim check passed; qualification probes never carry it.
+    /// </summary>
+    public static bool Retrieval(LaunchContext context) => context.Execution is { ValueKind: JsonValueKind.Object } execution
+        && execution.TryGetProperty("retrieval", out JsonElement retrieval) && retrieval.ValueKind == JsonValueKind.String && retrieval.GetString() == RetrievalAdmission.Public;
+
     public static List<RunComponent> Components(LaunchContext context, string executable, string id, string version, string configuration,
-        IReadOnlyList<string> tools, string variable, string destination)
+        IReadOnlyList<string> tools, string variable, string destination, IReadOnlyList<string>? retrievalTools = null)
     {
         IReadOnlyList<string> command = HarnessProcess.Command(context.Settings, executable);
         var components = new List<RunComponent>();
@@ -139,6 +146,11 @@ internal static class HarnessInventory
         foreach (string tool in tools)
         {
             components.Add(new(tool, "tool", version, Digest(new { harnessHash, tool }), configuration, [], ["local"], [id]));
+        }
+        // A retrieval run's web tools reach public hosts; their route is declared apart, so admission and the record can tell them.
+        foreach (string tool in retrievalTools ?? [])
+        {
+            components.Add(new(tool, "tool", version, Digest(new { harnessHash, tool }), configuration, [], [RetrievalAdmission.Destination], [id]));
         }
         string mcpHash = ContentHash.Sha256File(Executable(context.McpServer, context.Environment));
         string mcpConfiguration = Digest(new { server = "vericairn", transport = "stdio", environment = context.McpEnvironment.Keys.Order(StringComparer.Ordinal).ToArray(), authority = "run-principal" });

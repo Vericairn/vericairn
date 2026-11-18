@@ -12,10 +12,10 @@ namespace Vericairn.Runtime.Tests;
 internal sealed class NativeRun : IDisposable
 {
     public NativeRun(string harness, Action<NativeProbe, LaunchContext>? beforeDispatch = null, string? budget = null, bool keepOperatorKey = false,
-        bool newer = false, bool qualify = false, Action? afterProbe = null)
+        bool newer = false, bool qualify = false, Action? afterProbe = null, long recordFormat = 2, string? brief = null, bool retrieval = false)
     {
         Probe = new(harness);
-        Run = new(budget: budget ?? """{"wallMinutes":60,"attemptsPerStep":3}""", keepOperatorKey: keepOperatorKey || qualify);
+        Run = new(budget: budget ?? """{"wallMinutes":60,"attemptsPerStep":3}""", keepOperatorKey: keepOperatorKey || qualify, recordFormat: recordFormat, brief: brief);
         if (newer) Probe.Behavior("version", harness == "codex" ? "codex-cli 0.160.0" : "2.1.297 (Claude Code)");
         var environment = new Dictionary<string, string>(Probe.Context.Environment, WorkerEnvironment.Names) { ["LANG"] = "C" };
         // Every run is given its own temporary directory, so the admitted inventory is inspected with one too.
@@ -27,6 +27,8 @@ internal sealed class NativeRun : IDisposable
         foreach (string name in RunDirectory.TemporaryVariables) serverEnvironment[name] = environment[name];
         IReadOnlyList<string> server = [.. Probe.Context.McpServer, "--estate", Run.Estate.Root, "mcp", "serve", "--as", Run.Estate.BuilderId];
         LaunchContext inspection = Probe.Context with { Environment = environment, McpServer = server, McpEnvironment = serverEnvironment };
+        // A retrieval run's admitted inventory carries its web tools (RUN-04).
+        if (retrieval) inspection = inspection with { Execution = JsonSerializer.SerializeToElement(new { requested = new { model = "model-a", effort = "high" }, retrieval = "public" }) };
         File.WriteAllText(inspection.McpConfiguration, JsonSerializer.Serialize(new { mcpServers = new { vericairn = new { command = server[0], args = server.Skip(1), env = serverEnvironment } } }));
         Run.Service.Providers.Register(Probe.Launcher);
         Run.Service.WorkerOptions = Run.Service.WorkerOptions with { Environment = environment, Vericairn = Probe.Context.McpServer };

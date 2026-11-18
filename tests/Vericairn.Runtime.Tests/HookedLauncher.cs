@@ -73,4 +73,6 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
     public HarnessSignal? Read(string line) => inner.Read(line);
 
     public IReadOnlyList<HarnessAction> ReadActions(string line) => readActions?.Invoke(line) ?? inner.ReadActions(line);
+
+    public IReadOnlyList<HarnessToolResult> ReadToolResults(string line) => inner.ReadToolResults(line);
 }

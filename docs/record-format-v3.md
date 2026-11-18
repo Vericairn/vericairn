@@ -603,6 +603,42 @@ format-3 field. `records describe assignment` and `records describe result`
 include this contract, and the generic record reader advances to
 `vericairn.records/readers/10`.
 
+## What a worker run can reach (0.9.4)
+
+CODE-82 adds one optional field to `harness-qualification` and one to an
+`agent-run` operation's `execution` within format 3, and no record type. A
+record without them is unchanged, and none is refused or warned for lacking one.
+
+| Record | Additive contract |
+| --- | --- |
+| `harness-qualification` | `reach: {file, host}`: what a probe in the harness's place reached during qualification. `file`, a marker planted outside the probe workspace and its temporary directory, is `readable`, `blocked` or `unknown`; `host`, a test host on the loopback interface, is `reachable`, `blocked` or `unknown`. It is no admission identity, so a revocation may omit it. |
+| `operation` (agent-run) | `execution.reach: {outsideFile, testHost, secretPaths, secretKinds, secretPathsComplete}`, fixed at intent with the rest of `execution`: the same measurement made before the run started, the count of secret-bearing paths its operating-system user could open for reading (at most 512), their kinds (`ssh-key`, `cloud-credentials`, `registry-credentials`, `forge-credentials`, `signing-key`, `harness-login`, `device-key`, `environment-file`, `keychain`; each named once and counted at least once) and whether that inventory was complete. The paths themselves stay in the run's custody on the machine that ran it, never in a record. |
+
+`unknown` means the probe did not run or report, never that it was blocked. A
+reader of format 3 that predates the fields refuses a record that carries one as
+an unknown key, as any later format-3 field, so the estate's pin keeps every
+machine on a release that reads them; a format-2 estate refuses them. `records
+describe harness-qualification` and `records describe operation` include these
+contracts.
+
+## Public retrieval for research runs (0.9.4)
+
+RUN-04 adds one optional field to an assignment's `brief`, one to an `agent-run`
+operation's `execution` and one top-level field to that operation within format
+3, and no record type. A record without them is unchanged.
+
+| Record | Additive contract |
+| --- | --- |
+| `assignment` | `brief.retrieval: "public"`: the work's runs may retrieve public sources with their harness's web tools, never with credentials. It is the only value, and nothing else permits retrieval. |
+| `operation` (agent-run) | `execution.retrieval: "public"`, fixed at intent: the run's web tools were admitted. Validation refuses it unless the brief of the assignment revision the operation names permits retrieval (`operation.retrieval`), and only with it may an inventory component name the route `public-web` (`operation.execution`). |
+| `operation` (agent-run) | `sourcesObserved: {sources, count, complete, digest}`, recorded at settlement only, on an `observed-success` or `known-failure` revision of a run whose execution admitted retrieval, and kept by every later revision (`operation.sources-observed`): each source, in the order invoked, with its `tool`, exactly one of `address` (absolute http or https, no user information), `query` or `withheld: true`, `at`, `retained`, and its content's `hash` and `bytes` when received (a retained source names both); at most 100 in full, `count` of every source, `complete` (false when the run's log was missing, unreadable or could not be written) and `digest`, SHA-256 of the canonical JSON array of every entry. The retrieved text stays in the run's custody, never in a record. |
+
+A reader of format 3 that predates these fields refuses a record that carries
+one as an unknown key, as any later format-3 field, so the estate's pin keeps
+every machine on a release that reads them; a format-2 estate refuses them.
+`records describe assignment` and `records describe operation` include these
+contracts.
+
 ## Standing agents (0.9.4)
 
 GOAL-07 adds a goal's `plan.standing` and an assignment's `occurrence` within
@@ -653,7 +689,9 @@ shows neither record and dispatches nothing of the agent. A reader that reads
 them but cannot resolve the flow shows the goal with a warning
 (`standing.unavailable`) and dispatches none of its occurrences. A format-2
 estate refuses them. `records describe goal` and `records describe assignment`
-include this contract.
+include this contract, and the generic record reader advances to
+`vericairn.records/readers/11`, which carries the fields of this section and the
+two before it.
 
 ## Security reports (0.9.2)
 

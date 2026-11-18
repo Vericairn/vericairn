@@ -45,6 +45,15 @@ public sealed record HarnessSignal(long? Tokens = null, long? TokensAdded = null
 public sealed record HarnessAction(string Id, string Tool, JsonElement Input);
 
 /// <summary>
+/// What a tool returned to the agent, from a harness event that reports it, matched to its invocation by identity (from 0.9.4, RUN-04):
+/// the worker retains a web tool's result as an untrusted original. It is never an instruction, and the worker fetches nothing itself.
+/// </summary>
+/// <param name="Id">The invocation identity the result answers.</param>
+/// <param name="Content">The result's text as the harness reported it to the agent.</param>
+/// <param name="Error">Whether the harness reported the invocation as failed.</param>
+public sealed record HarnessToolResult(string Id, string Content, bool Error = false);
+
+/// <summary>
 /// The coding-agent launcher contract, version 1 (vericairn.launcher.agent/1): how one harness is verified before a run is recorded,
 /// the command line that starts it on an assignment, and what its output reports. The worker (vericairn.worker/1) does everything
 /// else: it prepares the workspace, records the intent, starts the process with the environment it builds, observes it, stops it
@@ -127,4 +136,10 @@ public interface IAgentLauncher
 
     /// <summary>Tool invocations in a harness event; ordinary messages and tool results return no actions.</summary>
     IReadOnlyList<HarnessAction> ReadActions(string line) => [];
+
+    /// <summary>
+    /// From 0.9.4 (RUN-04), tool results in a harness event, each with the identity of the invocation it answers; a launcher whose
+    /// harness reports no results returns none. The worker keeps only the results of the run's admitted web tools.
+    /// </summary>
+    IReadOnlyList<HarnessToolResult> ReadToolResults(string line) => [];
 }

@@ -43,6 +43,9 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Claude(line);
 
     /// <inheritdoc />
+    public IReadOnlyList<HarnessToolResult> ReadToolResults(string line) => HarnessActions.ClaudeResults(line);
+
+    /// <inheritdoc />
     public RunWatchSettings WatchDefaults => new(NormalTokensPerMinute: 20000);
 
     /// <summary>The launcher id recorded as the provider of every run it launches.</summary>
@@ -68,6 +71,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
             "Imports only a provisioned pro or max OAuth login into a fresh run configuration; implicit keychain login, managed accounts and environment credentials are not qualified.",
             "Watches provisional per-message tokens and settles tokens from the stream's complete final result; it reads no price, so a cap in currency is charged in full.",
             "Excludes user, project and local setting sources and repository customizations; preserves and inventories the built-in goal evaluator. Selects nine built-in tools explicitly and refuses detected managed settings.",
+            "From 0.9.4 (RUN-04), a run whose brief permits retrieval adds WebFetch and WebSearch, allowed explicitly and admitted with the public-web route, and the worker retains each result as an untrusted original; no other run gets a web tool.",
             "Shipped baseline: Claude Code 2.1.296. Another exact version needs a current human qualification with matching local probe digests; no version range is inferred. Every required flag is confirmed by help, with strict explicit MCP and two inventory checks. Tested with stand-in executables; no live Claude Code or sign-in qualification.",
         ],
         [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array with positional entry arguments; leading option flags are not qualified.", false, "claude")]);
@@ -205,7 +209,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
             limits.AddRange(["--max-budget-usd", (amount / 100m).ToString("0.00", CultureInfo.InvariantCulture)]);
         }
 
-        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", ClaudeCodeInventory.SettingsFor(context), "--tools", ClaudeCodeInventory.ToolList, .. selection, .. limits];
+        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", ClaudeCodeInventory.SettingsFor(context), "--tools", ClaudeCodeInventory.ToolsFor(context), .. selection, .. limits];
     }
 
     /// <summary>The stream's final result reports the run's usage: its input, cache and output tokens, read as one total.</summary>
