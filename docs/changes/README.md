@@ -1,5 +1,7 @@
 # Per-change fragments for the held guides
 
+Revision 2, November 20, 2026. Say that nothing comes between the title and the first section and that every line of placed text is quoted (OPS-17 review).
+
 Revision 1, November 20, 2026. Define the fragment layout under `docs/changes/<version>/`, through which a change hands its text for a held guide to the documentation-set change of its release (OPS-17).
 
 From 0.9.4, four guides of this repository are held: each release's documentation-set change owns them, and other changes leave
@@ -17,13 +19,14 @@ A fragment is one Markdown file per change at `docs/changes/<version>/<KEY>.md`,
 such as `0.9.4`, and `<KEY>` is the change's work-order key, such as `POLICY-08`. Nothing else lives in a version's directory, and
 this file is the only file directly under `docs/changes/`.
 
-- The first line is the title, `# <KEY>` followed by a colon and a short description.
+- The first line is the title, `# <KEY>` followed by a colon and a short description. Nothing but blank lines comes between the
+  title and the first section.
 - Each section is a level-two heading that names a held guide by its repository path, `## docs/operator-guide.md`,
   `## docs/limitations-and-platforms.md`, `## docs/api-v1.md` or `## docs/api-compatibility-<version>.md` for the fragment's own
   version, each at most once, in that order.
 - Under a guide, each placement is a level-three heading that says where the text goes, such as
   `### In "18. Routing, asks and the worker", after the paragraph beginning "goal step takes"`, followed by the text to insert as a
-  block quote, in the guide's own style ("From 0.9.4, ..." for a changed behavior).
+  block quote, every line of it beginning with `>`, in the guide's own style ("From 0.9.4, ..." for a changed behavior).
 - A fragment names no machine path and states only what its own change adds.
 
 ```markdown

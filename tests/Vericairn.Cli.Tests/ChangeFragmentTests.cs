@@ -50,6 +50,9 @@ public sealed partial class ChangeFragmentTests
         repository.Write("docs/changes/0.9.4/FIX-2.md", "# FIX-2: Out of order\n\n## docs/api-v1.md\n\n### In \"x\"\n\n> Text.\n\n## docs/operator-guide.md\n\n### In \"y\"\n\n> Text.\n\n## docs/api-compatibility-0.9.3.md\n\n### In \"z\"\n\n> Text.\n");
         repository.Write("docs/changes/0.9.4/FIX-3.md", "# FIX-3: A machine path\n\n## docs/operator-guide.md\n\n### In \"x\"\n\n> Read /" + "Users/someone/clone first.\n");
         repository.Write("docs/changes/0.9.4/FIX-4.md", "# FIX-4: No placement\n\n## docs/operator-guide.md\n\n> Text.\n");
+        repository.Write("docs/changes/0.9.4/FIX-7.md", "# FIX-7: Unquoted\n\n## docs/operator-guide.md\n\n### In \"x\"\n\nPlain text, not quoted.\n");
+        repository.Write("docs/changes/0.9.4/FIX-8.md", "# FIX-8: A preamble\n\nSome text before any section.\n\n## docs/operator-guide.md\n\n### In \"x\"\n\n> Text.\n");
+        repository.Write("docs/changes/0.9.4/FIX-9.md", "# FIX-9: Other roots\n\n## docs/operator-guide.md\n\n### In \"x\"\n\n> Keep it in ~" + "/clone, not in /" + "tmp/scratch.\n");
         repository.Write("docs/changes/0.9.3/FIX-5.md", Fragment("FIX-5", "0.9.3"));
         repository.Write("docs/changes/next/FIX-6.md", Fragment("FIX-6", "0.9.4"));
         repository.Write("docs/changes/stray.md", "# Stray\n");
@@ -62,6 +65,9 @@ public sealed partial class ChangeFragmentTests
         Assert.Contains("docs/changes/0.9.4/FIX-2.md: \"## docs/api-compatibility-0.9.3.md\" names no held guide; a section names docs/operator-guide.md, docs/limitations-and-platforms.md, docs/api-v1.md or docs/api-compatibility-0.9.4.md.", problems);
         Assert.Contains("docs/changes/0.9.4/FIX-3.md: a fragment names no machine path.", problems);
         Assert.Contains("docs/changes/0.9.4/FIX-4.md: each held guide's section places its text under a level-three heading saying where it goes.", problems);
+        Assert.Contains("docs/changes/0.9.4/FIX-7.md: a placement's text is a block quote, every line of it beginning with >.", problems);
+        Assert.Contains("docs/changes/0.9.4/FIX-8.md: nothing but blank lines comes between the title and the first held guide's section.", problems);
+        Assert.Contains("docs/changes/0.9.4/FIX-9.md: a fragment names no machine path.", problems);
         Assert.Contains("docs/changes/0.9.3: the documentation set of 0.9.3 is frozen, so its fragments were applied and removed with it; FIX-5.md remains.", problems);
         Assert.Contains("docs/changes/next: a directory under docs/changes is named for the release in preparation, such as 0.9.4.", problems);
         Assert.Contains("docs/changes/stray.md: only README.md lives directly under docs/changes.", problems);
@@ -113,44 +119,61 @@ public sealed partial class ChangeFragmentTests
         return problems;
     }
 
-    // What one fragment's text departs from: its title, its sections, their order and placements, and machine paths.
+    // What one fragment's text departs from: its title, what precedes the first section, its sections, their order, placements whose
+    // text is a block quote, and machine paths. Each departure is named once.
     private static IEnumerable<string> Layout(string text, string key, string version)
     {
+        const string Unplaced = "each held guide's section places its text under a level-three heading saying where it goes.";
+        const string Quoted = "a placement's text is a block quote, every line of it beginning with >.";
+        var problems = new List<string>();
         string[] lines = text.Split('\n');
-        if (!lines[0].StartsWith($"# {key}: ", StringComparison.Ordinal) || lines[0].Length <= key.Length + 4) yield return $"the first line is the title, \"# {key}: \" and a short description.";
+        if (!lines[0].StartsWith($"# {key}: ", StringComparison.Ordinal) || lines[0].Length <= key.Length + 4) problems.Add($"the first line is the title, \"# {key}: \" and a short description.");
         string[] held = [.. HeldGuides, $"docs/api-compatibility-{version}.md"];
         var named = new List<int>();
         string? section = null;
-        bool placed = true;
+        bool placement = false, quoted = false;
         foreach (string line in lines.Skip(1))
         {
             if (line.StartsWith("## ", StringComparison.Ordinal))
             {
-                if (section is not null && !placed) yield return "each held guide's section places its text under a level-three heading saying where it goes.";
+                if (section is not null && !placement) problems.Add(Unplaced);
+                if (placement && !quoted) problems.Add(Quoted);
                 section = line[3..].Trim();
-                placed = false;
+                placement = quoted = false;
                 int index = Array.IndexOf(held, section);
-                if (index < 0) yield return $"\"{line}\" names no held guide; a section names {string.Join(", ", held[..^1])} or {held[^1]}.";
+                if (index < 0) problems.Add($"\"{line}\" names no held guide; a section names {string.Join(", ", held[..^1])} or {held[^1]}.");
                 else named.Add(index);
             }
             else if (line.StartsWith("### ", StringComparison.Ordinal))
             {
-                placed = true;
+                if (section is null) problems.Add("nothing but blank lines comes between the title and the first held guide's section.");
+                if (placement && !quoted) problems.Add(Quoted);
+                placement = true;
+                quoted = false;
+            }
+            else if (line.Trim().Length > 0)
+            {
+                if (section is null) problems.Add("nothing but blank lines comes between the title and the first held guide's section.");
+                else if (!placement) problems.Add(Unplaced);
+                else if (line.StartsWith('>')) quoted = true;
+                else problems.Add(Quoted);
             }
         }
 
-        if (section is not null && !placed) yield return "each held guide's section places its text under a level-three heading saying where it goes.";
-        if (named.Count == 0) yield return "a fragment names at least one held guide in a level-two heading.";
+        if (section is not null && !placement) problems.Add(Unplaced);
+        if (placement && !quoted) problems.Add(Quoted);
+        if (named.Count == 0) problems.Add("a fragment names at least one held guide in a level-two heading.");
         for (int i = 1; i < named.Count; i++)
         {
             if (named[i] <= named[i - 1])
             {
-                yield return "the held guides are named each at most once, in the layout's order.";
+                problems.Add("the held guides are named each at most once, in the layout's order.");
                 break;
             }
         }
 
-        if (MachinePath().IsMatch(text)) yield return "a fragment names no machine path.";
+        if (MachinePath().IsMatch(text)) problems.Add("a fragment names no machine path.");
+        return problems.Distinct(StringComparer.Ordinal);
     }
 
     private static HashSet<string> Frozen(string root)
@@ -182,8 +205,9 @@ public sealed partial class ChangeFragmentTests
     [GeneratedRegex(@"\A[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[0-9]+\z")]
     private static partial Regex Key();
 
-    // A machine path, split so that the pattern itself is not one: a home or volume root, a temporary root or a drive letter.
-    [GeneratedRegex(@"(?:/" + "Users/|/" + "Volumes/|/" + "home/|/private/" + "tmp|[A-Za-z]:\\\\)")]
+    // A machine path, split so that the pattern itself is not one: a home, volume, root user's or mount root, a home by tilde, a
+    // temporary root or a drive letter. A root is matched where a path begins, after a space, quote, bracket or line start.
+    [GeneratedRegex(@"(?:^|[\s`'""(<\[=])(?:/" + "Users/|/" + "Volumes/|/" + "home/|/" + "root/|/" + "mnt/|/private/" + "tmp|/" + "tmp/|/var/" + "folders/|~/)|[A-Za-z]:\\\\", RegexOptions.Multiline)]
     private static partial Regex MachinePath();
 
     private sealed class Scratch : IDisposable
