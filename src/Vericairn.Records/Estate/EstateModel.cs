@@ -76,6 +76,12 @@ public sealed class EstateModel
     /// <summary>Reads an object of the estate by content hash, or null when it is not held: what checkpoint inventories are read through.</summary>
     internal Func<string, byte[]?>? ObjectReader { get; set; }
 
+    /// <summary>
+    /// From 0.9.4 (FIX-148): the loader's use of the signature tables while it judged this model, naming the tables and the context its
+    /// verifications are counted in; null for a model judged outside a loader, which reads the process's tables uncounted.
+    /// </summary>
+    internal Signing.SignatureTables.Judgment? Signatures { get; init; }
+
     /// <summary>The repository paths the loader read, for telling an unreadable witnessed file from an absent one.</summary>
     internal IReadOnlySet<string>? FilePaths { get; set; }
 

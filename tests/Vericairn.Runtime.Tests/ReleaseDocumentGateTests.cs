@@ -84,6 +84,32 @@ public sealed partial class ReleaseDocumentGateTests
         Assert.True(submitted.Ok, submitted.Message);
     }
 
+    /// <summary>
+    /// From 0.9.4 (FIX-148): a one-shot runtime keeps the judgment its command read, and a document edited after that read, as during a
+    /// presence wait, still holds the release, whose gate judges the estate afresh, so it reads the document's bytes as they are now.
+    /// </summary>
+    [Fact]
+    public void ADocumentEditedAfterAOneShotCommandsReadStillHoldsTheRelease()
+    {
+        using var fixture = new Fixture(covers: false, oneShot: true);
+        string commit = fixture.Commit("Reviewed documentation.");
+        fixture.Review(commit);
+        fixture.Provider.HeadSha = commit;
+        fixture.Estate.WriteFile("docs/guide.md", "# Guide\n");
+        RecordEnvelope declaration = fixture.Estate.Add("living-document", fixture.Estate.OperatorId,
+            $$"""{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"release","level":"refuse","product":"{{fixture.Request.Product}}"},{"on":"decision","level":"warn"}],"summary":"Documents the product."}""");
+        var review = new DocumentReviewRequest(fixture.Estate.OperatorId, "current", "Read the guide.");
+        Assert.True(fixture.Service.DocumentReview(declaration.Id, review).Ok);
+        EstateModel kept = fixture.Service.Session.Load();
+        Assert.Same(kept, fixture.Service.Session.Load());
+
+        fixture.Estate.WriteFile("docs/guide.md", "# Revised guide\n");
+        ReleaseResponse held = fixture.Service.ReleaseSubmit(fixture.Request);
+        Assert.False(held.Ok);
+        Assert.Contains("docs/guide.md", held.Message, StringComparison.Ordinal);
+        Assert.Empty(fixture.Provider.Dispatches);
+    }
+
     [Fact]
     public void AnUnavailableStrictGeneratorRefusesReleaseWithoutAuthoredTriggersOrPins()
     {
@@ -497,7 +523,7 @@ public sealed partial class ReleaseDocumentGateTests
         private readonly ReleaseSubmitRequest request;
         public ReleaseSubmitRequest Request => request with { Commit = Provider.HeadSha };
 
-        public Fixture(bool covers = true, bool otherRepository = false)
+        public Fixture(bool covers = true, bool otherRepository = false, bool oneShot = false)
         {
             Repository = Path.Combine(Scratch.Root, "source");
             Directory.CreateDirectory(Repository);
@@ -510,7 +536,7 @@ public sealed partial class ReleaseDocumentGateTests
             RepositoryClones.Register(Estate.Estate.Id, Resource.Id, Repository);
             string covered = covers ? ",{\"on\":\"covers\",\"level\":\"refuse\",\"paths\":[\"README.md\",\"guide.md\"]}" : string.Empty;
             Declaration = Estate.Add("living-document", Estate.OperatorId, $$"""{"path":"README.md","repository":"{{Resource.Id}}","title":"Readme","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product.Id}}"},{"on":"decision","level":"warn"}{{covered}}],"checks":["links-resolve"],"summary":"Documents the widget."}""");
-            Service = EstateService.Open(Estate.Root);
+            Service = EstateService.Open(Estate.Root, null, null, oneShot, null);
             var registry = new ProviderRegistry();
             registry.Register(Provider);
             registry.Register(new GitCommandAdapter());

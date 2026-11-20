@@ -15,13 +15,14 @@ namespace Vericairn.Runtime.Tests;
 /// assignment it judged; and read every operation once for each operation. Counted on generated estates of 40 and of 200 work orders,
 /// that code judged the estate 3 times, derived the living documents 3 times, and read the work orders 846 and 4,046 times and the
 /// operations 65 and 225 times. Now a read judges the estate twice and derives the living documents once, and the whole work orders
-/// and operations are read as often whatever the estate's size (6 and 26 times on those estates).
+/// and operations are read as often whatever the estate's size (6 and 26 times on those estates). From 0.9.4 (FIX-148) the one-shot
+/// runtime keeps its opening's judgment for status, so a read judges the estate once, counted in a context of the read's own.
 /// </summary>
 [Collection("status-performance")]
 public sealed class StatusPassCountTests
 {
     [Fact]
-    public void OneStatusReadJudgesTheEstateTwiceAndMakesNoRemovedPassThatGrowsWithTheEstate()
+    public void OneStatusReadJudgesTheEstateOnceAndMakesNoRemovedPassThatGrowsWithTheEstate()
     {
         using var small = new GeneratedStatusEstate(40, goals: 20, operations: true, livingDocuments: true);
         using var large = new GeneratedStatusEstate(200, goals: 20, operations: true, livingDocuments: true);
@@ -30,7 +31,7 @@ public sealed class StatusPassCountTests
         foreach (StatusPasses passes in new[] { fewer, more })
         {
             Assert.False(passes.Status.HasErrors);
-            Assert.Equal((1, 2), (passes.OpeningJudgments, passes.Judgments));
+            Assert.Equal((1, 1), (passes.OpeningJudgments, passes.Judgments));
             Assert.Equal(1, passes.LivingDocumentDerivations);
         }
 
@@ -48,20 +49,24 @@ public sealed class StatusPassCountTests
 internal sealed record StatusPasses(long OpeningJudgments, long Judgments, long LivingDocumentDerivations, long WorkOrderReads, long OperationReads,
     StatusResponse Status, TimeSpan Opening, TimeSpan Elapsed)
 {
-    /// <summary>Opens a runtime on the estate, as a command without a daemon does, and reads status, counting and timing it.</summary>
+    /// <summary>
+    /// Opens a one-shot runtime on the estate, as a command without a daemon does, and reads status, counting its judgments in a context
+    /// of its own with fresh signature tables, and timing it.
+    /// </summary>
     internal static StatusPasses Read(string root, Action<string, TimeSpan>? observe = null)
     {
         var clock = Stopwatch.StartNew();
-        using EstateService service = EstateService.Open(root);
+        var judgments = new JudgmentContext(new Vericairn.Records.Signing.SignatureTables());
+        using EstateService service = EstateService.Open(root, null, null, oneShot: true, judgments: judgments);
         TimeSpan opened = clock.Elapsed;
-        long opening = service.Session.Loads;
+        long opening = judgments.Judgments;
         EstateModel? judged = null;
-        service.Session.Judged = model => judged = model;
+        service.Session.Loaded = model => judged = model;
         StatusResponse status = service.Status(observe);
         clock.Stop();
         Assert.NotNull(judged);
         IReadOnlyDictionary<string, long> reads = judged.TypeReads;
-        return new(opening, service.Session.Loads, judged.LivingDocumentDerivations, reads.GetValueOrDefault("work-order"), reads.GetValueOrDefault("operation"),
+        return new(opening, judgments.Judgments, judged.LivingDocumentDerivations, reads.GetValueOrDefault("work-order"), reads.GetValueOrDefault("operation"),
             status, opened, clock.Elapsed);
     }
 }

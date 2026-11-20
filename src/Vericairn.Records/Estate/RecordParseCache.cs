@@ -15,7 +15,10 @@ internal sealed class RecordParseCache
 
     internal long ParsedFiles { get; private set; }
 
-    internal RecordEnvelope? Parse(RecordFile file, FindingList findings)
+    internal RecordEnvelope? Parse(RecordFile file, FindingList findings) => Parse(file, findings, null);
+
+    /// <summary>From 0.9.4 (FIX-148): parses as <see cref="Parse(RecordFile, FindingList)"/> does, counting a parse the cache could not spare in the context.</summary>
+    internal RecordEnvelope? Parse(RecordFile file, FindingList findings, JudgmentContext? context)
     {
         if (!entries.TryGetValue(file.Path, out Entry? entry) ||
             (!ReferenceEquals(entry.Bytes, file.Bytes) && !entry.Bytes.AsSpan().SequenceEqual(file.Bytes)))
@@ -30,6 +33,7 @@ internal sealed class RecordParseCache
             entry = new Entry(file.Bytes, record, parsedFindings.ToArray());
             entries[file.Path] = entry;
             ParsedFiles++;
+            context?.Parsed();
         }
         else if (!ReferenceEquals(entry.Bytes, file.Bytes))
         {

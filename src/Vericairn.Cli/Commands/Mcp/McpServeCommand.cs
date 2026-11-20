@@ -52,7 +52,8 @@ internal sealed class McpServeCommand : Command, ITextOutputCommand
         context.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
         server.RunAsync(Console.In, context.Output, context.Error, context.CancellationToken).GetAwaiter().GetResult();
         return Clean;
-    }, presence: false);
+    // A server answers calls until it is stopped, so its runtime judges at every call rather than keeping one command's judgment (FIX-148).
+    }, readOnly: false, upgrade: false, presence: false, longLived: true);
 
     /// <summary>
     /// Serves a remote estate's network MCP to a local client (MCP-03): each message is forwarded to its /mcp over the paired

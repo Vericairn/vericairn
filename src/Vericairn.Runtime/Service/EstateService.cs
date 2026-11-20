@@ -83,7 +83,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     internal static EstateService Open(string root, WorkerOptions? workerOptions) => Open(root, workerOptions, null);
 
     // A test opens two runtimes with different homes on one working tree in one process; a host uses the process's home.
-    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home)
+    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home) => Open(root, workerOptions, home, oneShot: false, judgments: null);
+
+    /// <summary>
+    /// From 0.9.4 (FIX-148): opens the runtime of one command that runs and ends, as the command line hosts it without a daemon: the model
+    /// its opening judges is kept for the command's later loads while the records and the manifest are unchanged and the runtime has
+    /// written nothing (<see cref="EstateSession.KeepsJudgment"/>), so the command judges the estate once. Long-lived hosts open with
+    /// <see cref="Open(string)"/> and judge at every load.
+    /// </summary>
+    internal static EstateService OpenOneShot(string root) => Open(root, null, null, oneShot: true, judgments: null);
+
+    /// <summary>
+    /// Opens a runtime as <see cref="Open(string, WorkerOptions?, string?)"/> does, one-shot or not, counting its judgments in a given
+    /// context (a test's, with fresh signature tables) or in a new one reading the process's tables.
+    /// </summary>
+    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home, bool oneShot, JudgmentContext? judgments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
@@ -91,9 +105,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             throw new InvalidOperationException($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
         }
 
-        var service = new EstateService(home is null ? EstateSession.Open(root) : EstateSession.Open(root, false, home));
+        var service = new EstateService(EstateSession.Open(root, false, home ?? VericairnHome.Path(), judgments));
         try
         {
+            // Chosen before the opening judges, so its judgment is the one the command keeps.
+            service.session.KeepsJudgment = oneShot;
             if (workerOptions is not null) service.WorkerOptions = workerOptions;
             service.JudgeInterruptedBatches();
             // One judgment of the estate serves both startup passes unless the first stores a settlement (FIX-136).
@@ -512,8 +528,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
         {
-            IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = session.LoadFiles(files);
+            // One snapshot's model and the files it was judged from: a one-shot command's kept judgment, never a second one (FIX-148).
+            (EstateModel model, IReadOnlyList<RecordFile> files) = session.LoadWithFiles();
             if (RequestDeviceRefusal(model) is not null)
             {
                 return new BriefResponse(ContextDenied + "\n", Element(new JsonObject { ["completeness"] = ContextDenied }),
@@ -2116,7 +2132,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return current.Model;
             }
 
-            EstateModel model = EstateLoader.Load(session.Root, session.CanonicalFiles());
+            EstateModel model = EstateLoader.Load(session.Root, session.CanonicalFiles(), null, context: session.Judgments);
             Interlocked.Increment(ref standingLoads);
             // Kept only when nothing changed while the records were read, so a kept model is never older than its stamp says.
             if (session.Stamp() == stamp)

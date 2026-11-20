@@ -248,10 +248,25 @@ public static class RecordSigning
 
         private ImportedKey(ECDsa? key) => this.key = key;
 
+        /// <summary>From 0.9.4: whether the import succeeded, so that the key can verify; one that did not verifies nothing.</summary>
+        internal bool Usable => key is not null;
+
         /// <summary>Imports an encoded public key; one that is not usable verifies nothing.</summary>
-        internal static ImportedKey Import(string encodedPublicKey)
+        internal static ImportedKey Import(string encodedPublicKey) => Import(encodedPublicKey, null);
+
+        /// <summary>
+        /// From 0.9.4 (FIX-148): imports an encoded public key as <see cref="Import(string)"/> does, counting the platform's import in the
+        /// context, whose seam may stand in for a platform that refuses it.
+        /// </summary>
+        internal static ImportedKey Import(string encodedPublicKey, Estate.JudgmentContext? context)
         {
             if (!IsPublicKey(encodedPublicKey))
+            {
+                return new(null);
+            }
+
+            context?.Imported();
+            if (context?.RefuseImport?.Invoke(encodedPublicKey) == true)
             {
                 return new(null);
             }
@@ -271,9 +286,21 @@ public static class RecordSigning
         }
 
         /// <summary>Verifies a signature over a digest.</summary>
-        internal bool Verify(ReadOnlySpan<byte> digest, string encodedSignature)
+        internal bool Verify(ReadOnlySpan<byte> digest, string encodedSignature) => Verify(digest, encodedSignature, null);
+
+        /// <summary>
+        /// From 0.9.4 (FIX-148): verifies as <see cref="Verify(ReadOnlySpan{byte}, string)"/> does, counting the platform's verification in
+        /// the context, whose seam may stand in for a platform that refuses it.
+        /// </summary>
+        internal bool Verify(ReadOnlySpan<byte> digest, string encodedSignature, Estate.JudgmentContext? context)
         {
             if (key is null || !IsSignature(encodedSignature))
+            {
+                return false;
+            }
+
+            context?.Verified();
+            if (context?.RefuseVerification?.Invoke(encodedSignature) == true)
             {
                 return false;
             }

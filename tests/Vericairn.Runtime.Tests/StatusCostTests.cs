@@ -13,8 +13,8 @@ namespace Vericairn.Runtime.Tests;
 
 /// <summary>
 /// The cost of status at 10,000 generated records (FIX-136), measured as one <c>vericairn status</c> without a daemon measures it: the
-/// runtime opens, judging the estate once for both of its startup passes, and status judges it once more and derives every view from that
-/// judgment. The bound is the profile's, counted (<see cref="StatusPassCountTests"/>): the profile of a copy of the first-party estate
+/// runtime opens, judging the estate once for both of its startup passes, and status derives every view from that judgment, which the
+/// one-shot runtime keeps (FIX-148; before it, status judged once more). The bound is the profile's, counted (<see cref="StatusPassCountTests"/>): the profile of a copy of the first-party estate
 /// (9,778 records) found three judgments of the estate in one read and passes repeated for each record or view, and a read now judges it
 /// twice, derives the living documents once and reads the whole work orders and operations as often as on an estate of 40 work orders.
 /// The times are written to the test output, beside one judgment of the same records timed alone, but bound nothing: on an Apple silicon
@@ -30,7 +30,7 @@ public sealed class StatusCostTests(ITestOutputHelper output)
     private const string EnvironmentVariable = "VERICAIRN_COST_TESTS";
 
     [Fact]
-    public void StatusAtTenThousandRecordsJudgesTheEstateTwiceWithoutRepeatedPassesAndWithUnchangedAnswers()
+    public void StatusAtTenThousandRecordsJudgesTheEstateOnceWithoutRepeatedPassesAndWithUnchangedAnswers()
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The 10,000-record status cost test runs when {EnvironmentVariable} is 1.");
         var generation = Stopwatch.StartNew();
@@ -47,10 +47,10 @@ public sealed class StatusCostTests(ITestOutputHelper output)
         output.WriteLine($"records: {records}");
         Assert.InRange(records, Records, Records + 200);
 
-        // Two judgments, one derivation of the living documents, and no more reads of the whole work orders or operations than on an
-        // estate of 40 work orders.
+        // One judgment, the opening's, kept for status by the one-shot runtime (FIX-148), one derivation of the living documents, and no
+        // more reads of the whole work orders or operations than on an estate of 40 work orders.
         StatusPasses fewer = StatusPasses.Read(small.Root);
-        Assert.Equal((1, 2), (first.OpeningJudgments, first.Judgments));
+        Assert.Equal((1, 1), (first.OpeningJudgments, first.Judgments));
         Assert.Equal(1, first.LivingDocumentDerivations);
         Assert.Equal((fewer.WorkOrderReads, fewer.OperationReads), (first.WorkOrderReads, first.OperationReads));
 
@@ -71,6 +71,22 @@ public sealed class StatusCostTests(ITestOutputHelper output)
 
         TimeSpan fastest = first.Elapsed < second.Elapsed ? first.Elapsed : second.Elapsed;
         output.WriteLine($"status against one judgment of the same records: {fastest.TotalMilliseconds / judgment.TotalMilliseconds:F2} times");
+        // goal and goal show, as one-shot commands (FIX-148): the opening's judgment serves the list and the goal, counted; the times are
+        // written, never asserted.
+        foreach ((string command, Func<EstateService, object?> read) in new (string, Func<EstateService, object?>)[]
+        {
+            ("goal", api => api.Goals()),
+            ("goal show", api => api.Goal(api.Goals()[0].Id)),
+        })
+        {
+            var clock = Stopwatch.StartNew();
+            var judgments = new JudgmentContext(new Vericairn.Records.Signing.SignatureTables());
+            using EstateService service = EstateService.Open(estate.Root, null, null, oneShot: true, judgments: judgments);
+            Assert.NotNull(read(service));
+            clock.Stop();
+            output.WriteLine($"{command}: {clock.Elapsed.TotalMilliseconds:F0} ms; judgments {judgments.Judgments}, verifications {judgments.Verifications}, parses {judgments.Parses}");
+            Assert.Equal(1, judgments.Judgments);
+        }
     }
 
     private TimeSpan Judge(string root)

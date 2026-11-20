@@ -120,7 +120,15 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
     /// Runs an operation against the estate's API, retaining the existing ownership and failure boundary. An operation that may write
     /// shows the presence prompts it asks for unless <paramref name="presence"/> is false, as for a server that runs for a session.
     /// </summary>
-    public int WithApi(string root, Func<IEstateApi, int> operation, bool readOnly = false, bool upgrade = false, bool presence = true)
+    public int WithApi(string root, Func<IEstateApi, int> operation, bool readOnly = false, bool upgrade = false, bool presence = true) =>
+        WithApi(root, operation, readOnly, upgrade, presence, longLived: false);
+
+    /// <summary>
+    /// Runs an operation as <see cref="WithApi(string, Func{IEstateApi, int}, bool, bool, bool)"/> does. From 0.9.4 (FIX-148) a runtime
+    /// this command hosts itself is one-shot, judging the estate once for the command, unless <paramref name="longLived"/> says the
+    /// command serves calls until it is stopped (mcp serve, a worker run in the foreground), whose runtime judges at every call.
+    /// </summary>
+    public int WithApi(string root, Func<IEstateApi, int> operation, bool readOnly, bool upgrade, bool presence, bool longLived)
     {
         try
         {
@@ -150,7 +158,8 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
                 }
             }
 
-            using EstateService service = readOnly ? EstateService.OpenReadOnly(root) : upgrade ? EstateService.OpenForUpgrade(root) : EstateService.Open(root);
+            using EstateService service = readOnly ? EstateService.OpenReadOnly(root) : upgrade ? EstateService.OpenForUpgrade(root)
+                : longLived ? EstateService.Open(root) : EstateService.OpenOneShot(root);
             // The command line hosts this runtime in its own process: the embedded profile, one of the two a presence session opens on.
             service.HostsEmbedded = true;
             UsingDaemon = false;
