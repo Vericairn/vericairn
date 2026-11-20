@@ -19,6 +19,7 @@ internal sealed class JudgmentContext
     private long verifications;
     private long imports;
     private long evictedInUse;
+    private long repositoryChecks;
 
     /// <summary>A context reading the given tables, or the process's.</summary>
     internal JudgmentContext(SignatureTables? tables = null) => Tables = tables ?? SignatureTables.Process;
@@ -41,6 +42,9 @@ internal sealed class JudgmentContext
     /// <summary>Kept verdicts evicted while a judgment in progress had used them, as this context's judgments saw it.</summary>
     internal long EvictionsInUse => Interlocked.Read(ref evictedInUse);
 
+    /// <summary>From 0.9.4 (FIX-152): passes of the repository checks (the walk and the writing scan) the runtime ran.</summary>
+    internal long RepositoryCheckPasses => Interlocked.Read(ref repositoryChecks);
+
     /// <summary>
     /// A test's stand-in for a platform that refuses to import a key: true refuses the import of that key text, as a platform refusal
     /// would. Scoped to this context; null in every runtime.
@@ -62,4 +66,6 @@ internal sealed class JudgmentContext
     internal void Imported() => Interlocked.Increment(ref imports);
 
     internal void EvictedInUse() => Interlocked.Increment(ref evictedInUse);
+
+    internal void CheckedRepository() => Interlocked.Increment(ref repositoryChecks);
 }

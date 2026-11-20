@@ -143,13 +143,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     internal string? ReportedVersion { get; set; }
 
     /// <inheritdoc />
-    public HealthResponse Health()
-    {
-        lock (gate)
-        {
-            return new HealthResponse(ApiVersion.Current, ReportedVersion ?? Version, session.Manifest.Estate, session.Root, session.Profile, session.Manifest.RecordFormat, startedAt, Environment.ProcessId);
-        }
-    }
+    public HealthResponse Health() =>
+        // From 0.9.4 (FIX-152) without the gate: every field is set when the runtime opens, so health answers while another call judges.
+        new(ApiVersion.Current, ReportedVersion ?? Version, session.Manifest.Estate, session.Root, session.Profile, session.Manifest.RecordFormat, startedAt, Environment.ProcessId);
 
     /// <inheritdoc />
     public StatusResponse Status() => Status(null);
@@ -160,7 +156,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = MeasureStatus("load-and-validate", session.Load, observe);
-            PolicySections sections = ReadPolicySections(model, observe);
+            PolicySections sections = SharedPolicySections(model, observe);
             FindingList checks = MeasureStatus("repository-and-section-checks", () => SectionChecks(model, ChecksWithBatches(model), sections), observe);
             JsonObject json = MeasureStatus("status-json", () =>
             {
@@ -198,7 +194,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            ProgressResponse progress = ProgressCore(model, RepositoryChecks(model));
+            ProgressResponse progress = SharedProgress(model);
             JsonObject json = JsonNode.Parse(progress.Json.GetRawText())!.AsObject();
             json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model, () => progress), ProtocolJson.Options);
             return progress with { Json = Element(json), EventsCursor = EventsCursorLocked(model, null, new EventPass { Runs = true }) };
@@ -207,7 +203,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private ProgressResponse ProgressCore(EstateModel model, FindingList checks)
     {
-        PolicySections sections = ReadPolicySections(model);
+        PolicySections sections = SharedPolicySections(model);
         checks = SectionChecks(model, checks, sections);
         JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
         AddPolicySections(json, sections);
@@ -3008,7 +3004,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     private FindingList ChecksWithBatches(EstateModel model)
     {
-        FindingList checks = RepositoryChecks(model);
+        FindingList checks = SharedRepositoryChecks(model);
         foreach (Finding finding in InterruptedBatches(model))
         {
             checks.Add(finding);
@@ -3022,8 +3018,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return checks;
     }
 
-    private FindingList RepositoryChecks(EstateModel model) =>
-        EstateChecks.Run(model, Providers.Source("git")?.IgnoredEstateEntries(model.Root));
+    // Each pass is counted in the runtime's context (FIX-152), so a test shows how many a command runs.
+    private FindingList RepositoryChecks(EstateModel model)
+    {
+        session.Judgments.CheckedRepository();
+        return EstateChecks.Run(model, Providers.Source("git")?.IgnoredEstateEntries(model.Root));
+    }
 
     /// <summary>
     /// The batches this machine began storing and did not finish, each a warning of code batch.incomplete, a reconcile task naming what

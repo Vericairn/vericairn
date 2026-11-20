@@ -62,8 +62,8 @@ public sealed partial class EstateService
     {
         lock (gate)
         {
-            IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = session.LoadFiles(files);
+            // A judgment of its own, never a kept one, since the hand-over adds findings to it; parsed through the session's cache (FIX-152).
+            (EstateModel model, IReadOnlyList<RecordFile> files) = session.JudgeAfresh();
             if (RequestDeviceRefusal(model) is not null)
             {
                 return new ResumeResponse(ContextDenied + "\n", null, true, new Problem("denied", ContextDenied, []));
@@ -83,9 +83,9 @@ public sealed partial class EstateService
     {
         lock (gate)
         {
-            // Load and retain precisely one file set: a concurrent sync cannot mix two revisions of the copy.
-            IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = session.LoadFiles(files);
+            // Load and retain precisely one file set: a concurrent sync cannot mix two revisions of the copy. A judgment of its own, never a
+            // kept one, since the hand-over adds findings to it; parsed through the session's cache (FIX-152).
+            (EstateModel model, IReadOnlyList<RecordFile> files) = session.JudgeAfresh();
             if (RequestDeviceRefusal(model) is not null)
             {
                 return HandoffAssembly.Refuse("denied", ContextDenied, []);

@@ -338,6 +338,31 @@ public sealed class EstateSession : IDisposable
         return (model, files.Files);
     }
 
+    /// <summary>
+    /// From 0.9.4 (FIX-152): a judgment of the estate made now, as an unkept <see cref="Load"/> makes it, through the session's parse cache,
+    /// and the exact files it was judged from; it neither returns nor replaces the kept model, so its caller may add to its findings.
+    /// The files are not copied and must not be changed.
+    /// </summary>
+    internal (EstateModel Model, IReadOnlyList<RecordFile> Files) JudgeAfresh()
+    {
+        if (readOnly)
+        {
+            IReadOnlyList<RecordFile> read = ReadFiles();
+            return (EstateLoader.Load(Root, read, null, objects: ObjectReader, context: Judgments), read);
+        }
+
+        if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
+        LiveStore.FileSnapshot files = Live.Snapshot();
+        if (!ReferenceEquals(files, loadedFiles))
+        {
+            parseCache.Retain(files.ByPath);
+            loadedFiles = files;
+            kept = null;
+        }
+
+        return (EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments), files.Files);
+    }
+
     /// <summary>Told each model <see cref="Load"/> judges, once it is judged: what cost tests count the passes over (FIX-136).</summary>
     internal Action<EstateModel>? Judged { get; set; }
 

@@ -154,7 +154,8 @@ public sealed class OneJudgmentCommandTests : IDisposable
     {
         using EstateService service = EstateService.Open(Root, null, null, oneShot: false, judgments: new JudgmentContext(new SignatureTables()));
         service.HostsEmbedded = true;
-        return CliHarness.RunWithApi(service, null, ["--estate", Root, .. command]);
+        // Handed over behind another interface, so that, as for each request a daemon serves, the command's calls share no derivation (FIX-152).
+        return CliHarness.RunWithApi(new Vericairn.Protocol.CancellationBoundApi(service, CancellationToken.None), null, ["--estate", Root, .. command]);
     }
 
     // The clock's readings (a brief's freshness, status's time) are the only difference two runs of one command may show.

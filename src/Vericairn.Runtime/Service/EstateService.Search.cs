@@ -57,8 +57,8 @@ public sealed partial class EstateService
     {
         lock (gate)
         {
-            IReadOnlyList<RecordFile> files = session.Files();
-            return SearchSources(session.LoadFiles(files), files, [], searches, null).Selections;
+            (EstateModel model, IReadOnlyList<RecordFile> files) = session.LoadWithFiles();
+            return SearchSources(model, files, [], searches, null).Selections;
         }
     }
 

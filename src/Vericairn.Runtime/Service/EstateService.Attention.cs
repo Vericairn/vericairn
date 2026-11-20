@@ -66,8 +66,9 @@ public sealed partial class EstateService
     private AttentionResponse AttentionLocked(EstateModel model, string principal)
     {
         string at = RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow());
-        FindingList checks = RepositoryChecks(model);
-        ProgressResponse progress = ProgressCore(model, checks);
+        // One derivation of the checks and the progress projection serves a command's status and attention alike (FIX-152).
+        FindingList checks = SharedRepositoryChecks(model);
+        ProgressResponse progress = SharedProgress(model);
         var notices = new List<AttentionNotice>();
         using JsonDocument status = JsonDocument.Parse(EstateStatus.RenderJson(model, checks));
         JsonElement document = status.RootElement;

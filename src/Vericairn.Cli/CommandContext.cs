@@ -142,6 +142,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             if (BorrowedApi is not null)
             {
                 if (BorrowedApi is VericairnClient borrowedClient) _ = IsAlive(borrowedClient);
+                using IDisposable? borrowedCommand = (BorrowedApi as EstateService)?.Command();
                 return Showing(new CancellationBoundApi(BorrowedApi, CancellationToken), operation, readOnly || !presence);
             }
 
@@ -163,6 +164,8 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             // The command line hosts this runtime in its own process: the embedded profile, one of the two a presence session opens on.
             service.HostsEmbedded = true;
             UsingDaemon = false;
+            // From 0.9.4 (FIX-152) the command's calls share one derivation of the repository checks, policy sections and progress.
+            using IDisposable command = service.Command();
             return Showing(new CancellationBoundApi(service, CancellationToken), operation, readOnly || !presence);
         }
         catch (Exception exception) when ((exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException) && exception is not IClientOperationFailure)
