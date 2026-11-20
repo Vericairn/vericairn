@@ -15,16 +15,18 @@ namespace Vericairn.Records.Tests;
 /// </summary>
 internal sealed class StandingFixture : IDisposable
 {
-    public StandingFixture(JsonArray? triggers = null, JsonObject? period = null, JsonObject? budget = null, string until = "2027-06-01T00:00:00Z", bool activate = true, string subject = "the widget", JsonObject? limits = null)
+    public StandingFixture(JsonArray? triggers = null, JsonObject? period = null, JsonObject? budget = null, string until = "2027-06-01T00:00:00Z", bool activate = true, string subject = "the widget", JsonObject? limits = null,
+        TemplateDefinition? flow = null, string role = "researcher", string subjectField = "topic")
     {
         Policies = new PolicyFixture();
-        Flow = FlowFixture.Install(Estate, Researcher());
+        SubjectField = subjectField;
+        Flow = flow ?? FlowFixture.Install(Estate, Researcher());
         Work = Add("work-order", new JsonObject
         {
             ["key"] = "RES-1", ["kind"] = "ordinary", ["title"] = "Research the widget", ["intent"] = "Keep researching the widget between releases.", ["scope"] = new JsonArray("path:research/"),
             ["exitQuestion"] = "Is each occurrence's research recorded?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("cited findings"),
         });
-        Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("researcher", Estate.BuilderId), FlowFixture.Role("decider", Estate.OperatorId)) });
+        Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role(role, Estate.BuilderId), FlowFixture.Role("decider", Estate.OperatorId)) });
         Goal = Add("goal", GoalBody(triggers, period, budget, until, subject, limits));
         if (activate)
         {
@@ -37,6 +39,9 @@ internal sealed class StandingFixture : IDisposable
     public TestEstate Estate => Policies.Estate;
 
     public TemplateDefinition Flow { get; }
+
+    /// <summary>The flow's subject field the goal binds: topic for the researcher.</summary>
+    public string SubjectField { get; }
 
     public RecordEnvelope Work { get; }
 
@@ -61,7 +66,7 @@ internal sealed class StandingFixture : IDisposable
                 ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(Work.Id),
                 ["standing"] = new JsonObject
                 {
-                    ["pin"] = FlowFixture.Pin(Flow), ["subject"] = new JsonObject { ["topic"] = subject },
+                    ["pin"] = FlowFixture.Pin(Flow), ["subject"] = new JsonObject { [SubjectField] = subject },
                     ["triggers"] = triggers ?? new JsonArray(Monthly()),
                     ["period"] = period ?? new JsonObject { ["unit"] = "months", ["runs"] = 4, ["wallMinutes"] = 120 },
                     ["until"] = until,

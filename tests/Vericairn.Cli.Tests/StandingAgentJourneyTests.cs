@@ -158,6 +158,48 @@ public class StandingAgentJourneyTests
         }
     }
 
+    [Fact]
+    public void EachShippedStandingRoleFillsAStandingAgentWithoutCopyingItsFlow()
+    {
+        string root = CliHarness.TempDirectory("standing-roles");
+        string scratch = CliHarness.TempDirectory("standing-roles-scratch");
+        try
+        {
+            // From 0.9.4 (PROC-08) the duty carrier, the researcher and the bug hunter are built-in flows every estate lists.
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Standing roles.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string[] listed = [.. CliHarness.Ok("--estate", root, "--json", "templates", "list").Json.GetProperty("templates").EnumerateArray().Select(t => t.GetProperty("pin").GetProperty("id").GetString()!)];
+            Assert.Contains("vericairn.estate/duty-carrier", listed);
+            Assert.Contains("vericairn.software/researcher", listed);
+            Assert.Contains("vericairn.software/bug-hunter", listed);
+            Assert.Contains("never publish, post or reply outside the estate", CliHarness.Ok("--estate", root, "templates", "show", "vericairn.software/researcher", "--version", "1.0.0").Out, StringComparison.OrdinalIgnoreCase);
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json", $$"""{"roles":[{"role":"researcher","principals":["{{op}}"]},{"role":"bug-hunter","principals":["{{op}}"]}]}"""));
+
+            // A researcher and a bug hunter over the same subject are two agents of two roles; each previews what would be due and is activated.
+            foreach ((string role, string key) in new[] { ("researcher", "RES-1"), ("bug-hunter", "BUG-1") })
+            {
+                string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, role + ".json",
+                    $$"""{"key":"{{key}}","kind":"ordinary","title":"Keep the widget's {{role}} going","intent":"Standing work.","scope":["path:src/"],"exitQuestion":"Is each occurrence carried?","inputs":[],"deliverables":["outputs"]}""")).Id;
+                CliHarness.Outcome proposed = CliHarness.Ok("--estate", root, "goal", "propose", "--by", op, "--title", "The widget's " + role, "--objective", "Keep it going.", "--done", """{"type":"work-order","fields":{"key":"DONE"}}""",
+                    "--work-order", order, "--budget", "wallMinutes=30", "--budget", "attemptsPerStep=2", "--kind", "stewardship", "--standing", $"vericairn.software/{role}@1.0.0", "--subject", "topic=the widget",
+                    "--trigger", """{"key":"asked","kind":"request"}""", "--period", "runs=4", "--period", "wallMinutes=120");
+                Assert.Contains($"Flow: vericairn.software/{role} 1.0.0", proposed.Out, StringComparison.Ordinal);
+                string goal = proposed.Out.Split('\n')[0].Split("  ")[1];
+                CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+                JsonElement step = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op, "--occurrence", "request").Json.GetProperty("step");
+                Assert.Equal(("ask", "person"), (step.GetProperty("outcome").GetString(), step.GetProperty("route").GetString()));
+                string brief = CliHarness.Ok("--estate", root, "--json", "records", "show", step.GetProperty("assignment").GetProperty("id").GetString()!).Json.GetProperty("body").GetProperty("brief").ToString();
+                Assert.Contains("authority each effect needs", brief, StringComparison.Ordinal);
+                Assert.Contains("Fingerprint rule", brief, StringComparison.Ordinal);
+            }
+
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     private static void Refused(string root, string expected, string[] arguments)
     {
         CliHarness.Outcome refused = CliHarness.Run(["--estate", root, .. arguments]);
