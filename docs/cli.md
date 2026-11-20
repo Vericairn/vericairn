@@ -955,7 +955,7 @@ vericairn --json doctor
 
 The text report is unchanged, and the release check's disclosure and notices stay on standard error with or without `--json`.
 `version --json` writes `{"version": "..."}`. `records describe --json` writes the type list (`reads`, `writesAtMost`, `types` with
-`name`, `sinceFormat` and `summary`, and `reserved`) or one type with its `fields`. `records hash --json` writes `{"hash": "..."}`,
+`name`, `sinceFormat` and `summary`, and `reserved`) or one type with its `fields`. From 0.9.4 (DOCS-46) a field of fixed members, such as an assignment's `brief`, adds `members`, each with `name`, `kind`, `required`, `sinceFormat` and `description`, `emptyAllowed` for an array, `limits` where one applies, and its own `members`; the text output lists them under the field. `records hash --json` writes `{"hash": "..."}`,
 `records format --json` writes the files it `formatted` and those left `unchanged`, and `recover compare --json` writes
 `thisEstate`, `otherEstate`, `sameEstate` and the `onlyHere`, `onlyThere` and `differing` records by `type` and `id`.
 

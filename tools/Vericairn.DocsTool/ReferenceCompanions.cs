@@ -78,7 +78,7 @@ internal static partial class ReferenceSet
             types = RecordTypeRegistry.All.OrderBy(t => t.Name, StringComparer.Ordinal).Select(t => new
             {
                 name = t.Name, summary = t.Summary, subjectType = t.SubjectType, subjectHashRequired = t.SubjectHashRequired, sinceFormat = t.SinceFormat,
-                fields = t.Fields.Select(f => new { name = f.Name, kind = f.Kind, required = f.Required, sinceFormat = f.SinceFormat, description = f.Description }),
+                fields = t.Fields.Select(Field),
             }),
             reserved = RecordTypeRegistry.Reserved,
         };
@@ -87,6 +87,20 @@ internal static partial class ReferenceSet
             ["inputs/commands.json"] = JsonBytes(commandSource), ["inputs/record-types.json"] = JsonBytes(recordSource),
             ["inputs/openapi.json"] = Encoding.UTF8.GetBytes(OpenApiDocument.Json),
         };
+    }
+
+    // A field under the record reference's input names; from 0.9.4 (DOCS-46) a field of fixed members adds members, each with
+    // emptyAllowed and limits when they apply, so an input without them renders as before.
+    private static Dictionary<string, object?> Field(FieldDescription field)
+    {
+        var described = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["name"] = field.Name, ["kind"] = field.Kind, ["required"] = field.Required, ["sinceFormat"] = field.SinceFormat, ["description"] = field.Description,
+        };
+        if (field.EmptyAllowed is bool empty) described["emptyAllowed"] = empty;
+        if (field.Limits is not null) described["limits"] = field.Limits;
+        if (field.Members.Count > 0) described["members"] = field.Members.Select(Field).ToList();
+        return described;
     }
 
     private static byte[] JsonBytes(object value) => Encoding.UTF8.GetBytes(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(value)) + "\n");

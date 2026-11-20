@@ -87,9 +87,28 @@ internal sealed class BuildReferenceCompanion(string name) : SoftwareCompanion(n
                 .Append("| Field | Kind | Required | Introduced in format | Meaning |\n|---|---|---|---|---|\n");
             foreach (JsonElement field in Array(type, "fields")) Row(text, String(field, "name"), String(field, "kind"), Recorded(field, "required"), Recorded(field, "sinceFormat"), String(field, "description"));
             text.Append('\n');
+            foreach (JsonElement field in Array(type, "fields")) Members(text, name + "." + String(field, "name"), field);
         }
         text.Append("Reserved for later releases: ").Append(DocumentMarkdown.Text(Recorded(source, "reserved"))).Append(".\n");
         return text.ToString();
+    }
+
+    // From 0.9.4 (DOCS-46): a field of fixed members, as the input records them from the validator's rules, gets a table of its members,
+    // and each member of fixed members its own table after it. An input without members renders as before.
+    private static void Members(StringBuilder text, string path, JsonElement field)
+    {
+        if (!field.TryGetProperty("members", out _)) return;
+        JsonElement[] members = Array(field, "members");
+        text.Append("### `").Append(path).Append("`\n\n")
+            .Append("| Member | Kind | Required | Empty allowed | Limits | Introduced in format | Meaning |\n|---|---|---|---|---|---|---|\n");
+        foreach (JsonElement member in members)
+        {
+            string empty = member.TryGetProperty("emptyAllowed", out JsonElement allowed) ? Value(allowed) : "";
+            string limits = member.TryGetProperty("limits", out _) ? String(member, "limits") : "";
+            Row(text, String(member, "name"), String(member, "kind"), Recorded(member, "required"), empty, limits, Recorded(member, "sinceFormat"), String(member, "description"));
+        }
+        text.Append('\n');
+        foreach (JsonElement member in members) Members(text, path + "." + String(member, "name"), member);
     }
 
     private static string Api(JsonElement source)
