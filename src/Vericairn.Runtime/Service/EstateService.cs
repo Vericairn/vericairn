@@ -3131,6 +3131,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             if (UnclosedActRefusal(proposed, records, () => LoadWith([])) is Problem unclosed) return unclosed;
             FindingList relevant = Invalid(proposed, records);
             AttemptWaits(proposed, records, relevant);
+            ConcurrentPathsStart(proposed, records, relevant);
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
                 : JudgePolicySources(records, proposed);

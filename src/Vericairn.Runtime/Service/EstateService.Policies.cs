@@ -127,7 +127,8 @@ public sealed partial class EstateService
         // Only explicit repository relations select another repository. No network or provider lookup is involved. A result's
         // duty scope is not such a relation: its exact commits are loaded below as evidence, never as current writing.
         HashSet<string> selected = [];
-        foreach (RecordEnvelope record in model.Current("estate-policy").Concat(model.Current("writing-exception"))) SelectRepositories(record.Body);
+        // A policy whose every rule is concurrent-paths reads no repository bytes: it compares assignments' briefs from the records (POLICY-08).
+        foreach (RecordEnvelope record in model.Current("estate-policy").Where(p => !ConcurrentOnly(p)).Concat(model.Current("writing-exception"))) SelectRepositories(record.Body);
         foreach (RecordEnvelope resource in model.Current("resource").Where(r => EstateModel.BodyString(r, "kind") == "repository"))
         {
             if (!model.Chain(resource).Any(selected.Contains)) continue;
@@ -200,7 +201,13 @@ public sealed partial class EstateService
         }
     }
 
-    private RecordResponse PolicyRecord(EstateModel model, RecordEnvelope record, IReadOnlyDictionary<string, RecordFile>? sourceFiles = null)
+    private static bool ConcurrentOnly(RecordEnvelope policy)
+    {
+        JsonElement[] rules = [.. PolicyInputs.Items(PolicyInputs.Get(policy.Body, "rules"))];
+        return rules.Length > 0 && rules.All(r => PolicyInputs.Text(r, "kind") == ConcurrentPaths.Kind);
+    }
+
+        private RecordResponse PolicyRecord(EstateModel model, RecordEnvelope record, IReadOnlyDictionary<string, RecordFile>? sourceFiles = null)
     {
         using JsonDocument document = JsonDocument.Parse((sourceFiles is null ? session.LoadedFile(record.ExpectedPath)! : sourceFiles[record.ExpectedPath]).Bytes);
         return new(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
