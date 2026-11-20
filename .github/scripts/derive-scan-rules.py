@@ -30,9 +30,10 @@ k8s = by['kubernetes-secret-yaml']['allowlists']
 nuget = by['nuget-config-password']['allowlists'][0]['regexes']; assert nuget[2] == r'^\%\S.*\%$'
 vault = by['vault-service-token']['allowlists'][0]['regexes']
 allow = []
-def block(desc, rules_, regexes, target=None, stop=None):
+def block(desc, rules_, regexes, target=None, stop=None, paths=None):
     s = f'[[allowlists]]\ndescription = "{desc}"\n'
     if rules_: s += 'targetRules = ' + json.dumps(rules_) + '\n'
+    if paths: s += 'condition = "AND"\npaths = ' + arr(paths) + '\n'
     if target: s += f'regexTarget = "{target}"\n'
     s += 'regexes = ' + arr(regexes) + '\n'
     if stop: s += 'stopwords = [\n' + ''.join(f'    {json.dumps(w)},\n' for w in stop) + ']\n'
@@ -46,6 +47,13 @@ block("Kubernetes secrets: template or empty values", ['kubernetes-secret-yaml']
 block("Kubernetes secrets: kind and data in separate documents", ['kubernetes-secret-yaml'], k8s[1]['regexes'], 'match')
 block("NuGet configuration passwords: environment variable references", ['nuget-config-password'], [nuget[2]])
 block("Vault service tokens: a value without a digit", ['vault-service-token'], vault)
+# FIX-150: a history checkpoint's inventory lists each record's path, whose random id can spell a key word, beside its hash. For every
+# rule, a line of exactly that shape in a file named objects/<64 hex digits>; GitleaksScanner applies the configuration with this
+# allowance only when every such file the range adds or changes holds nothing but such lines, and the configuration without it otherwise.
+inventory_path = r'^objects/[0-9a-f]{64}$'
+inventory_line = r'[a-z][a-z0-9-]{0,63}/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}'
+block("History checkpoint inventories: a record's path and hash alone on a line, in the estate's objects", None,
+      [r'\A\n?' + inventory_line + r'\z'], 'line', paths=[inventory_path])
 header = f'''# Vericairn's secret-scanning configuration for `vericairn changes push`.
 #
 # The rules are gitleaks' default rules: config/gitleaks.toml of gitleaks v{version} (commit
@@ -55,8 +63,10 @@ header = f'''# Vericairn's secret-scanning configuration for `vericairn changes 
 # .github/scripts/derive-scan-rules.py derives this file.
 #
 # The allowances after the rules are the only ones. Each describes a value that is not the credential its rule finds;
-# none exempts a path, and none admits a sample credential such as an AWS key id ending in EXAMPLE. docs/changes.md
-# lists them, and each scan records this file's SHA-256.
+# none exempts a path, and none admits a sample credential such as an AWS key id ending in EXAMPLE. The last, for a
+# history checkpoint inventory's lines, holds only together with its path condition, and the scanner leaves it out of a
+# scan whose objects mix such lines with others. docs/changes.md lists them, and each scan records the SHA-256 of the
+# configuration it applied: this file, or this file without its last allowance.
 
 title = "Vericairn secret scan"
 minVersion = "v8.25.0"
@@ -68,6 +78,10 @@ assert len(parsed['rules']) == len(c['rules'])
 for a, b in zip(c['rules'], parsed['rules']):
     a = {k: v for k, v in a.items() if k != 'allowlists'}; assert a == b, a['id']
 assert all('allowlists' not in r for r in parsed['rules']) and 'allowlist' not in parsed
-assert all('paths' not in a for a in parsed['allowlists'])
+assert all('paths' not in a for a in parsed['allowlists'][:-1])
+last = parsed['allowlists'][-1]
+assert last == {'description': last['description'], 'condition': 'AND', 'paths': [inventory_path], 'regexTarget': 'line',
+                'regexes': [r'\A\n?' + inventory_line + r'\z']}, last
+assert text.count('\n[[allowlists]]\ndescription = "History checkpoint inventories') == 1 and text.endswith(allow[-1])
 open(dst, 'w', encoding='utf-8', newline='\n').write(text)
 print(len(parsed['rules']), 'rules;', len(parsed['allowlists']), 'allowances;', len(text.encode()), 'bytes')

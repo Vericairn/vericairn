@@ -79,6 +79,73 @@ public sealed class PushProviderTests
         });
     }
 
+    // FIX-150: the inventory allowance applies only when every file it could reach that the range adds or changes holds nothing but
+    // inventory lines; a file mixing them with another line, or any read the scanner cannot complete, scans without it.
+    [Theory]
+    [InlineData("pure", true)]
+    [InlineData("none", true)]
+    [InlineData("mixed", false)]
+    [InlineData("log fails", false)]
+    [InlineData("grep fails", false)]
+    [InlineData("unasked path", false)]
+    [InlineData("other commit", false)]
+    [InlineData("path before commit", false)]
+    public void TheInventoryAllowanceAppliesOnlyWhenEveryReachableFileHoldsOnlyInventoryLines(string range, bool allowance)
+    {
+        string inventory = "objects/" + new string('e', 64);
+        string other = "objects/" + new string('f', 64);
+        string commit = new('b', 40);
+        var greps = new List<ProcessStartInfo>();
+        byte[]? applied = null;
+        var scanner = new GitleaksScanner(info =>
+        {
+            if (info.FileName == "git" && info.ArgumentList.Contains("log"))
+            {
+                Assert.Equal("C", info.Environment["LC_ALL"]);
+                Assert.Equal(["--no-replace-objects", "log", "--no-show-signature", "--format=commit %H", "--name-only", "--root", "--no-renames", "--full-history", "-m",
+                    "--diff-filter=d", "--no-relative", "--no-ext-diff", "--no-textconv", Plan.Range, "--", ":(top)objects"], info.ArgumentList);
+                return range switch
+                {
+                    "log fails" => new(ProcessOutcome.Exited, true, 128, string.Empty, string.Empty),
+                    "none" => Success("commit " + commit + "\n\nobjects/notes.txt\nobjects/sub/" + new string('e', 64) + "\n"),
+                    "path before commit" => Success(inventory + "\ncommit " + commit + "\n"),
+                    _ => Success("commit " + commit + "\n\n" + inventory + "\n" + other + "\r\n"),
+                };
+            }
+
+            if (info.FileName == "git" && info.ArgumentList.Contains("grep"))
+            {
+                greps.Add(info);
+                bool invert = info.ArgumentList.Contains("--invert-match");
+                Assert.Equal("C", info.Environment["LC_ALL"]);
+                Assert.Equal("^" + GitleaksScanner.InventoryLine + "$", info.ArgumentList[info.ArgumentList.IndexOf("-e") + 1]);
+                Assert.Equal([commit, "--", ":(top)" + inventory, ":(top)" + other], info.ArgumentList.Skip(info.ArgumentList.IndexOf("-e") + 2));
+                return range switch
+                {
+                    "grep fails" => new(ProcessOutcome.Exited, true, 128, string.Empty, string.Empty),
+                    "unasked path" when !invert => Success(commit + ":objects/" + new string('d', 64) + "\n"),
+                    "other commit" when !invert => Success(new string('c', 40) + ":" + inventory + "\n"),
+                    "mixed" => Success(commit + ":" + inventory + "\n"),
+                    _ when invert => Success(commit + ":" + other + "\n"),
+                    _ => Success(commit + ":" + inventory + "\n"),
+                };
+            }
+
+            if (info.FileName == "git") return Success("2");
+            if (info.ArgumentList[0] == "version") return Success("8.30.1");
+            string configuration = info.ArgumentList.Single(a => a.StartsWith("--config=", StringComparison.Ordinal)).Split('=', 2)[1];
+            applied = File.ReadAllBytes(configuration);
+            string report = info.ArgumentList.Single(a => a.StartsWith("--report-path=", StringComparison.Ordinal)).Split('=', 2)[1];
+            File.WriteAllText(report, "0");
+            return Success();
+        });
+        SecretScan scan = scanner.Scan(Path.GetTempPath(), Plan);
+        Assert.Equal("passed", scan.Verdict);
+        Assert.Equal(allowance ? GitleaksScanner.Configuration : GitleaksScanner.ConfigurationWithoutInventories, applied);
+        Assert.Equal("8.30.1; rules " + (allowance ? GitleaksScanner.ConfigurationHash : GitleaksScanner.ConfigurationWithoutInventoriesHash), scan.Version);
+        Assert.Equal(range is "none" or "log fails" or "path before commit" ? 0 : range is "grep fails" or "unasked path" or "other commit" ? 1 : 2, greps.Count);
+    }
+
     [Theory]
     [InlineData("NotStarted")]
     [InlineData("TimedOut")]

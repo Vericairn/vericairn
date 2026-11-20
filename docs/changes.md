@@ -80,7 +80,32 @@ allowances are its own, each for a value that is not the credential its rule fin
 - for Kubernetes secrets, template or empty values, and kind and data in separate
   documents;
 - for NuGet configuration passwords, environment variable references;
-- for Vault service tokens, a value without a digit.
+- for Vault service tokens, a value without a digit;
+- from 0.9.4, for every rule, a line of a history checkpoint's inventory in the
+  estate's objects, as the next paragraph describes.
+
+From 0.9.4 (FIX-150, decision 01M7N48B8CGR54YTJZMAMJTYGH), the scan passes a
+history checkpoint's inventory whatever its record ids contain. An inventory
+lists each record by its path under `records/` beside its hash, and a random
+record id can spell a key word such as `KEY` just before the hash, which
+gitleaks' generic key rule reads as a key's name and value; before 0.9.4 about
+one checkpoint push in five was refused for it. The allowance passes a line
+only when it has exactly an inventory line's shape, with nothing before or after
+it: a record type, a month, a record id and `.json`, one space, then `sha256:`
+and 64 lower-case hexadecimal digits. It holds only in a file named by 64
+lower-case hexadecimal digits directly in the `objects/` folder at the
+repository's root. The scanner cannot tell from the commits which objects a
+checkpoint names, so it applies the allowance only when every such file that
+the pushed commits add or change, and that holds a line of that shape, holds
+nothing but such lines. If one mixes inventory lines with any other line, or
+the scanner cannot read those files, the whole range is scanned without the
+allowance, as before 0.9.4. Every other line and every other path is scanned
+exactly as before, and no repository exception, allow comment or ignore file is
+honored. A value in an inventory line's hash position passes, whatever it is:
+the allowance trusts the shape, not the checkpoint's signature, which the
+estate's checks verify. The recorded scan's version names the configuration the
+scan applied, the configuration with this allowance or the same configuration
+without it, each by its own SHA-256.
 
 The recorded scan's version names gitleaks' version and the configuration's SHA-256,
 for example `8.30.1; rules sha256:…`, so each scan identifies the rules it applied.

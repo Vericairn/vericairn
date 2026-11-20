@@ -28,7 +28,8 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         Assert.DoesNotContain("useDefault", text, StringComparison.Ordinal);
         Assert.Equal(222, Regex.Count(text, @"^\[\[rules\]\]$", RegexOptions.Multiline));
         Assert.DoesNotMatch(new Regex(@"^\[allowlist\]$|^\[\[rules\.allowlists?\]\]$|^\[rules\.allowlist\]$", RegexOptions.Multiline), text);
-        Assert.DoesNotMatch(new Regex(@"^paths\s*=", RegexOptions.Multiline), text);
+        // The one path condition is the inventory allowance's (FIX-150), which holds only together with its line's shape.
+        Assert.Equal(1, Regex.Count(text, @"^paths\s*=", RegexOptions.Multiline));
         string[] rules = Regex.Matches(text, @"^id = ""(?<id>[a-z0-9-]+)""$", RegexOptions.Multiline).Select(m => m.Groups["id"].Value).ToArray();
         Assert.Contains("aws-access-token", rules);
         Assert.Contains("github-pat", rules);
@@ -36,13 +37,131 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         // Every allowance follows the rules, targets rules that exist and admits no sample credential.
         string allowances = text[text.IndexOf("[[allowlists]]", StringComparison.Ordinal)..];
         Assert.DoesNotContain("[[rules]]", allowances, StringComparison.Ordinal);
-        Assert.Equal(9, Regex.Count(allowances, @"^\[\[allowlists\]\]$", RegexOptions.Multiline));
+        Assert.Equal(10, Regex.Count(allowances, @"^\[\[allowlists\]\]$", RegexOptions.Multiline));
         Assert.DoesNotContain("EXAMPLE", allowances, StringComparison.Ordinal);
         Assert.DoesNotContain("AIza", allowances, StringComparison.Ordinal);
         foreach (Match target in Regex.Matches(allowances, @"^targetRules = \[""(?<id>[a-z0-9-]+)""\]$", RegexOptions.Multiline))
             Assert.Contains(target.Groups["id"].Value, rules);
         Assert.Equal("sha256:" + Convert.ToHexStringLower(SHA256.HashData(GitleaksScanner.Configuration)), GitleaksScanner.ConfigurationHash);
     }
+
+    // FIX-150: the inventory allowance is the last, for every rule, and only where its path condition and its line's shape both hold.
+    [Fact]
+    public void TheInventoryAllowanceIsTheLastAndHoldsOnlyWithItsPathAndLineShape()
+    {
+        string text = Encoding.UTF8.GetString(GitleaksScanner.Configuration);
+        string last = text[text.LastIndexOf("[[allowlists]]", StringComparison.Ordinal)..];
+        Assert.Equal(
+            "[[allowlists]]\n"
+            + "description = \"History checkpoint inventories: a record's path and hash alone on a line, in the estate's objects\"\n"
+            + "condition = \"AND\"\n"
+            + "paths = [\n    '''" + GitleaksScanner.InventoryPath + "''',\n]\n"
+            + "regexTarget = \"line\"\n"
+            + "regexes = [\n    '''\\A\\n?" + GitleaksScanner.InventoryLine + "\\z''',\n]\n", last);
+        Assert.DoesNotContain("targetRules", last, StringComparison.Ordinal);
+
+        // The configuration without it is the same file up to it, recorded by its own hash.
+        string without = Encoding.UTF8.GetString(GitleaksScanner.ConfigurationWithoutInventories);
+        Assert.Equal(text[..(text.Length - last.Length - 1)], without);
+        Assert.Equal(9, Regex.Count(without, @"^\[\[allowlists\]\]$", RegexOptions.Multiline));
+        Assert.Equal("sha256:" + Convert.ToHexStringLower(SHA256.HashData(GitleaksScanner.ConfigurationWithoutInventories)),
+            GitleaksScanner.ConfigurationWithoutInventoriesHash);
+        Assert.NotEqual(GitleaksScanner.ConfigurationHash, GitleaksScanner.ConfigurationWithoutInventoriesHash);
+
+        // The shape is a checkpoint inventory's line as the product writes and reads it.
+        var shape = new Regex("^" + GitleaksScanner.InventoryLine + "$", RegexOptions.CultureInvariant);
+        foreach (string line in InventoryLines())
+        {
+            Assert.Matches(shape, line);
+            Assert.True(Vericairn.Records.History.HistoryInventory.TryParseLine(line, out _), line);
+        }
+    }
+
+    [Fact]
+    public void AnInventoryNamingARecordIdThatSpellsAKeyWordPasses()
+    {
+        string content = string.Concat(InventoryLines().Select(l => l + "\n"));
+        SecretScan scan = ScanAdditions([(ObjectPath(content), content)]);
+        Assert.Equal("passed", scan.Verdict);
+        Assert.EndsWith("; rules " + GitleaksScanner.ConfigurationHash, scan.Version, StringComparison.Ordinal);
+    }
+
+    // The same inventory anywhere but a file named by its SHA-256 in the root's objects folder is scanned as every other file is.
+    [Theory]
+    [InlineData("inventory.txt")]
+    [InlineData("objects/sub/{0}")]
+    [InlineData("objects/{0}.txt")]
+    [InlineData("records/objects/{0}")]
+    [InlineData("estate/objects/{0}")]
+    [InlineData("objects/{1}")]
+    [InlineData("Objects/{0}")]
+    public void TheAllowanceDoesNotApplyOutsideTheObjectsFolder(string path)
+    {
+        string content = string.Concat(InventoryLines().Select(l => l + "\n"));
+        string name = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+        SecretScan scan = ScanAdditions([(string.Format(System.Globalization.CultureInfo.InvariantCulture, path, name, name.ToUpperInvariant()), content)]);
+        Assert.Equal("findings", scan.Verdict);
+        Assert.True(scan.FindingCount > 0);
+    }
+
+    [Fact]
+    public void TheSameInventoryWithOneSecretShapedLineIsRefused()
+    {
+        string secret = "ghp" + "_" + RandomNumberGenerator.GetString("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789", 36);
+        string[] lines = InventoryLines();
+        string content = lines[0] + "\n" + "credential = " + secret + "\n" + string.Concat(lines.Skip(1).Select(l => l + "\n"));
+        SecretScan scan = ScanAdditions([(ObjectPath(content), content)]);
+        Assert.Equal("findings", scan.Verdict);
+        // The secret's line and the inventory line spelling a key word: the file mixes lines, so the allowance does not apply in it.
+        Assert.True(scan.FindingCount >= 2);
+        Assert.EndsWith("; rules " + GitleaksScanner.ConfigurationWithoutInventoriesHash, scan.Version, StringComparison.Ordinal);
+    }
+
+    // A line of any other shape is found as it was before: a near miss of the shape, and a harmless line, which takes the allowance from
+    // the whole file, since the allowance holds only in files whose every line has the shape.
+    [Theory]
+    [InlineData("{0} extra")]
+    [InlineData("{0}\r")]
+    [InlineData(" {0}")]
+    [InlineData("records/{0}")]
+    [InlineData("lower")]
+    [InlineData("month")]
+    [InlineData("tab")]
+    [InlineData("upper hash")]
+    [InlineData("harmless")]
+    public void ALineOfAnyOtherShapeIsScannedAsBefore(string form)
+    {
+        string[] lines = InventoryLines();
+        string keyed = lines[1];
+        string changed = form switch
+        {
+            "lower" => keyed[..keyed.IndexOf(' ', StringComparison.Ordinal)].ToLowerInvariant() + keyed[keyed.IndexOf(' ', StringComparison.Ordinal)..],
+            "month" => keyed.Replace("/2026-11/", "/2026-13/", StringComparison.Ordinal),
+            "tab" => keyed.Replace(" sha256:", "\tsha256:", StringComparison.Ordinal),
+            "upper hash" => keyed[..keyed.IndexOf(':', StringComparison.Ordinal)] + keyed[keyed.IndexOf(':', StringComparison.Ordinal)..].ToUpperInvariant(),
+            "harmless" => keyed,
+            _ => string.Format(System.Globalization.CultureInfo.InvariantCulture, form, keyed),
+        };
+        string content = lines[0] + "\n" + changed + "\n" + lines[2] + "\n" + (form == "harmless" ? "A plain note.\n" : string.Empty);
+        SecretScan scan = ScanAdditions([(ObjectPath(content), content)]);
+        Assert.Equal("findings", scan.Verdict);
+        Assert.Equal(1, scan.FindingCount);
+    }
+
+    // Inventory lines as HistoryInventory writes them; the second names a record id spelling KEY just before its end, which gitleaks'
+    // generic key rule reads as a key name with the hash as its value. Assembled at run time, so that this file holds no such line.
+    private static string[] InventoryLines()
+    {
+        static string Hash(string seed) => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(seed)));
+        return
+        [
+            "operation/2026-11/01M7PV6AXW41AVCKTFJP3J9Y09.json " + Hash("first"),
+            "decision/2026-11/01M7PV6AXW41AVCKTFJ" + "K" + "EY" + "9Y09.json " + Hash("second"),
+            "work-order/2026-11/01M7PV6AXW41AVCKTFJP3J9Y0Z.json " + Hash("third"),
+        ];
+    }
+
+    private static string ObjectPath(string content) => "objects/" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
 
     [Theory]
     [InlineData("aws", "settings.txt")]
@@ -71,7 +190,9 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         Assert.EndsWith("; rules " + GitleaksScanner.ConfigurationHash, scan.Version, StringComparison.Ordinal);
     }
 
-    private SecretScan ScanAddition(string path, string content)
+    private SecretScan ScanAddition(string path, string content) => ScanAdditions([(path, content)]);
+
+    private SecretScan ScanAdditions((string Path, string Content)[] files)
     {
         string? gitleaks = Environment.GetEnvironmentVariable("VERICAIRN_TEST_GITLEAKS");
         Assert.SkipWhen(gitleaks is null, "Set VERICAIRN_TEST_GITLEAKS to an installed gitleaks of at least 8.25.0 to scan real commits.");
@@ -83,10 +204,14 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         Git("add", "readme.txt");
         Git("commit", "-m", "Initial content");
         string basis = Git("rev-parse", "HEAD");
-        string file = Path.Combine(Repository, path.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        File.WriteAllText(file, content);
-        Git("add", "--", path);
+        foreach ((string path, string content) in files)
+        {
+            string file = Path.Combine(Repository, path.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            File.WriteAllText(file, content);
+            Git("add", "--", path);
+        }
+
         Git("commit", "-m", "Add content");
         string head = Git("rev-parse", "HEAD");
         var scanner = new GitleaksScanner(info =>
