@@ -232,6 +232,12 @@ public partial interface IEstateApi
     GoalDueResponse? GoalDue(string goal, string? asOf = null) => throw new NotSupportedException("This API implementation does not support standing agents.");
 
     /// <summary>
+    /// From 0.9.4 (GOAL-08): records one output of a standing agent's occurrence, a possibility, an ask or a publication request, by the
+    /// contributor of the assignment that carries it, naming what raised it; another principal disposes of it.
+    /// </summary>
+    WriteOutcome StandingOutput(StandingOutputRequest request) => throw new NotSupportedException("This API implementation does not support standing outputs.");
+
+    /// <summary>
     /// From 0.9.4 (CODE-73): the overlap check's view: the active assignments by repository, every overlap of their effective permitted
     /// paths with its witnesses and resolution, and the concurrent-paths policies that hold it; only one repository's when it is named (a
     /// repository resource's id or estate). Read-only.

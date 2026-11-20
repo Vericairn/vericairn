@@ -693,6 +693,34 @@ include this contract, and the generic record reader advances to
 `vericairn.records/readers/11`, which carries the fields of this section and the
 two before it.
 
+## Standing outputs (0.9.4)
+
+GOAL-08 adds fields to `possibility`, `ask` and `operator-request`, and a goal's
+`plan.standing.outputs`, within format 3, and no record type: every output of a
+standing agent's occurrence is a record another principal disposes of. A record
+without them behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `possibility` | Optional `raisedBy: {goal, occurrence, assignment, run?}` names a standing agent's goal by its first revision, the occurrence key, the assignment of the goal's work order that carries that key, recorded before it, whose contributor is the record's author, and, for an agent, the agent run of that assignment by the author, in flight when the record is written; a result that already settles the occurrence refuses it (`standing.raised-by`). Such a possibility is raised `open` with a `fingerprint` and at least one source (`standing.possibility`); its occurrence records at most `plan.standing.outputs.possibilities` (five when unset) possibilities, of which at most `drafts` (three) carry a `draft`, and one summary possibility, the one with `extras` (`standing.output-cap`); a second open possibility of the same agent with the same fingerprint, read as each stood when it is written, is refused (`standing.duplicate-output`); and where one with that fingerprint was declined, a new one names it in `raisesAgain` with at least one `evidence` item (`standing.raises-again`). A revision keeps `raisedBy` and `fingerprint` (`standing.raised-by`); one that changes the disposition or `adoptedAs` is refused by the possibility's author and by an agent that carried an assignment of the goal's work order before it (`standing.own-output`), and adopting one with `disclosure: held` takes an operator who is a person (`standing.held`). Optional on any possibility: `fingerprint` (lower-case letters, digits and `. : / _ -`, up to 200 characters); `sources`, each `{address, retrievedAt?, hash?, extents?}`; `evidence`, each `{stance: for|against, statement, sources?}`, the sources by index, with no scores (`possibility.evidence`); `reviewTriggers`, each `{at}` or `{condition}` (`possibility.review-trigger`); `links`, each `{relation: duplicate-of|supersedes, possibility, hash}` naming another possibility at its exact hash (`possibility.link`); `draft: {key?, title, intent, scope, deliverables, exitQuestion}`; `disclosure: held`; `extras`; `raisesAgain`. |
+| `ask` | Optional `raisedBy`, as a possibility's. Such an ask is put to a person other than its author, names a revision of the agent's goal in `goal`, and does not open with the words of the runtime's own asks about a goal (`standing.ask`); its author does not withdraw it (`standing.own-output`): a decision of the person asked disposes of it. |
+| `operator-request` | Optional `raisedBy`, as a possibility's. Such a request is of kind `publication` and pins the agent's work order (`standing.publication`): its exact text, labeled the agent's draft. |
+| `goal` | Optional `plan.standing.outputs: {possibilities?, drafts?, open?}`: possibilities per occurrence (1 to 20, five when unset), drafts among them (no more than the possibilities, three when unset; `standing.outputs`) and open outputs (1 to 1,000, ten when unset). |
+
+A standing agent's open outputs are its possibilities still open, its asks still
+waiting and its publication requests not closed. While they reach `open`, its due
+occurrences are deferred, and an `agent-run` operation of the goal is refused,
+judged by the records before it (`operation.standing`). The runtime's write
+boundary also refuses a new disposition of a standing agent's possibility, with
+`standing.output-now`, by an agent the goal's work role names as the roster
+stands; dispositions already in the estate keep their reading.
+
+A reader of format 3 that predates these fields refuses a record that carries
+one of them as an unknown key, as any later format-3 field, so the estate's pin
+keeps every machine on a release that reads them. A format-2 estate refuses them.
+`records describe possibility`, `records describe ask` and `records describe
+operator-request` include this contract.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

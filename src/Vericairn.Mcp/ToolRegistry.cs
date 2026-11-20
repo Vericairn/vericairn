@@ -339,6 +339,7 @@ public sealed partial class ToolRegistry
 
                     return Outcome(await api.GoalDecideAsync(Arg(a, "goal"), new GoalDecideRequest(by, Arg(a, "step"), paths ?? [], Arg(a, "reasons"), evidence), token).ConfigureAwait(false));
                 }),
+            .. StandingOutputTools(by),
             Read("asks_list", "What waits on a principal, or on every principal when none is named: the asks still open or notified, oldest first, at most three in one delivery to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order. As text, or as the canonical JSON when form is json. Reading them answers nothing: an ask is answered by a decision of the principal it is put to, which no tool records.", Arguments(("to", "The principal asked (ULID); omitted, every principal."), ("form", "text (the default) or json.")),
                 async (api, a, token) => OptionalArg(a, "form") switch
                 {

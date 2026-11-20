@@ -103,6 +103,61 @@ public class StandingAgentJourneyTests
         }
     }
 
+    [Fact]
+    public void AStandingOutputIsRecordedAndItsAuthorCannotAdoptItWithWorkNew()
+    {
+        string root = CliHarness.TempDirectory("standing-outputs");
+        string scratch = CliHarness.TempDirectory("standing-outputs-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Standing outputs.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            Directory.CreateDirectory(Path.Combine(root, "docs", "templates"));
+            File.WriteAllText(Path.Combine(root, "docs", "templates", "example-researcher-1.0.0.json"), StandingFlows.Researcher().ToJsonString());
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json", $$"""{"roles":[{"role":"researcher","principals":["{{op}}"]}]}"""));
+            string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json",
+                """{"key":"RES-1","kind":"ordinary","title":"Research the widget","intent":"Keep researching the widget.","scope":["path:research/"],"exitQuestion":"Is each occurrence researched?","inputs":[],"deliverables":["findings"]}""")).Id;
+            string[] propose = ["goal", "propose", "--by", op, "--title", "Research the widget", "--objective", "Keep researching the widget.", "--done", """{"type":"work-order","fields":{"key":"RESEARCHED"}}""",
+                "--work-order", order, "--budget", "wallMinutes=30", "--budget", "attemptsPerStep=2", "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget",
+                "--trigger", """{"key":"asked","kind":"request"}""", "--period", "runs=4", "--period", "wallMinutes=120"];
+
+            // --outputs caps what each occurrence records and the open outputs; a malformed cap is refused.
+            Refused(root, "An output cap is possibilities, drafts or open", [.. propose, "--outputs", "scores=3"]);
+            CliHarness.Outcome proposed = CliHarness.Ok(["--estate", root, .. propose, "--outputs", "possibilities=2", "--outputs", "drafts=1", "--outputs", "open=4"]);
+            string goal = proposed.Out.Split('\n')[0].Split("  ")[1];
+            JsonElement outputs = CliHarness.Ok("--estate", root, "--json", "records", "show", goal).Json.GetProperty("body").GetProperty("plan").GetProperty("standing").GetProperty("outputs");
+            Assert.Equal((2, 1, 4), (outputs.GetProperty("possibilities").GetInt32(), outputs.GetProperty("drafts").GetInt32(), outputs.GetProperty("open").GetInt32()));
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            string assignment = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op, "--occurrence", "request").Json.GetProperty("step").GetProperty("assignment").GetProperty("id").GetString()!;
+
+            // The operator carries the occurrence as a person here, and records a possibility with a draft through the API the MCP tool calls.
+            string possibility;
+            using (EstateService api = EstateService.Open(root))
+            {
+                var body = new JsonObject
+                {
+                    ["title"] = "Cache the index", ["idea"] = "Reading the index on every call costs a second.", ["fingerprint"] = "cache/index",
+                    ["sources"] = new JsonArray(new JsonObject { ["address"] = "https://example.org/widget/index" }),
+                    ["draft"] = new JsonObject { ["title"] = "Cache the index", ["intent"] = "Stop reading it on every call.", ["scope"] = new JsonArray("path:src/index/"), ["deliverables"] = new JsonArray("a cached index"), ["exitQuestion"] = "Is the index read once per change?" },
+                };
+                Vericairn.Protocol.WriteOutcome raised = api.StandingOutput(new Vericairn.Protocol.StandingOutputRequest(op, assignment, "possibility", JsonSerializer.SerializeToElement(body)));
+                Assert.True(raised.Ok, raised.Problem?.Message);
+                possibility = raised.Written!.Id;
+            }
+
+            // Its author does not adopt it: work new --from-possibility refuses, and nothing is written.
+            CliHarness.Outcome own = CliHarness.Run("--estate", root, "work", "new", "--by", op, "--from-possibility", possibility, "--key", "IDX-1");
+            Assert.NotEqual(0, own.Code);
+            Assert.Contains("standing.own-output", own.Err + own.Out, StringComparison.Ordinal);
+            Assert.Equal("open", CliHarness.Ok("--estate", root, "--json", "records", "show", possibility).Json.GetProperty("body").GetProperty("disposition").GetString());
+            Assert.Contains("1 outputs open", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     private static void Refused(string root, string expected, string[] arguments)
     {
         CliHarness.Outcome refused = CliHarness.Run(["--estate", root, .. arguments]);

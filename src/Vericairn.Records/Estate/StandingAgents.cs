@@ -134,6 +134,12 @@ internal static class StandingAgents
         /// <summary>The results awaiting review that defer its dispatch.</summary>
         public int AwaitingCap { get; init; } = DefaultAwaitingReview;
 
+        /// <summary>From GOAL-08: its open outputs, possibilities still open, asks still waiting and publication requests not closed.</summary>
+        public int OpenOutputs { get; init; }
+
+        /// <summary>From GOAL-08: the open outputs that defer its dispatch.</summary>
+        public int OpenCap { get; init; } = StandingOutputs.DefaultOpen;
+
         /// <summary>The occurrences that may be carried now, oldest first.</summary>
         public IEnumerable<OccurrenceState> Due => Occurrences.Where(o => o.State == "due");
 
@@ -418,6 +424,8 @@ internal static class StandingAgents
         (int failures, RecordEnvelope? failure) = Failures(model, current, assignments, runs);
         int awaitingCap = AwaitingReviewCap(current);
         int awaiting = AwaitingCount(model, order, null);
+        int openCap = StandingOutputs.CapsOf(current).Open;
+        int open = StandingOutputs.OpenCount(model, current);
         int limit = FailureLimit(current);
         int inFlight = runs.Count(r => r.InFlight);
         (string state, string reason) = status switch
@@ -437,13 +445,15 @@ internal static class StandingAgents
         var states = new List<OccurrenceState>();
         foreach (Occurrence occurrence in occurrences)
         {
-            states.Add(StateOf(model, ledger, occurrence, byKey.GetValueOrDefault(occurrence.Key), runs, state, reason, period, inFlight, awaiting, awaitingCap));
+            states.Add(StateOf(model, ledger, occurrence, byKey.GetValueOrDefault(occurrence.Key), runs, state, reason, period, inFlight, awaiting, awaitingCap, open, openCap));
         }
 
         return new Agent(current, status, state, reason, asOf, flow, step, unavailable, order, until, TJson.Text(plan, "runsOn"), period, inFlight, ledger.Concurrency, failures, limit, failure, triggers, next, states)
         {
             Awaiting = awaiting,
             AwaitingCap = awaitingCap,
+            OpenOutputs = open,
+            OpenCap = openCap,
         };
     }
 
@@ -602,7 +612,7 @@ internal static class StandingAgents
     }
 
     /// <summary>An occurrence's state from the assignment that holds its key, its runs and its result, then the agent's gates.</summary>
-    private static OccurrenceState StateOf(EstateModel model, AgentRuns.Ledger ledger, Occurrence occurrence, List<RecordEnvelope>? holders, List<AgentRuns.Run> runs, string agent, string agentReason, Period? period, int inFlight, int awaiting, int awaitingCap)
+    private static OccurrenceState StateOf(EstateModel model, AgentRuns.Ledger ledger, Occurrence occurrence, List<RecordEnvelope>? holders, List<AgentRuns.Run> runs, string agent, string agentReason, Period? period, int inFlight, int awaiting, int awaitingCap, int open, int openCap)
     {
         RecordEnvelope? holder = holders is { Count: > 0 } ? holders[^1] : null;
         if (holder is not null)
@@ -663,11 +673,11 @@ internal static class StandingAgents
 
         return Gate(new(occurrence, "due", occurrence.Summary, null, null, null));
 
-        OccurrenceState Gate(OccurrenceState due) => Gated(agent, agentReason, period, inFlight, ledger.Concurrency, awaiting, awaitingCap, due);
+        OccurrenceState Gate(OccurrenceState due) => Gated(agent, agentReason, period, inFlight, ledger.Concurrency, awaiting, awaitingCap, due, open, openCap);
     }
 
     /// <summary>An occurrence the agent's gates defer: anything but an active agent, a period whose caps are reached, or runs in flight at its concurrency.</summary>
-    private static OccurrenceState Gated(string agent, string agentReason, Period? period, int inFlight, int concurrency, int awaiting, int awaitingCap, OccurrenceState due)
+    private static OccurrenceState Gated(string agent, string agentReason, Period? period, int inFlight, int concurrency, int awaiting, int awaitingCap, OccurrenceState due, int open = 0, int openCap = int.MaxValue)
     {
         if (agent != "active")
         {
@@ -684,6 +694,12 @@ internal static class StandingAgents
             return due with { State = "deferred", Reason = $"{due.Reason}; deferred: {awaiting.ToString(CultureInfo.InvariantCulture)} of its results await review, its cap of {awaitingCap.ToString(CultureInfo.InvariantCulture)}" };
         }
 
+        // From GOAL-08: open outputs at the plan's cap defer dispatch until another principal disposes of some (§ 10).
+        if (open >= openCap)
+        {
+            return due with { State = "deferred", Reason = $"{due.Reason}; deferred: {open.ToString(CultureInfo.InvariantCulture)} of its outputs are open, its cap of {openCap.ToString(CultureInfo.InvariantCulture)}" };
+        }
+
         if (inFlight >= concurrency)
         {
             return due with { State = "deferred", Reason = $"{due.Reason}; waits: {inFlight.ToString(CultureInfo.InvariantCulture)} of its runs in flight, its concurrency of {concurrency.ToString(CultureInfo.InvariantCulture)}" };
@@ -697,7 +713,7 @@ internal static class StandingAgents
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(occurrence);
-        OccurrenceState state = Gated(agent.State, agent.Reason, agent.Period, agent.InFlight, agent.Concurrency, agent.Awaiting, agent.AwaitingCap, new OccurrenceState(occurrence, "due", occurrence.Summary, null, null, null));
+        OccurrenceState state = Gated(agent.State, agent.Reason, agent.Period, agent.InFlight, agent.Concurrency, agent.Awaiting, agent.AwaitingCap, new OccurrenceState(occurrence, "due", occurrence.Summary, null, null, null), agent.OpenOutputs, agent.OpenCap);
         return agent with { Occurrences = [.. agent.Occurrences, state] };
     }
 
@@ -970,6 +986,14 @@ internal static class StandingAgents
             refusals.Add(("operation.standing", $"{awaiting.ToString(CultureInfo.InvariantCulture)} of standing agent {goal.Id}'s results await review, its cap of {cap.ToString(CultureInfo.InvariantCulture)}: no run starts until they are reviewed."));
         }
 
+        // From GOAL-08: open outputs at the plan's cap hold dispatch (§ 10).
+        int open = StandingOutputs.OpenCount(model, goal, before);
+        int openCap = StandingOutputs.CapsOf(goal).Open;
+        if (open >= openCap)
+        {
+            refusals.Add(("operation.standing", $"{open.ToString(CultureInfo.InvariantCulture)} of standing agent {goal.Id}'s outputs are open, its cap of {openCap.ToString(CultureInfo.InvariantCulture)}: no run starts until another principal disposes of some."));
+        }
+
         if (PeriodOf(model, goal, runs, at) is { Caps.Count: > 0 } period && period.Caps.TryGetValue("runs", out long allowed) && period.Spent.GetValueOrDefault("runs") >= allowed)
         {
             refusals.Add(("operation.budget", $"Standing agent {goal.Id} has had {period.Spent.GetValueOrDefault("runs").ToString(CultureInfo.InvariantCulture)} runs in the period from {RecordParser.FormatTimestamp(period.Start)}, its cap of {allowed.ToString(CultureInfo.InvariantCulture)}: its occurrences defer to the next period."));
@@ -1045,6 +1069,7 @@ internal static class StandingAgents
         string? until = standing.Timestamp("until", true);
         standing.Hash("runsOn", false);
         standing.Number("awaitingReview", false, 1, 100);
+        StandingOutputs.ValidateCaps(standing.Nested("outputs", false));
         standing.NoOtherKeys();
         if (kind != "stewardship")
         {

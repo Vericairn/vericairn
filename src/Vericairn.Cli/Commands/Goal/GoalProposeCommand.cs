@@ -32,6 +32,7 @@ internal sealed class GoalProposeCommand : Command
         var triggerOption = new Option<string[]>("--trigger") { Description = "From 0.9.4, with --standing, a trigger as JSON with its own key and kind; repeatable: schedule {unit: days|months, every, firstAt}, duty {policy, rule}, event {recordType, fields?, roles?}, condition {record: a record predicate} or request." };
         var periodOption = new Option<string[]>("--period") { Description = "From 0.9.4, with --standing, a cap per UTC-anchored period as unit=value; repeatable: unit=months|days (months when omitted), every, runs and wallMinutes (both required), tokens, or currency=<amount in minor units>:<unit>. The period caps the units the budget caps; the budget is then each run's caps." };
         var awaitingOption = new Option<long?>("--awaiting-review") { Description = "From 0.9.4, with --standing, how many of its results may await review before its dispatch defers; three when omitted." };
+        var outputsOption = new Option<string[]>("--outputs") { Description = "From 0.9.4, with --standing, an output cap as name=value; repeatable: possibilities (each occurrence's, five when omitted; extras join one summary possibility), drafts (how many of them carry a draft work order, three when omitted) and open (open outputs before its dispatch defers, ten when omitted)." };
         var runsOnOption = new Option<string?>("--runs-on") { Description = "From 0.9.4, with --standing, the runtime that dispatches it unattended, by its identity's public-key hash (sha256:...)." };
         var supersedesOption = new Option<string?>("--supersedes") { Description = "The goal this proposal revises, by its current revision's id; a revision needs a fresh activation, and only its sponsor, a person, or an operator for a goal an agent sponsors records it." };
         Options.Add(byOption);
@@ -56,6 +57,7 @@ internal sealed class GoalProposeCommand : Command
         Options.Add(periodOption);
         Options.Add(runsOnOption);
         Options.Add(awaitingOption);
+        Options.Add(outputsOption);
         Options.Add(supersedesOption);
         SetAction(parseResult => operations.GoalPropose(
             parseResult.GetValue(context.EstateOption)!,
@@ -84,6 +86,7 @@ internal sealed class GoalProposeCommand : Command
                 Period = parseResult.GetValue(periodOption) ?? [],
                 RunsOn = parseResult.GetValue(runsOnOption),
                 AwaitingReview = parseResult.GetValue(awaitingOption),
+                Outputs = parseResult.GetValue(outputsOption) ?? [],
             },
             parseResult.GetValue(context.JsonOption)));
     }

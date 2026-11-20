@@ -85,6 +85,7 @@ public static class OpenApiDocument
         ("POST", "/v1/work/review"),
         ("GET", "/v1/release-bases/{hash}"),
         ("POST", "/v1/work/amend"),
+        ("POST", "/v1/standing/outputs"),
         ("POST", "/v1/work/takeover"),
         ("GET", "/v1/devices"),
         ("POST", "/v1/devices"),
@@ -834,8 +835,10 @@ public static class OpenApiDocument
         requestClose["properties"]!["evidence"]!["items"]!["required"] = new JsonArray("summary");
 
         JsonObject workNewRequest = Object(("by", "string"), ("key", "string"), ("title", "string"), ("intent", "string"),
-            ("scope", "array"), ("exitQuestion", "string"), ("deliverables", "array"), ("kind", "string"), ("after", "array"), ("inputs", "array"));
-        workNewRequest["required"] = new JsonArray("by", "key", "title", "intent", "scope", "exitQuestion", "deliverables");
+            ("scope", "array"), ("exitQuestion", "string"), ("deliverables", "array"), ("kind", "string"), ("after", "array"), ("inputs", "array"), ("fromPossibility", "string"));
+        // From 0.9.4 (GOAL-08), a possibility's draft supplies what the request leaves out, so only the author is required of every request.
+        workNewRequest["required"] = new JsonArray("by");
+        workNewRequest["properties"]!["fromPossibility"]!["description"] = "From 0.9.4: an open possibility to adopt; its draft work order supplies the fields left out, and its adopting revision is stored with the work order. Without it, key, title, intent, scope, exitQuestion and deliverables are required.";
         workNewRequest["properties"]!["kind"]!["default"] = "ordinary";
         foreach (string field in new[] { "scope", "deliverables", "after", "inputs" })
             workNewRequest["properties"]![field]!["items"] = new JsonObject { ["type"] = "string" };
@@ -943,6 +946,7 @@ public static class OpenApiDocument
             ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
             ["ResultReviewRequest"] = Object(("result", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
             ["AmendRequest"] = Object(("assignment", "string"), ("by", "string"), ("body", "object")),
+            ["StandingOutputRequest"] = Object(("by", "string"), ("assignment", "string"), ("kind", "string"), ("body", "object")),
             ["DeviceCreateRequest"] = Object(("principal", "string"), ("name", "string"), ("custody", "string"), ("profiles", "array"), ("presence", "boolean")),
             ["AdmitRequest"] = Object(("device", "string"), ("by", "string"), ("note", "string"), ("recovery", "string"), ("passphrase", "string")),
             ["DeviceRenameRequest"] = Object(("device", "string"), ("name", "string")),
@@ -1165,6 +1169,7 @@ public static class OpenApiDocument
         "/v1/work/result" => "ResultRequest",
         "/v1/work/review" => "ResultReviewRequest",
         "/v1/work/amend" => "AmendRequest",
+        "/v1/standing/outputs" => "StandingOutputRequest",
         "/v1/work/takeover" => "TakeoverRequest",
         "/v1/goals/{id}/step" => "GoalStepRequest",
         "/v1/devices" => "DeviceCreateRequest",
@@ -1304,6 +1309,7 @@ public static class OpenApiDocument
         ("GET", "/v1/release-bases/{hash}") => "Read retained exact release-admission inputs and findings; historical evidence grants no new authority.",
         ("POST", "/v1/work/review") => "Review the expected exact result revision with its evidence read, signed as the acting principal; no acceptance is recorded.",
         ("POST", "/v1/work/amend") => "Request an amendment; it authorizes nothing.",
+        ("POST", "/v1/standing/outputs") => "From 0.9.4: record one output of a standing agent's occurrence, a possibility, an ask or a publication request, by the contributor of the assignment that carries it; the runtime names what raised it, and another principal disposes of it.",
         ("POST", "/v1/work/takeover") => "Hand a step an agent holds over to a person: a new assignment of the step to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop, each stop's facts reported as observed. Recorded by a person only, the one taking the step over, the sponsor of its goal or an operator, never by an agent.",
         ("GET", "/v1/devices") => "Devices known to the estate and whether this machine holds their keys.",
         ("POST", "/v1/devices") => "Create a device on the runtime's machine.",

@@ -19,4 +19,7 @@ internal sealed record GoalProposal(string By, string Title, string Objective, s
 
     /// <summary>From 0.9.4, the results awaiting review that defer a standing agent's dispatch; three when omitted.</summary>
     public long? AwaitingReview { get; init; }
+
+    /// <summary>From 0.9.4 (GOAL-08), a standing agent's output caps, each as name=value: possibilities, drafts and open.</summary>
+    public string[]? Outputs { get; init; }
 }

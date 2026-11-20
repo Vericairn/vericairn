@@ -177,9 +177,9 @@ internal sealed class GoalOperations(CommandContext context)
             return context.Fail("--subject, --flow-option and --until configure a run, and go with --flow or --standing.");
         }
 
-        if (!standing && ((proposal.Triggers?.Length ?? 0) > 0 || (proposal.Period?.Length ?? 0) > 0 || proposal.RunsOn is not null || proposal.AwaitingReview is not null))
+        if (!standing && ((proposal.Triggers?.Length ?? 0) > 0 || (proposal.Period?.Length ?? 0) > 0 || proposal.RunsOn is not null || proposal.AwaitingReview is not null || (proposal.Outputs?.Length ?? 0) > 0))
         {
-            return context.Fail("--trigger, --period, --awaiting-review and --runs-on configure a standing agent, and go with --standing.");
+            return context.Fail("--trigger, --period, --awaiting-review, --outputs and --runs-on configure a standing agent, and go with --standing.");
         }
 
         return context.WithApi(root, api =>
@@ -393,6 +393,23 @@ internal sealed class GoalOperations(CommandContext context)
         if (proposal.AwaitingReview is long awaiting)
         {
             plan["awaitingReview"] = awaiting;
+        }
+
+        if (proposal.Outputs is { Length: > 0 } outputs)
+        {
+            var caps = new Json.JsonObject();
+            foreach (string cap in outputs)
+            {
+                string[] parts = cap.Split('=', 2);
+                if (parts.Length != 2 || parts[0] is not ("possibilities" or "drafts" or "open") || !long.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long value))
+                {
+                    return $"An output cap is possibilities, drafts or open as name=number: '{cap}'.";
+                }
+
+                caps[parts[0]] = value;
+            }
+
+            plan["outputs"] = caps;
         }
 
         body["plan"]!["standing"] = plan;
