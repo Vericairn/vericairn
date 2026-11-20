@@ -1,11 +1,13 @@
-# Enrollment troubleshooting: a presence prompt that expired, was refused or timed out
+# Enrollment troubleshooting: a presence prompt that expired, was refused or timed out, or a signed command that failed at once
 
 This recipe is for an enrollment step that ended without a clear answer while a device asked for its owner's presence: on a
 Mac, a key in the Secure Enclave, whose every signature shows a Touch ID or password dialog. It applies to the steps of
 [devices and admission](operator-guide.md#3-principals-devices-and-admission) that sign with such a key: `devices create` for
 a person's device, whose new key signs its own device record; `devices admit`, signed by the admitting device; and your first
 device admitting itself, which in a new estate also signs the adoption checkpoint. It tells the endings apart from what the
-command prints, then reconciles from what the estate holds, without replaying the enrollment.
+command prints, then reconciles from what the estate holds, without replaying the enrollment. From 0.9.4 it also covers any
+signed command that fails at once, before a dialog appears, because the process that ran it cannot reach the signing
+capability ([a signed command that fails at once](#a-signed-command-that-fails-at-once-094)).
 
 An authenticated prompt is no completion receipt. Touch ID accepting your finger, or the dialog accepting your password, lets
 the key make one signature; it does not say that the record was stored. Only the stored record, read back with the commands
@@ -96,6 +98,117 @@ Estate records and this machine's key custody are kept apart. A device's key liv
 estate, and the records live in the estate. Do not delete or edit key files, do not end `vericairn-enclave`, the daemon or a
 command by killing its process, and do not edit records or `estate/manifest.json` by hand: each step above writes through the
 runtime, which judges it as any write.
+
+## A signed command that fails at once (0.9.4)
+
+A signed command can also fail at once, before any dialog appears, because the process that ran it cannot reach the Secure
+Enclave: a command run by a sandboxed agent process, in a container, from a service or over a remote shell into the Mac. That
+is neither an expired nor a refused prompt, and it does not show that the Mac lacks the hardware. Three cases end alike or
+nearly so. Tell them apart by what the command printed, by whether a dialog appeared, and by what `vericairn doctor` reports
+when you run it from the same context that tried to sign, the same sandbox, container, shell or service, not another terminal:
+
+```sh
+vericairn doctor
+```
+
+On a Mac its `enclave` line gives the reason; from 0.9.3 `vericairn --json doctor` gives it as `enclave`'s `state` and
+`detail`.
+
+- **Missing helper.** `doctor` reports:
+
+  ```text
+  enclave   Secure Enclave custody unavailable (no vericairn-enclave helper beside the command line)
+  ```
+
+  The command line looks for the `vericairn-enclave` helper next to itself, so this is an installation matter. Without the
+  helper no Secure Enclave key on this machine can be read: `devices list --json` shows each such device with `heldHere` false,
+  and a signed command announces no signature. It signs with another admitted device of the same principal whose key this
+  machine holds, if there is one; otherwise it refuses, an admission with:
+
+  ```text
+  error: An admission is signed by an admitted device of its author, and principal <operator-id> has none whose key this machine holds: admit from a machine that holds one, or with the operator's recovery key (--recovery). Nothing was written.
+  ```
+
+  In an estate that does not require signatures, a record other than an admission is written unsigned instead, so check what
+  was stored. Put the helper back beside the command line by installing the release's archive or tool package again. Do not
+  follow a refusal's advice to create a device: the device and its key still stand, and only the helper is missing.
+
+- **Capability unavailable to the invoking process.** The helper is there but reports that no Secure Enclave is available to
+  the process it runs in. It checks this before any prompt, so no dialog appears and nothing is signed. A device that asks for
+  presence prints its prompt's line and then, at once, the same two lines as an expired or refused prompt:
+
+  ```text
+  runtime: Stopped at signature 1 of 1, which was not made; 0 were signed.
+  error: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).
+  ```
+
+  A device that never asks for presence, such as an agent's, prints the error line alone. From 0.9.2 the runtime describes a
+  signing failure by its kind, never by its message, so the helper's own words, `This Mac has no Secure Enclave available to
+  this process.`, which earlier releases printed, no longer appear; `doctor` gives them instead. Run from that same context, it
+  reports:
+
+  ```text
+  enclave   Secure Enclave custody unavailable (no Secure Enclave available to this process)
+  ```
+
+  while an ordinary terminal session on the same Mac can report the enclave available. The probe runs when `doctor` runs, so
+  its line describes the context it ran in, not the machine.
+
+- **Presence refused or expired.** A dialog appeared. You pressed Cancel and the command failed at once, or nobody answered and
+  it failed after 300 seconds: [what the command prints](#what-the-command-prints) applies. `doctor` in that context reports
+  the enclave available, on a line that begins `enclave   Secure Enclave custody available`.
+
+Reaching the runtime does not qualify a process to sign. `vericairn status`, `devices list` and every other read that works from
+the invoking process show that it reaches the runtime and the estate, not that it can sign. `heldHere` says that this machine
+holds the device's key, not that the asking process can use the Secure Enclave. `doctor`, run where the signing will happen, is
+the supported check: it reports whether Secure Enclave custody is available there and, when not, why. It neither signs nor asks
+for presence, so it cannot stand in for the signing step itself, whose dialog can still be refused or expire. Run the signed
+command from a process that can reach the capability, such as your own terminal session on the Mac, outside the sandbox.
+
+Recover as for the other endings:
+
+1. Keep the failed command, what it printed on both streams and its exit code. Do not run it again yet.
+2. Inspect, as [before any retry](#before-any-retry-inspect): a command that signs several records can have stored the ones
+   before the failure, as its `Stopped at signature k of n` line says.
+3. Reopen only what is missing, as [the reconciliation](#reconcile-reopen-only-the-operation-that-did-not-complete) says.
+4. Make any retry once, separately authorized for that step, from a context where `doctor` reports the enclave available.
+
+Do not create or admit a device again, move the key to weaker custody such as a file key, copy key files, loosen the sandbox so
+that the agent signs by itself, or retry automatically. An agent that meets this ending stops, keeps the command and its output,
+and reports to its operator, who decides the retry and where it runs.
+
+### Worked example: refused in a sandbox, signed from your own terminal
+
+You admit your desktop from your laptop, in a terminal that runs inside a sandbox, such as an agent tool's:
+
+```sh
+vericairn devices admit <desktop-id> --by <operator-id> --note "The operator's desktop."
+```
+
+It fails at once, and no dialog appears:
+
+```text
+runtime: Writing the admission record asks for your presence once, for the one
+runtime: record it signs:
+runtime:  1. admission device <desktop-id>: admits the device
+runtime: Signature 1 of 1: admission device <desktop-id>: admits
+runtime: the device (<short hash>)
+runtime: Stopped at signature 1 of 1, which was not made; 0 were signed.
+error: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).
+```
+
+These are the lines an expired prompt prints, in the [second worked example](#worked-example-an-admission-that-expired-with-nothing-written);
+what differs is that no dialog appeared and the command ended at once. Keep them. `vericairn doctor`, run in the same sandboxed
+terminal, reports `no Secure Enclave available to this process`. Inspect:
+
+```sh
+vericairn devices list --json
+```
+
+The laptop reads `admitted` and `heldHere` though this process could not sign with it, and the desktop reads `not admitted`:
+nothing was written. In your own terminal session on the Mac, outside the sandbox, `vericairn doctor` reports Secure Enclave
+custody available. There, run the same `devices admit` once more and answer its prompt: it ends with `Signed 1 of 1.`, and the
+desktop reads `admitted`.
 
 ## Worked example: your first device admitted, its adoption checkpoint expired
 
