@@ -219,21 +219,27 @@ assignments whose effective paths share a path within the selection. A pair is:
 - `unmet` otherwise.
 
 Disjoint effective paths make no subject: when one owner keeps the shared paths and every other party's brief excludes them, the
-pair no longer overlaps within the selection. A pair's finding names the subject as the two assignments' lineage identities joined
+pair no longer overlaps within the selection. A selection that no pair meets, as when the last pair's overlap was excluded, is `satisfied` with no
+subject, so the resolved state holds nothing. A pair's finding names the subject as the two assignments' lineage identities joined
 by `+`, in ordinal order, with the repository, the later assignment as its anchor and the exact current revisions of both as its
 evidence. The estate check and status evaluate the rule from the records alone, so every machine reads the same pairs; `work
 overlap` adds what this machine's registered clones show.
 
 At `refuse`, from the policy's `startsAt`, the rule adds a surface, assignment start. The runtime's write boundary refuses, before
 writing, a new assignment (`assignment.concurrent-paths`), a run admission and a new attempt (`attempt.concurrent-paths`) that leave
-an unmet or unavailable pair, naming each pair, its policy and rule and both remedies: record the later assignment with `after`
-naming the earlier, or exclude the shared paths from every brief but the owner's with `excludedChanges`. A revision of an
+an unmet or unavailable pair, naming each pair, its policy and rule and the remedies that can apply: record the later assignment
+with `after` naming the earlier, or exclude the shared paths from every brief but the owner's with `excludedChanges`, and, for an
+attempt or a run on assignments already recorded, a policy exception for the exact pair. A refused new assignment or revision is
+offered only the first two, since an exception cannot pin a revision that does not exist yet. A revision of an
 assignment is refused only for a pair its previous revision did not already leave unmet, unavailable or excepted, so a corrective
 revision is never held by a pair it inherited, while that pair still holds the assignment's attempts and runs. Record validation
 never refuses: a pair recorded before the policy, at a lower level, by an older runtime or in another clone is reported and held only
 when work on it starts. At `warn` and `remind` the pairs are findings and hold nothing. `goal step` records the later of a held
-overlap with `after` naming the earlier, so its routing satisfies the rule. Run admission and new attempts read this machine's
-registered clones for what they show of each assignment's release, as the overlap check's waits do.
+overlap with `after` naming the earlier, so its routing satisfies the rule. Every assignment-start refusal, of a new assignment, a
+revision, a run admission or a new attempt, reads this machine's registered clones for what they show of each assignment's release
+(a change's head reachable from the repository's main line, labeled as observed here), as the overlap check's `after` waits do, so a
+start can pass on a machine whose clone shows the earlier change merged while the estate check and status, from the records alone,
+still show the pair until a `change-merge` operation or an acceptance records it.
 
 An exception covers one exact pair of assignment revisions with a `pair` target, `{"kind": "pair", "assignments": [<assignment
 reference>, <assignment reference>]}`, each reference a `{type, id, hash}` of an assignment revision, the two of different
@@ -241,7 +247,9 @@ assignments, in either order. A concurrent-paths rule takes only pair targets, a
 no `submission`. It applies to an unmet pair only: an unavailable pair is resolved by naming each brief's repository or narrowing
 the patterns until the comparison is determined. A newer revision of either assignment is another pair, which needs a fresh
 exception. The usual exception bounds apply: the operator, or a delegate whose grant names the exact policy, rule and target, and
-never one whose own assignment is in the pair. An exception pins revisions that already exist, so it covers a pair already recorded,
+never one whose own assignment is in the pair. From 0.9.4, for every kind, an exception whose delegated authority reference does not
+resolve to the exact record it names is not applied, failing closed: the finding it would cover stands, and the evaluation goes on
+rather than stopping at it. An exception pins revisions that already exist, so it covers a pair already recorded,
 such as one recorded before the policy or in another clone; a new assignment is first recorded resolved, in sequence or with the
 shared paths excluded.
 

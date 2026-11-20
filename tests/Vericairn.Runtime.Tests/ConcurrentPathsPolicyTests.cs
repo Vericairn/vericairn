@@ -38,8 +38,9 @@ public class ConcurrentPathsPolicyTests
         Assert.StartsWith("The new assignment is refused: a refuse-level concurrent-paths policy holds a pair it leaves unresolved.", finding.Message, StringComparison.Ordinal);
         Assert.Contains($"Policy held-widget ({policy.Id}), rule concurrent, unmet: W-1's assignment {run.Assignment} and W-3's assignment ", finding.Message, StringComparison.Ordinal);
         Assert.Contains($" in widget ({run.Resource}) share paths such as widget", finding.Message, StringComparison.Ordinal);
-        Assert.Contains("record the later with after naming the earlier (sequence), or exclude the shared paths from every brief but the owner's with excludedChanges (one owner)", finding.Message, StringComparison.Ordinal);
-        Assert.Contains("or the operator grants a policy exception for the exact pair of assignment revisions.", finding.Message, StringComparison.Ordinal);
+        // A new assignment is offered only the remedies that can apply to it: an exception cannot pin a revision not yet recorded.
+        Assert.Contains("Record it resolved: name the earlier assignment in after (sequence), or narrow its paths with excludedChanges so that they share none within the selection (one owner).", finding.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("exception for the exact pair", finding.Message, StringComparison.Ordinal);
         Assert.Equal(records, run.Estate.Load().Records.Count);
 
         // Either remedy records the assignment: a sequence, or one owner, the other excluding the shared paths.
@@ -100,6 +101,7 @@ public class ConcurrentPathsPolicyTests
         Assert.False(attempt.Ok);
         FindingDto held = Assert.Single(attempt.Problem!.Findings, f => f.Code == "attempt.concurrent-paths");
         Assert.StartsWith("A new attempt is refused:", held.Message, StringComparison.Ordinal);
+        Assert.Contains("or the operator grants a policy exception for the exact pair of assignment revisions.", held.Message, StringComparison.Ordinal);
         Assert.Contains($"W-1's assignment {run.Assignment} and W-3's assignment {later}", held.Message, StringComparison.Ordinal);
         Assert.False(run.Service.Attempt(new AttemptRequest(run.Assignment, run.Estate.BuilderId, "widget repository, branch work/w-1", "Start.")).Ok);
         // An attempt dated back before the policy's activation is held as one written now.
@@ -213,6 +215,118 @@ public class ConcurrentPathsPolicyTests
     }
 
     [Fact]
+    public void ASelectionNoPairMeetsIsSatisfiedWithNoSubjectAndHoldsNothing()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        Order(run, "W-3");
+        // Only the widget's assignment holds paths in the selection, so no pair meets it.
+        RunEstate.Ok(run.Service.Assign(new AssignRequest("W-3", run.Estate.BuilderId, run.Estate.OperatorId, Brief(["path:docs/"], [])) { Repository = run.Resource }));
+        Declare(run, "held-widget", ["widget/**"], "refuse");
+        PolicyResponse evaluation = run.Service.PolicyEvaluate();
+        PolicyFindingDto none = Assert.Single(evaluation.Findings, f => f.Kind == ConcurrentPaths.Kind);
+        Assert.Equal(("policy", "satisfied", 0, false), (none.Target.Kind, none.Verdict, none.SubjectCount, none.ReleaseHold));
+        Assert.Equal("No subjects selected.", none.Actual);
+        Assert.True(evaluation.Complete);
+        Assert.DoesNotContain(run.Service.Check().Findings, f => f.Code is "policy.unavailable" or "policy.unmet");
+
+        // A conformance vector with no pair: the complete canonical result, the same whatever the records' order.
+        PolicyKindRegistry registry = FoundationPolicyTests.Kinds;
+        PolicyBasis recorded = PolicyBasis.Recorded(run.Estate.Load(), implementations: registry.Implementations);
+        PolicyBasis vector = new(PolicyBasisTests.Model(recorded.Records), recorded.AsOf, recorded.Origin, implementations: registry.Implementations);
+        PolicyEvaluation result = PolicyEvaluator.Evaluate(vector, registry);
+        Assert.Equal(("satisfied", 0), Assert.Single(result.Findings, f => f.Kind == ConcurrentPaths.Kind) is var f ? (f.Verdict, f.SubjectCount) : default);
+        var reversed = new PolicyBasis(PolicyBasisTests.Model(vector.Records.Reverse()), vector.AsOf, vector.Origin, implementations: registry.Implementations);
+        Assert.Equal(result.Canonical(), PolicyEvaluator.Evaluate(reversed, registry).Canonical());
+        Assert.True(PolicyKindRegistry.Conforms(registry, registry, [vector]));
+    }
+
+    [Fact]
+    public void ACorrectiveExclusionThatRemovesTheLastPairLeavesTheRuleSatisfied()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        Order(run, "W-3");
+        string later = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-3", run.Estate.BuilderId, run.Estate.OperatorId, Brief(["path:widget/", "path:docs/"], [])) { Repository = run.Resource })).Id;
+        Declare(run, "held-widget", ["widget/**"], "refuse");
+        Assert.Equal("unmet", Assert.Single(run.Service.PolicyEvaluate().Findings, f => f.Kind == ConcurrentPaths.Kind).Verdict);
+
+        // One owner: the later excludes the shared paths, which narrows it and needs no amendment.
+        Revise(run, later, b => b["brief"]!["excludedChanges"] = new JsonArray("path:widget/"));
+        PolicyResponse evaluation = run.Service.PolicyEvaluate();
+        PolicyFindingDto resolved = Assert.Single(evaluation.Findings, f => f.Kind == ConcurrentPaths.Kind);
+        Assert.Equal(("satisfied", 0, false), (resolved.Verdict, resolved.SubjectCount, resolved.ReleaseHold));
+        Assert.True(evaluation.Complete);
+        Assert.DoesNotContain(run.Service.Check().Findings, f => f.Code is "policy.unavailable" or "policy.unmet");
+    }
+
+    [Fact]
+    public void ARevisionWideningWithinAnInheritedPairIsAdmittedAndWideningIntoANewPairIsRefused()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        Order(run, "W-3");
+        Order(run, "W-4");
+        string inherited = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-3", run.Estate.BuilderId, run.Estate.OperatorId, RunEstate.Json(RunEstate.Brief)) { Repository = run.Resource })).Id;
+        string apart = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-4", run.Estate.BuilderId, run.Estate.OperatorId, Brief(["path:docs/"], [])) { Repository = run.Resource })).Id;
+        Declare(run, "held-widget", ["widget/**"], "refuse");
+
+        // W-3 already overlaps W-1 unresolved: widening it within that pair is admitted, and the pair still holds its attempts.
+        string widened = Revise(run, inherited, b => b["brief"]!["permittedChanges"] = new JsonArray("path:widget/", "path:tools/")).Id;
+        Assert.Contains(run.Service.Attempt(new AttemptRequest(widened, run.Estate.BuilderId, "widget repository, branch work/w-3", "Start.")).Problem!.Findings,
+            f => f.Code == "attempt.concurrent-paths");
+        // W-4 overlaps nothing in the selection: widening it into the widget's paths makes new pairs, and is refused with the remedies that can apply.
+        WriteOutcome refused = Submit(run, apart, b => b["brief"]!["permittedChanges"] = new JsonArray("path:docs/", "path:widget/"));
+        FindingDto finding = Assert.Single(refused.Problem!.Findings, f => f.Code == "assignment.concurrent-paths");
+        Assert.StartsWith("This revision of the assignment is refused: refuse-level concurrent-paths policies hold 2 pairs it leaves unresolved.", finding.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("exception for the exact pair", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void APolicyOnAnotherRepositoryHoldsNothingHere()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        Order(run, "W-3");
+        Declare(run, "held-estate", ["**"], "refuse", repository: run.Estate.Load().FirstEstate!.Id);
+        WriteOutcome assigned = run.Service.Assign(new AssignRequest("W-3", run.Estate.BuilderId, run.Estate.OperatorId, RunEstate.Json(RunEstate.Brief)) { Repository = run.Resource });
+        Assert.True(assigned.Ok);
+        Assert.Contains(assigned.Notices!, n => n.StartsWith("Overlap: W-1's assignment", StringComparison.Ordinal));
+        Assert.True(run.Service.Attempt(new AttemptRequest(assigned.Written!.Id, run.Estate.BuilderId, "widget repository, branch work/w-3", "Start.")).Ok);
+        Assert.Equal("satisfied", Assert.Single(run.Service.PolicyEvaluate().Findings, f => f.Kind == ConcurrentPaths.Kind).Verdict);
+    }
+
+    [Fact]
+    public void AnExpiredPairExceptionCoversNothingAndADelegateCannotExceptItsOwnAssignment()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        Order(run, "W-3");
+        string later = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-3", run.Estate.BuilderId, run.Estate.OperatorId, RunEstate.Json(RunEstate.Brief)) { Repository = run.Resource })).Id;
+        RecordEnvelope policy = Declare(run, "held-widget", ["widget/**"], "refuse");
+        EstateModel model = run.Estate.Load();
+        RecordEnvelope decision = Decide(run, "Accept the hand merge for a week.");
+        RecordReference[] pair = [model.ById[run.Assignment].Reference, model.ById[later].Reference];
+        JsonObject grant = Exception(run, decision, pair);
+        RunEstate.Ok(run.Service.PolicyExcept("held-widget", new PolicyChangeRequest(run.Estate.OperatorId, JsonSerializer.SerializeToElement(grant), policy.ComputedHash)));
+        DateTimeOffset expiry = DateTimeOffset.Parse(grant["expiresAt"]!.GetValue<string>(), CultureInfo.InvariantCulture);
+        Assert.Equal("excepted", Assert.Single(run.Service.PolicyEvaluate().Findings, f => f.Kind == ConcurrentPaths.Kind).Disposition);
+
+        // At its exclusive expiry the exception covers nothing: the finding is unmet again and the boundary holds the pair's attempts.
+        PolicyFindingDto expired = Assert.Single(run.Service.PolicyEvaluate(RecordParser.FormatTimestamp(expiry)).Findings, f => f.Kind == ConcurrentPaths.Kind);
+        Assert.Equal(("unmet", "none"), (expired.Verdict, expired.Disposition));
+        run.Service.AuthoringClock = new Clock(expiry);
+        Assert.Contains(run.Service.Attempt(new AttemptRequest(later, run.Estate.BuilderId, "widget repository, branch work/w-3", "Start.")).Problem!.Findings,
+            f => f.Code == "attempt.concurrent-paths");
+        run.Service.AuthoringClock = null;
+
+        // The builder holds both assignments: its own exception of the pair is refused as a self-exception, whatever grant it holds.
+        var signer = new StoreSigner(new FileKeyStore(VericairnHome.Path()), run.BuilderDevice);
+        RecordEnvelope own = run.Estate.Add("policy-exception", run.Estate.BuilderId, Exception(run, decision, pair).ToJsonString(), policy.Reference, signer: signer);
+        Assert.Contains(run.Estate.Load().Findings, f => f.Code == "exception.self" && f.Location.Contains(own.Id, StringComparison.Ordinal));
+    }
+
+    private sealed class Clock(DateTimeOffset at) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => at;
+    }
+
+    [Fact]
     public void ThePolicyKindTakesNoParametersAndOnlyARepositorySelection()
     {
         using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
@@ -299,7 +413,7 @@ public class ConcurrentPathsPolicyTests
     // A concurrent-paths policy on the widget's repository, approved and signed with the operator's key held here, in force from its own
     // record's time unless it starts later; the test then waits for this machine's clock to reach that time, so the runtime's later
     // records are dated at or after it.
-    private static RecordEnvelope Declare(RunEstate run, string key, string[] selectors, string level, TimeSpan? startsIn = null, JsonObject? parameters = null)
+    private static RecordEnvelope Declare(RunEstate run, string key, string[] selectors, string level, TimeSpan? startsIn = null, JsonObject? parameters = null, string? repository = null)
     {
         TestEstate estate = run.Estate;
         estate.SetClock(Later(estate));
@@ -308,7 +422,7 @@ public class ConcurrentPathsPolicyTests
         var definition = new JsonObject
         {
             ["key"] = key, ["title"] = "Held paths", ["owner"] = estate.OperatorId, ["reason"] = "Keep concurrent work on shared paths in sequence.", ["state"] = "active",
-            ["appliesTo"] = new JsonObject { ["kind"] = "repository", ["repository"] = run.Resource, ["selectors"] = new JsonArray([.. selectors.Select(s => (JsonNode)s)]) },
+            ["appliesTo"] = new JsonObject { ["kind"] = "repository", ["repository"] = repository ?? run.Resource, ["selectors"] = new JsonArray([.. selectors.Select(s => (JsonNode)s)]) },
             ["rules"] = new JsonArray(new JsonObject { ["key"] = "concurrent", ["kind"] = AssignmentOverlaps.PolicyKind, ["version"] = 1, ["parameters"] = parameters ?? new JsonObject() }),
             ["level"] = level, ["startsAt"] = RecordParser.FormatTimestamp(declared + (startsIn ?? TimeSpan.Zero)), ["maxExceptionDays"] = 30,
         };

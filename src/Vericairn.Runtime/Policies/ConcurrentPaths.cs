@@ -77,7 +77,9 @@ internal static class ConcurrentPaths
             findings.Add(context.Finding(Target(context.Model, overlap), Item, pair.Verdict, pair.Reason, Required, NextAction(pair.Verdict), later, Revisions(context.Model, overlap)));
         }
 
-        return findings;
+        // No pair meets the selection, as when one owner's exclusions resolved the last one: the rule is satisfied with no subject.
+        return findings.Count > 0 ? findings
+            : [context.Finding(new("policy", context.Identity, context.Policy.Reference), "", "satisfied", "No subjects selected.", Required, "No action.", subjects: 0)];
     }
 
     /// <summary>
@@ -182,8 +184,12 @@ internal static class ConcurrentPaths
         _ => "Resolve the pair before work starts: record the later with after naming the earlier (sequence), or exclude the shared paths from every brief but the owner's with excludedChanges (one owner); or the operator grants a policy exception for this exact pair of assignment revisions.",
     };
 
-    /// <summary>Why a start is refused: every pair that holds it, named with its policy, rule and both remedies; null when none does.</summary>
-    internal static string? Refusal(EstateModel model, IReadOnlyList<Standing> standing, string what)
+    /// <summary>
+    /// Why a start is refused: every pair that holds it, named with its policy, rule and the remedies that can apply to the write; null when
+    /// none does. An exception pins revisions that already exist, so it is named only for an attempt or a run on recorded assignments
+    /// (<paramref name="recorded"/>), never for a new assignment or a revision, which is recorded resolved.
+    /// </summary>
+    internal static string? Refusal(EstateModel model, IReadOnlyList<Standing> standing, string what, bool recorded = true)
     {
         List<Standing> holding = [.. standing.Where(s => s.Holds)];
         if (holding.Count == 0) return null;
@@ -195,8 +201,16 @@ internal static class ConcurrentPaths
         }
 
         bool unavailable = holding.Any(s => s.Pair.Verdict == "unavailable");
-        text.Append(" Resolve each pair before work starts: record the later with after naming the earlier (sequence), or exclude the shared paths from every brief but the owner's with excludedChanges (one owner)");
-        text.Append(holding.Any(s => s.Pair.Verdict == "unmet") ? "; or the operator grants a policy exception for the exact pair of assignment revisions." : ".");
+        if (recorded)
+        {
+            text.Append(" Resolve each pair before work starts: record the later with after naming the earlier (sequence), or exclude the shared paths from every brief but the owner's with excludedChanges (one owner)");
+            text.Append(holding.Any(s => s.Pair.Verdict == "unmet") ? "; or the operator grants a policy exception for the exact pair of assignment revisions." : ".");
+        }
+        else
+        {
+            text.Append(" Record it resolved: name the earlier assignment in after (sequence), or narrow its paths with excludedChanges so that they share none within the selection (one owner).");
+        }
+
         if (unavailable) text.Append(" An unavailable pair is resolved by naming each brief's repository or narrowing the patterns until the comparison is determined; no exception covers it.");
         return text.ToString();
     }

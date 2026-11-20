@@ -48,7 +48,7 @@ public sealed partial class EstateService
                     standing.RemoveAll(s => inherited.Contains(Key(proposed, s)));
                 }
 
-                if (ConcurrentPaths.Refusal(proposed, standing, envelope.Supersedes is null ? "the new assignment" : "this revision of the assignment") is string refusal)
+                if (ConcurrentPaths.Refusal(proposed, standing, envelope.Supersedes is null ? "the new assignment" : "this revision of the assignment", recorded: false) is string refusal)
                 {
                     relevant.Add(new Finding(Severity.Error, "assignment.concurrent-paths", record.RelativePath + "#body.brief", refusal));
                 }

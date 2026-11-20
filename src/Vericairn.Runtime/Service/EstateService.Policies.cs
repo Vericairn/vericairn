@@ -207,7 +207,7 @@ public sealed partial class EstateService
         return rules.Length > 0 && rules.All(r => PolicyInputs.Text(r, "kind") == ConcurrentPaths.Kind);
     }
 
-        private RecordResponse PolicyRecord(EstateModel model, RecordEnvelope record, IReadOnlyDictionary<string, RecordFile>? sourceFiles = null)
+    private RecordResponse PolicyRecord(EstateModel model, RecordEnvelope record, IReadOnlyDictionary<string, RecordFile>? sourceFiles = null)
     {
         using JsonDocument document = JsonDocument.Parse((sourceFiles is null ? session.LoadedFile(record.ExpectedPath)! : sourceFiles[record.ExpectedPath]).Bytes);
         return new(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
