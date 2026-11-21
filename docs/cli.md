@@ -1228,12 +1228,12 @@ until time; when a period's cap is reached its occurrences defer and `goal step`
 awaiting review reach the plan's `awaitingReview` (`--awaiting-review`, three when unset) dispatch defers; while the runs in flight
 fill the budget's concurrency (one when it states none) occurrences wait; and after the goal's `limits.consecutiveFailures` failed
 runs in a row (three when it sets none) `goal step` asks the sponsor once and dispatches nothing until a decision answers it. Each
-settled run counts once, in the order the runs settled: it failed when a blocked or abandoned result was recorded on its assignment
-after it started and before the assignment's next run started, whatever a later result or a correction says, or when it settled
-as a known failure, unless its sponsor (when a person) or an operator asked it to stop (`--stop-runs`, `goal stop`, `worker stop`; a
-stop by anyone else, the dispatcher that started it included, counts); it succeeded when it settled as an observed success whose
-settlement names the completed or partial result its agent recorded during the run, with no such failure result; any other run,
-one whose harness exited cleanly with no result included, counts for nothing. A run's intent is refused at the record, whatever
+settled run counts once, in the order the runs settled: it succeeded when it settled as an observed success whose settlement names
+the completed or partial result its agent recorded during the run; otherwise it failed when a blocked or abandoned result was
+recorded on its assignment after it started and before the assignment's next run started, whatever a later result or a correction
+says, or when it settled as a known failure, unless its sponsor (when a person) or an operator asked it to stop (`--stop-runs`,
+`goal stop`, `worker stop`; a stop by anyone else, the dispatcher that started it included, counts); any other run, one whose
+harness exited cleanly with no result included, counts for nothing. A run's intent is refused at the record, whatever
 route starts it, for a run on no occurrence or on a settled one, past the until time, during the failure pause, past the period's
 runs or while results awaiting review reach their cap, each judged by the records before the intent. A second standing agent of one
 role over one subject is never activated, nor one past its until time.
@@ -1250,9 +1250,13 @@ nothing to review. A completed or partial result, and the attempt it closes, is 
 makes a run succeed by itself, whether recorded with `work result`, `records new` or by hand: only a settlement names it, and
 nothing written after the settlement, whatever date it claims, so after three failed runs the carrying agent's own attempt and
 completed result leave the pause held and the failures at three. A run settled from the worker's retained observation, or by hand,
-names no result unless its writer names one. A run's status and settlement are read from the latest of its revisions no agent tied
-to the goal wrote, so such an agent's revision of a settled run, to canceled, uncertain or a success, takes back no failure, while a
-known-failure settlement it wrote still counts as one; an untied principal's correction counts as written. A run whose intent or
+names no result unless its writer names one. A run is read from all of its records, every revision on every branch, whatever a
+fork, the order of identifiers or a reconciliation makes its current revision. Where a record that no agent tied to the goal wrote
+settles or cancels the run, the latest record no tied agent wrote, by its place in the run's history and never by its date, decides
+the run (when that record leaves it canceled or unsettled, the run counts for nothing), and the records tied agents wrote count for
+nothing: their revisions and divergent records take back no failure and turn no success into a failure, and an untied principal's
+correction, such as the operator's, counts as written. Only where no record by an untied principal settles or cancels the run does
+a known-failure settlement a tied agent wrote count, as a failure, as for an agent that steps its own goal. A run whose intent or
 settlement an agent tied to the goal recorded never succeeds, a stop such an agent records names no one who decides for the goal,
 and its runs never take a result off a run another principal recorded.
 

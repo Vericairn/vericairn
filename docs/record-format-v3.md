@@ -690,37 +690,44 @@ or with a cap above the budget's per-run cap; the ledger of a standing agent
 charges each period's runs against the period's caps.
 
 The consecutive failed runs count each settled `agent-run` of the goal once, in
-the order the runs settled (each at the later of its intent and its first settled
-revision). A run failed when a `result` with outcome `blocked` or `abandoned` was
+the order the runs settled (each at the later of its intent and its first
+settling revision no tied agent wrote, or, without one, its first settling
+revision). A run is read
+from its lineage: every `operation` whose `supersedes` chain reaches the run's
+intent, on every branch, whatever divergent successors, the order of identifiers
+or a `reconciliation` make current. Where a revision no agent tied to the goal (as
+the `ask` row of the standing outputs below reads ties) wrote settles the run or
+cancels it, the deepest revision no tied agent wrote, by its number of
+`supersedes` steps from the intent and never by its `at`, decides the run, and the
+revisions tied agents wrote count for nothing; when the deciding revision is not
+settled, the run counts for nothing. Only where no such revision settles
+or cancels the run does a `known-failure` revision a tied agent wrote count, as a
+failure. A run succeeded when the deciding revision is `observed-success` with
+`observed.reference` naming a `completed` or `partial` result on an attempt of
+its assignment, recorded after its intent, and no tied agent wrote its intent;
+otherwise it failed when a `result` with outcome `blocked` or `abandoned` was
 recorded on an attempt on its assignment, any revision of either, after its intent
 and before the intent of the assignment's next run, whatever a later result or a
-correction says; or when it settled `known-failure`, unless its stop was requested
-by the goal's sponsor, when a person, or an operator, as they stood when the stop
-was recorded, in a revision no agent tied to the goal (as the `ask` row of the
-standing outputs below reads ties) wrote; any other principal's stop and the
-worker's for a cap count. A run succeeded when it settled `observed-success`
-with `observed.reference` naming a `completed` or `partial` result on an attempt
-of its assignment, recorded after its intent, with no such failure result, and no
-tied agent wrote its intent or its settlement; any other run counts for nothing,
-one that exited cleanly with no result included. A run's status, settlement and
-`observed.reference` are read from the latest of its revisions no tied agent
-wrote, whatever their `at`, so a tied agent's revision of a settled run changes
-none of them, while a `known-failure` revision a tied agent wrote still counts as
-a failure; an untied principal's revision counts as written. From 0.9.4 the worker names in
-`observed.reference` of an observed success the latest `completed` or `partial`
-result its agent recorded during the run, on an attempt recorded during the run,
-as it sees them at the run's exit, and names none otherwise; a reader that
-predates this reads it as the free text the field already was. A `completed` or
-`partial` result never makes a run succeed by itself: only the settlement names
+correction says, or when the deciding revision is `known-failure`, unless its stop
+was requested by the goal's sponsor, when a person, or an operator, as they stood
+when the stop was recorded, in a revision no tied agent wrote; any other
+principal's stop and the worker's for a cap count. Any other run counts for
+nothing, one that exited cleanly with no result included. From 0.9.4 the worker
+names in `observed.reference` of an observed success the latest `completed` or
+`partial` result its agent recorded during the run, on an attempt recorded during
+the run, as it sees them at the run's exit, and names none otherwise; a reader
+that predates this reads it as the free text the field already was. A `completed`
+or `partial` result never makes a run succeed by itself: only the settlement names
 it, so no result written after the settlement, whatever its `at`, does. A later
 run whose intent a tied agent wrote never ends the window of a run no tied agent
-wrote. From 0.9.4 (FIX-155) the failures end in two ways only:
-a success ends the failures before it while they are fewer than the limit, and
-once they reach it only an answer of the pause's ask ends them, an `ask` goal step
-recorded naming one of the failures, answered by a decision the `ask` row counts,
-after which no run settled before the earlier of the ask and that decision counts.
-So no attempt, result, run or decision a tied agent writes ends the pause, whatever
-its `at`.
+wrote. From 0.9.4 (FIX-155) the failures end in two ways only: a success ends the
+failures before it while they are fewer than the limit, and once they reach it
+only an answer of the pause's ask ends them, an `ask` goal step recorded naming one
+of the failures, answered by a decision the `ask` row counts, after which no run
+settled before the earlier of the ask and that decision counts. So no attempt,
+result, run revision, divergent revision, reconciliation or decision a tied agent
+writes ends the pause or turns a success an untied settlement names into a
+failure, whatever its `at`.
 
 A reader of format 3 that predates these fields refuses an assignment that
 carries `occurrence` as an unknown key and refuses a goal whose plan carries

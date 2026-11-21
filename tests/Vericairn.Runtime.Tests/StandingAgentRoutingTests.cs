@@ -299,6 +299,53 @@ public class StandingAgentRoutingTests
     }
 
     [Fact]
+    public void ACarriersDivergentRevisionOfItsFailedRunLeavesThePauseHeldAndNothingRouted()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string builder = run.Estate.BuilderId;
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 });
+        string? third = null;
+        for (int i = 0; i < 3; i++)
+        {
+            GoalStepResponse failing = Step(run, goal, "fail-" + i, scenario: "claude-fails");
+            Assert.True(failing.Ok, failing.Message);
+            Assert.Equal("known-failure", run.Settled(failing.Run!.Run).Status);
+            third = failing.Run.Run;
+        }
+
+        (string, int) Due() => (run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString()!, run.Service.GoalDue(goal)!.Json.GetProperty("failures").GetProperty("consecutive").GetInt32());
+        Assert.Equal(("held", 3), Due());
+        AgentRuns.Run failed = AgentRuns.Find(run.Estate.Load(), third!)!;
+        RecordEnvelope intent = failed.Intent;
+        RecordEnvelope settled = failed.Revisions.First(r => EstateModel.BodyString(r, "status") == "known-failure");
+        RecordEnvelope dispatched = run.Estate.Load().ById[settled.Supersedes!];
+        var signer = new Vericairn.Records.Signing.StoreSigner(new Vericairn.Records.Signing.FileKeyStore(Vericairn.Records.Signing.VericairnHome.Path()), run.BuilderDevice);
+        RecordEnvelope Fork(RecordEnvelope superseded, RecordEnvelope successor, string status)
+        {
+            JsonObject body = JsonNode.Parse(successor.Body.GetRawText())!.AsObject();
+            body["status"] = status;
+            run.Estate.SetClock(superseded.AtTime.AddSeconds(-1));
+            return run.Estate.Add("operation", builder, body.ToJsonString(), supersedes: superseded.Id, id: StandingAgentTests.Below(successor.Id), signer: signer);
+        }
+
+        // Written by hand, the builder's record superseding the third run's intent beside its dispatched revision, sorting before it; then one
+        // superseding the dispatched revision beside the settlement as a success; then its own reconciliation keeping that one: after each,
+        // goal due reads the agent held with three failures and goal step starts no run.
+        Fork(intent, dispatched, "canceled");
+        Assert.Equal(("held", 3), Due());
+        Assert.Null(Step(run, goal, "after-intent-fork").Run);
+        RecordEnvelope kept = Fork(dispatched, settled, "observed-success");
+        Assert.NotEqual(settled.Id, run.Estate.Load().SupersededBy[dispatched.Id]);
+        Assert.Equal(("held", 3), Due());
+        Assert.Null(Step(run, goal, "after-settlement-fork").Run);
+        run.Estate.SetClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds()));
+        run.Estate.Add("reconciliation", builder, new JsonObject { ["kept"] = kept.Id, ["withdrawn"] = new JsonArray(settled.Id), ["note"] = "Keep the builder's revision." }.ToJsonString(), dispatched.Reference, signer: signer);
+        Assert.Equal(kept.Id, run.Estate.Load().SupersededBy[dispatched.Id]);
+        Assert.Equal(("held", 3), Due());
+        Assert.Null(Step(run, goal, "after-reconciliation").Run);
+    }
+
+    [Fact]
     public void ALapsedOrPausedAgentDispatchesNothingAndATimeAheadOfTheClockIsRefused()
     {
         using var run = new RunEstate(recordFormat: 3);
