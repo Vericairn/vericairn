@@ -269,7 +269,9 @@ public partial class GoalJourneyTests
                 "--execution", "model=model-b", "--execution", "effort=low", "--setting", "command=" + FakeHarness.Setting("mcp", report)];
             CliHarness.Outcome refused = CliHarness.Run(step);
             Assert.Equal(2, refused.Code);
-            Assert.Contains($"W-1 is routed to Builder through claude-code, and its run cannot start: The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence on this machine (design/goals.md § 10): Device {operatorDevice}", refused.Err, StringComparison.Ordinal);
+            string unfolded = CliHarness.Unfold(refused.Err);
+            Assert.Contains($"W-1 is routed to Builder through {original.Launcher}", unfolded, StringComparison.Ordinal);
+            Assert.Contains($", and its run cannot start: The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence on this machine (design/goals.md § 10): Device {operatorDevice}", unfolded, StringComparison.Ordinal);
             Assert.Contains("Nothing was recorded.", refused.Err, StringComparison.Ordinal);
             Assert.False(File.Exists(report));
             Assert.DoesNotContain("assignment ", CliHarness.Ok("--estate", root, "work", "observe", "W-1").Out, StringComparison.Ordinal);
@@ -516,7 +518,8 @@ public partial class GoalJourneyTests
     {
         CliHarness.Outcome outcome = CliHarness.Run(["--estate", root, .. args]);
         Assert.True(outcome.Code == 2, $"vericairn {string.Join(' ', args)} exited {outcome.Code}, not refused\n{outcome.Out}\n{outcome.Err}");
-        Assert.Contains(because, outcome.Err, StringComparison.Ordinal);
+        // From 0.9.4 (CODE-80) the runtime's problem is folded to 80 columns, every row marked as the runtime's.
+        Assert.Contains(because, CliHarness.Unfold(outcome.Err), StringComparison.Ordinal);
     }
 
     private static string Release(string status)

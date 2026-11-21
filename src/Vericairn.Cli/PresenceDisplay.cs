@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Vericairn.Protocol;
+using Vericairn.Sdk;
 
 namespace Vericairn.Cli;
 
@@ -10,6 +11,13 @@ namespace Vericairn.Cli;
 /// it, embedded or the daemon: the records an operator action will sign with its owner's presence, announced before the first prompt,
 /// "Signature k of n" with what each prompt signs, any it adds, and how many it signed. A command that signs nothing with presence
 /// shows nothing, and a runtime that keeps no notices shows nothing either; standard output keeps the command's own answer.
+/// <para>
+/// From 0.9.4 (CODE-80) a presence session's list is shown from its terms, counted and summarized here with the runtime's descriptions
+/// labeled as the runtime's; the fingerprint the system dialog shows is computed here from the check's nonce and terms received before it,
+/// with a warning in its place otherwise; and each signature under the session is shown as it is made (<see cref="PresenceNoticeReader"/>).
+/// Every line taken from the runtime's own words begins with <c>runtime:</c>, its control characters shown escaped; a line without it is
+/// one the command line derived itself.
+/// </para>
 /// </summary>
 internal sealed class PresenceDisplay : IDisposable
 {
@@ -21,17 +29,23 @@ internal sealed class PresenceDisplay : IDisposable
     private readonly CancellationTokenSource stopping = new();
     private readonly object writing = new();
     private readonly Task? following;
+    private readonly PresenceNoticeReader reader = new();
     private long cursor;
     private bool stopped;
 
-    private PresenceDisplay(IEstateApi api, TextWriter output, long? start)
+    private readonly Func<int> width;
+
+    private PresenceDisplay(IEstateApi api, TextWriter output, long? start, Func<int> width)
     {
         this.api = api;
         this.output = output;
+        this.width = width;
         if (start is long position)
         {
             cursor = position;
-            following = Task.Run(FollowAsync);
+            // From 0.9.4 (CODE-80) the first waiting read is made before the command acts, so the runtime counts this display as
+            // following from the start and lets it read a session's terms before their nonce exists.
+            following = FollowAsync();
         }
     }
 
@@ -39,7 +53,13 @@ internal sealed class PresenceDisplay : IDisposable
     /// Takes the runtime's position before the command acts, so only the notices of what it does are shown, and follows from there.
     /// A runtime that cannot answer is not followed.
     /// </summary>
-    internal static PresenceDisplay Start(IEstateApi api, TextWriter output)
+    internal static PresenceDisplay Start(IEstateApi api, TextWriter output) => Start(api, output, () => CommandContext.TerminalWidth(output));
+
+    /// <summary>
+    /// Starts as <see cref="Start(IEstateApi, TextWriter)"/> does, folding the runtime's lines to the columns <paramref name="width"/>
+    /// gives at each batch: the terminal's width, 80 where output goes elsewhere.
+    /// </summary>
+    internal static PresenceDisplay Start(IEstateApi api, TextWriter output, Func<int> width)
     {
         long? start;
         try
@@ -53,7 +73,7 @@ internal sealed class PresenceDisplay : IDisposable
             start = null;
         }
 
-        return new PresenceDisplay(api, output, start);
+        return new PresenceDisplay(api, output, start, width);
     }
 
     /// <summary>Stops following once the command has its answer, after showing every notice raised until then.</summary>
@@ -117,12 +137,12 @@ internal sealed class PresenceDisplay : IDisposable
     {
         lock (writing)
         {
-            foreach (PresenceNotice notice in response.Notices.Where(n => n.Sequence > cursor))
-            {
-                output.WriteLine(notice.Text);
-                Volatile.Write(ref cursor, notice.Sequence);
-            }
-
+            // One read's notices are one batch: the reader holds a session's terms as received before a nonce only once their read is over.
+            List<PresenceNotice> batch = [.. response.Notices.Where(n => n.Sequence > cursor)];
+            // From the re-check of PR #398, every row of the runtime's words begins with its mark: each line is folded to the terminal's width.
+            int columns = width();
+            foreach (PresenceLine line in reader.Read(batch)) output.WriteLine(PresenceNoticeReader.Fold(line.Text, columns));
+            if (batch.Count > 0) Volatile.Write(ref cursor, batch[^1].Sequence);
             output.Flush();
         }
     }

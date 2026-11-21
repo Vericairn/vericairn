@@ -198,10 +198,36 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock FontWeight="SemiBold" IsVisible="{Binding HasStanding}" Text="Standing agents: each one's state and next occurrence" />
+              <ListBox ItemsSource="{Binding Standing}" IsVisible="{Binding HasStanding}" AutomationProperties.Name="Standing agents, each with its state and next occurrence">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="p:StandingRow">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Heading}" TextWrapping="Wrap" />
+                        <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
               <TextBlock FontWeight="SemiBold" IsVisible="{Binding HasDue}" Text="Due times of runs: when each timed step is due" />
               <ListBox ItemsSource="{Binding Due}" IsVisible="{Binding HasDue}" AutomationProperties.Name="Due times of runs, before each timed step runs">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="p:DueRow">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Heading}" TextWrapping="Wrap" />
+                        <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <TextBlock FontWeight="SemiBold" IsVisible="{Binding HasDecisions}" Text="Decisions of runs: who decided what and why" />
+              <ListBox ItemsSource="{Binding Decisions}" IsVisible="{Binding HasDecisions}" AutomationProperties.Name="Decisions of runs: who decided each path and why">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="p:DecisionRow">
                     <Border Classes="card">
                       <StackPanel Spacing="2">
                         <TextBlock FontWeight="SemiBold" Text="{Binding Heading}" TextWrapping="Wrap" />

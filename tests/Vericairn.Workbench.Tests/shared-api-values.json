@@ -69,7 +69,8 @@
     "batch.incomplete",
     "batch.unreadable",
     "communication.conflict",
-    "operation.duplicate-identity"
+    "operation.duplicate-identity",
+    "standing.duplicate"
   ],
   "Vericairn.Records.Estate.FlowPosition.AttentionKinds": [
     "uncertain",
@@ -77,7 +78,16 @@
     "exhausted",
     "consecutive-failures",
     "impossible",
-    "missed"
+    "missed",
+    "loop"
+  ],
+  "Vericairn.Records.Estate.FlowPosition.DecisionStates": [
+    "pending",
+    "held",
+    "in-review",
+    "taken",
+    "returning",
+    "attention"
   ],
   "Vericairn.Records.Estate.FlowPosition.ItemStates": [
     "satisfied",
@@ -147,7 +157,8 @@
     "person",
     "reserved",
     "attention",
-    "request"
+    "request",
+    "rule"
   ],
   "Vericairn.Records.Estate.NextEligible.RouteStates": [
     "agent",
@@ -296,6 +307,29 @@
     "watch",
     "due"
   ],
+  "Vericairn.Records.Templates.FlowTransition.DeadlineRules": [
+    "default",
+    "attention"
+  ],
+  "Vericairn.Records.Templates.FlowTransition.DeciderKinds": [
+    "rule",
+    "role",
+    "rule-then-role"
+  ],
+  "Vericairn.Records.Templates.FlowTransition.GatePaths": [
+    "go",
+    "recycle",
+    "hold",
+    "kill"
+  ],
+  "Vericairn.Records.Templates.FlowTransition.Undelegables": [
+    "administration",
+    "charter",
+    "grant",
+    "legal-commitment",
+    "ownership-transfer",
+    "destructive"
+  ],
   "Vericairn.Records.Types.AcceptanceType.SubjectTypes": [
     "work-order",
     "result",
@@ -412,6 +446,16 @@
     "proposed-by-planner",
     "given"
   ],
+  "Vericairn.Records.Types.HarnessQualificationType.FileReach": [
+    "readable",
+    "blocked",
+    "unknown"
+  ],
+  "Vericairn.Records.Types.HarnessQualificationType.HostReach": [
+    "reachable",
+    "blocked",
+    "unknown"
+  ],
   "Vericairn.Records.Types.HarnessQualificationType.ProbeNames": [
     "version",
     "flags",
@@ -454,7 +498,8 @@
     "package",
     "vericairn-release",
     "operator-request",
-    "security-triage"
+    "security-triage",
+    "flow-decision"
   ],
   "Vericairn.Records.Types.OperationType.Statuses": [
     "not-started",
@@ -547,7 +592,8 @@
     "manage-estate-policies",
     "grant-policy-exceptions",
     "manage-writing-exceptions",
-    "manage-prompts"
+    "manage-prompts",
+    "dispatch"
   ],
   "Vericairn.Records.Types.SecurityReportRules.Dispositions": [
     "security",

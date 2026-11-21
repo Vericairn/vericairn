@@ -65,6 +65,10 @@ internal static class CodexInventory
     internal static RunPreflight Establish(LaunchContext context, bool qualifying = false)
     {
         HarnessInventory.CommandPrefix(context, "codex");
+        // From 0.9.4 (RUN-04): Codex's web search reports only its query, never what it retrieved, so a retrieval run's sources could not
+        // be retained as originals; this launcher keeps web search disabled and refuses such a run before its intent.
+        if (HarnessInventory.Retrieval(context))
+            throw new ProviderRefusedException("Codex's web search reports no retrieved content in its events, so a retrieval run's sources could not be retained as originals; the codex launcher keeps web search disabled. Run the work with the claude-code launcher, or under a brief that does not permit retrieval.");
         RefuseManagedConfiguration(context);
         IReadOnlyList<RunComponent> instructions = HarnessConfiguration.Inspect(context, codex: true);
         CheckHome();

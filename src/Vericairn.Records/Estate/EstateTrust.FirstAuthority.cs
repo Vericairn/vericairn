@@ -56,12 +56,12 @@ internal sealed partial class EstateTrust
     /// the first authority is one the estate already makes when the manifest names a candidate. It costs a judgment of the estate for
     /// each candidate, so it serves that command alone. The manifest is read from the bytes given, which the command has checked.
     /// </summary>
-    internal static FirstAuthorityReading ReadFirstAuthority(string root, IReadOnlyList<RecordFile> files, byte[] manifestBytes, Func<string, byte[]?>? objects)
+    internal static FirstAuthorityReading ReadFirstAuthority(string root, IReadOnlyList<RecordFile> files, byte[] manifestBytes, Func<string, byte[]?>? objects, JudgmentContext? context = null)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(manifestBytes);
         // Judged from a model that holds every record, as the loader judges one before it keeps only the records that count.
-        EstateModel model = EstateLoader.Load(root, files, null, manifestBytes, objects, judge: false);
+        EstateModel model = EstateLoader.Load(root, files, null, manifestBytes, objects, judge: false, context: context);
         EstateManifest? manifest = model.Manifest;
         EstateTrust trust = Build(model, manifest, model.ObjectReader, model.FilePaths);
         bool history = model.OfType("history-checkpoint").Any();
@@ -80,10 +80,9 @@ internal sealed partial class EstateTrust
                 .Select(a => judged.IdentityOf(model.ById[a.Subject!.Id])).Distinct(StringComparer.Ordinal).Count();
             int signed = identity is null ? 0 : model.Records.Count(r => r.Signatures.Any(s => model.ById.TryGetValue(s.Device, out RecordEnvelope? signer) && signer.Type == "device" &&
                 judged.IdentityOf(signer) == identity));
-            // Its own signatures, verified as the judgment with it as the first authority verifies every signature.
-            string? problem = candidate.DeclaredHash != candidate.ComputedHash
-                ? "its content does not match the hash its envelope declares"
-                : judged.Verification(candidate, Mode.Anchors).FirstOrDefault(f => f.Severity == Severity.Error) is { } failed ? failed.Code + ": " + failed.Message : null;
+            // Its own signatures, verified as the judgment with it as the first authority verifies every signature: what the estate reads
+            // before it takes the candidate as its first authority (FIX-134).
+            string? problem = judged.FirstAuthorityProblem();
             evidence.Add(new FirstAuthorityEvidence(candidate, device, identity, device is null ? null : EstateModel.BodyString(device, "principal"), manifest?.FirstAuthority == candidate.Id,
                 ReferenceEquals(candidate, trust.FirstAuthority), history && judged.WitnessedFirst(candidate, trust.AuthorityCandidates), revoked, admits, signed, problem));
         }

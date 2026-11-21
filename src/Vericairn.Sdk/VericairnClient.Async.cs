@@ -250,6 +250,10 @@ public sealed partial class VericairnClient
     public Task<WriteOutcome> ReviewResultAsync(ResultReviewRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(ReviewResult), async token => (await PostAsync<ResultReviewRequest, WriteOutcome>("/v1/work/review", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReviewResult)), cancellationToken);
 
+    /// <summary>The cancellable StandingOutput operation, with a deadline covering the complete response.</summary>
+    public Task<WriteOutcome> StandingOutputAsync(StandingOutputRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(StandingOutput), async token => (await PostAsync<StandingOutputRequest, WriteOutcome>("/v1/standing/outputs", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(StandingOutput)), cancellationToken);
+
     /// <summary>The cancellable Amend operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> AmendAsync(AmendRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(Amend), async token => (await PostAsync<AmendRequest, WriteOutcome>("/v1/work/amend", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(Amend)), cancellationToken);
@@ -338,9 +342,21 @@ public sealed partial class VericairnClient
     public Task<GoalResponse?> GoalAsync(string id, CancellationToken cancellationToken = default) =>
         RunOperationAsync<GoalResponse?>(nameof(Goal), async token => (await GetAsync<GoalResponse>("/v1/goals/" + Uri.EscapeDataString(id), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Goal)), cancellationToken);
 
+    /// <summary>The cancellable WorkOverlap operation, with a deadline covering the complete response.</summary>
+    public Task<OverlapResponse> WorkOverlapAsync(string? repository = null, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<OverlapResponse>(nameof(WorkOverlap), async token => (await GetAsync<OverlapResponse>(repository is null ? "/v1/overlaps" : "/v1/overlaps?repository=" + Uri.EscapeDataString(repository), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(WorkOverlap)), cancellationToken);
+
+    /// <summary>The cancellable WorkOverlapPreview operation, with a deadline covering the complete response.</summary>
+    public Task<OverlapResponse> WorkOverlapPreviewAsync(OverlapPreviewRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<OverlapResponse>(nameof(WorkOverlapPreview), async token => (await PostAsync<OverlapPreviewRequest, OverlapResponse>("/v1/overlaps/preview", request, cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(WorkOverlapPreview)), cancellationToken);
+
     /// <summary>The cancellable GoalNext operation, with a deadline covering the complete response.</summary>
     public Task<NextResponse?> GoalNextAsync(string goal, CancellationToken cancellationToken = default) =>
         RunOperationAsync<NextResponse?>(nameof(GoalNext), async token => (await GetAsync<NextResponse>(GoalPath(goal, "next"), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(GoalNext)), cancellationToken);
+
+    /// <summary>The cancellable GoalDue operation, with a deadline covering the complete response.</summary>
+    public Task<GoalDueResponse?> GoalDueAsync(string goal, string? asOf = null, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<GoalDueResponse?>(nameof(GoalDue), async token => (await GetAsync<GoalDueResponse>(GoalPath(goal, "due") + (asOf is null ? string.Empty : "?asOf=" + Uri.EscapeDataString(asOf)), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(GoalDue)), cancellationToken);
 
     /// <summary>The cancellable GoalStep operation, with a deadline covering the complete response.</summary>
     public Task<GoalStepResponse> GoalStepAsync(string goal, GoalStepRequest request, CancellationToken cancellationToken = default) =>
@@ -381,6 +397,10 @@ public sealed partial class VericairnClient
     /// <summary>The cancellable GoalClose operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> GoalCloseAsync(string goal, GoalCloseRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(GoalClose), async token => (await PostAsync<GoalCloseRequest, WriteOutcome>(GoalPath(goal, "close"), request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(GoalClose)), cancellationToken);
+
+    /// <summary>The cancellable GoalDecide operation, with a deadline covering the complete response.</summary>
+    public Task<WriteOutcome> GoalDecideAsync(string goal, GoalDecideRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(GoalDecide), async token => (await PostAsync<GoalDecideRequest, WriteOutcome>(GoalPath(goal, "decide"), request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(GoalDecide)), cancellationToken);
 
     /// <summary>The cancellable Providers operation, with a deadline covering the complete response.</summary>
     public Task<IReadOnlyList<ProviderRow>> ProvidersAsync(CancellationToken cancellationToken = default) =>

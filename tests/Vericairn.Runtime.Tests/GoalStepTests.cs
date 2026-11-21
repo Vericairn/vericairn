@@ -559,7 +559,7 @@ public class GoalStepTests
             GoalStepResponse refused = run.Service.GoalStep(run.Goal, new GoalStepRequest(by, run.Resource, Command(run, "never")));
             Assert.False(refused.Ok, by);
             Assert.Equal("refused", refused.Problem!.Code);
-            Assert.EndsWith($"does not take steps of goal {run.Goal}: a step is taken by an operator, by the goal's sponsor when the sponsor is a person, or by a principal holding the 'local-engineering' scope, as the builder dispatches agents under the operator's authority. Nothing was recorded.", refused.Message, StringComparison.Ordinal);
+            Assert.EndsWith($"does not take steps of goal {run.Goal}: a step is taken by an operator, by the goal's sponsor when the sponsor is a person, by a principal holding the 'local-engineering' scope, as the builder dispatches agents under the operator's authority, or by a dispatcher whose dispatch grant in force names the goal. Nothing was recorded.", refused.Message, StringComparison.Ordinal);
         }
 
         Assert.Equal(assignments, run.Service.Records("assignment").Count);
@@ -659,7 +659,7 @@ public class GoalStepTests
         return (sam, goal);
     }
 
-    private static GoalStepResponse Step(RunEstate run, string report, string scenario = "claude") =>
+    internal static GoalStepResponse Step(RunEstate run, string report, string scenario = "claude") =>
         run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting(scenario, run.Report(report)) }));
 
     private static void Order(RunEstate run, string key, string extra) =>

@@ -27,7 +27,7 @@ public sealed class AuthorityType : IRecordType
         new("conditions", "string[]", true, "Conditions under which the grant applies."),
         new("basis", "ulid", true, "The decision record that authorizes this grant."),
         new("expires", FieldKinds.Timestamp, false, "When the grant stops being in force; a record authored from then on cannot rely on it.", 2),
-        new("bounds", "object[]", false, "Required for policy scopes: one typed bound per scope, with actions, subject selection and scope-specific limits. Policy grants require expiry and an operator signature.", 3),
+        new("bounds", "object[]", false, "Required for policy scopes: one typed bound per scope, with actions, subject selection and scope-specific limits. Policy grants require expiry and an operator signature. From 0.9.4 the dispatch scope's bound is {scope: dispatch, goals, maxAssignmentsPerDay, reassign?}: a dispatch grant gives dispatch alone to a service principal, signed, expiring within 30 days.", 3),
     ];
 
     /// <inheritdoc />
@@ -46,6 +46,7 @@ public sealed class AuthorityType : IRecordType
         }
 
         PolicyAuthority.ValidateGrant(context);
+        DispatchAuthority.ValidateGrant(context);
         body.NoOtherKeys();
         if (grantee is not null && context.RequireReference("grantee", grantee, "principal") is null)
         {

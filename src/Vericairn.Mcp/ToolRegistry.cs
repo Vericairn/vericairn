@@ -268,6 +268,20 @@ public sealed partial class ToolRegistry
                 }),
             Read("work_observe", "What an observer sees of a work order: its assignments, attempts, results, amendments, reviews and acceptances.", Arguments(("workOrder", "Work-order key or record id.")), "workOrder",
                 async (api, a, token) => { ObserveResponse? o = (await api.ObserveAsync(Arg(a, "workOrder"), cancellationToken: token).ConfigureAwait(false)); return o is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(o.Text, false); }),
+            Read("work_overlap", "From 0.9.4: the overlap check's view: the active assignments by repository, each with its effective permitted paths (permitted patterns less exclusions) and why it is active, and every overlap of two of them with its patterns, witnesses and resolution and the concurrent-paths policies that hold it; with brief, a draft brief's overlaps before it is recorded. As text, or as JSON of format vericairn.overlaps/1 when form is json. Reading it records nothing.", OverlapArguments(),
+                async (api, a, token) =>
+                {
+                    OverlapResponse view = a?["brief"] is JsonObject
+                        ? await api.WorkOverlapPreviewAsync(new OverlapPreviewRequest(Body(a, "brief"), OptionalArg(a, "repository")), token).ConfigureAwait(false)
+                        : await api.WorkOverlapAsync(OptionalArg(a, "repository"), token).ConfigureAwait(false);
+                    bool problem = view.Json.ValueKind == JsonValueKind.Object && view.Json.TryGetProperty("problem", out _);
+                    return OptionalArg(a, "form") switch
+                    {
+                        null or "text" => new ToolCallResult(view.Text, problem),
+                        "json" => new ToolCallResult(view.Json.GetRawText(), problem),
+                        string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
+                    };
+                }),
             Read("context_prepare", "Compute a measured deterministic context package for a work order, with exact original identities and a complete withheld list. Optional maxBytes is a context allocation, separate from a run spending cap; mandatory overflow refuses. Without maxBytes, optional bodies are withheld. Optional searches add the top three new candidates of each as optional sources pinned by exact hash, recorded in the manifest; they grant no authority. Tokens remain unknown. Writes nothing.", WithSearchArgument(Arguments(("workOrder", "Work-order key or record id."), ("maxBytes", "Optional positive context byte allocation, as a decimal string."))), "workOrder",
                 async (api, a, token) =>
                 {
@@ -296,6 +310,36 @@ public sealed partial class ToolRegistry
                 async (api, a, token) => OptionalArg(a, "goal") is string id ? (await api.GoalAsync(id, cancellationToken: token).ConfigureAwait(false)) is GoalResponse goal ? new ToolCallResult(goal.Json.GetRawText(), false) : NotFound("goal", id) : Json((await api.GoalsAsync(cancellationToken: token).ConfigureAwait(false)))),
             Read("goal_progress", "A goal's progress condition by condition, as vericairn goal show prints it: each record predicate's verdict (met, not-met or unknown) with its reason, each condition's verdict in the current evaluation, the steps, who accepts the goal and what still stands between it and its acceptance, which no tool records.", Arguments(("goal", "Goal record id (ULID), any revision.")), "goal",
                 async (api, a, token) => (await api.GoalAsync(Arg(a, "goal"), cancellationToken: token).ConfigureAwait(false)) is GoalResponse goal ? new ToolCallResult(goal.Text, false) : NotFound("goal", Arg(a, "goal"))),
+            Read("goal_due", "From 0.9.4: a standing agent's occurrences as of an explicit UTC time, the runtime's clock when asOf is omitted, as vericairn goal due shows them: its state, each trigger and when it is next due, its period's caps and spend, its concurrency and failure pause, and each occurrence with its key and state (due, deferred with its reason, running, assigned, settled, disposed or held). As text, or as JSON of format vericairn.due/1 when form is json. Reading it records nothing and carries no occurrence; goal step does.",
+                Arguments(("goal", "Goal record id (ULID), any revision."), ("asOf", "The UTC time its triggers are evaluated at, for example 2026-12-01T00:00:00Z; the runtime's clock when omitted."), ("form", "text (the default) or json.")), "goal",
+                async (api, a, token) =>
+                {
+                    GoalDueResponse? due = await api.GoalDueAsync(Arg(a, "goal"), OptionalArg(a, "asOf"), token).ConfigureAwait(false);
+                    if (due is null)
+                    {
+                        return NotFound("goal", Arg(a, "goal"));
+                    }
+
+                    bool problem = due.Json.ValueKind == JsonValueKind.Object && due.Json.TryGetProperty("problem", out _);
+                    return OptionalArg(a, "form") switch
+                    {
+                        null or "text" => new ToolCallResult(due.Text, problem),
+                        "json" => new ToolCallResult(due.Json.GetRawText(), problem),
+                        string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
+                    };
+                }),
+            Write("goal_decide", "From 0.9.4: records the decision of a run's decision step by the acting principal, which holds the step's current assignment: the path or paths its transition takes, the reasons and the evidence by hash, as the result of that assignment, signed by its own device. The first decision of a round is final. Choosing a path performs nothing reserved and dispatches nothing; goal step takes the steps it makes eligible. A decision the flow requires of a person is refused for an agent, and a rule's decision is recorded by goal step, never here.",
+                DecideArguments(), ["goal", "step", "paths", "reasons"],
+                async (api, a, token) =>
+                {
+                    if (!TryStrings(a, "paths", out IReadOnlyList<string>? paths, out string? problem) || !TryStrings(a, "evidence", out IReadOnlyList<string>? evidence, out problem))
+                    {
+                        return new ToolCallResult(problem!, true);
+                    }
+
+                    return Outcome(await api.GoalDecideAsync(Arg(a, "goal"), new GoalDecideRequest(by, Arg(a, "step"), paths ?? [], Arg(a, "reasons"), evidence), token).ConfigureAwait(false));
+                }),
+            .. StandingOutputTools(by),
             Read("asks_list", "What waits on a principal, or on every principal when none is named: the asks still open or notified, oldest first, at most three in one delivery to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order. As text, or as the canonical JSON when form is json. Reading them answers nothing: an ask is answered by a decision of the principal it is put to, which no tool records.", Arguments(("to", "The principal asked (ULID); omitted, every principal."), ("form", "text (the default) or json.")),
                 async (api, a, token) => OptionalArg(a, "form") switch
                 {
@@ -403,6 +447,22 @@ public sealed partial class ToolRegistry
             ["required"] = new JsonArray("id", "hash"), ["additionalProperties"] = false,
         };
         schema["required"] = new JsonArray("product", "version", "by", "commit", "expected", "clientBuild");
+        return schema;
+    }
+
+    /// <summary>The arguments of goal_decide: the goal, the step, the paths, the reasons and the evidence.</summary>
+    private static JsonObject DecideArguments()
+    {
+        JsonObject schema = Arguments(("goal", "Goal record id (ULID), any revision."), ("step", "The decision step's key."), ("reasons", "Why this path, from the evidence named."));
+        schema["properties"]!["paths"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "The path or paths of the step's transition the decision takes; several only where the flow allows." };
+        schema["properties"]!["evidence"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "The records the decision rests on, each as id or type:id, pinned at their current hash." };
+        return schema;
+    }
+
+    private static JsonObject OverlapArguments()
+    {
+        JsonObject schema = Arguments(("repository", "A repository resource's id or estate: only that repository's assignments and overlaps, or the repository a draft brief would change when it names none."), ("form", "text (the default) or json."));
+        schema["properties"]!["brief"] = new JsonObject { ["type"] = "object", ["description"] = "A draft brief, as an assignment carries it: its overlaps with the active assignments are previewed, and nothing is recorded." };
         return schema;
     }
 

@@ -195,7 +195,8 @@ internal sealed partial class DutyProofEvaluation
         if (found.Length != 1 || !found[0].Available || ContentHash.Sha256(found[0].Bytes.AsSpan()) != hash) throw new PolicyInputException("Required retained proof bytes are unavailable or their hash differs: " + hash + ".");
     }
 
-    private IEnumerable<RecordEnvelope> Reviews(RecordEnvelope result, string requirement, DateTimeOffset at) => Model.OfType("review")
+    // Only a review of the exact result qualifies, so the reviews about it are read, not every review for each step (FIX-136).
+    private IEnumerable<RecordEnvelope> Reviews(RecordEnvelope result, string requirement, DateTimeOffset at) => Model.About(result.Id, "review")
         .Where(r => PolicyWork.CurrentAt(Model, r, at) && PolicyWork.ReviewQualifies(Model, r, result, requirement) && Authentic(r))
         .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal);
 

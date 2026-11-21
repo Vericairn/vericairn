@@ -200,7 +200,7 @@ public class SoftwareJourneyTests
             foreach (string key in new[] { "W-8", "W-9" })
             {
                 CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", builder, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Work {{key}}","intent":"Exercise the notes.","scope":["notes"],"exitQuestion":"Done?","inputs":[],"deliverables":["notes"]}"""));
-                string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", key, "--contributor", builder, "--by", builder, "--brief", brief).Id;
+                string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", key, "--contributor", builder, "--by", builder, "--repository", "estate", "--brief", brief).Id;
                 for (int i = 0; i < (key == "W-8" ? 3 : 1); i++)
                 {
                     CliHarness.Outcome attempt = CliHarness.Ok("--estate", root, "--json", "work", "attempt", assignment, "--by", builder, "--workspace", "here", "--note", "Do it.", "--at", RecordParser.FormatTimestamp(notesTime));
@@ -286,13 +286,13 @@ public class SoftwareJourneyTests
             string bare = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "bare.json", Product)).Id;
             CliHarness.Outcome unselected = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--product", bare, "--version", "1.0.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, unselected.Code);
-            Assert.Contains("No release provider is selected", unselected.Err, StringComparison.Ordinal);
+            Assert.Contains("No release provider is selected", CliHarness.Unfold(unselected.Err), StringComparison.Ordinal);
             CliHarness.Outcome unknown = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "gitlab-releases", "--product", bare, "--version", "1.0.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, unknown.Code);
-            Assert.Contains("'gitlab-releases' has no implementation", unknown.Err, StringComparison.Ordinal);
+            Assert.Contains("'gitlab-releases' has no implementation", CliHarness.Unfold(unknown.Err), StringComparison.Ordinal);
             CliHarness.Outcome incomplete = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", bare, "--version", "1.0.0", "--by", builder);
             Assert.Equal(2, incomplete.Code);
-            Assert.Contains("needs the settings repository", incomplete.Err, StringComparison.Ordinal);
+            Assert.Contains("needs the settings repository", CliHarness.Unfold(incomplete.Err), StringComparison.Ordinal);
             Assert.False(Directory.Exists(Path.Combine(root, "records", "operation")));
             Assert.Empty(provider.Dispatches);
 

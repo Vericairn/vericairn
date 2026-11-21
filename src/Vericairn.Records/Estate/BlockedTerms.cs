@@ -31,11 +31,20 @@ public static class BlockedTerms
     public static ImmutableArray<string> In(EstateModel model, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(model);
-        var terms = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (RecordEnvelope policy in model.Current("estate-policy"))
+        return [.. Lists(model, now).SelectMany(l => l.Terms).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// The lists behind <see cref="In"/>: each current policy that has started and declares terms, with its normalized terms in a stable
+    /// order, so that a check can name the list a term came from without repeating the term (CODE-81).
+    /// </summary>
+    internal static IEnumerable<(RecordEnvelope Policy, ImmutableArray<string> Terms)> Lists(EstateModel model, DateTimeOffset now)
+    {
+        foreach (RecordEnvelope policy in model.Current("estate-policy").OrderBy(p => p.Id, StringComparer.Ordinal))
         {
             if (EstateModel.BodyString(policy, "startsAt") is string starts
                 && DateTimeOffset.TryParse(starts, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset start) && start > now) continue;
+            var terms = new SortedSet<string>(StringComparer.Ordinal);
             foreach (JsonElement parameters in Rules(policy.Body))
             {
                 if (!parameters.TryGetProperty("terms", out JsonElement list) || list.ValueKind != JsonValueKind.Array) continue;
@@ -44,8 +53,8 @@ public static class BlockedTerms
                     if (term.ValueKind == JsonValueKind.String && Valid(term.GetString()) is null) terms.Add(Normalize(term.GetString()!.Trim()));
                 }
             }
+            if (terms.Count > 0) yield return (policy, [.. terms]);
         }
-        return [.. terms];
     }
 
     /// <summary>Why a declared list is malformed, or null when it is well formed.</summary>

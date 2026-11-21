@@ -110,7 +110,7 @@ public sealed class JsonOutputContractTests : IDisposable
         CliHarness.Outcome json = CliHarness.Ok("--estate", root, "--json", "doctor");
         using JsonDocument document = JsonDocument.Parse(json.Out);
         JsonElement result = document.RootElement;
-        string[] probes = ["version", "runtime", "git", "dotnet", "estate", "custody", "enclave", "records", "search", "daemon"];
+        string[] probes = ["version", "runtime", "git", "dotnet", "estate", "custody", "enclave", "presence", "records", "search", "daemon"];
         Assert.Equal(probes.Append("stateWarnings").Order(StringComparer.Ordinal), result.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         foreach (string name in probes)
         {
@@ -126,6 +126,17 @@ public sealed class JsonOutputContractTests : IDisposable
         Assert.Equal("1, 2, 3", result.GetProperty("records").GetProperty("value").GetString());
         Assert.Equal(OperatingSystem.IsMacOS() ? JsonValueKind.String : JsonValueKind.Null, result.GetProperty("enclave").GetProperty("detail").ValueKind);
         if (!OperatingSystem.IsMacOS()) Assert.Equal("not-applicable", State(result, "enclave"));
+        // From 0.9.4 (ID-16): a build from source is a development build, so presence sessions are off on a Mac, and doctor says why.
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.Equal("unavailable", State(result, "presence"));
+            Assert.Equal("per-signature", Value(result, "presence"));
+            Assert.StartsWith("presence sessions off because this is a development build", Detail(result, "presence"), StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Equal("not-applicable", State(result, "presence"));
+        }
 
         // The text report keeps its lines, and they state the same facts.
         string[] lines = CliHarness.Ok("--estate", root, "doctor").Out.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -138,6 +149,7 @@ public sealed class JsonOutputContractTests : IDisposable
         Assert.EndsWith(Detail(result, "custody")!.Split("; per-user state at ")[1], lines[5], StringComparison.Ordinal);
         int next = 6;
         if (OperatingSystem.IsMacOS()) Assert.StartsWith("enclave   Secure Enclave custody ", lines[next++], StringComparison.Ordinal);
+        if (OperatingSystem.IsMacOS()) Assert.Equal("presence  " + Detail(result, "presence"), lines[next++]);
         Assert.Equal($"records   reads record formats 1, 2, 3; {Detail(result, "records")}", lines[next++]);
         Assert.StartsWith("search    ", lines[next++], StringComparison.Ordinal);
         Assert.Equal("daemon    none; commands run the embedded runtime", lines[^1]);

@@ -37,7 +37,7 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
 
         CliHarness.Outcome admitted = e.Step(guide, "vericairn devices admit <laptop-id> --by <operator-id> --note \"The first authority.\"");
         e.Values["<admission-id>"] = admitted.Out.Split("  ")[1];
-        Quoted(guide, admitted.Err, e.Values, 7);
+        Quoted(guide, admitted.Err, e.Values, 11);
         Assert.Contains("Stopped at signature 2 of 2, which was not made; 1 was signed.", admitted.Err, StringComparison.Ordinal);
         Assert.Contains("warning: No history checkpoint with trigger adoption was written: The record could not be signed on this machine", admitted.Err, StringComparison.Ordinal);
 
@@ -58,7 +58,7 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         CliHarness.Outcome check = e.Step(guide, "vericairn estate checkpoint --adopt --check");
         e.Values["<plan>"] = Line(check.Out, "plan: ")["plan: ".Length..];
         CliHarness.Outcome adopted = e.Step(guide, "vericairn estate checkpoint --adopt --expect-plan <plan> --by <operator-id>");
-        Quoted(guide, adopted.Err, e.Values, 4);
+        Quoted(guide, adopted.Err, e.Values, 7);
         Assert.Contains("Signed 1 of 1.", adopted.Err, StringComparison.Ordinal);
         Assert.StartsWith("History: adopted", Line(e.Step(guide, "vericairn status").Out, "History: "), StringComparison.Ordinal);
         e.Step(guide, "vericairn estate check");
@@ -96,7 +96,7 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         e.Custody.DeclineAt = e.Custody.Reasons.Count + 1;
 
         CliHarness.Outcome expired = e.Step(guide, "vericairn devices admit <desktop-id> --by <operator-id> --note \"The operator's desktop.\"", refused: true);
-        Quoted(guide, expired.Err, e.Values, 5);
+        Quoted(guide, expired.Err, e.Values, 7);
         Assert.Contains("Stopped at signature 1 of 1, which was not made; 0 were signed.", expired.Err, StringComparison.Ordinal);
         Assert.Contains("error: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).", expired.Err, StringComparison.Ordinal);
         Assert.Equal(string.Empty, expired.Out);
@@ -107,7 +107,7 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         // The one missing step, once, with a fresh prompt.
         e.Custody.DeclineAt = 0;
         CliHarness.Outcome reopened = e.Step(guide, "vericairn devices admit <desktop-id> --by <operator-id> --note \"The operator's desktop.\"");
-        Quoted(guide, reopened.Err, e.Values, 4);
+        Quoted(guide, reopened.Err, e.Values, 6);
         Assert.Contains("Signed 1 of 1.", reopened.Err, StringComparison.Ordinal);
         Assert.Equal("admitted", Listed(e.Step(guide, "vericairn devices list --json"), e.Values["<desktop-id>"]).GetProperty("admission").GetString());
         EstateModel model = e.Api.Session.Load();
@@ -156,14 +156,154 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
             Assert.Contains("(enrollment-troubleshooting.md)", Doc(linking), StringComparison.Ordinal);
     }
 
-    /// <summary>Asserts that each line a command printed on standard error, its identities put back as the guide's placeholders, is in the guide.</summary>
+    /// <summary>
+    /// DOCS-45: the worked example of a signed command refused in a sandbox. The custody fails at once with the helper's words for a process
+    /// that cannot reach the Secure Enclave, before any prompt; the command prints what an expired prompt prints, inspection finds nothing
+    /// written while the signing device reads held here, and the same command, run once from a context that reaches the enclave, signs.
+    /// </summary>
+    [Fact]
+    public void ACapabilityUnavailableToTheProcessFailsAtOnceAndTheStepIsSignedOnceFromAContextThatReachesIt()
+    {
+        string guide = Guide();
+        string section = Section(guide, "## A signed command that fails at once (0.9.4)");
+        using Estate e = Estate.Born("guide-sandbox");
+        string laptop = e.Admitted("Operator's laptop");
+        e.Values["<desktop-id>"] = e.Device("Operator's desktop");
+        int asked = e.Custody.Reasons.Count;
+        e.Custody.Unavailable = true;
+
+        const string Admit = "vericairn devices admit <desktop-id> --by <operator-id> --note \"The operator's desktop.\"";
+        Assert.Contains("\n" + Admit + "\n", section, StringComparison.Ordinal);
+        CliHarness.Outcome refused = e.Step(guide, Admit, refused: true);
+        Quoted(section, refused.Err, e.Values, 7);
+        Assert.Contains("Stopped at signature 1 of 1, which was not made; 0 were signed.", refused.Err, StringComparison.Ordinal);
+        Assert.Contains("error: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).", refused.Err, StringComparison.Ordinal);
+        // The runtime describes the failure by its kind: the helper's words do not reach the command, and no prompt was asked.
+        Assert.DoesNotContain("Secure Enclave available", refused.Err, StringComparison.Ordinal);
+        Assert.Equal(asked, e.Custody.Reasons.Count);
+
+        // Inspection: nothing written, and the laptop reads held here though this process could not sign with it.
+        Assert.Contains("\nvericairn devices list --json\n", section, StringComparison.Ordinal);
+        CliHarness.Outcome listed = e.Step(guide, "vericairn devices list --json");
+        JsonElement signing = Listed(listed, laptop);
+        Assert.Equal("admitted", signing.GetProperty("admission").GetString());
+        Assert.True(signing.GetProperty("heldHere").GetBoolean());
+        Assert.Equal("not admitted", Listed(listed, e.Values["<desktop-id>"]).GetProperty("admission").GetString());
+
+        // The one retry, from a context that reaches the enclave: the same command, once, with its prompt.
+        e.Custody.Unavailable = false;
+        CliHarness.Outcome signed = e.Step(guide, Admit);
+        Quoted(guide, signed.Err, e.Values, 6);
+        Assert.Contains("Signed 1 of 1.", signed.Err, StringComparison.Ordinal);
+        Assert.Equal(asked + 1, e.Custody.Reasons.Count);
+        Assert.Equal("admitted", Listed(e.Step(guide, "vericairn devices list --json"), e.Values["<desktop-id>"]).GetProperty("admission").GetString());
+        Assert.Single(e.Api.Session.Load().Records, r => r.Type == "admission" && r.Subject?.Id == e.Values["<desktop-id>"]);
+        string flat = Flat(section);
+        Assert.Contains("it ends with `Signed 1 of 1.`, and the desktop reads `admitted`.", flat, StringComparison.Ordinal);
+        Assert.Contains("The laptop reads `admitted` and `heldHere` though this process could not sign with it, and the desktop reads `not admitted`: nothing was written.", flat, StringComparison.Ordinal);
+    }
+
+    // DOCS-45: a device that never asks for presence, such as an agent's, prints the refusal's line alone.
+    [Fact]
+    public void ADeviceThatNeverAsksPresencePrintsTheRefusalLineAlone()
+    {
+        string guide = Guide();
+        using Estate e = Estate.Born("guide-sandbox-agent");
+        string laptop = e.Device("Operator's laptop");
+        WriteOutcome admitted = e.Api.DeviceAdmit(new(laptop, e.Operator, "The first authority."));
+        Assert.True(admitted.Ok, admitted.Problem?.Message);
+        string desktop = e.Device("Operator's desktop");
+        e.Custody.Unavailable = true;
+
+        CliHarness.Outcome refused = e.Run("devices", "admit", desktop, "--by", e.Operator, "--note", "The operator's desktop.");
+        Assert.NotEqual(0, refused.Code);
+        string[] lines = [.. refused.Err.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').Where(l => l.Length > 0)];
+        string only = Assert.Single(lines);
+        Assert.Contains("\n  " + only + "\n", Section(guide, "## A signed command that fails at once (0.9.4)"), StringComparison.Ordinal);
+        Assert.Contains("A device that never asks for presence, such as an agent's, prints the error line alone.", Flat(guide), StringComparison.Ordinal);
+    }
+
+    // DOCS-45: without the helper no Secure Enclave key here can be read: the device reads not held here, and the admission is refused
+    // before any signature is announced. The stand-in custody's key is set aside, which leaves this machine's custody unable to read it,
+    // as a key the missing helper would read is.
+    [Fact]
+    public void AMissingHelperAnnouncesNoSignatureAndRefusesWithoutAKeyHeldHere()
+    {
+        string guide = Guide();
+        using Estate e = Estate.Born("guide-helper");
+        string laptop = e.Admitted("Operator's laptop");
+        e.Values["<desktop-id>"] = e.Device("Operator's desktop");
+        string key = Path.Combine(VericairnHome.Path(), "keys", laptop + ".p8");
+        Assert.True(File.Exists(key));
+        File.Move(key, key + ".unread");
+
+        JsonElement signing = Listed(e.Step(guide, "vericairn devices list --json"), laptop);
+        Assert.Equal("admitted", signing.GetProperty("admission").GetString());
+        Assert.False(signing.GetProperty("heldHere").GetBoolean());
+        CliHarness.Outcome refused = e.Step(guide, "vericairn devices admit <desktop-id> --by <operator-id> --note \"The operator's desktop.\"", refused: true);
+        Quoted(Section(guide, "## A signed command that fails at once (0.9.4)"), refused.Err, e.Values, 1);
+        Assert.DoesNotContain("Signature", refused.Err, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, refused.Out);
+    }
+
+    /// <summary>
+    /// DOCS-45: the three cases by <c>doctor</c>'s enclave line, as the report prints each, run in the same context as the signed command;
+    /// the helper's own words; and what the branch says of connectivity, recovery and retry.
+    /// </summary>
+    [Fact]
+    public void TheBranchTellsTheThreeCasesApartByDoctorsEnclaveLineAndRecoversWithoutRetryingBlind()
+    {
+        string guide = Guide();
+        string section = Section(guide, "## A signed command that fails at once (0.9.4)");
+        Assert.Contains("\n  " + MachineDiagnostics.EnclaveLine(MachineDiagnostics.Enclave(available: false, helper: false)) + "\n", section, StringComparison.Ordinal);
+        Assert.Contains("\n  " + MachineDiagnostics.EnclaveLine(MachineDiagnostics.Enclave(available: false, helper: true)) + "\n", section, StringComparison.Ordinal);
+        Assert.StartsWith("enclave   Secure Enclave custody available", MachineDiagnostics.EnclaveLine(MachineDiagnostics.Enclave(available: true, helper: true)), StringComparison.Ordinal);
+        Assert.Contains("`enclave   Secure Enclave custody available`", section, StringComparison.Ordinal);
+        Assert.Equal("no Secure Enclave available to this process", MachineDiagnostics.Enclave(available: false, helper: true).Detail);
+        Assert.Contains("reports `" + MachineDiagnostics.Enclave(available: false, helper: true).Detail + "`", Flat(section), StringComparison.Ordinal);
+
+        // The helper's words, which earlier releases printed, are its own for a process that cannot reach the enclave.
+        string helper = File.ReadAllText(Path.Combine(Root(), "src", "Vericairn.Enclave", "vericairn-enclave.swift"));
+        Match words = Regex.Match(helper, "fail\\(3, \"(?<words>[^\"]+)\"\\)");
+        Assert.True(words.Success);
+        Assert.Contains("`" + words.Groups["words"].Value + "`", Flat(section), StringComparison.Ordinal);
+
+        // doctor runs word for word; on a Mac its enclave line is one of those the branch tells apart.
+        using Estate e = Estate.Born("guide-doctor");
+        CliHarness.Outcome doctor = e.Step(guide, "vericairn doctor");
+        if (OperatingSystem.IsMacOS())
+        {
+            string line = Line(doctor.Out, "enclave   ");
+            Assert.True(line.StartsWith("enclave   Secure Enclave custody available", StringComparison.Ordinal) || section.Contains("\n  " + line + "\n", StringComparison.Ordinal), line);
+        }
+        else Assert.DoesNotContain("enclave   ", doctor.Out, StringComparison.Ordinal);
+
+        string flat = Flat(section);
+        Assert.Contains("Reaching the runtime does not qualify a process to sign.", flat, StringComparison.Ordinal);
+        Assert.Contains("`heldHere` says that this machine holds the device's key, not that the asking process can use the Secure Enclave.", flat, StringComparison.Ordinal);
+        Assert.Contains("It neither signs nor asks for presence, so it cannot stand in for the signing step itself", flat, StringComparison.Ordinal);
+        Assert.Contains("Keep the failed command, what it printed on both streams and its exit code. Do not run it again yet.", flat, StringComparison.Ordinal);
+        Assert.Contains("Make any retry once, separately authorized for that step, from a context where `doctor` reports the enclave available.", flat, StringComparison.Ordinal);
+        Assert.Contains("Do not create or admit a device again, move the key to weaker custody such as a file key, copy key files, loosen the sandbox so that the agent signs by itself, or retry automatically.", flat, StringComparison.Ordinal);
+        Assert.Contains("it does not show that the Mac lacks the hardware", flat, StringComparison.Ordinal);
+
+        // The ordinary signing guidance links to the branch.
+        foreach (string linking in new[] { "agent-builders.md", "agents-only.md", "people-and-agents.md", "people-only.md" })
+            Assert.Contains("(enrollment-troubleshooting.md#a-signed-command-that-fails-at-once-094)", Doc(linking), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Asserts that each line a command printed on standard error, its identities put back as the guide's placeholders, is in the guide:
+    /// from 0.9.4 (CODE-80) each row of a runtime line the command line folded to 80 columns.
+    /// </summary>
     private static void Quoted(string guide, string error, Dictionary<string, string> values, int expected)
     {
         string[] lines = [.. error.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').Where(l => l.Length > 0)];
         Assert.Equal(expected, lines.Length);
         foreach (string line in lines)
         {
-            string placed = values.Aggregate(line, (text, pair) => text.Replace(pair.Value, pair.Key, StringComparison.Ordinal));
+            // From 0.9.4 (CODE-80) a prompt's line ends with the record's short hash, which the guide shows as a placeholder.
+            string placed = ShortHash().Replace(values.Aggregate(line, (text, pair) => text.Replace(pair.Value, pair.Key, StringComparison.Ordinal)), " (<short hash>)");
             Assert.True(guide.Contains("\n" + placed + "\n", StringComparison.Ordinal) || guide.Contains("\n  " + placed + "\n", StringComparison.Ordinal),
                 $"The guide does not quote what the command prints: {placed}");
         }
@@ -176,16 +316,33 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
 
     private static string Guide() => Doc("enrollment-troubleshooting.md");
 
-    private static string Doc(string name)
+    // A section of the guide, from its heading to the next heading of the same level.
+    private static string Section(string guide, string heading)
+    {
+        int start = guide.IndexOf("\n" + heading + "\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, heading);
+        int end = guide.IndexOf("\n## ", start + heading.Length + 1, StringComparison.Ordinal);
+        return end < 0 ? guide[start..] : guide[start..(end + 1)];
+    }
+
+    // Prose with its line breaks and indentation read as single spaces.
+    private static string Flat(string text) => Regex.Replace(text, @"\n[ ]*", " ");
+
+    private static string Doc(string name) => File.ReadAllText(Path.Combine(Root(), "docs", name)).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private static string Root()
     {
         string? root = AppContext.BaseDirectory;
         while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx"))) root = Path.GetDirectoryName(root);
         Assert.NotNull(root);
-        return File.ReadAllText(Path.Combine(root, "docs", name)).Replace("\r\n", "\n", StringComparison.Ordinal);
+        return root;
     }
 
     [GeneratedRegex("<[a-z-]+>")]
     private static partial Regex Placeholder();
+
+    [GeneratedRegex(@" \([0-9a-f]{12}\)$")]
+    private static partial Regex ShortHash();
 
     /// <summary>
     /// A new estate, as <c>estate init</c> writes it, served by an embedded runtime whose operator's key is held by a recording stand-in
@@ -233,12 +390,13 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         }
 
         /// <summary>The operator's first device, admitted by itself without presence, then asking presence at every signature.</summary>
-        public void Admitted(string name)
+        public string Admitted(string name)
         {
             string device = Device(name);
             WriteOutcome admitted = Api.DeviceAdmit(new(device, Operator, "The first authority."));
             Assert.True(admitted.Ok, admitted.Problem?.Message);
             Presence(device);
+            return device;
         }
 
         /// <summary>States that a device asks its owner's presence at every signature.</summary>

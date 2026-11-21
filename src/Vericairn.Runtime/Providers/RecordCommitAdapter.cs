@@ -43,6 +43,19 @@ public interface IRecordCommitAdapter
             : throw new ProviderRefusedException("This record commit adapter cannot carry an earlier action's trail.");
     }
 
+    /// <summary>
+    /// As <see cref="Commit(string, string, string, IReadOnlyDictionary{string, string}, IReadOnlySet{string}, IReadOnlyDictionary{string, string})"/>,
+    /// ending the commit's message with a closing paragraph of these exact trailer lines: those the estate requires on every pushed
+    /// commit, which the checked push then finds (CODE-81). An adapter that does not override this adds none and refuses a non-empty list.
+    /// </summary>
+    string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts,
+        IReadOnlyDictionary<string, string> carried, IReadOnlyList<string> trailers)
+    {
+        ArgumentNullException.ThrowIfNull(trailers);
+        return trailers.Count == 0 ? Commit(directory, branch, basis, files, receipts, carried)
+            : throw new ProviderRefusedException("This record commit adapter cannot end its commit with the trailer lines the estate requires; nothing was committed.");
+    }
+
     /// <summary>Verify the retained commit contains exactly the original record and members on its pinned base, without changing the working tree.</summary>
     void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files);
 

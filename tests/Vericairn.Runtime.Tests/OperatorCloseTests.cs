@@ -3,6 +3,7 @@
 
 using Vericairn.Mcp;
 using Vericairn.Protocol;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Store;
@@ -269,6 +270,46 @@ public sealed class OperatorCloseTests
         Assert.Empty(f.Estate.Load().OfType("acceptance"));
         Assert.Empty(BatchJournal.All(f.Api.Session).Journals);
     }
+
+    [Fact]
+    public void AnAcceptanceOfAWorkOrdersCurrentRevisionClosesTheResultBeforeItAndAllNeverSignsThatWorkOrderAgain()
+    {
+        // From 0.9.4 (FIX-141) an acceptance of the work order's current revision recorded after its current result accepts it, as
+        // acceptances were given before they named a result's exact hash; a later result, or an earlier revision's acceptance, does not.
+        using var f = new OperatorCloseFixture();
+        var earlier = f.Add("EARLIER");
+        RecordEnvelope accepted = AcceptOrder(f, earlier.Order);
+        var milestone = f.Add("MILESTONE", kind: "milestone");
+        AcceptOrder(f, milestone.Order);
+        var later = f.Add("LATER");
+        AcceptOrder(f, later.Order);
+        RecordEnvelope next = f.Result(f.Attempt(later.Assignment));
+        f.Review(next);
+        var changed = f.Add("CHANGED");
+        AcceptOrder(f, changed.Order);
+        f.Revise(changed.Order, "title", "Finish CHANGED, revised");
+        f.Add("PLAIN");
+
+        OperatorCloseCandidatesResponse listed = f.Api.OperatorCloseCandidates();
+
+        Assert.True(listed.Ok, listed.Problem?.Message);
+        Assert.Equal(["CHANGED", "LATER", "PLAIN"], listed.Items.Select(i => i.Key));
+        Assert.Equal(next.Id, Assert.Single(listed.Items, i => i.Key == "LATER").Result.Id);
+        string[] before = [.. f.Estate.Load().OfType("acceptance").Select(a => a.Id)];
+
+        OperatorCloseResponse closed = f.Api.OperatorClose(f.Request(all: true), TestContext.Current.CancellationToken);
+
+        Assert.True(closed.Ok, closed.Problem?.Message);
+        Assert.Equal(3, closed.Written.Count);
+        RecordEnvelope[] signed = [.. f.Estate.Load().OfType("acceptance").Where(a => !before.Contains(a.Id))];
+        Assert.Equal(new[] { changed.Result.Id, next.Id, listed.Items[2].Result.Id }.Order(StringComparer.Ordinal), signed.Select(a => a.Subject!.Id).Order(StringComparer.Ordinal));
+        Assert.DoesNotContain(signed, a => a.Subject!.Id == earlier.Result.Id || a.Subject.Id == milestone.Result.Id || a.Subject.Id == earlier.Order.Id);
+        Assert.Empty(f.Api.OperatorCloseCandidates().Items);
+        Assert.Equal(accepted.Id, Assert.Single(f.Estate.Load().OfType("acceptance"), a => a.Subject!.Id == earlier.Order.Id).Id);
+    }
+
+    private static RecordEnvelope AcceptOrder(OperatorCloseFixture f, RecordEnvelope order) => f.Estate.Add("acceptance", f.Estate.OperatorId,
+        System.Text.Json.JsonSerializer.Serialize(new { statement = "I accept " + EstateModel.BodyString(order, "key") + ".", basis = Array.Empty<string>(), self = order.By == f.Estate.OperatorId }), order.Reference);
 
     private static void AssertRefusedWithoutWrites(OperatorCloseFixture f, OperatorCloseRequest request)
     {

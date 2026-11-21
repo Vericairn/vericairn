@@ -143,10 +143,10 @@ public sealed partial class EstateService
             var outputs = new List<DocumentOutputChange>();
             var pins = new JsonArray();
             string decisionId = Ulid.NewUlid().Value;
-            // Every document pin and the decision are announced before the first presence prompt (FIX-124).
-            using IDisposable counted = presence.Action("decision from ask " + ask.Id, SignsWithPresence(model, request.By)
-                ? [.. change.Documents.OrderBy(d => d.Path, StringComparer.Ordinal).Select(d => PinSignature(d.Path)),
-                    DescribeRecord(new RecordDraft("decision", request.By, JsonSerializer.SerializeToElement(body)), model)] : null);
+            // Every pin and the decision are authored completely, unsigned, before the first signature, so the decision that names the pins
+            // at their exact hashes is too, and a presence session lists them all by exact hash (ID-16).
+            DateTimeOffset at = SessionNow();
+            var drafts = new List<RecordDraft>();
             foreach (DesignFileChange document in change.Documents.OrderBy(d => d.Path, StringComparer.Ordinal))
             {
                 Problem? problem = PrepareDocumentPin(new(document.Path, request.By, request.Summary), model, out RecordDraft? draft, out _);
@@ -170,9 +170,10 @@ public sealed partial class EstateService
                     draft = draft with { Body = JsonSerializer.SerializeToElement(pinBody) };
                     draft = StampRevision(draft, RevisionLines.History(model, document.Path));
                 }
-                (AuthoredRecord? pin, string? refusal) = AuthorLocked(draft, model);
+                draft = Fixed(draft, at);
+                (AuthoredRecord? pin, string? refusal) = AuthorUnsignedLocked(draft, model);
                 if (pin is null) return Failed(refusal!);
-                records.Add(pin);
+                drafts.Add(draft);
                 if (RevisionLines.IsAuthored(pin.Envelope))
                 {
                     byte[] after = RevisionLines.Refresh(ProjectRevision(model, pin.Envelope), document.Path, documentBytes);
@@ -181,9 +182,23 @@ public sealed partial class EstateService
                 pins.Add(new JsonObject { ["path"] = document.Path, ["id"] = pin.Envelope.Id, ["hash"] = pin.Envelope.ComputedHash });
             }
             body["changeSet"] = new JsonObject { ["baseCommit"] = change.BaseCommit, ["head"] = change.Head, ["pins"] = pins };
-            (AuthoredRecord? decision, string? reason) = AuthorLocked(new("decision", request.By, JsonSerializer.SerializeToElement(body), Id: decisionId), model);
-            if (decision is null) return Failed(reason!);
-            records.Add(decision);
+            RecordDraft deciding = Fixed(new RecordDraft("decision", request.By, JsonSerializer.SerializeToElement(body), Id: decisionId), at);
+            drafts.Add(deciding);
+            // Every document pin and the decision are announced before the first presence prompt (FIX-124).
+            using IDisposable counted = SessionAction("decision from ask " + ask.Id, SignsWithPresence(model, request.By)
+                ? [.. change.Documents.OrderBy(d => d.Path, StringComparer.Ordinal).Select(d => PinSignature(d.Path)), DescribeRecord(deciding, model)] : null,
+                ExactSession("decision from ask", "decision from ask:" + ask.Id + ":" + ask.ComputedHash, drafts, redatable: false));
+            foreach (RecordDraft planned in drafts)
+            {
+                (AuthoredRecord? signed, string? reason) = AuthorLocked(SessionDraft(planned), model);
+                if (signed is null) return Failed(reason!);
+                records.Add(signed);
+            }
+
+            for (int i = 0; i < records.Count - 1; i++)
+            {
+                if (records[i].Envelope.ComputedHash != pins[i]!["hash"]!.GetValue<string>()) return Failed("A document pin changed while it was signed; nothing was written.");
+            }
 
             // Signing can require operator presence. Re-observe membership, bytes and the ask after that wait.
             DesignChangeSet? current;
@@ -199,11 +214,11 @@ public sealed partial class EstateService
                 current => change.Documents.Any(d => !RevisionLines.History(current, d.Path).Select(r => r.ComputedHash)
                     .SequenceEqual(RevisionLines.History(model, d.Path).Select(r => r.ComputedHash), StringComparer.Ordinal))
                     ? new("conflict", "A document's revision history changed during preparation.", []) : null, [.. outputs]);
-            RecordWritten? written = stored.Written.SingleOrDefault(r => r.Id == decision.Envelope.Id);
+            RecordWritten? written = stored.Written.SingleOrDefault(r => r.Id == decisionId);
             Problem? incomplete = stored.Problem;
             if (incomplete is not null && stored.Written.Count > 0)
                 incomplete = new("reconcile-required", "Part of the decision and pin batch was stored. Inspect its receipts and reconcile the retained batch before retrying.", incomplete.Findings);
-            return new(written, stored.Written.Where(r => r.Id != decision.Envelope.Id).ToArray(), incomplete);
+            return new(written, stored.Written.Where(r => r.Id != decisionId).ToArray(), incomplete);
         }
 
         static DecisionNewResponse Failed(string message) => new(null, [], new Problem("refused", message, []));

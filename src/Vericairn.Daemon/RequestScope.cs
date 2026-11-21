@@ -71,6 +71,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/records/prepare", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/context/prepare", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/context/brief", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/overlaps/preview", StringComparison.OrdinalIgnoreCase) &&
             // The index is derived machine-local state, never a record: updating it is part of reading.
             !operation.Equals("POST /v1/search", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/search/index", StringComparison.OrdinalIgnoreCase) &&
@@ -246,6 +247,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/work/result"] = typeof(ResultRequest),
         ["POST /v1/work/review"] = typeof(ResultReviewRequest),
         ["POST /v1/work/amend"] = typeof(AmendRequest),
+        ["POST /v1/standing/outputs"] = typeof(StandingOutputRequest),
         ["POST /v1/work/takeover"] = typeof(TakeoverRequest),
         ["GET /v1/devices"] = null,
         ["POST /v1/devices"] = typeof(DeviceCreateRequest),
@@ -288,6 +290,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/goals"] = typeof(GoalProposeRequest),
         ["GET /v1/goals/{id}"] = null,
         ["GET /v1/goals/{id}/next"] = null,
+        ["GET /v1/goals/{id}/due"] = null,
+        ["GET /v1/overlaps"] = null,
+        ["POST /v1/overlaps/preview"] = typeof(OverlapPreviewRequest),
         ["POST /v1/goals/{id}/step"] = typeof(GoalStepRequest),
         ["POST /v1/goals/{id}/activate"] = typeof(GoalActionRequest),
         ["POST /v1/goals/{id}/pause"] = typeof(GoalActionRequest),
@@ -296,6 +301,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/goals/{id}/evaluate"] = typeof(GoalEvaluateRequest),
         ["POST /v1/goals/{id}/accept"] = typeof(GoalAcceptRequest),
         ["POST /v1/goals/{id}/close"] = typeof(GoalCloseRequest),
+        ["POST /v1/goals/{id}/decide"] = typeof(GoalDecideRequest),
         ["GET /v1/providers"] = null,
         ["GET /v1/launchers"] = null,
         ["GET /v1/runs"] = null,
@@ -376,6 +382,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PromptUseRequest)] = (_, r, d) => Acting(((PromptUseRequest)r).By, d),
         [typeof(PromptQuery)] = (_, _, _) => null,
         [typeof(ResourceRequest)] = (_, _, _) => null,
+        // From 0.9.4 (CODE-73): a preview reads a draft brief and records nothing.
+        [typeof(OverlapPreviewRequest)] = (_, _, _) => null,
         // A selecting read (MCP-05) reads for the device's own principal; the route refuses another and judges every delivery again.
         [typeof(EventSelectRequest)] = (_, r, d) => Optional(((EventSelectRequest)r).Principal, d),
         // From 0.9.3 (FIX-124): presence notices name what the person at the runtime's machine is asked to sign there; no device reads them.
@@ -407,6 +415,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(ResultRequest)] = (_, r, d) => Acting(((ResultRequest)r).By, d),
         [typeof(ResultReviewRequest)] = (_, r, d) => Acting(((ResultReviewRequest)r).By, d),
         [typeof(AmendRequest)] = (_, r, d) => Acting(((AmendRequest)r).By, d),
+        [typeof(StandingOutputRequest)] = (_, r, d) => Acting(((StandingOutputRequest)r).By, d),
         [typeof(DeviceCreateRequest)] = (_, r, d) => Acting(((DeviceCreateRequest)r).Principal, d),
         [typeof(AdmitRequest)] = (_, r, d) => Acting(((AdmitRequest)r).By, d) ?? Recovery(((AdmitRequest)r).Recovery, d),
         [typeof(RevokeRequest)] = (_, r, d) => Acting(((RevokeRequest)r).By, d) ?? Recovery(((RevokeRequest)r).Recovery, d),
@@ -424,6 +433,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(GoalEvaluateRequest)] = (_, r, d) => Acting(((GoalEvaluateRequest)r).By, d),
         [typeof(GoalAcceptRequest)] = (_, r, d) => Acting(((GoalAcceptRequest)r).By, d),
         [typeof(GoalCloseRequest)] = (_, r, d) => Acting(((GoalCloseRequest)r).By, d),
+        [typeof(GoalDecideRequest)] = (_, r, d) => Acting(((GoalDecideRequest)r).By, d),
         [typeof(WorkMovePlanRequest)] = (_, r, d) => Acting(((WorkMovePlanRequest)r).By, d),
         [typeof(ReleaseWithdrawRequest)] = (_, r, d) => Acting(((ReleaseWithdrawRequest)r).By, d),
         [typeof(ReleaseReviewAssignRequest)] = (_, r, d) => Acting(((ReleaseReviewAssignRequest)r).By, d),

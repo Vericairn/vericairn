@@ -871,6 +871,82 @@ public sealed partial class ReleasePolicyGateTests
         Assert.Empty(f.Api.Records("operation"));
     }
 
+    // From 0.9.4 (POLICY-08; decision 01M7XFQ6SGG9FQXZH1FVGH74NG): a concurrent-paths rule holds work starts, never a release. With one
+    // unmet and two unavailable pairs of a refuse-level policy on the released repository, the release preview, the submission check and
+    // the submission carry every pair as an enforced finding that is no release hold; a rule of another kind on the same policy, here
+    // one whose kind is not installed, still holds all three, and without it the submission dispatches.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConcurrentPathsPairsNeverHoldTheReleaseWhileAnotherRuleOfTheirPolicyDoes(bool otherRule)
+    {
+        using var f = new Fixture();
+        RecordEnvelope repository = Assert.Single(f.Api.Session.Load().Current("resource"),
+            r => r.Body.GetProperty("location").TryGetProperty("github", out JsonElement github) && github.GetString() == "Example/widget");
+        for (int i = 1; i <= 3; i++)
+        {
+            RecordEnvelope order = f.Records.Add("work-order", new JsonObject
+            {
+                ["key"] = $"W-{i}", ["kind"] = "ordinary", ["title"] = $"Widget change {i}", ["intent"] = "Change the widget.", ["scope"] = new JsonArray("the widget"),
+                ["exitQuestion"] = "Is the widget changed?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("widget"),
+            });
+            // The first two name the released repository and share the widget's paths: an unmet pair. The third names none, as an older
+            // runtime wrote it, so its pair with each of them is unavailable.
+            JsonObject brief = JsonNode.Parse(RunEstate.Brief)!.AsObject();
+            if (i < 3) brief["repository"] = repository.Id;
+            f.Records.Add("assignment", new JsonObject { ["contributor"] = f.Records.Estate.BuilderId, ["brief"] = brief }, subject: order.Reference);
+        }
+
+        JsonObject policy = f.Records.PolicyBody("held-widget", duty: false);
+        JsonNode other = policy["rules"]![0]!.DeepClone();
+        policy["appliesTo"] = new JsonObject { ["kind"] = "repository", ["repository"] = repository.Id, ["selectors"] = new JsonArray("widget/**") };
+        // In force from its own record's time: the decision approving it, then the policy, each a second later.
+        DateTimeOffset startsAt = f.Records.Estate.Clock.AddSeconds(2);
+        policy["startsAt"] = RecordParser.FormatTimestamp(startsAt);
+        policy["rules"] = new JsonArray(new JsonObject { ["key"] = "concurrent", ["kind"] = AssignmentOverlaps.PolicyKind, ["version"] = 1, ["parameters"] = new JsonObject() });
+        if (otherRule) policy["rules"]!.AsArray().Add(other);
+        RecordEnvelope declared = f.Records.Policy(policy);
+        Assert.Equal(startsAt, declared.AtTime);
+        RecordEnvelope candidate = f.Candidate();
+        f.Records.AssertValid();
+        Assert.True(f.Clock.Now > candidate.AtTime);
+
+        PolicyResponse preview = f.Api.PolicyEvaluate(release: candidate.Id);
+        ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
+        ReleaseResponse submitted = f.Api.ReleaseSubmit(f.Request);
+        Assert.Equal("preview", preview.Basis.Origin);
+        Assert.NotNull(preview.Basis.Submission);
+        foreach (PolicyResponse view in new[] { preview, check.Policies!, submitted.Policies! })
+        {
+            PolicyFindingDto[] pairs = [.. view.Findings.Where(x => x.Kind == ConcurrentPaths.Kind)];
+            Assert.Equal(["unavailable", "unavailable", "unmet"], pairs.Select(p => p.Verdict).Order(StringComparer.Ordinal));
+            Assert.All(pairs, p => Assert.Equal(("pair", "refuse", true, false), (p.Target.Kind, p.Level, p.Enforced, p.ReleaseHold)));
+            PolicyFindingDto[] holds = [.. view.Findings.Where(x => x.ReleaseHold)];
+            Assert.Equal(holds.Length, view.Holds);
+            Assert.All(holds, h => Assert.Equal(("age", "unavailable"), (h.Rule, h.Verdict)));
+            Assert.Equal(otherRule, holds.Length > 0);
+        }
+
+        IEnumerable<string> policyObjections = check.Check!.Objections.Where(o => o.Location.StartsWith("policy:", StringComparison.Ordinal)).Select(o => o.Code + " " + o.Location);
+        if (otherRule)
+        {
+            Assert.False(check.Ok);
+            Assert.Equal(["policy.unavailable policy:held-widget/age"], policyObjections.Distinct());
+            Assert.False(submitted.Ok);
+            Assert.DoesNotContain(submitted.Problem!.Findings, finding => finding.Location.EndsWith("/concurrent", StringComparison.Ordinal));
+            Assert.Contains(submitted.Problem.Findings, finding => finding.Code == "policy.unavailable" && finding.Location == "policy:held-widget/age");
+            Assert.Equal(0, f.Provider.Calls);
+            Assert.Empty(f.Api.Records("operation"));
+        }
+        else
+        {
+            Assert.True(check.Ok, check.Message);
+            Assert.Empty(check.Check.Objections);
+            Assert.True(submitted.Ok, submitted.Message);
+            Assert.Equal(1, f.Provider.Calls);
+        }
+    }
+
     [Theory]
     [InlineData("1.0.0", true)]
     [InlineData("2.0.0", false)]

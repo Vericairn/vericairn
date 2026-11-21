@@ -52,7 +52,7 @@ public class FlowStopRoutingTests
 
         // goal step records the operator request and nothing else: no assignment, ask or run, and its one item is the exact command.
         int assignments = run.Service.Records("assignment").Count;
-        GoalStepResponse taken = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse taken = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(taken.Ok, taken.Message);
         Assert.Equal(("request", "accept", "request", op), (taken.Outcome, taken.Step, taken.Route, taken.Principal));
         Assert.Null(taken.Assignment);
@@ -93,7 +93,7 @@ public class FlowStopRoutingTests
         var fallback = new AttentionDerivation(api.Records, api.Record, () => api.Progress(), api.Asks, api.Goals, () => api.Runs());
         Assert.DoesNotContain(fallback.AskItems(null), a => a.Record == request.Id);
         AssertTheSameStops(run, goal);
-        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal("none", again.Outcome);
         Assert.Contains($"accept is stopped, requested: a reserved act, accept-release: operator request {request.Id} waits on", again.Message, StringComparison.Ordinal);
 
@@ -104,7 +104,7 @@ public class FlowStopRoutingTests
         JsonElement settled = Assert.Single(queue.Json.GetProperty("withdrawn").EnumerateArray());
         Assert.Equal((request.Id, "settled"), (settled.GetProperty("revision").GetString(), settled.GetProperty("state").GetString()));
         Assert.DoesNotContain(run.Service.Status().Json.GetProperty("attention").EnumerateArray(), a => a.TryGetProperty("record", out JsonElement id) && id.GetString() == request.Id);
-        GoalStepResponse publishing = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse publishing = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal(("request", "publish"), (publishing.Outcome, publishing.Step));
         RecordEnvelope publication = run.Estate.Load().ById[publishing.Request!.Id];
         Assert.Equal(("publication", publish), (EstateModel.BodyString(publication, "kind"), publication.Body.GetProperty("content")[0].GetProperty("text").GetString()));
@@ -127,7 +127,7 @@ public class FlowStopRoutingTests
         Assert.Equal("person", Assert.Single(run.Service.GoalNext(goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("review").ValueKind == JsonValueKind.Object && s.GetProperty("key").GetString() == "draft").GetProperty("route").GetProperty("state").GetString());
         FlowStepRoutingTests.Review(run, lyrics);
         FlowStepRoutingTests.Review(run, master);
-        GoalStepResponse first = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse first = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal("request", first.Outcome);
         Assert.Contains($"--master {FlowFixture.Hash('b')} --result {master.Id}", first.Message, StringComparison.Ordinal);
 
@@ -145,7 +145,7 @@ public class FlowStopRoutingTests
         FlowStepRoutingTests.Review(run, remastered);
         string second = $"example-provider accept --master {FlowFixture.Hash('c')} --result {remastered.Id}";
         Assert.Equal("request", Route(run.Service.GoalNext(goal)!, "accept").GetProperty("state").GetString());
-        GoalStepResponse revised = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse revised = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal("request", revised.Outcome);
         RecordEnvelope revision = run.Estate.Load().ById[revised.Request!.Id];
         Assert.Equal(first.Request.Id, revision.Supersedes);
@@ -169,7 +169,7 @@ public class FlowStopRoutingTests
         // An agent without the step-taking authority records no request; whoever takes the run's steps does, and nothing is dispatched.
         GoalStepResponse refused = run.Service.GoalStep(goal, new GoalStepRequest(builder));
         Assert.Equal("refused", refused.Problem!.Code);
-        GoalStepResponse taken = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse taken = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         RecordEnvelope request = run.Estate.Load().ById[taken.Request!.Id];
 
         // An agent closes the request citing the operator's words: the request is closed, acceptance still waits on the act, and since
@@ -184,12 +184,12 @@ public class FlowStopRoutingTests
         Assert.Equal("request", Route(run.Service.GoalNext(goal)!, "accept").GetProperty("state").GetString());
 
         // The addressed operator's own dismissal is not asked again while the command holds.
-        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal("request", again.Outcome);
         RecordEnvelope renewed = run.Estate.Load().ById[again.Request!.Id];
         Assert.True(run.Service.OperatorRequestDismiss(renewed.Id, new OperatorRequestCloseRequest(op, renewed.ComputedHash, Reason: "Not now.")).Ok);
         Assert.Equal("closed", Route(run.Service.GoalNext(goal)!, "accept").GetProperty("state").GetString());
-        Assert.Equal("none", run.Service.GoalStep(goal, new GoalStepRequest(op)).Outcome);
+        Assert.Equal("none", run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Outcome);
 
         // An agent's record of the act does not count: the step still waits, and says why.
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", builder, Marker("ACCEPTED"))));
@@ -230,19 +230,19 @@ public class FlowStopRoutingTests
         var held = new List<GoalStepResponse>();
         for (int index = 0; index < 3; index++)
         {
-            held.Add(run.Service.GoalStep(goal, new GoalStepRequest(op)));
+            held.Add(run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)));
             Assert.Equal("ask", held[^1].Outcome);
         }
 
         Assert.Equal(["clip[intro]", "clip[verse]", "clip[chorus]"], held.Select(h => h.Step));
         Assert.Equal(["assigned", "assigned", "assigned", "queued", "queued"], Routes(run, goal));
-        GoalStepResponse queued = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse queued = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal("none", queued.Outcome);
         Assert.Contains("clip[bridge] is stopped, queued", queued.Message, StringComparison.Ordinal);
 
         // One settles: the next clip in order is delivered, and the last still waits.
         FlowStepRoutingTests.Done(run, held[0].Assignment!.Id, ("clip", FlowFixture.Hash('1'), null), by: op);
-        GoalStepResponse bridge = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse bridge = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal(("ask", "clip[bridge]"), (bridge.Outcome, bridge.Step));
         Assert.Equal(["assigned", "assigned", "assigned", "queued"], Routes(run, goal).Skip(1));
         Assert.Equal(0, run.Service.Check().Errors);
@@ -283,11 +283,11 @@ public class FlowStopRoutingTests
         public override DateTimeOffset GetUtcNow() => at;
     }
 
-    private static void Options(JsonObject body) =>
+    internal static void Options(JsonObject body) =>
         body["plan"]!["flow"]!["options"] = new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" };
 
     /// <summary>The song taken to its listening review: the builder drafts and masters by assignments the operator makes, and goal step gives listening to the operator.</summary>
-    private static (RecordWritten Lyrics, RecordWritten Mastering, RecordWritten Master) ToAcceptance(RunEstate run, string goal, bool listen = true)
+    internal static (RecordWritten Lyrics, RecordWritten Mastering, RecordWritten Master) ToAcceptance(RunEstate run, string goal, bool listen = true)
     {
         string builder = run.Estate.BuilderId;
         RecordWritten drafting = Assign(run, goal, "draft", builder);
@@ -296,7 +296,7 @@ public class FlowStopRoutingTests
         RecordWritten master = FlowStepRoutingTests.Done(run, mastering.Id, ("master", FlowFixture.Hash('b'), null));
         if (listen)
         {
-            GoalStepResponse listening = run.Service.GoalStep(goal, new GoalStepRequest(run.Estate.OperatorId));
+            GoalStepResponse listening = run.Service.GoalStep(goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource));
             Assert.Equal(("ask", "listen"), (listening.Outcome, listening.Step));
         }
 
@@ -318,7 +318,7 @@ public class FlowStopRoutingTests
             ["contributor"] = contributor, ["step"] = named,
             ["brief"] = new JsonObject
             {
-                ["outcome"] = "Carry step " + step + ".", ["sources"] = new JsonArray(), ["permittedChanges"] = new JsonArray("path:song/"), ["prohibitedEffects"] = new JsonArray("publication"),
+                ["outcome"] = "Carry step " + step + ".", ["sources"] = new JsonArray(), ["permittedChanges"] = new JsonArray("path:song/"), ["repository"] = run.Resource, ["prohibitedEffects"] = new JsonArray("publication"),
                 ["workspace"] = new JsonArray("song repository, a work branch"), ["limits"] = new JsonArray(), ["expectedOutputs"] = new JsonArray("the step's outputs"),
                 ["reviewCriteria"] = new JsonArray("the outputs exist"), ["recovery"] = "Carry it again.",
             },

@@ -27,7 +27,13 @@ internal sealed class GoalProposeCommand : Command
         var flowOption = new Option<string?>("--flow") { Description = "A flow to run, as id@version, a template of kind flow (vericairn templates list): the goal is a run of it, whose plan gives exactly one --work-order and whose every work and review step is an assignment of it naming the step." };
         var subjectOption = new Option<string[]>("--subject") { Description = "With --flow, a field of the flow's subject as name=value: a record field by its id (or type:id), a list field as comma-separated item names, a text field as its text; repeatable." };
         var flowOptionOption = new Option<string[]>("--flow-option") { Description = "With --flow, the goal's own configuration as name=value: a flow option, step.<key>=on|off for an optional step, or from 0.9.4 zone=<IANA time zone> or when.<key>=<timing as JSON> for a step's timing, narrower than the estate's and the product's template-defaults; repeatable. No configuration turns off a required step, a reserved marking or a step an estate policy requires." };
-        var untilOption = new Option<string?>("--until") { Description = "With --flow, the step the run ends at; the steps after it are not part of the run." };
+        var untilOption = new Option<string?>("--until") { Description = "With --flow, the step the run ends at; the steps after it are not part of the run. From 0.9.4, with --standing, the UTC time the standing agent returns to its sponsor; thirty days from now when omitted." };
+        var standingOption = new Option<string?>("--standing") { Description = "From 0.9.4: a standing agent, with --kind stewardship: the flow it runs once per occurrence, as id@version, a template of kind flow that declares the trigger kinds it uses and one routed work step. Its plan gives exactly one --work-order; each occurrence is an assignment of it naming the occurrence. The proposal prints what would be due. A flow grants nothing." };
+        var triggerOption = new Option<string[]>("--trigger") { Description = "From 0.9.4, with --standing, a trigger as JSON with its own key and kind; repeatable: schedule {unit: days|months, every, firstAt}, duty {policy, rule}, event {recordType, fields?, roles?}, condition {record: a record predicate} or request." };
+        var periodOption = new Option<string[]>("--period") { Description = "From 0.9.4, with --standing, a cap per UTC-anchored period as unit=value; repeatable: unit=months|days (months when omitted), every, runs and wallMinutes (both required), tokens, or currency=<amount in minor units>:<unit>. The period caps the units the budget caps; the budget is then each run's caps." };
+        var awaitingOption = new Option<long?>("--awaiting-review") { Description = "From 0.9.4, with --standing, how many of its results may await review before its dispatch defers; three when omitted." };
+        var outputsOption = new Option<string[]>("--outputs") { Description = "From 0.9.4, with --standing, an output cap as name=value; repeatable: possibilities (each occurrence's, five when omitted; extras join one summary possibility), drafts (how many of them carry a draft work order, three when omitted) and open (open outputs before its dispatch defers, ten when omitted)." };
+        var runsOnOption = new Option<string?>("--runs-on") { Description = "From 0.9.4, with --standing, the runtime that dispatches it unattended, by its identity's public-key hash (sha256:...)." };
         var supersedesOption = new Option<string?>("--supersedes") { Description = "The goal this proposal revises, by its current revision's id; a revision needs a fresh activation, and only its sponsor, a person, or an operator for a goal an agent sponsors records it." };
         Options.Add(byOption);
         Options.Add(titleOption);
@@ -46,6 +52,12 @@ internal sealed class GoalProposeCommand : Command
         Options.Add(subjectOption);
         Options.Add(flowOptionOption);
         Options.Add(untilOption);
+        Options.Add(standingOption);
+        Options.Add(triggerOption);
+        Options.Add(periodOption);
+        Options.Add(runsOnOption);
+        Options.Add(awaitingOption);
+        Options.Add(outputsOption);
         Options.Add(supersedesOption);
         SetAction(parseResult => operations.GoalPropose(
             parseResult.GetValue(context.EstateOption)!,
@@ -67,7 +79,15 @@ internal sealed class GoalProposeCommand : Command
                 parseResult.GetValue(flowOption),
                 parseResult.GetValue(subjectOption) ?? [],
                 parseResult.GetValue(flowOptionOption) ?? [],
-                parseResult.GetValue(untilOption)),
+                parseResult.GetValue(untilOption))
+            {
+                Standing = parseResult.GetValue(standingOption),
+                Triggers = parseResult.GetValue(triggerOption) ?? [],
+                Period = parseResult.GetValue(periodOption) ?? [],
+                RunsOn = parseResult.GetValue(runsOnOption),
+                AwaitingReview = parseResult.GetValue(awaitingOption),
+                Outputs = parseResult.GetValue(outputsOption) ?? [],
+            },
             parseResult.GetValue(context.JsonOption)));
     }
 }

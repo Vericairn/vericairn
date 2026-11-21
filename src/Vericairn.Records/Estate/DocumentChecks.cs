@@ -168,8 +168,15 @@ public static partial class DocumentChecks
     {
         string directory = documentPath.Contains('/', StringComparison.Ordinal) ? documentPath[..documentPath.LastIndexOf('/')] : string.Empty;
         var broken = new List<(string Target, int Line, int Column, string? Resolved)>();
+        // From 0.9.4 (FIX-138), a link written inside a fenced or indented code block or an inline code span is an example, not a link.
+        bool[] code = MarkdownCode.Mask(text);
         foreach (Match link in LinkRegex().Matches(text))
         {
+            if (code[link.Index] || code[link.Groups["target"].Index])
+            {
+                continue;
+            }
+
             string written = link.Groups["target"].Value;
             string target = written.Split('#')[0].Split('?')[0];
             if (target.Length == 0 || target.Contains("://", StringComparison.Ordinal) || target.StartsWith("mailto:", StringComparison.Ordinal) || target.StartsWith('/'))

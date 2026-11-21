@@ -160,7 +160,7 @@ public class ProgressReportTests
     public void WhatComesNextIsEachReleaseWorkOrderNotYetAcceptedWithTheWorkOrdersAmongItsInputs()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        string note = "  Until goals plan releases (GOAL-06), the only source is each release work order not yet accepted, a work order whose key begins with REL-, and the work orders it carries, which are its input work orders.\n";
+        string note = Note;
         Assert.Contains(note + "  No release work order waits for its acceptance.\n", ProgressReport.Render(estate.Load(), null), StringComparison.Ordinal);
 
         RecordEnvelope done = Order(estate, "W-1");
@@ -190,6 +190,86 @@ public class ProgressReportTests
         Assert.Equal("REL-020", next.GetProperty("workOrder").GetProperty("key").GetString());
         Assert.Equal(1, next.GetProperty("accepted").GetInt32());
         Assert.Equal(["W-1", "W-2"], next.GetProperty("carries").EnumerateArray().Select(c => c.GetProperty("key").GetString()));
+    }
+
+    private const string Note = "  Until goals plan releases (GOAL-06), the only source is each release work order not yet accepted, a work order whose key begins with REL-, and the work orders it carries: those placed in it, or, when none is placed in it, its input work orders.\n";
+
+    /// <summary>
+    /// From 0.9.4 (FIX-149): a release carrier shaped like the first-party estate's, with work placed in it and no input work orders,
+    /// carries its placements, which name the carrier by its identity, and never itself, though its current revision places it in itself.
+    /// </summary>
+    [Fact]
+    public void WhatComesNextCountsTheWorkOrdersPlacedInACarrierThatHasNoInputs()
+    {
+        using var estate = new TestEstate(recordFormat: 3);
+        RecordEnvelope product = Product(estate);
+        RecordEnvelope carrier = estate.Add("work-order", estate.OperatorId, OrderBody("REL-094", "ordinary", string.Empty));
+        string Placed(string key, RecordEnvelope placedIn) => OrderBody(key, "ordinary", string.Empty)[..^1]
+            + ",\"placement\":{\"kind\":\"release\",\"carrier\":\"" + placedIn.Id + "\",\"product\":\"" + product.Id + "\",\"version\":\"0.9.4\"}}";
+        RecordEnvelope done = estate.Add("work-order", estate.OperatorId, Placed("W-1", carrier));
+        RecordEnvelope acceptance = Accept(estate, done);
+        RecordEnvelope revised = estate.Add("work-order", estate.OperatorId, Placed("REL-094", carrier).Replace("\"Work.\"", "\"Release work.\"", StringComparison.Ordinal), supersedes: carrier.Id);
+        RecordEnvelope open = estate.Add("work-order", estate.OperatorId, Placed("W-2", carrier));
+        RecordEnvelope elsewhere = estate.Add("work-order", estate.OperatorId, OrderBody("REL-095", "ordinary", string.Empty));
+        estate.Add("work-order", estate.OperatorId, Placed("W-3", elsewhere));
+        Order(estate, "W-9");
+        EstateModel model = estate.Load();
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error);
+
+        Assert.Equal(
+            $"""
+            What comes next, by release
+            {Note}  REL-094  planned  Order REL-094 [work-order {revised.Id}]
+                2 work orders, 1 accepted
+                W-1  accepted  Order W-1 [work-order {done.Id}, acceptance {acceptance.Id}]
+                W-2  planned   Order W-2 [work-order {open.Id}]
+              REL-095  planned  Order REL-095 [work-order {elsewhere.Id}]
+                1 work order, 0 accepted
+                W-3  planned  Order W-3 [work-order {model.Current("work-order").Single(o => EstateModel.BodyString(o, "key") == "W-3").Id}]
+
+            """,
+            Section(ProgressReport.Render(model, null), "What comes next, by release"));
+        using JsonDocument json = JsonDocument.Parse(ProgressReport.RenderJson(model, null));
+        JsonElement next = json.RootElement.GetProperty("next").GetProperty("releases")[0];
+        Assert.Equal(1, next.GetProperty("accepted").GetInt32());
+        Assert.Equal(["W-1", "W-2"], next.GetProperty("carries").EnumerateArray().Select(c => c.GetProperty("key").GetString()));
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-149): a goal with an acceptance reads achieved, and a release carrier whose own work order is accepted reads
+    /// accepted, whatever the last goal-status or work-status after it says, in the goal list, status and progress, from the records
+    /// alone; no record is rewritten.
+    /// </summary>
+    [Fact]
+    public void AnAcceptedGoalAndAnAcceptedCarrierReadDoneWhateverTheirLastStatusSays()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        Work work = Work.Write(estate);
+        estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Activated."}""", work.Goal.Reference);
+        RecordEnvelope evaluation = estate.Add("review", work.Reviewer.Id, Evaluation("pass", Met(work.Result), Met(work.Result)), work.Goal.Reference);
+        RecordEnvelope achieved = estate.Add("acceptance", estate.OperatorId, $$"""{"statement":"Accepted on the evaluation.","basis":["{{evaluation.Id}}"],"self":true}""", work.Goal.Reference);
+        estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Recorded again after the acceptance."}""", work.Goal.Reference);
+        RecordEnvelope carrier = estate.Add("work-order", estate.OperatorId, OrderBody("REL-093", "ordinary", string.Empty));
+        estate.Add("work-status", estate.OperatorId, """{"status":"active","note":"Releasing."}""", carrier.Reference);
+        RecordEnvelope accepted = Accept(estate, carrier);
+        estate.Add("work-status", estate.OperatorId, """{"status":"active","note":"Recorded again after the acceptance."}""", carrier.Reference);
+        EstateModel model = estate.Load();
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location == achieved.ExpectedPath);
+
+        Assert.Equal("achieved", GoalRules.Status(model, work.Goal));
+        Assert.Equal("achieved", Assert.Single(GoalView.Rows(model)).Status);
+        Assert.Equal("accepted", EstateStatus.WorkItems(model).Single(i => i.Key == "REL-093").Status);
+        Assert.Equal(accepted.Id, EstateStatus.StatusRecord(model, carrier)?.Id);
+        Assert.Contains($"REL-093  accepted", EstateStatus.Render(model, new FindingList(), estate.Clock), StringComparison.Ordinal);
+        using JsonDocument status = JsonDocument.Parse(EstateStatus.RenderJson(model, new FindingList()));
+        Assert.Equal("accepted", status.RootElement.GetProperty("workOrders").EnumerateArray().Single(o => o.GetProperty("key").GetString() == "REL-093").GetProperty("status").GetString());
+
+        // Progress waits on neither: the carrier is not among what comes next, and the goal is not ready for an acceptance it has.
+        string report = ProgressReport.Render(model, null);
+        Assert.Contains(Note + "  No release work order waits for its acceptance.\n", report, StringComparison.Ordinal);
+        using JsonDocument progress = JsonDocument.Parse(ProgressReport.RenderJson(model, null));
+        Assert.Empty(progress.RootElement.GetProperty("next").GetProperty("releases").EnumerateArray());
+        Assert.DoesNotContain(work.Goal.Id, progress.RootElement.GetProperty("operator").GetRawText(), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -93,18 +93,9 @@ public sealed class AcceptanceType : IRecordType
         }
         else if (order is not null)
         {
-            string kind = order.Body.TryGetProperty("kind", out System.Text.Json.JsonElement k) ? k.GetString() ?? "milestone" : "milestone";
-            if (kind == "milestone" && !isOperator)
+            if (WorkAuthorityRefusal(context.Model, context.Record.By, order, subject.Type == "result", sameAuthor, context.Record) is string refusal)
             {
-                context.Error("acceptance.policy", subject.Type == "result" ? "A result toward a milestone work order is accepted by the operator." : "A milestone work order is accepted by the operator.");
-            }
-            else if (kind == "ordinary" && !isOperator)
-            {
-                bool allowed = sameAuthor ? context.HasScope(context.Record.By, Scopes.SelfAcceptOrdinaryWork) : context.HasScope(context.Record.By, Scopes.AcceptWork);
-                if (!allowed)
-                {
-                    context.Error("acceptance.policy", sameAuthor ? "Self-acceptance of ordinary work needs the 'self-accept-ordinary-work' authority scope." : "Accepting another principal's work needs the 'accept-work' authority scope.");
-                }
+                context.Error("acceptance.policy", refusal);
             }
         }
         else if (!isOperator)
@@ -118,6 +109,32 @@ public sealed class AcceptanceType : IRecordType
         {
             context.Warning("acceptance.unresolved", "The subject was superseded after this acceptance; it accepts an earlier revision and needs reconsideration.");
         }
+    }
+
+    /// <summary>
+    /// Why a principal may not accept a work order, or a result toward it, at a record's place, or null when it may: a milestone and a
+    /// result toward one are the operator's to accept; ordinary work is the operator's, its author's own under the
+    /// 'self-accept-ordinary-work' scope, or another principal's under 'accept-work'. From 0.9.4 status also reads an acceptance of a work
+    /// order as accepting its result only when its author could have accepted that result by this rule (FIX-141).
+    /// </summary>
+    internal static string? WorkAuthorityRefusal(EstateModel model, string? by, RecordEnvelope order, bool result, bool sameAuthor, RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        ArgumentNullException.ThrowIfNull(record);
+        string kind = order.Body.TryGetProperty("kind", out System.Text.Json.JsonElement k) ? k.GetString() ?? "milestone" : "milestone";
+        bool isOperator = model.HasRoleAt(by, Roles.Operator, record);
+        if (kind == "milestone" && !isOperator)
+        {
+            return result ? "A result toward a milestone work order is accepted by the operator." : "A milestone work order is accepted by the operator.";
+        }
+
+        if (kind == "ordinary" && !isOperator && !(sameAuthor ? model.HasScopeAt(by, Scopes.SelfAcceptOrdinaryWork, record) : model.HasScopeAt(by, Scopes.AcceptWork, record)))
+        {
+            return sameAuthor ? "Self-acceptance of ordinary work needs the 'self-accept-ordinary-work' authority scope." : "Accepting another principal's work needs the 'accept-work' authority scope.";
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -64,8 +64,9 @@ public class DeviceStandingReadTests
         {
             await signing.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
 
-            // The write holds the runtime's gate while it signs: an operation that needs the gate waits for it.
-            Task<HealthResponse> gated = Task.Run(service.Health, TestContext.Current.CancellationToken);
+            // The write holds the runtime's gate while it signs: an operation that needs the gate, such as validation, waits for it. Health
+            // does not need it from 0.9.4 (FIX-152).
+            Task<FindingsResponse> gated = Task.Run(service.Validate, TestContext.Current.CancellationToken);
             await Task.WhenAny(gated, Task.Delay(200, TestContext.Current.CancellationToken));
             Assert.False(gated.IsCompleted);
 

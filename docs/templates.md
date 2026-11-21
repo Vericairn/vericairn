@@ -309,7 +309,9 @@ Top-level `checks` apply to the whole document; `quality.checks` applies to the
 section payload. Built-in check objects use `name`: `length` with `min` and/or
 `max` bounds, `required-terms` with `terms`, `references-exist`, `links-resolve`,
 `names-version`, or `matches-generator`. Length measures text characters;
-required terms compare case-sensitive text. Version checks use selected release
+required terms compare case-sensitive text. From 0.9.4, `links-resolve` passes over
+a link inside a fenced or indented code block or an inline code span, as the
+[living documents guide](living-documents.md#when-a-declared-check-fails) describes. Version checks use selected release
 records. Other installed namespaced checks receive the payload and resolved
 sources. Unavailable checks cannot pass.
 
@@ -474,7 +476,8 @@ every template.
   `reserved` (`accept-release`, `publish`, `spend`, `use-credential` or
   `security-review`), `after`, `requires`, `done`, `action`, `traps`, `inputs`,
   `outputs`, `review`, `each` and `when`, and a work step may add `failure`
-  (0.9.2).
+  (0.9.2). From 0.9.4 (PROC-19) a step may end in a `transition`, a decision
+  among named paths (see [Decision transitions](#decision-transitions-094)).
 - A step waits on the step declared before it, or on the steps its `after`
   names (an empty list for none), and on the producers of its inputs; steps
   whose waits are done may run in parallel. References name earlier steps only.
@@ -674,13 +677,178 @@ ends it before one. From 0.9.4 (PROC-18) a configuration also sets `zone`, the
 venture's IANA time zone, and `when.<step>`, a step's timing as JSON text such
 as `{"delay":{"after":"PT2H"}}`, for a step whose timing the flow does not fix,
 the narrowest winning; a timing it sets is checked as the flow's own is, and
-one for a fixed step is refused (`flow.timing-fixed`). From 0.9.4 (FIX-146) a run keeps the configuration resolved
+one for a fixed step is refused (`flow.timing-fixed`). From 0.9.4 (PROC-19) it
+sets `decider.<step>`, a step's decider among those its transition allows. From 0.9.4 (FIX-146) a run keeps the configuration resolved
 when its current goal revision was activated, the run's product read as its
 work order stood then: `template-defaults` recorded later apply to new runs and
 to the run's next revision, which its sponsor signs and activates, as later
 defaults never rewrite a document instance, so nothing but a revision changes
 a running run's steps. `docs new` and `docs adopt` refuse a flow, and a living
 document never pins one.
+
+### Decision transitions (0.9.4)
+
+From 0.9.4 (PROC-19) a `decision` step may end in a decision transition: two or
+more named paths, each leading to a step, a branch, another flow or the end of
+the run, decided by a rule, by the step's role, whose principal is an agent or a
+person, or by a rule first and the role when no rule holds. Another kind of step
+is followed by a decision step that decides from its outputs.
+
+```json
+{ "key": "gate", "title": "Decide the release", "kind": "decision", "role": "approver",
+  "required": true, "recovery": "Decide again from the pinned inputs.",
+  "when": { "instant": true, "deadline": "P2D" },
+  "transition": {
+    "paths": [
+      { "name": "ship", "step": "release" },
+      { "name": "rework", "step": "draft", "limit": 2 },
+      { "name": "drop", "end": true }
+    ],
+    "decider": "role",
+    "configurable": ["rule", "rule-then-role"],
+    "rules": [{ "path": "ship", "when": [{ "type": "verification", "subject": "{input.lyrics.id}", "fields": { "outcome": "passed" } }] }],
+    "default": "drop",
+    "review": "independent",
+    "deadline": "default"
+  } }
+```
+
+- `paths` name each path once. A path leads to exactly one of `step`, a later
+  step that names the deciding step in its `after`, an earlier `work` or
+  `review` step the deciding step waits on, or the deciding step itself;
+  `branch`, a branch whose steps come after the deciding step; `flow`, the
+  exact pin of another flow, whose run its sponsor proposes and activates; or
+  `end: true`. A path back, to an earlier step or to the step itself, carries
+  `limit`, the most times the run takes it: past it, attention is raised and
+  the sponsor is asked, and once the ask is answered the path is taken once
+  more. Every step that names the deciding step in its `after` is one of its
+  paths' steps or its join. A deciding step is a `decision` step, required,
+  not reserved, run once and in no branch, so its paths' steps never run
+  unchosen, and no failure route or branch returns the run to it
+  (`flow.failure`): it decides again only by its own course.
+- `gate` in place of `paths` is the phase gate's predefined set, on a
+  `decision` step: `{"go": "<later step>", "recycle": "<earlier step>",
+  "limit": 3}` gives the paths `go`, `recycle`, `hold`, which keeps the step with
+  its decider to decide again, and `kill`, which ends the run; recycle and hold
+  take the limit, three when none is named.
+- `several: true` lets one decision take several forward paths at once, and
+  `join` names the step where they meet, which waits on each of them; a path
+  back, the end and another flow are always taken alone.
+- `decider` is `rule`, `role` or `rule-then-role`, and `configurable` the other
+  deciders a venture may choose. `person: true` requires a person, and `undelegable`
+  (`administration`, `charter`, `grant`, `legal-commitment`,
+  `ownership-transfer` or `destructive`) marks a decision the operating-modes
+  design never delegates: either one is decided by a person in the step's role,
+  never a rule, an agent's assignment of it or decision is refused, and routing
+  passes over the role's agents. A step of a role the flow marks `person` is
+  decided by a person too.
+- A rule's `rules` are record predicates in the goal completion language, bound
+  to the run as the step's own are, and `default` is the path taken when none
+  holds. The rule reads the records made at or before the round began, when
+  what the step waits on was done or the step was due, the first rule whose
+  predicates all hold winning. The position shows that decision pending, with
+  its path, until `goal step` records it, signed by who takes the step: an
+  observation of kind `flow-decision` naming the step, the path, the rule that
+  matched and each record the rule read by id and hash
+  ([record format 3](record-format-v3.md#decisions-of-a-runs-steps-094)). The
+  position and validation evaluate its rules again as of the time it names,
+  over only the records it names, each at its hash, with the same as-of
+  evaluation: the rule it names must hold and no earlier rule may, since the
+  first that holds wins, and its default holds only under `rule` and only when
+  no rule does. A recorded decision that does not hold counts for nothing, and
+  validation reports it, and one reading the records as of another time than
+  its round's start counts for nothing. No later record, a revision or a record
+  dated earlier, changes a decision that holds. Two checks are made only when a
+  decision is written, and the write boundary refuses one that fails them: it
+  names every record its rules count as of its time
+  (`observation.flow-decision-read`), and its rules hold with each derived state
+  they name, a work order's status, an ask's answer or a living document's
+  clearance, read as it is then, the round's start or later
+  (`observation.flow-decision-state`). Both are read as the records stood when
+  the decision was recorded, and validation otherwise evaluates its rules
+  without those states, so a later record or a later change of a state never
+  invalidates a recorded decision or blocks an unrelated write. One already in
+  the estate that fails either, written around the runtime by a sync, an older
+  runtime or by hand, is reported as information, and the run's position
+  ignores it: the round stays pending, the step names the record and why, and
+  a decision that relied on it counts for nothing. A rule naming an input that an
+  earlier step's output carries is not evaluated again: only the run's position
+  binds it.
+- A role's principal decides from the step's assignment, which goal step routes
+  to it as any step's: an agent is routed, a person is assigned and asked. The
+  decision is the step's item of kind decision, the result of that assignment,
+  whose `decision` field names the paths, the reasons and the evidence by hash,
+  signed by the decider's own device, as `vericairn goal decide` and the MCP
+  `goal_decide` tool record it ([CLI](cli.md#runs-of-a-flow-092)). Only the
+  step's current assignment decides: a displaced one's decision counts for
+  nothing. It is distinct from the estate's decision records.
+- Each round takes one kind of decider: under `rule` only a rule's decision;
+  under `role` only a principal's, or the default a deadline takes; under
+  `rule-then-role` the rule's where a rule held when the round began, and the
+  role's otherwise. Under `rule-then-role` the round's kind is on record, never
+  read from the records as they are now: `goal step` records the rule's
+  decision when a rule held, or, when none did, a `flow-decision` observation
+  with the rule `none`, no path and the records the rules read, as of the
+  round's start, evaluated again as a rule's decision is. Until one is on
+  record the round is pending and no principal's decision counts, nor one
+  recorded before it; `goal decide` reaching such a round records that no rule
+  held first, in the same stored batch as the decision, signed by the
+  principal holding the step's assignment. A decision of the
+  other kind counts for nothing in the round, whenever it is dated, and
+  validation reports a principal's decision with no record that no rule held
+  before it, or under an assignment made in a round its rule decided.
+- In each round the first decision that stands is final: a further decision
+  of the round counts for nothing, and validation reports it, so neither the
+  API nor a synced record changes it. A new round begins only by the flow's own
+  course: a path back once its step is done again, a hold, or what the step
+  waits on done again. A decision a review sent back never stood, and its
+  decider decides again in the same round.
+- `review` is the review an agent's decision takes before it takes effect, as an
+  item's review is: by a principal the run names for the review's role, or with
+  no role named a reviewer or operator, or one an assignment of the step's
+  review carries, who meets its independence, and never by any other reviewer;
+  findings send it back to its decider. A person's decision takes effect when
+  recorded.
+- `deadline` is what the step's timing deadline does when it passes before a
+  decision: `default` takes the default path, which `goal step` records as a
+  rule's decision is recorded, and no decision recorded after the deadline
+  counts; `attention`, the default, asks the sponsor, and a decision recorded
+  after the deadline takes effect only once the sponsor answers, whatever path
+  it takes, a path back or a hold included. The contract refuses `default` on a
+  decision only a person makes, one with `person`, one `undelegable` or one in a
+  role the flow marks `person`: nothing records a person's decision but the
+  person, so its deadline only raises attention. A deadline's default counts
+  only when it is recorded at or after the deadline the position derives,
+  naming it, and no later than the clock that reads it; one dated before it, or
+  naming another, counts for nothing, so no default replaces a decision of the
+  role that stood by the deadline, and validation reports one recorded after a
+  decision of the step's current assignment that it names a deadline after.
+
+A taken path makes the steps it leads to eligible and turns the other paths'
+steps off, the steps of a branch a path not taken enters whatever the branch's
+predicates say, and every step that waits only on steps a decision turned off,
+a join among them once every path it joins is off; the end and another flow
+turn off every step not done, whatever its place in the flow's order, and the
+run is then complete. A path back returns the run to its step, which runs again
+from a fresh assignment, and the deciding step decides again once that step is
+done again; the return stays made whatever the deciding step reads later. A
+path back counts the decisions that took it and took effect, one a round.
+Choosing a path performs nothing reserved: a reserved step a path leads to
+still stops for the operator, with its exact command when it is next. No
+decision turns off a step an estate policy requires or a required reserved
+step: `goal decide` refuses such a path (`flow.decision-protected`), validation
+reports a recorded one (`result.decision-protected`, or
+`observation.flow-decision-protected` for a rule's decision or a deadline's
+default), and the step stays on. Nothing refuses a rule's decision or a
+deadline's default when `goal step` records it, so the contract refuses a
+transition whose rule's path, or default a rule or a deadline may take, would
+turn off a required reserved step.
+Community takes the chosen path when `goal step` is called; the carrier that
+takes paths unattended in Standard and Pro is `GOAL-10` (0.9.6). A venture
+chooses the decider, where the flow allows, by the option `decider.<step>` in
+`template-defaults` at the estate, domain or product, or the goal's own
+options, the narrowest winning; one the flow fixes is refused
+(`flow.decider`).
 
 ### The software pack's flows (0.9.2)
 
@@ -718,6 +886,19 @@ observation after `observe`, a reserved `publish` step after `publish` whose
 or a document review after `docs-after`. Such an extension names its estate's
 own destinations, so it stays that estate's content and pins the base it
 extends by hash.
+
+
+### The first standing roles (0.9.4)
+
+From 0.9.4 (PROC-08) the software pack also ships three standing roles as
+built-in flows with triggers: `vericairn.estate/duty-carrier` 1.0.0 (trigger
+kinds `duty` and `request`), `vericairn.software/researcher` 1.0.0 and
+`vericairn.software/bug-hunter` 1.0.0 (both `schedule`, `event` and
+`request`). Each has one role, one work step and never lines; its role brief
+states the outputs it records, its fingerprint rule and the authority each
+effect needs, and what no grant covers becomes an operator request. A standing
+agent pins one with `goal propose --standing`; the roles, their triggers and
+outputs are in [software.md](software.md#the-first-standing-roles-094).
 
 ## Client and extension contract
 

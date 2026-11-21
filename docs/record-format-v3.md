@@ -95,6 +95,31 @@ explicitly bounded grant. Reserved actions remain reserved. Scope containment is
 selectors, `**`, and literal directory prefixes ending in `/**` prove containment; other unproved inclusion
 is refused. Generic engineering or administration authority does not substitute for these scopes.
 
+**The dispatch scope (0.9.4).** From 0.9.4 (ID-07), unattended dispatch is signed by a dispatcher: a `service` principal whose
+only role is `service` and that holds no other grant. Its `authority` record gives `dispatch` alone, is signed, states no
+`conditions`, expires no more than 30 days after it is made, and carries one bound, `{scope: "dispatch", goals, maxAssignmentsPerDay,
+reassign?}`: `goals` names the goals and standing agents it carries by the id of each goal's first revision,
+`maxAssignmentsPerDay` (1 to 10,000) caps the assignments it dates in one UTC day, and `reassign`, false when omitted, lets it
+reassign a step another assignment still holds, with no result on it, as after a lapse. A dispatch grant is made only to a principal
+with no history before it: no grant of any scope its author may write and no assignment to it by another principal who may assign,
+dated before the grant, unless an earlier dispatch grant to it is valid, as a renewal; the principal's own records, and records their
+authors had no authority to write, never count as such history. A grant of another
+scope to a principal holding a dispatch grant, or that held a valid one at or before it, during its term or after it expired, a
+dispatch grant to a principal holding another, and a dispatch grant with an earlier history are `authority.dispatch`. A dispatcher's
+assignment is `assignment.dispatch`, and counts for nothing, unless, at its time, a valid dispatch grant is in force, its work order
+is a step of a goal the bound names, its role is no reserved action, the day's cap is not passed, and it goes to a principal the
+goal's roster names for the step's role, as `goal step` routes it, never the dispatcher itself or a person; a reassignment also takes
+over no step a person holds, needs `reassign`, and goes neither to the holder it replaces nor in a role the roster gives a person.
+Nothing else gives a dispatcher authority to assign. The roster, whether a principal is a person, the step's role (from the work
+order's revision the assignment pins) and the dispatcher's own record are read as they stood at the assignment's time. A dispatcher
+never works a step: an attempt, progress claim or result it writes is `dispatch.work` and counts for nothing. Backdating fails
+closed: a principal holding a valid dispatch grant is a dispatcher for every record it writes, at any date, so an assignment or work
+it dates before its grant counts for nothing too; and a dispatch grant refused only for an earlier history, whether that history was
+written before the grant or dated before it afterwards by another principal, gives no authority to assign yet confines what the
+principal writes from the grant's date on. What a principal with such a history wrote dated before the grant keeps its reading, and
+a record it dates back into an earlier grant's term is read as any principal's record dated into an expired grant's term. No field or
+type is added; an older reader reports the bound as errors and a dispatcher's assignment as `assignment.author`.
+
 Authorization uses the cited grant as it existed at the action's authoring time. Future grants cannot
 authorize earlier work. Expiry or a later supersession prevents subsequent delegated actions while preserving
 historical attribution. A policy reconciliation requires format 3, a signature and the same bounded authority;
@@ -466,6 +491,262 @@ closed run's steps that are neither done nor off read `unsettled` with their
 reasons, never `done`, and the goal may still be accepted. `goal close` and
 `goal accept --reason` write it ([operator guide](operator-guide.md#closing-a-run-094)).
 
+### Decisions of a run's steps (0.9.4)
+
+PROC-19 adds one optional field to `result` and one observation kind within
+format 3, and no record type. A result without `decision` and every other
+observation behave as before, and a flow's decision transition is template
+content of kind `flow` ([Templates](templates.md#decision-transitions-094)),
+not a record.
+
+| Record | Additive contract |
+| --- | --- |
+| `result` | Optional `decision: {paths, reasons, evidence}` records the decision of a run's decision step by the principal holding its current assignment: `paths`, the path or paths of the step's transition it takes; `reasons`, never blank; and `evidence`, each `{type, id, hash}` of an exact record, possibly none. It is the step's item of kind decision, distinct from the estate's `decision` records, and it performs nothing reserved. |
+| `observation` | Kind `flow-decision` records a rule's decision of a run's decision step, or the default its missed deadline takes, as the runtime evaluated it: its subject is the goal's exact revision, its author a principal who takes the run's steps, `asOf` the round's start, when the rule read the records, and its `facts` are `step`, `paths` (the one path taken), `rule` (the matching rule's number from 1, `default`, `deadline`, or `none` with no path, recording under `rule-then-role` that no rule held, so the role decides the round) and `read` (each record the rule read as its type, id and hash, separated by spaces). |
+
+Validation refuses a `decision` on a result that is not completed; on a result
+whose attempt is not on an assignment of a decision step of a run's flow, or is
+on a review assignment; for a step whose transition its role does not decide in
+the run's configuration; naming a path the transition does not declare, a path
+twice, or several paths where the flow takes one or where one of them goes back,
+ends the run or hands it to another flow; by an agent where the decision is a
+person's, because the flow requires a person, the decision is one the
+operating-modes design never delegates or the flow marks the step's role a
+person's; on an assignment a later assignment of the step displaced before it;
+after an earlier decision of the same assignment that still stands in its round,
+not sent back by a review and not a hold that took effect; and evidence that is
+not an estate record at its recorded hash. It reports a decision whose paths
+would turn off a step an estate policy requires or a required reserved step
+(`result.decision-protected`); such a step stays on. Under `rule-then-role` it
+also refuses a decision under an assignment made after a round began and before
+that round's rule decision was recorded, since a round in which a rule held is
+the rule's, and one with no `flow-decision` observation recording that no rule
+held at or before it. Validation refuses a `flow-decision` observation whose goal is not a
+run, whose author does not take the run's steps (for `none`, nor holds the step's
+assignment), whose step's transition a rule
+does not decide in the run's configuration, whose `default` is recorded where a
+rule alone does not decide (under `rule-then-role` the role decides when no rule
+holds), whose `none` is recorded where the step is not decided by a rule then
+its role or names a path, whose `deadline` is recorded where a rule decides, the transition takes
+no default at a deadline, the run's timing sets no deadline or the decision is a
+person's, whose path is not the one its rule names, whose read records are not
+estate records at their hashes, whose `asOf` is later than it is recorded, or
+for a round whose rule decision is already recorded. Its rules are evaluated
+again as of `asOf` over only the records it read, each at its hash, with the
+as-of evaluation the position uses: validation refuses one whose rule does not
+hold there or after an earlier rule that holds, and a `default` or `none` when
+any rule holds. A predicate over a derived state is left out of that
+evaluation, which stays fixed; the write boundary refuses a new one whose rules
+do not hold with the states they name read when it is written
+(`observation.flow-decision-state`), or whose `read` leaves out a record its
+rules count as of `asOf` (`observation.flow-decision-read`), both read as the
+records stood when it was recorded, so a later record or state change never
+invalidates it or blocks an unrelated write. On one already in the estate,
+written around the runtime, either is information, and the run's position
+ignores that record. A result under `rule-then-role` is refused unless the
+first kind recorded for the latest round start named at or before it, one the
+position counts, records that no rule held, and no hold or path back of the step
+taken since opened another round. It reports a
+deadline's default naming a deadline by which a decision of the step's current
+assignment stood, and a rule's decision or deadline's default whose path would
+turn off a step an estate policy requires (`observation.flow-decision-protected`);
+such a step stays on. Whether a deadline had passed, and when a round began, are
+the run's position's to derive: it counts a deadline's default only when it is
+recorded at or after the deadline it derives and names it, and a rule's decision
+only when its `asOf` is its round's start. An assignment of a decision step is
+refused where a rule decides it in the run, and an agent's where the decision is
+a person's. Which decision counts, its review before it takes effect and a path
+back past its limit are derived when the run is read, never stored. A reader of
+format 3 that predates the field refuses a result that carries it as an unknown
+key, as any later format-3 field; a reader of it that cannot resolve the run's
+flow shows the result and reads the step undecided. `records describe result`
+includes this contract, and the generic record reader advances to
+`vericairn.records/readers/9`.
+
+## Concurrent assignments compared by their permitted paths (0.9.4)
+
+CODE-73 adds three optional fields to an assignment's `brief` and one optional
+field to `result` within format 3, and no record type. An assignment or result
+without them behaves as before: none is refused or warned for lacking one, and
+the write-boundary rules below apply only to new records.
+
+| Record | Additive contract |
+| --- | --- |
+| `assignment` | `brief.repository`: the identity of the repository the work changes, the estate's own (its first charter's id) or a repository resource's (its first record's id). `brief.excludedChanges`: patterns in the grammar of `permittedChanges` that the work leaves out, each an interpretable pattern, never prose, since prose excludes nothing. `brief.after`: at most 20 assignment ids whose work this one waits for; each is followed to its current revision, and validation refuses one that names the assignment itself, names it twice or makes a cycle (`assignment.after`), and an exclusion that is prose (`assignment.excluded`) or a repository that is no such identity (`assignment.repository`). |
+| `result` | Optional `change: {repository, base, head, target}`: the repository's identity as above, the base and head commits (40 lower-case hex digits) and the branch the change integrates into, a plain branch name (`result.change`). The runtime derives the change's paths from the registered clone, by name without rename detection, so a rename is a removal and an addition; a clone missing either commit makes them unavailable, never empty. The change releases its assignment only as that assignment's work: in the repository its brief names (for an older brief, the one its runs named), merged by a `change-merge` operation at that head or reachable from the main line of the registered clone, never from the branch named as `target`, and, where the clone shows them, with a base that is a proper ancestor of its head and touching one of the assignment's effective permitted paths; a reachable head needs the clone to show both, and a merge the records show stands where no clone shows otherwise. Any other change keeps the assignment active. An assignment whose brief holds no path pattern is released when its result is completed, whatever change it names. |
+
+From 0.9.4 the runtime's write boundary refuses a new format-3 assignment whose
+permitted changes hold a path pattern and whose brief names no repository
+(`assignment.repository-required`); `work assign`, `goal step`, routing and
+flows fill it from the run's repository, the one named with `--repository`,
+or, when the estate names no repository resource, the estate's own. It refuses
+a revision that changes an assignment's `repository`, `permittedChanges`,
+`excludedChanges` or `after` while a run of it is in flight
+(`assignment.narrowing-in-flight`), and a new attempt on an assignment while one
+it names in `after` is not released (`attempt.after`). Narrowing by exclusion or
+`after` grants less, so it needs no amendment. A new completed result whose
+assignment holds a path pattern and that names no `change`, or a `change` in
+another repository, with the same commit as base and head, or for an older
+assignment that names no repository, is written with a warning in the write's
+notices, since its assignment then stays active until acceptance; a result the
+check counts as released at completion, recorded before the check's first
+record, is not warned.
+
+The overlap check reads these fields; status and progress show its open
+overlaps from the records alone, and `vericairn work overlap` adds what this
+machine's registered clones show ([CLI](cli.md#vericairn-work-overlap-094)). A
+reader of format 3 that predates the fields refuses an assignment or a result
+that carries one as an unknown key, as any later format-3 field, so the estate's
+pin keeps every machine on a release that reads them; an older reader keeps
+reading every record without them. A format-2 estate refuses them, as every
+format-3 field. `records describe assignment` and `records describe result`
+include this contract, and the generic record reader advances to
+`vericairn.records/readers/10`.
+
+POLICY-08 adds a rule kind and a policy-exception target within format 3, and no
+field or record type. An `estate-policy` rule of the foundation kind
+`vericairn.estate/concurrent-paths`, version 1, with empty `parameters` and a
+`repository` selection, holds the unresolved pairs of active assignments whose
+effective permitted paths meet within its selectors
+([policies](policies.md#concurrent-paths-094)); a runtime without the kind reports
+the rule unavailable. A `policy-exception` target of kind `pair` carries
+`assignments`, the exact references of two revisions of two different
+assignments, and no `submission`; a concurrent-paths rule takes only pair targets
+and only such a rule takes one (`exception.pair`). A reader of format 3 that
+predates the target refuses an exception carrying it (`body.enum`), so readers
+upgrade before an estate writes one; every other record keeps its reading.
+
+## What a worker run can reach (0.9.4)
+
+CODE-82 adds one optional field to `harness-qualification` and one to an
+`agent-run` operation's `execution` within format 3, and no record type. A
+record without them is unchanged, and none is refused or warned for lacking one.
+
+| Record | Additive contract |
+| --- | --- |
+| `harness-qualification` | `reach: {file, host}`: what a probe in the harness's place reached during qualification. `file`, a marker planted outside the probe workspace and its temporary directory, is `readable`, `blocked` or `unknown`; `host`, a test host on the loopback interface, is `reachable`, `blocked` or `unknown`. It is no admission identity, so a revocation may omit it. |
+| `operation` (agent-run) | `execution.reach: {outsideFile, testHost, secretPaths, secretKinds, secretPathsComplete}`, fixed at intent with the rest of `execution`: the same measurement made before the run started, the count of secret-bearing paths its operating-system user could open for reading (at most 512), their kinds (`ssh-key`, `cloud-credentials`, `registry-credentials`, `forge-credentials`, `signing-key`, `harness-login`, `device-key`, `environment-file`, `keychain`; each named once and counted at least once) and whether that inventory was complete. The paths themselves stay in the run's custody on the machine that ran it, never in a record. |
+
+`unknown` means the probe did not run or report, never that it was blocked. A
+reader of format 3 that predates the fields refuses a record that carries one as
+an unknown key, as any later format-3 field, so the estate's pin keeps every
+machine on a release that reads them; a format-2 estate refuses them. `records
+describe harness-qualification` and `records describe operation` include these
+contracts.
+
+## Public retrieval for research runs (0.9.4)
+
+RUN-04 adds one optional field to an assignment's `brief`, one to an `agent-run`
+operation's `execution` and one top-level field to that operation within format
+3, and no record type. A record without them is unchanged.
+
+| Record | Additive contract |
+| --- | --- |
+| `assignment` | `brief.retrieval: "public"`: the work's runs may retrieve public sources with their harness's web tools, never with credentials. It is the only value, and nothing else permits retrieval. |
+| `operation` (agent-run) | `execution.retrieval: "public"`, fixed at intent: the run's web tools were admitted. Validation refuses it unless the brief of the assignment revision the operation names permits retrieval (`operation.retrieval`), and only with it may an inventory component name the route `public-web` (`operation.execution`). |
+| `operation` (agent-run) | `sourcesObserved: {sources, count, complete, digest}`, recorded at settlement only, on an `observed-success` or `known-failure` revision of a run whose execution admitted retrieval, and kept by every later revision (`operation.sources-observed`): each source, in the order invoked, with its `tool`, exactly one of `address` (absolute http or https, no user information), `query` or `withheld: true`, `at`, `retained`, and its content's `hash` and `bytes` when received (a retained source names both); at most 100 in full, `count` of every source, `complete` (false when the run's log was missing, unreadable or could not be written) and `digest`, SHA-256 of the canonical JSON array of every entry. The retrieved text stays in the run's custody, never in a record. |
+
+A reader of format 3 that predates these fields refuses a record that carries
+one as an unknown key, as any later format-3 field, so the estate's pin keeps
+every machine on a release that reads them; a format-2 estate refuses them.
+`records describe assignment` and `records describe operation` include these
+contracts.
+
+## Standing agents (0.9.4)
+
+GOAL-07 adds a goal's `plan.standing` and an assignment's `occurrence` within
+format 3, and no record type: a standing agent is a stewardship goal, which
+already carries its sponsor, budget, lifecycle and ledger. A goal or assignment
+without them behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `goal` | Optional `plan.standing: {pin, subject, triggers, period, until, runsOn?}`, on a stewardship goal only and never beside `plan.flow`, with a `given` plan of exactly one ordinary work order (`standing.kind`, `standing.flow`, `standing.work`). `pin` is the exact `{id, version, hash}` of a flow that declares the trigger kinds the plan uses and exactly one routed step, of kind work (`standing.flow`, `standing.trigger`); `subject` binds the flow's subject as a run's does (`standing.subject`); each trigger has its own slug `key` and a `kind`: `schedule {unit: days|months, every, firstAt}`, `duty {policy, rule}`, `event {recordType, fields?, roles?}`, `condition {record}` with a record predicate, or `request` (`standing.trigger`); `period {unit: days|months, every?, runs, wallMinutes, tokens?, currency?}` caps the units the budget caps, which are then each run's caps (`standing.period`); `until` is after the goal is recorded (`standing.until`); optional `awaitingReview` (1 to 100, three when absent) is how many results may await review before dispatch defers; `runsOn` is a runtime identity's public-key hash. A flow's `triggers` declare kinds from the same five. |
+| `assignment` | Optional `occurrence: {key, trigger, revision, item}` on, and only on, an assignment of a standing agent's work order (`assignment.occurrence`). `revision` is the goal revision the trigger's declaration originates from; `item` is `{interval, dueAt}`, `{record: {type, id, hash}}`, `{failing, records}`, `{at, by}` or the duty's `{occurrence, policy, rule, dueAt, deadline, schedule}`; `key` is the goal's identity, the trigger, the revision and the item joined by `/`, or `duty/` and the duty occurrence's identity. A revision keeps its assignment's occurrence exactly, and a person's hand-over carries it exactly. A new occurrence is refused unless its agent is active and before its `until` at the assignment's time, and its item is one its trigger makes then: a schedule's latest due interval with its `dueAt`; an event's record of the trigger's type and filters, at its exact hash, recorded after the trigger was activated and before the assignment; a request by the assignment's author, no later than it; a duty occurrence's exact identity from the trigger's policy at its originating revision, its rule, its subject's identity and the duty's own schedule item (`{kind, number}`, `{kind, at}` or `{kind, publication}`, built from the policy's schedule, which the item's `schedule` equals exactly in canonical form; for a release schedule, the first published revision of a release of the schedule's product, published within the schedule's window, as the duty's evaluation opens one), with the schedule's due time, due by then, and its deadline. Any other current assignment naming the same key refuses it (`standing.duplicate`, a reconcile task) unless one is a person's hand-over of the other's step or holds nothing (an earlier revision, withdrawn by a reconciliation, or stored without the record it was routed with). |
+
+The runtime's write boundary also refuses a new assignment, with
+`assignment.occurrence-now`, whose event record is the agent's own or an agent's
+the trigger does not admit, or whose condition does not fail over the records its
+item names, read as the records stand; assignments already in the estate keep
+their reading. A `reconciliation` whose subject is an assignment naming an
+occurrence, keeping and withdrawing assignments of that occurrence (the latest
+revision of each, none a revision of the subject), settles `standing.duplicate`,
+recorded by the operator or under `local-engineering`, only while two or more of
+them hold the key (recorded before it, withdrawn by no earlier reconciliation and
+not stranded) and the one kept is one of those (`reconciliation.occurrence`). An
+occurrence's settlement is its key's: the latest result on any assignment of the
+key, a withdrawn one included, settles it and counts toward `awaitingReview`.
+
+`goal-status` with status `active` is refused for a standing agent past its
+`until`, or while another active standing agent of the same flow or work role
+carries the same subject (`goal-status.standing`). An `agent-run` operation whose
+goal is a standing agent is refused, judged by the records before it, past
+`until`, while its consecutive failed runs reach the goal's
+`limits.consecutiveFailures` (three when unset; each settled run counted once by
+its latest result between its start and the next run of its assignment, failed
+when blocked or abandoned, or without one by a known-failure settlement, unless
+its stop was requested by the goal's sponsor, when a person, or an operator, as
+they stood when the stop was recorded; any other principal's stop and the
+worker's for a cap count) and no
+answered ask of the pause about the latest lets it go on, past the period's
+`runs`, for an assignment naming no occurrence or a settled one, while results
+awaiting review reach `awaitingReview` (`operation.standing`, `operation.budget`),
+or with a cap above the budget's per-run cap; the ledger of a standing agent
+charges each period's runs against the period's caps.
+
+A reader of format 3 that predates these fields refuses an assignment that
+carries `occurrence` as an unknown key and refuses a goal whose plan carries
+`standing` as an unknown key of `plan`, as any later format-3 field, so the
+estate's pin keeps every machine on a release that reads them: such a reader
+shows neither record and dispatches nothing of the agent. A reader that reads
+them but cannot resolve the flow shows the goal with a warning
+(`standing.unavailable`) and dispatches none of its occurrences. A format-2
+estate refuses them. `records describe goal` and `records describe assignment`
+include this contract, and the generic record reader advances to
+`vericairn.records/readers/11`, which carries the fields of this section and the
+two before it.
+
+## Standing outputs (0.9.4)
+
+GOAL-08 adds fields to `possibility`, `ask` and `operator-request`, and a goal's
+`plan.standing.outputs`, within format 3, and no record type: every output of a
+standing agent's occurrence is a record another principal disposes of. A record
+without them behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `possibility` | Optional `raisedBy: {goal, occurrence, assignment, run?}` names a standing agent's goal by its first revision, the occurrence key, the assignment of the goal's work order that carries that key, recorded before it, whose contributor is the record's author, and, for an agent, the agent run of that assignment by the author, in flight when the record is written; a result that already settles the occurrence refuses it (`standing.raised-by`). Such a possibility is raised `open` with a `fingerprint` and at least one source (`standing.possibility`); its occurrence records at most `plan.standing.outputs.possibilities` (five when unset) possibilities, of which at most `drafts` (three) carry a `draft`, and one summary possibility, the one with `extras`, read in the goal revision in force when the possibility was first raised (the latest activated before it) and counting each other possibility of the occurrence at its revision as it stood, a revision counting for the draft or extras it adds (`standing.output-cap`); a second open possibility of the same agent with the same fingerprint, read as each stood when it is written, is refused (`standing.duplicate-output`); and where one with that fingerprint was declined, a new one names it in `raisesAgain` with at least one `evidence` item (`standing.raises-again`). A revision keeps exactly the `raisedBy` and `fingerprint` its chain's first revision names, and a revision of a possibility no standing agent raised names no `raisedBy` (`standing.raised-by`); the rules apply by the first revision's `raisedBy`, whatever the revision's body says. One that changes the disposition or `adoptedAs` is refused by the possibility's author and by an agent tied to the goal, as the `ask` row reads ties (`standing.own-output`; `standing.output-now` where only records written after it tie the agent). On any possibility, a revision of one whose revision before it carries `disclosure: held` that changes its disposition or `adoptedAs` is refused for an agent, adopting it takes an operator who is a person, and so does a revision that drops `disclosure` (`standing.held`). On any possibility, at any format, a revision that adopts it, recorded by the author of its first revision, is refused (`standing.own-output`) when its chain carries a field of this section; otherwise the write boundary refuses it (`standing.output-now`), and an adoption already in the estate keeps its reading. Optional on any possibility: `fingerprint` (lower-case letters, digits and `. : / _ -`, up to 200 characters); `sources`, each `{address, retrievedAt?, hash?, extents?}`; `evidence`, each `{stance: for|against, statement, sources?}`, the sources by index, with no scores (`possibility.evidence`); `reviewTriggers`, each `{at}` or `{condition}` (`possibility.review-trigger`); `links`, each `{relation: duplicate-of|supersedes, possibility, hash}` naming another possibility at its exact hash (`possibility.link`); `draft: {key?, title, intent, scope, deliverables, exitQuestion}`; `disclosure: held`; `extras`; `raisesAgain`. |
+| `ask` | Optional `raisedBy`, as a possibility's, kept by every revision as its first revision names it (`standing.raised-by`). Such an ask is put to a person other than its author, names a revision of the agent's goal in `goal`, and does not open with the words of the runtime's own asks about a goal (`standing.ask`); no revision withdraws it, with `raisedBy` or without (`standing.own-output`): a decision of the person asked disposes of it. A `decision` whose `answers` names such an ask, or one of the runtime's own asks about a standing agent's goal below, answers nothing when its author raised the ask or is an agent tied to the goal, whatever its `decidedBy` names, so the ask stays waiting, counted among the open outputs, and a failure pause holds. An agent is tied when any `assignment` of the work order of any revision of the goal names it as `contributor`, or any revision of the goal's `roles`, or of the `roster` where the goal's roles do not name its work step's role, has named it for that role; ties are read from the records whatever their `at`, and only grow. Such a decision is an error (`standing.own-output`) when its author raised the ask or a record tying it was written before the later of the decision and the ask revision it names, and otherwise reported (`standing.output-now`). The author of one of the runtime's asks is not refused for being its author: a principal nothing ties to the goal, such as the builder whose goal step wrote the ask, records the person's decision on it. |
+| `operator-request` | Optional `raisedBy`, as a possibility's, kept by every revision as its first revision names it (`standing.raised-by`). Such a request, and each revision of it, is of kind `publication`, pins the agent's work order and is put to an operator other than its author (`standing.publication`): its exact text, labeled the agent's draft. An `operator-request-close` or an `operator-request` observation of it is recorded by an operator who is a person, never by its author or `askedBy` (`standing.own-output`) and never by an agent, whatever `operatorWords` it cites (`standing.publication`). |
+| `goal` | Optional `plan.standing.outputs: {possibilities?, drafts?, open?}`: possibilities per occurrence (1 to 20, five when unset), drafts among them (no more than the possibilities, three when unset; `standing.outputs`) and open outputs (1 to 1,000, ten when unset). |
+
+A standing agent's open outputs are its possibilities still open, its asks still
+waiting and its publication requests not closed. While they reach `open`, its due
+occurrences are deferred, and an `agent-run` operation of the goal is refused,
+judged by the records before it (`operation.standing`). The runtime's write
+boundary also refuses, with `standing.output-now`, a new disposition of a
+standing agent's possibility, or a new decision answering a standing agent's ask
+or one of the runtime's asks about its goal, by an agent tied to the goal only by
+records written after it. Because ties only grow, a later roster or
+assignment change makes no record already in the estate an error and is never
+refused for one; it can make an answered ask wait again for the person, as a
+decision by an agent it ties answers nothing from then on, and it never makes a
+waiting ask answered. The runtime takes
+an ask for its own renewal, period-cap or failure-pause ask only when its first
+revision names no `raisedBy`, it is put to a person and its author took the
+goal's steps as the records stood when it was written (an operator, the sponsor
+when a person, a holder of `local-engineering` or a dispatcher whose grant names
+the goal); another principal's ask in the same words holds back none of them.
+goal step writes and signs these asks as its caller, so an agent that carries the
+occurrences and may itself take the goal's steps can write one in their words, as
+it could by calling goal step; its own answer to one answers nothing.
+
+A reader of format 3 that predates these fields refuses a record that carries
+one of them as an unknown key, as any later format-3 field, so the estate's pin
+keeps every machine on a release that reads them. A format-2 estate refuses them.
+`records describe possibility`, `records describe ask` and `records describe
+operator-request` include this contract.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a
@@ -502,7 +783,7 @@ writes one. The design is the estate's signed history design, decision
 | `inventory` | Hashes of the objects listing the records this checkpoint first witnesses, each once. |
 | `records`, `recordSetHash` | The count and record set hash of everything it witnesses: its inventory and those of the checkpoints it follows, less the removals they acknowledge. The set hash is an estate observation's: SHA-256 of the canonical JSON array of `{hash, id}` sorted by id. |
 | `trigger` | `adoption` exactly when `previous` is empty; `closing` exactly when `closes` is present; otherwise `interval`, `upgrade`, `release`, `charter` or `manual`. |
-| `closes` | Optional `{kind, id}`, `kind` `device`, `key` or `grant`: what a closing closes ([below](#closings-and-authority-at-a-records-time-092)). |
+| `closes` | Optional `{kind, id}`, `kind` `device`, `key`, `grant` or, from 0.9.4, `role`: what a closing closes ([below](#closings-and-authority-at-a-records-time-092)). An older reader refuses a `role` closing's `kind` (`body.enum`), so readers upgrade before an estate writes one. |
 | `anchored` | Optional, nonempty `{id, hash}`, sorted by id: unsigned records that count under required signatures, and signed records a closing refused, because this checkpoint lists them. |
 | `removed` | Optional, nonempty `{id, hash, reason}`, sorted by id: witnessed records whose removal this checkpoint acknowledges. |
 
@@ -633,7 +914,12 @@ naming none while there are several, is `manifest.first-authority`, whose messag
 there is then no first authority, so no signed admission counts until the manifest names the right one. Witnessed history only
 confirms it, as for the first charter: the one the manifest names, witnessed alone, stands; another witnessed, judged with it as
 the first authority, is `history.root-ambiguous`, with no record counting. Every other such self-admission is
-`signature.self-admission`.
+`signature.self-admission`. From 0.9.4 (FIX-134), a self-admission is the first authority only when, read as the first authority,
+its content has the hash its envelope declares and its signature verifies as every signature does: under its device's key at its
+stated time, by a device of its author. One the manifest names that does not, or the only one when it names none, is
+`manifest.first-authority` naming it, there is no first authority and nothing signed under it counts until the manifest names
+one that verifies; it is never witnessed first under any reading either. Before 0.9.4 such an admission was read as the first
+authority, flagged only by its own `signature.invalid`.
 
 ## Closings and authority at a record's time (0.9.2)
 
@@ -654,17 +940,41 @@ acts and no act follows yet:
 | `device` | Any device record of the device's line | Its revocation | An operator, a person holding `administer`, or an operator's recovery device |
 | `key` | The device revision whose public key is replaced | A rotation to another key | The device itself, for its own principal |
 | `grant` | The authority revision being narrowed; the closing closes it and every revision of its line dated at or before it | A revision naming another grantee, dropping a scope, reserving another action, adding a condition, adding or shortening an expiry, or changing a policy scope's bounds | An operator, who may revise the grant |
+| `role` (0.9.4) | The principal revision that gives a person the operator role; the closing closes it and every revision of its line dated at or before it | A revision of that person's record taking the operator role away, dropping it or describing another kind of principal; never for the root operator; removing any other role writes no closing | The root operator or another operator, the role still standing, never the person |
+
+**Role closings (0.9.4).** From 0.9.4 (ID-14), removing the operator role from a person writes a role
+closing; removing any other role writes none, and that role is read at each record's time, as
+before (decision `01M7JSJSHTTX86F10007GDQ238`). A `role` closing naming a revision that gives no
+operator role closes nothing (`history.closing-author`). A `role` closing closes a person: from it on,
+a record the person wrote, signed or unsigned, that the closing or a checkpoint it follows does
+not witness and no anchor lists counts for nothing (`history.after-closing`), whatever date it
+states and whatever device signed it, in every read: a decision, a grant, a revision of their own
+or another principal's line, an admission or a closing. Such a record never takes another
+person's role or voids another's closing: the role closings that act are read when every other
+closing is judged, those before them in checkpoint order included, though never against
+themselves. Until the removal follows, the check warns `history.closing-unfollowed`. What the
+person gave as operator before the closing, the principal and authority revisions and the
+closings it witnesses, keeps counting for anchoring, acknowledging a removal, rooting an
+adoption and the closings, as written, where the person held the role when writing it; so a
+closing keeps the force it had when it was signed when its author is later removed with their own
+role closing. A removal of the operator role in an adopted estate that no role closing names is the
+warning `history.closing-missing`, and the runtime refuses to write one without its closing; such a
+removal, and only such a one, still withdraws its author's closings from these acts. Since a role
+closing is signed by the root operator or another standing operator, and only an operator gives or
+takes the operator role, a person holding `administer` but not the operator role does not write
+one; removing another role from a person they admitted is written as before, with no closing.
 
 Closings are judged in checkpoint order: every checkpoint after those it follows, ids
 breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
 names, reach an adoption checkpoint by one who may anchor; when its signatures verify
 against the closings before it in that order; and when its author may perform the act. For a
-device or a grant that power reads as before signed history: the signer's operator role or
-`administer` grant stood at the closing's time and still stands, no trusted revision having
+device, a grant or a role that power reads as before signed history: the signer's operator role
+or `administer` grant stood at the closing's time and still stands, no trusted revision having
 since narrowed, revoked or removed it and no closing before this one having closed that
-grant's line, and a recovery device signs only for an operator. That power is read against
-the closings before this one, never against this closing itself, since its author chooses
-what it witnesses. Whether a checkpoint following no other may anchor is read against the
+grant's line, and a recovery device signs only for an operator; from 0.9.4 an operator whose
+role was since removed still holds that power for a closing their own role closing witnesses
+(below). That power is read against the closings before this one, and the role closings that
+act, never against this closing itself, since its author chooses what it witnesses. Whether a checkpoint following no other may anchor is read against the
 closings that act, and those act only when reached from such a checkpoint, so the two are
 settled together: from every such checkpoint that verifies, the closings reached are judged,
 each such checkpoint whose author may not anchor with those closings acting is dropped, and
@@ -762,7 +1072,9 @@ at its record stage is judged again when it resumes. The strongest acts read mor
 before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
 device's or a grant's closing need the signer's operator role or `administer` grant to stand
 at the checkpoint's time and still stand, so a later narrowing, revocation or closing
-withdraws those powers for every checkpoint. From 0.9.2 (FIX-108) those acts read grant and
+withdraws those powers for every checkpoint, except that from 0.9.4 a role closing keeps, for
+the checkpoints and the principal and authority revisions it witnesses, the operator role its
+person held when writing them. From 0.9.2 (FIX-108) those acts read grant and
 principal revisions as follows. The revisions considered are those authentic by their
 signatures against the closings in force for the act, so none such a closing refuses, and not
 refused for their date against the nearest revision below them considered (below), with the
@@ -805,8 +1117,9 @@ operator's role again gives back the closings of those whose role or `administer
 operator's appointments or grants, and the operator's own earlier closings only when it is dated
 after the removal and before them. Either holds only until more such records are written, among
 them a removal on top of the role written again or forking the line below it. The root
-operator's own closings cannot be reopened this way, and role
-closings are planned. Removing an operator's role takes, for these acts, what that
+operator's own closings cannot be reopened this way, and from 0.9.4 a role closing ends it for
+everything the person writes after the closing ([above](#closings-and-authority-at-a-records-time-092)).
+Removing an operator's role without a role closing takes, for these acts, what that
 person appointed, granted and closed; those the person appointed keep the role in ordinary
 reads, and a removal they write still counts for these acts, until the root operator writes
 their appointments again or closes their devices, after which what they sign with a closed
@@ -837,10 +1150,12 @@ for nothing, whoever signed it. It attaches to the nearest record below it in it
 counts, skipping any that does not: unsigned, refused this way or not counting otherwise. A
 revision on top of one that does not count is compared with, and follows, the line there, so
 its line has one current record in every read. The strongest acts, which consider only the
-revisions above, compare a revision with the nearest one below it that they consider. A role has no closing; role closings are planned. A former operator's records dated into
-the time the role stood read as it stood, apart from policy authority, which reads them only
-where signed history places them before the removal; close and revoke a person's devices when
-removing their role.
+revisions above, compare a revision with the nearest one below it that they consider. From 0.9.4 a removal of a person's operator role
+in an estate that has adopted is written after the person's role closing ([above](#closings-and-authority-at-a-records-time-092)), which
+refuses everything the person writes that it does not witness, whatever date it states. In an estate that has not adopted, and
+for a removal no role closing names, a former operator's records dated into the time the role stood read as it stood, apart from
+policy authority, which reads them only where signed history places them before the removal; close and revoke a person's devices
+when removing their role there.
 
 **What a claimed time decides.** Path month, order, release-notes windows, progress, ages
 and duty sequence still follow `at` for records that count, ids breaking ties. The
@@ -849,7 +1164,8 @@ verifies against is the signer's claim of time, bounded by closings. Canonical s
 policy evaluation take their recorded time from the records that count.
 Roles and grants are read at the stated time as above, bounded by grant closings, while the
 strongest acts also need the role or grant to still stand, so a stated time carries none of those
-powers past a later removal or narrowing.
+powers past a later removal or narrowing; what a person's role closing witnesses keeps them, and
+what it does not witness counts for nothing.
 
 **Dates checkpoints question.** A signed record dated more than five minutes after the
 earliest-dated counting checkpoint that witnesses it, the checkpoint listing it or one that

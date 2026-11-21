@@ -103,6 +103,19 @@ Linux secret service (`linux-secret-service`), or a file in the per-user state d
 format 2 a device keeps its identity across renames and key rotations
 ([record-format-v2.md](record-format-v2.md#a-device-keeps-its-identity)).
 
+From 0.9.4 the charter's policies may also state `presence`, `per-signature` or `per-action`, in an estate at record format 3. It
+says how many presence checks a person's device asks for: `per-signature`, one check for every signature with a key that needs its
+owner's presence, as before 0.9.4; `per-action`, or no `presence` at all, lets an operator action ask one check for a list of its
+signatures it announces first, a presence session, where the release build's helper and the Mac's macOS version allow it
+([operator's guide](operator-guide.md#3-principals-devices-and-admission)). Every runtime honors it for every person's device in the
+estate, and the stricter of it and the device owner's setting on the key's machine wins: either saying `per-signature` makes every
+signature ask its own check, and an owner cannot loosen the estate's setting. Any other value is refused, and a runtime reading one
+anyway counts it as `per-signature`.
+Under required signatures only a charter revision the root operator signs changes it; under optional signatures an unsigned charter
+revision can change it either way, as it can every charter policy. The field is additive within format 3, but a reader before 0.9.4
+refuses a charter whose policies hold a member it does not know, so write it only after every writer of the estate has upgraded. The
+setting is honored by software, not enforced by the hardware.
+
 ## Where records are kept: profiles, the live store, objects
 
 The manifest's `profile` is `repository-synced` (the default: record files in the git repository are canonical and
@@ -152,6 +165,12 @@ From 0.9.3, each inventory entry also carries `mode`, as Git records it: `100755
 any other; the archive entry's attributes carry the same mode for other tools. Restore reads the mode from the verified
 inventory alone, applies it on Linux and macOS, and refuses any other value (`export.entry-mode`), so it never creates a
 link, a directory or a special file. An entry without `mode`, as every release before 0.9.3 wrote it, restores as before.
+
+From 0.9.4, an export also carries the owner's agent instruction files at the estate's root, each one present as a file of
+exactly the name the estate check allows there, with its bytes and mode, and the restore writes it back like any other
+member. The export refuses an estate where a link, a FIFO or anything else that is not a regular file stands in place of
+one of them, judged from its status without opening it, before it writes anything. An export
+written before 0.9.4 lacks them and restores as before.
 
 ## Software: resources, observations, verifications and operations
 
@@ -205,6 +224,8 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   itself superseded, its `record.subject-stale` and `acceptance.unresolved` findings stop; a replacement that still pins
   an earlier subject revision remains flagged. Historical records still undergo structural, hash, signature and
   authority validation, so supersession never repairs an invalid pinned hash. This applies to both record formats.
+  From 0.9.4, [the living documents guide](living-documents.md#following-up-reviews-after-several-pins-094) shows how
+  each stale review of a document revision is followed up after several pins.
 - Document revisions pin files under `design/` and `docs/` by hash; editing a pinned file without a new
   revision record is a drift error.
 - Decisions keep the operator's words verbatim in `statement` and carry a `synthesis`: a clean, thorough restatement
@@ -228,3 +249,7 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   git's and GitHub's metadata: `.git`, `.gitignore`, `.gitattributes`, `.github` and, from 0.6.0, a `.mailmap`, which
   shows the history's names and addresses as one author in git's own views; it is scanned as text and travels in an
   export like `.gitattributes`.
+- From 0.9.4, `vericairn estate check` warns about a hook definition, an automatic approval or a value that looks like a
+  secret in the owner's agent instruction files at the root, naming the file, the line and the kind and never the value,
+  and about a repository's own instruction files at the root of its clone registered on this machine, as untrusted input
+  ([the MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) lists what it reads).

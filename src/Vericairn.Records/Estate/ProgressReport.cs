@@ -47,6 +47,17 @@ public static class ProgressReport
         Releases(text, report);
         Next(text, report);
         Eligible(text, report);
+        // From 0.9.4 (CODE-73), the open overlaps of active assignments, under the work, from the records alone.
+        string overlaps = AssignmentOverlaps.StatusText(model, report.Overlaps);
+        if (overlaps.Length > 0) text.Append('\n').Append(overlaps);
+        // From 0.9.4 (GOAL-07), each standing agent as of the estate's newest record: its state, next occurrence, deferrals and spend.
+        IReadOnlyList<StandingAgents.Agent> standing = EstateStatus.Standing(model, () => FlowStops.RecordedTime(model));
+        if (standing.Count > 0)
+        {
+            text.Append("\nStanding agents, as of the estate's newest record\n");
+            foreach (StandingAgents.Agent agent in standing) text.Append("  ").Append(StandingView.Line(agent)).Append('\n');
+        }
+
         Operator(text, report);
         return text.ToString();
     }
@@ -90,6 +101,18 @@ public static class ProgressReport
             },
             ["operator"] = OperatorJson(report),
         };
+        if (report.Overlaps.Any(o => o.Open))
+        {
+            json["overlaps"] = AssignmentOverlaps.StatusJson(model, report.Overlaps);
+        }
+
+        // From 0.9.4 (GOAL-07): each standing agent as of the estate's newest record; absent when there is none.
+        IReadOnlyList<StandingAgents.Agent> standing = EstateStatus.Standing(model, () => FlowStops.RecordedTime(model));
+        if (standing.Count > 0)
+        {
+            json["standingAgents"] = new JsonArray([.. standing.Select(a => (JsonNode)StandingView.Summary(model, a))]);
+        }
+
         using JsonDocument document = JsonDocument.Parse(json.ToJsonString());
         return CanonicalJson.SerializePretty(document.RootElement);
     }
@@ -129,7 +152,8 @@ public static class ProgressReport
             return new ReleaseLine(p, accepted, notAccepted.Select(r => (r, ReleaseContents.OrderOf(model, r))).ToList());
         }).ToList();
 
-        // What comes next: each release work order not yet accepted, and the work orders among its inputs, until goals plan releases.
+        // What comes next: each release work order not yet accepted, and the work orders placed in it, or for a carrier in which none is
+        // placed its input work orders, until goals plan releases. From 0.9.4 (FIX-149) placements are read from one index for the model.
         var upcoming = sorted
             .Where(o => o.Item.Key.StartsWith(ReleaseKeyPrefix, StringComparison.Ordinal) && o.Status is not ("accepted" or "retired"))
             .Select(o => new Upcoming(o, Carried(model, o.Order, orders)))
@@ -144,12 +168,25 @@ public static class ProgressReport
         }).ToList();
 
         return new Report(model, model.CurrentEstate, manifest, pinned, pinMigration, formatMigration, repository is null ? RecordsOnly : RecordsAndRepository, findings,
-            sorted, states, model.Current("release").Count(), releases, upcoming, planned, Asked(model), Due(model, orders, assignments));
+            sorted, states, model.Current("release").Count(), releases, upcoming, planned, Asked(model), Due(model, orders, assignments))
+        {
+            Overlaps = AssignmentOverlaps.Overlaps(model),
+        };
     }
 
-    /// <summary>The work orders a release work order carries: those among its inputs, each once, in the order it names them.</summary>
+    /// <summary>
+    /// The work orders a release work order carries. From 0.9.4 (FIX-149) these are the current work orders placed in it, by key, never the carrier itself (<see cref="EstateModel.PlacedIn"/>); a carrier in which none is placed,
+    /// as before placements (record format 3), carries the work orders among its inputs, each once, in the order it names them.
+    /// </summary>
     private static List<OrderLine> Carried(EstateModel model, RecordEnvelope release, Dictionary<string, OrderLine> orders)
     {
+        List<OrderLine> placed = model.PlacedIn(release).Select(order => orders.GetValueOrDefault(order.Id)).OfType<OrderLine>()
+            .OrderBy(o => o.Item.Key, StringComparer.Ordinal).ThenBy(o => o.Item.Id, StringComparer.Ordinal).ToList();
+        if (placed.Count > 0)
+        {
+            return placed;
+        }
+
         var carried = new List<OrderLine>();
         if (!release.Body.TryGetProperty("inputs", out JsonElement inputs) || inputs.ValueKind != JsonValueKind.Array)
         {
@@ -301,7 +338,7 @@ public static class ProgressReport
     {
         text.Append("\nWhat comes next, by release\n");
         text.Append("  Until goals plan releases (GOAL-06), the only source is each release work order not yet accepted, a work order whose key begins with ")
-            .Append(ReleaseKeyPrefix).Append(", and the work orders it carries, which are its input work orders.\n");
+            .Append(ReleaseKeyPrefix).Append(", and the work orders it carries: those placed in it, or, when none is placed in it, its input work orders.\n");
         if (report.Upcoming.Count == 0)
         {
             text.Append("  No release work order waits for its acceptance.\n");
@@ -604,5 +641,9 @@ public static class ProgressReport
         IReadOnlyList<Upcoming> Upcoming,
         IReadOnlyList<Planned> Planned,
         IReadOnlyList<AskLine> Asks,
-        Acceptances Acceptances);
+        Acceptances Acceptances)
+    {
+        /// <summary>From 0.9.4 (CODE-73), the overlaps among active assignments, from the records alone.</summary>
+        public IReadOnlyList<AssignmentOverlaps.Overlap> Overlaps { get; init; } = [];
+    }
 }

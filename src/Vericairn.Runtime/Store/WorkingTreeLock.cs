@@ -69,6 +69,12 @@ internal sealed class WorkingTreeLock : IDisposable
         get { lock (sync) return depth > 0 && owner == Environment.CurrentManagedThreadId; }
     }
 
+    /// <summary>From 0.9.4 (FIX-148): whether any thread of this runtime holds the lock now, as a load that must be fresh asks.</summary>
+    internal bool Entered
+    {
+        get { lock (sync) return depth > 0; }
+    }
+
     internal string LockPath => Path.Combine(directory, LockName);
 
     internal string HolderPath => Path.Combine(directory, HolderName);

@@ -109,13 +109,18 @@ public static class LivingDocuments
         }
     }
 
-    /// <summary>Every current declaration with its state, in path order.</summary>
+    /// <summary>
+    /// Every current declaration with its state, in path order; from 0.9.4 derived once for a loaded model and kept with it, so every
+    /// reader is given the same states, each with read-only copies of its reasons, unavailable contributions and notes.
+    /// </summary>
     public static IReadOnlyList<State> Derive(EstateModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return model.Current("living-document")
+        return model.LivingDocumentStates(m => Array.AsReadOnly(m.Current("living-document")
             .OrderBy(d => EstateModel.BodyString(d, "path"), StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal)
-            .Select(d => Evaluate(model, d)).ToList();
+            .Select(d => Evaluate(m, d))
+            .Select(s => s with { Reasons = Array.AsReadOnly(s.Reasons.ToArray()), Unavailable = Array.AsReadOnly(s.Unavailable.ToArray()), Notes = Array.AsReadOnly(s.Notes.ToArray()) })
+            .ToArray()));
     }
 
     /// <summary>

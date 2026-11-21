@@ -36,18 +36,39 @@ public sealed partial class EstateService
                 return null;
             }
 
-            // A run's steps are its flow's, routed by each step's role (design/flow.md § 6).
+            // From 0.9.4 (GOAL-07) a standing agent's steps are its occurrences, evaluated now and routed by the role of its flow's work step.
+            if (StandingAgents.IsStanding(current))
+            {
+                StandingAgents.Agent agent = StandingAgents.Derive(model, current, FlowClock.GetUtcNow(), Duties(model, current, FlowClock.GetUtcNow()));
+                NextEligible.StandingRoutes standing = NextEligible.Standing(model, agent, Machine(model));
+                using JsonDocument rendered = JsonDocument.Parse(NextEligible.RenderJson(model, standing));
+                return new NextResponse(NextEligible.RenderText(model, standing), rendered.RootElement.Clone());
+            }
+
+            // A run's steps are its flow's, routed by each step's role (design/flow.md § 6). From 0.9.4 (CODE-73) the overlaps of the goal's
+            // work follow, and those a new assignment of its next step would have.
             if (FlowRuns.IsRun(current))
             {
                 NextEligible.FlowRunRoutes flow = NextEligible.FlowRoutes(model, current, Machine(model));
-                using JsonDocument run = JsonDocument.Parse(NextEligible.RenderJson(model, flow));
-                return new NextResponse(NextEligible.RenderText(model, flow), run.RootElement.Clone());
+                (string runOverlaps, JsonArray runJson) = GoalOverlaps(model, flow.Position.Work is { } work ? [work] : [],
+                    flow.Position.Work is { } order && flow.Next is NextEligible.FlowStepRoute { Route.Assignment: null } step ? (order, step.Name) : null);
+                return new NextResponse(NextEligible.RenderText(model, flow) + runOverlaps, WithOverlaps(NextEligible.RenderJson(model, flow), runJson));
             }
 
             NextEligible.GoalRoutes routes = NextEligible.Routes(model, current, Machine(model));
-            using JsonDocument json = JsonDocument.Parse(NextEligible.RenderJson(model, routes));
-            return new NextResponse(NextEligible.RenderText(model, routes), json.RootElement.Clone());
+            (string overlaps, JsonArray overlapJson) = GoalOverlaps(model, [.. GoalRules.Work(model, current)],
+                routes.Next is NextEligible.GoalStep { Route.Assignment: null } next ? (next.Order, EstateModel.BodyString(next.Order, "key") ?? next.Order.Id) : null);
+            return new NextResponse(NextEligible.RenderText(model, routes) + overlaps, WithOverlaps(NextEligible.RenderJson(model, routes), overlapJson));
         }
+    }
+
+    // The goal's routes in JSON, with its overlaps when there are any.
+    private static JsonElement WithOverlaps(string routes, JsonArray overlaps)
+    {
+        JsonObject json = JsonNode.Parse(routes)!.AsObject();
+        if (overlaps.Count > 0) json["overlaps"] = overlaps;
+        using JsonDocument document = JsonDocument.Parse(json.ToJsonString());
+        return document.RootElement.Clone();
     }
 
     /// <summary>
@@ -63,7 +84,14 @@ public sealed partial class EstateService
     /// <param name="Review">For a run, a review before hand-off of the step's items, which its assignment carries; null for the step itself.</param>
     /// <param name="Attention">For a run, the required attention its sponsor is asked about; null for a step to carry.</param>
     private sealed record Taken(RecordEnvelope Order, string Key, string Title, NextEligible.Route Route, FlowPosition.Position? Flow = null, FlowPosition.StepInstance? Step = null,
-        FlowPosition.PendingReview? Review = null, FlowPosition.Attention? Attention = null);
+        FlowPosition.PendingReview? Review = null, FlowPosition.Attention? Attention = null)
+    {
+        /// <summary>From 0.9.4 (GOAL-07), for a standing agent, the agent as of the time it was evaluated at.</summary>
+        public StandingAgents.Agent? Standing { get; init; }
+
+        /// <summary>From 0.9.4 (GOAL-07), for a standing agent, the occurrence its assignment carries.</summary>
+        public StandingAgents.Occurrence? Occurrence { get; init; }
+    }
 
     /// <inheritdoc />
     public GoalStepResponse GoalStep(string goal, GoalStepRequest request)
@@ -75,10 +103,14 @@ public sealed partial class EstateService
             return StepProblem(goal, "refused", "The recording principal and the repository are named by ULIDs; nothing was recorded.");
         }
 
-        // The records a step signs together are announced before the first prompt once its route is known (FIX-124).
-        using IDisposable counted = presence.Action("goal step " + goal);
+        // The records a step signs together are announced before the first prompt once its route is known (FIX-124). From 0.9.4 (ID-16)
+        // its route authors them completely in advance, so a person's assignment and ask share one presence check, listed by exact hash
+        // in the step's presence session; the list is read at the step's first signature, once the route has filled it.
+        List<RecordDraft> stepDrafts = [];
+        using IDisposable counted = SessionAction("goal step " + goal, null, GoalStepSession(goal, stepDrafts));
         AuthoredRecord? routed = null;
         RunStartRequest run;
+        IReadOnlyList<string> notices = [];
         string key;
         NextEligible.Route route;
         string goalId;
@@ -95,7 +127,7 @@ public sealed partial class EstateService
             goalId = current.Id;
             if (!Routing.MayTakeStep(model, current, request.By, DateTimeOffset.UtcNow))
             {
-                return StepProblem(goalId, "refused", $"{PrincipalName(model, request.By)} ({request.By}) does not take steps of goal {goalId}: a step is taken by an operator, by the goal's sponsor when the sponsor is a person, or by a principal holding the 'local-engineering' scope, as the builder dispatches agents under the operator's authority. Nothing was recorded.");
+                return StepProblem(goalId, "refused", $"{PrincipalName(model, request.By)} ({request.By}) does not take steps of goal {goalId}: a step is taken by an operator, by the goal's sponsor when the sponsor is a person, by a principal holding the 'local-engineering' scope, as the builder dispatches agents under the operator's authority, or by a dispatcher whose dispatch grant in force names the goal. Nothing was recorded.");
             }
 
             string status = GoalRules.Status(model, current);
@@ -105,7 +137,18 @@ public sealed partial class EstateService
             }
 
             Taken taken;
-            if (FlowRuns.IsRun(current))
+            if (StandingAgents.IsStanding(current))
+            {
+                // From 0.9.4 (GOAL-07): a standing agent carries one occurrence per call, evaluated again from the records now.
+                (Taken? occurrence, GoalStepResponse? response) = StandingTaken(model, current, request);
+                if (response is not null)
+                {
+                    return response;
+                }
+
+                taken = occurrence!;
+            }
+            else if (FlowRuns.IsRun(current))
             {
                 NextEligible.FlowRunRoutes flow = NextEligible.FlowRoutes(model, current, Machine(model));
                 if (flow.Position.Flow is null || flow.Position.Work is null)
@@ -144,6 +187,11 @@ public sealed partial class EstateService
 
             route = taken.Route;
             key = taken.Key;
+            if (route.State == "rule")
+            {
+                return RuleStep(model, current, taken, request);
+            }
+
             if (route.State == "request")
             {
                 return RequestStep(model, current, taken, request);
@@ -151,7 +199,7 @@ public sealed partial class EstateService
 
             if (route.State != "agent")
             {
-                return Ask(model, current, taken, request);
+                return Ask(model, current, taken, request, stepDrafts);
             }
 
             // An agent's step: refused before anything is recorded when the run could not start here.
@@ -179,9 +227,20 @@ public sealed partial class EstateService
             if (route.Assignment is null)
             {
                 string where = Latest(model, request.Repository!, "resource") is RecordEnvelope resource ? $"{EstateModel.BodyString(resource, "name") ?? resource.Id}, a work branch" : "the step's repository, a work branch";
-                var assigning = new RecordDraft("assignment", request.By, Element(Routed(model, current, taken, where, "run")), taken.Order.Reference);
+                // From 0.9.4 (CODE-73): the brief names the run's repository, and an overlap a refuse-level concurrent-paths policy holds
+                // records the step to run after the earlier assignment, alone, so that it holds the step and its run waits.
+                (JsonObject routedBody, notices, IReadOnlyList<string> held) = Sequence(model, Routed(model, current, taken, where, "run"), request.Repository, key, taken.Order);
+                if (held.Count > 0)
+                {
+                    return SequencedStep(model, goalId, taken, route, request, routedBody, held, notices, agentName, stepDrafts);
+                }
+
+                var assigning = Fixed(new RecordDraft("assignment", request.By, Element(routedBody), taken.Order.Reference), SessionNow());
                 ExpectPresence(request.By, [DescribeRecord(assigning, model), OperationSignature(global::Vericairn.Records.Types.OperationType.AgentRun, "not-started", "agent run of " + key)], "the step is routed to an agent");
-                (routed, string? unsigned) = AuthorLocked(assigning, model);
+                // Authored in advance and listed, the assignment is still a single signature: the run's intent is authored by the worker
+                // after its preflight, so it is in no list, and each keeps its own check (design/presence-sessions.md § 5).
+                stepDrafts.Add(assigning);
+                (routed, string? unsigned) = AuthorLocked(SessionDraft(assigning), model);
                 if (routed is null)
                 {
                     return StepProblem(goalId, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -197,7 +256,9 @@ public sealed partial class EstateService
                 carried = routed.Envelope.Id;
             }
 
-            run = new RunStartRequest(carried, route.Launcher!, route.Principal!, request.By, request.Repository!, goalId, request.Branch, request.Base, request.WallMinutes, request.Settings, request.Configuration, request.Execution, request.Allocation, request.ContextPackage)
+            // An occurrence's runs share one work branch of its own, so that two occurrences never share a branch (GOAL-07).
+            string? branch = request.Branch ?? (taken.Occurrence is StandingAgents.Occurrence carriedOccurrence ? OccurrenceBranch(taken.Order, carriedOccurrence) : null);
+            run = new RunStartRequest(carried, route.Launcher!, route.Principal!, request.By, request.Repository!, goalId, branch, request.Base, request.WallMinutes, request.Settings, request.Configuration, request.Execution, request.Allocation, request.ContextPackage)
             { Search = request.Search };
         }
 
@@ -205,7 +266,11 @@ public sealed partial class EstateService
         // and the budget again when it records the intent, routing's assignment with it.
         RunResponse started = runDispatch.Start(run, routed, out RecordWritten? assignment);
         string assigned = assignment is null || started.Operation is null ? string.Empty : $"Routing assigned {key} to its agent (assignment {assignment.Id}), recorded with the run's intent. ";
-        return new GoalStepResponse(goalId, started.Ok ? "run" : "none", $"{assigned}{key} is routed to the agent {agentName} [principal {route.Principal}] through {route.Launcher}: {route.Reason}. {started.Message}", started.Ok, key, route.State, route.Principal, assignment, null, started, started.Ok ? null : started.Problem);
+        // The run's admission reports the overlaps of the assignment it carries (CODE-73); a step that did not start reports routing's.
+        return new GoalStepResponse(goalId, started.Ok ? "run" : "none", $"{assigned}{key} is routed to the agent {agentName} [principal {route.Principal}] through {route.Launcher}: {route.Reason}. {started.Message}", started.Ok, key, route.State, route.Principal, assignment, null, started, started.Ok ? null : started.Problem)
+        {
+            Notices = !started.Ok && notices.Count > 0 ? notices : null,
+        };
     }
 
     /// <inheritdoc />
@@ -235,7 +300,9 @@ public sealed partial class EstateService
             RecordEnvelope? order = WorkView.OrderOfAssignment(model, held) is RecordEnvelope pinned ? model.Latest(pinned) : null;
             // A run's assignments hold its steps one by one: a hand-over takes over one step, from the assignment that holds that step.
             FlowRuns.StepRef? step = FlowRuns.StepOf(held);
-            IReadOnlyList<RecordEnvelope> assignments = order is null ? [] : Routing.Assignments(model, order, step);
+            // From 0.9.4 (GOAL-07) a standing agent's assignments hold its occurrences one by one: a hand-over takes over one occurrence.
+            string? occurrence = StandingAgents.KeyOf(held);
+            List<RecordEnvelope> assignments = order is null ? [] : Routing.Assignments(model, order, step).Where(a => StandingAgents.KeyOf(a) == occurrence).ToList();
             string orderStatus = order is null ? "?" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
             personName = PrincipalName(model, person);
             string? refusal = agentKind is not ("agent" or "service") ? $"Assignment {held.Id} is {PrincipalName(model, agent)}'s, not an agent's: a hand-over takes a step over from an agent."
@@ -255,12 +322,24 @@ public sealed partial class EstateService
             JsonArray sources = brief["sources"] as JsonArray ?? [];
             sources.Add(new JsonObject { ["type"] = "assignment", ["id"] = held.Id, ["hash"] = held.ComputedHash });
             brief["sources"] = sources;
+            // From 0.9.4 (CODE-73) the hand-over names the repository the agent's brief or runs named, as routing fills it.
+            if (FillRepository(model, Element(brief), null, out _, order) is JsonElement filled)
+            {
+                brief = JsonNode.Parse(filled.GetRawText())!.AsObject();
+            }
+
             string note = string.IsNullOrWhiteSpace(request.Note) ? $"Takes the step over from {PrincipalName(model, agent)}'s assignment {held.Id}: the hand-over to {personName}." : request.Note.Trim();
             var body = new JsonObject { ["contributor"] = person, ["brief"] = brief, ["note"] = note.Length > 4000 ? note[..3999] + "…" : note };
             if (step is not null)
             {
                 // The person carries the same step from the same inputs the agent's brief pinned.
                 body["step"] = JsonNode.Parse(held.Body.GetProperty("step").GetRawText());
+            }
+
+            if (occurrence is not null)
+            {
+                // The person carries the same occurrence, under the same key.
+                body["occurrence"] = JsonNode.Parse(held.Body.GetProperty("occurrence").GetRawText());
             }
 
             WriteOutcome outcome = WriteLocked(new RecordDraft("assignment", request.By, Element(body), order!.Reference), model);
@@ -280,8 +359,11 @@ public sealed partial class EstateService
         return new TakeoverResponse($"{personName} takes the step over by assignment {written.Id}, which carries the agent's brief and names its assignment {request.Assignment}. {stopped}", true, written, stops);
     }
 
-    /// <summary>Records what a step routed to a person, or to no one, asks: the person's assignment and ask, or the sponsor's ask.</summary>
-    private GoalStepResponse Ask(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
+    /// <summary>
+    /// Records what a step routed to a person, or to no one, asks: the person's assignment and ask, authored completely in advance into
+    /// <paramref name="stepDrafts"/> so one presence check covers both (ID-16), or the sponsor's ask, a single write.
+    /// </summary>
+    private GoalStepResponse Ask(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request, List<RecordDraft> stepDrafts)
     {
         if (step.Attention is not null)
         {
@@ -297,34 +379,41 @@ public sealed partial class EstateService
             return StepProblem(goal.Id, "refused", $"{key} has no principal available and the estate names no one to ask: it has no charter operator. Nothing was recorded.", key, route);
         }
 
-        AuthoredRecord? assignment = null;
+        RecordDraft? assigning = null;
+        IReadOnlyList<string> notices = [];
         string question, recommendation, consequence;
         string[] options = [];
         if (route.State is "person" or "reserved")
         {
             // Routing produces the assignment to the chosen person, and the ask tells the person the step is theirs: the two are stored
-            // together, or neither is.
-            var assigning = new RecordDraft("assignment", request.By, Element(Routed(model, goal, step, "the repositories its scope names, on a work branch, named without machine paths", "ask")), step.Order.Reference);
+            // together, or neither is. Both are authored completely before the first signature, the ask naming the assignment's id.
+            // From 0.9.4 (CODE-73): the brief names its repository where it can, and an overlap a refuse-level policy holds records it after the earlier assignment.
+            (JsonObject routedBody, notices, _) = Sequence(model, Routed(model, goal, step, "the repositories its scope names, on a work branch, named without machine paths", "ask"), request.Repository, key, step.Order);
+            assigning = Fixed(new RecordDraft("assignment", request.By, Element(routedBody), step.Order.Reference), SessionNow());
             ExpectPresence(request.By, [DescribeRecord(assigning, model), new("ask", SubjectKey(model, step.Order.Reference), "records a question that waits on its principal")], "the step is routed to a person");
-            (assignment, string? unsigned) = AuthorLocked(assigning, model);
-            if (assignment is null)
-            {
-                return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
-            }
-
-            string id = assignment.Envelope.Id;
-            question = step.Review is FlowPosition.PendingReview review
+            string id = assigning.Id!;
+            // From 0.9.4 (PROC-19) a decision step its role decides is asked as a decision among its paths, recorded with goal decide.
+            string? paths = step.Review is null && step.Step?.Step is { Decides: true, Transition: { } transition }
+                ? string.Join("; ", transition.Paths.Select(p => $"{p.Name}, to {p.Leads}"))
+                : null;
+            question = paths is not null
+                ? $"Will you decide {key} {title}, a step of goal {goalTitle}, among its paths ({paths})? It is assigned to you as its {route.Role} (assignment {id})."
+                : step.Review is FlowPosition.PendingReview review
                 ? $"Will you review {review.What} at {review.Hash}, of step {step.Step!.Name} of goal {goalTitle}, before it is handed on? It is assigned to you as its {route.Role} (assignment {id}), a{(review.Requirement.Independence == "independent" ? "n" : string.Empty)} {review.Requirement.Independence} review."
                 : route.State == "reserved"
                 ? $"{key} {title}, a step of goal {goalTitle}, is a reserved action, {Routing.Describe(route.Reserved!)}: will you carry it? It is assigned to you as its {route.Role} (assignment {id})."
                 : $"Will you carry {key} {title}, the next step of goal {goalTitle}? It is assigned to you as its {route.Role} (assignment {id}).";
             string from = step.Step is null ? $"vericairn work brief {key}" : $"assignment {id}'s brief, which pins the step's inputs, with vericairn work brief {EstateModel.BodyString(step.Order, "key") ?? step.Order.Id}";
-            recommendation = step.Review is FlowPosition.PendingReview reviewing
+            recommendation = paths is not null
+                ? $"Decide it from assignment {id}'s brief, and record the path with its reasons and evidence: vericairn goal decide {goal.Id} --step {key} --path <path> --reason <why> --evidence <record> --by {route.Principal}. Choosing a path performs nothing reserved; goal step then takes the steps it leads to."
+                : step.Review is FlowPosition.PendingReview reviewing
                 ? $"Review it from assignment {id}'s brief: record a review of {reviewing.Subject.Type} {reviewing.Subject.Id} at {reviewing.Hash} with outcome pass, findings or fail. Findings send the step back to its author; fail takes its failure route."
                 : route.State == "reserved"
                 ? $"Carry it yourself, from {from}: no agent carries a reserved action without a grant in force, and you hold it. Record an attempt on assignment {id} when you start and a result when you stop."
                 : $"Carry it: record an attempt on assignment {id} when the work starts and a result when it stops; {from} is everything it needs.";
-            consequence = step.Review is not null
+            consequence = paths is not null
+                ? $"{key} waits for your decision, and the steps after it wait with it; the goal's other steps go on."
+                : step.Review is not null
                 ? $"Step {step.Step!.Name} is not handed on until it is reviewed, and what depends on it waits; the goal's other steps go on."
                 : route.State == "reserved"
                 ? $"{key} waits until you act, and nothing reserved is done for you; the goal's other steps go on."
@@ -358,15 +447,15 @@ public sealed partial class EstateService
             ask["options"] = new JsonArray(options.Select(o => (JsonNode)o).ToArray());
         }
 
-        if (assignment is not null)
+        if (assigning is not null)
         {
-            ask["assignment"] = assignment.Envelope.Id;
+            ask["assignment"] = assigning.Id;
         }
 
         var draft = new RecordDraft("ask", request.By, Element(ask), new RecordReference("work-order", step.Order.Id, null));
         RecordWritten? assigned = null;
         RecordWritten asked;
-        if (assignment is null)
+        if (assigning is null)
         {
             WriteOutcome written = WriteLocked(draft, model);
             if (!written.Ok)
@@ -378,7 +467,16 @@ public sealed partial class EstateService
         }
         else
         {
-            (AuthoredRecord? authored, string? unsigned) = AuthorLocked(draft, model);
+            // The step's list, read at its first signature: the assignment and the ask, by exact hash, in the order they are signed.
+            draft = Fixed(draft, SessionNow());
+            stepDrafts.AddRange([assigning, draft]);
+            (AuthoredRecord? assignment, string? unsigned) = AuthorLocked(SessionDraft(assigning), model);
+            if (assignment is null)
+            {
+                return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
+            }
+
+            (AuthoredRecord? authored, unsigned) = AuthorLocked(SessionDraft(draft), model);
             if (authored is null)
             {
                 return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -406,7 +504,39 @@ public sealed partial class EstateService
             "person" => $"{key} is routed to a person: it is assigned to {whom} (assignment {assigned!.Id}) and asked of them (ask {asked.Id}).",
             _ => $"No principal is available for {key}: {whom} is asked to assign someone or change the roster (ask {asked.Id}); it is given to no one else.",
         };
-        return new GoalStepResponse(goal.Id, "ask", $"{said} {route.Reason}. Waiting answers nothing: the ask is answered by a decision of {whom}.", true, key, route.State, route.Principal, assigned, asked);
+        return new GoalStepResponse(goal.Id, "ask", $"{said} {route.Reason}. Waiting answers nothing: the ask is answered by a decision of {whom}.", true, key, route.State, route.Principal, assigned, asked)
+        {
+            Notices = notices.Count > 0 ? notices : null,
+        };
+    }
+
+    /// <summary>
+    /// Records a rule's decision, or a missed deadline's default, as the run derives it (from 0.9.4, PROC-19; design/flow.md § 5): a
+    /// flow-decision observation of the goal's exact revision naming the step, the path, the rule that matched and each record it read by id
+    /// and hash, signed by who takes the step; or, under a rule then the role, the round's kind when no rule held, after which the role
+    /// decides. The position reads it from then on, its rules evaluated again only over the records it
+    /// names, so no later record changes it; nothing is dispatched.
+    /// </summary>
+    private GoalStepResponse RuleStep(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
+    {
+        FlowPosition.StepInstance instance = step.Step!;
+        // A single write, and an observation is outside § 10's allow-list: it is in no presence session's list and keeps its own check (ID-16).
+        var draft = new RecordDraft("observation", request.By, Element(FlowDecisions.RuleBody(instance)), new RecordReference(goal.Type, goal.Id, goal.ComputedHash));
+        WriteOutcome written = WriteLocked(draft, model);
+        if (!written.Ok)
+        {
+            return new GoalStepResponse(goal.Id, "none", "Not recorded: " + written.Problem!.Message, false, step.Key, step.Route.State, null, Problem: written.Problem);
+        }
+
+        FlowPosition.StepDecision decision = instance.Decision!;
+        if (decision.Rule == "none")
+        {
+            return new GoalStepResponse(goal.Id, "decided", $"{step.Key}'s round is its role's: no rule held as the records stood at {RecordParser.FormatTimestamp(decision.At ?? decision.Since)}, recorded in observation {written.Written!.Id}; goal step routes the step to its role next. Nothing was dispatched.",
+                true, step.Key, step.Route.State, null) { Decision = written.Written };
+        }
+
+        return new GoalStepResponse(goal.Id, "decided", $"{step.Key} is decided by {(decision.Decider == "deadline" ? "its deadline's default" : decision.Rule == "default" ? "its rule's default" : "its rule " + decision.Rule)}: path {string.Join(", ", decision.Paths)}, recorded in observation {written.Written!.Id}; goal step takes the path next. Nothing was dispatched.",
+            true, step.Key, step.Route.State, null) { Decision = written.Written };
     }
 
     /// <summary>
@@ -439,7 +569,7 @@ public sealed partial class EstateService
         var ask = new JsonObject
         {
             ["to"] = route.Principal,
-            ["question"] = Clip($"Required attention in goal {goalTitle}{(run ? string.Empty : $", step {key}")}: {attention.Summary}. How does the run go on?", 4000),
+            ["question"] = Clip($"{NextEligible.AttentionQuestion}{goalTitle}{(run ? string.Empty : $", step {key}")}: {attention.Summary}. How does the run go on?", 4000),
             ["recommendation"] = Clip(recommendation, 4000),
             ["consequence"] = Clip(run ? "Nothing more of the run is dispatched until this ask is answered." : $"{key} waits, and only what depends on it waits; the run's other steps go on.", 2000),
             ["goal"] = goal.Id,

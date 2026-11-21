@@ -322,6 +322,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public WriteOutcome Amend(AmendRequest request) => Post<AmendRequest, WriteOutcome>("/v1/work/amend", request)!;
 
     /// <inheritdoc />
+    public WriteOutcome StandingOutput(StandingOutputRequest request) => Post<StandingOutputRequest, WriteOutcome>("/v1/standing/outputs", request)!;
+
+    /// <inheritdoc />
     public IReadOnlyList<DeviceRow> Devices() => Get<List<DeviceRow>>("/v1/devices")!;
 
     /// <inheritdoc />
@@ -407,6 +410,15 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public NextResponse? GoalNext(string goal) => Get<NextResponse>(GoalPath(goal, "next"), allowNotFound: true);
 
     /// <inheritdoc />
+    public GoalDueResponse? GoalDue(string goal, string? asOf = null) => Get<GoalDueResponse>(GoalPath(goal, "due") + (asOf is null ? string.Empty : "?asOf=" + Uri.EscapeDataString(asOf)), allowNotFound: true);
+
+    /// <inheritdoc />
+    public OverlapResponse WorkOverlap(string? repository = null) => Get<OverlapResponse>(repository is null ? "/v1/overlaps" : "/v1/overlaps?repository=" + Uri.EscapeDataString(repository))!;
+
+    /// <inheritdoc />
+    public OverlapResponse WorkOverlapPreview(OverlapPreviewRequest request) => Post<OverlapPreviewRequest, OverlapResponse>("/v1/overlaps/preview", request)!;
+
+    /// <inheritdoc />
     public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => Post<GoalStepRequest, GoalStepResponse>(GoalPath(goal, "step"), request)!;
 
     /// <inheritdoc />
@@ -435,6 +447,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
 
     /// <inheritdoc />
     public WriteOutcome GoalClose(string goal, GoalCloseRequest request) => Post<GoalCloseRequest, WriteOutcome>(GoalPath(goal, "close"), request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome GoalDecide(string goal, GoalDecideRequest request) => Post<GoalDecideRequest, WriteOutcome>(GoalPath(goal, "decide"), request)!;
 
     /// <inheritdoc />
     public IReadOnlyList<ProviderRow> Providers() => Get<List<ProviderRow>>("/v1/providers")!;
