@@ -45,6 +45,8 @@ public sealed class JsonOutputContractTests : IDisposable
         ["packages deprecate"] = "records a package registry action",
         ["security-reports poll"] = "reads a repository host's advisories",
         ["security-reports triage"] = "reads a repository host's advisory",
+        ["progress target refresh"] = "places the estate's progress at a target's host",
+        ["progress target follow"] = "follows the event journal until interrupted",
     };
 
     private static readonly HashSet<string> PathNames = new(StringComparer.Ordinal)

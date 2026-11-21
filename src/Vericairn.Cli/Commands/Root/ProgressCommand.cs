@@ -12,5 +12,7 @@ internal sealed class ProgressCommand : Command
     {
         var operations = new EstateViews(context);
         SetAction(parseResult => operations.Progress(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(context.JsonOption), context.Presentation.Read(parseResult)));
+        // From 0.9.4 (WATCH-06): the same progress kept at a target.
+        Subcommands.Add(new ProgressTargetCommand(context));
     }
 }
