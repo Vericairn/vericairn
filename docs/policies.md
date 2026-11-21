@@ -1,5 +1,7 @@
 # Estate policies, writing exceptions and release admission
 
+Revision 16, November 20, 2026. Add the concurrent-paths rule kind, by which an estate holds an unresolved overlap of two assignments' permitted paths at assignment start, and the pair exception for one exact pair of assignment revisions (POLICY-08); its findings hold work starts, never a release submission.
+
 Revision 15, November 12, 2026. Say that from 0.9.2 blocked terms and the text they are matched in are compared after Vericairn's own Unicode NFKC normalization and full case folding, the same in every build (FIX-105).
 
 Revision 14, November 6, 2026. State what a release basis retains: files read from a working tree, within a bound, while each file of an exact commit is named by path and hash and read from Git (FIX-95).
@@ -82,7 +84,7 @@ All authoring commands take `--by`. Revisions, retirement, exception grants and 
 
 `GET /v1/estate-policies/access?principal=<id>` (`PolicyAccess`, MCP `policy_access`) reports currently admitted action names without creating a record. MCP exposes writes only for its connection principal's current authority and checks it again at the call. Exact policy, rule, token and scope bounds remain server checks on the proposed body. The authority response itself grants no permission.
 
-`estate check`, `status` and `progress` evaluate one snapshot per read. Their `policies` and `writingExceptions` sections carry the same basis and findings as the dedicated reads. Check retains built-in findings beside `policy.unmet`, `policy.unavailable` and `policy.excepted`, with policy revision and rule identity. A refuse-level policy finding is a warning in check; it is a release hold at submission. Only reconstructed, excepted `writing.spacing` occurrences leave the warning count, and each remains visible as `writing.excepted`. Other errors and unread sources remain visible.
+`estate check`, `status` and `progress` evaluate one snapshot per read. Their `policies` and `writingExceptions` sections carry the same basis and findings as the dedicated reads. Check retains built-in findings beside `policy.unmet`, `policy.unavailable` and `policy.excepted`, with policy revision and rule identity. A refuse-level policy finding is a warning in check; it is a release hold at submission, except a concurrent-paths finding, which holds only work starts. Only reconstructed, excepted `writing.spacing` occurrences leave the warning count, and each remains visible as `writing.excepted`. Other errors and unread sources remain visible.
 
 Progress and status group unfinished operator-owned duties under **What waits on the operator**, including exact subject, occurrence, deadline, required action and current evidence, even without an ask. An actual ask addressed to an operator can link an occurrence by pinning a result with the exact `duties` binding as its subject. The view groups that ask with the duty, preserving the duty's owner. A builder's linked reserved-action ask therefore does not transfer ownership. Only real asks enter the ask queue; a completed duty does not answer or withdraw an ask. Reads create no asks or other records. These views authorize no effects.
 
@@ -191,6 +193,66 @@ The rule applies from its policy's `startsAt` while the policy is active, and li
 and retired with the operator's exact approval, so a relaxation to `warn` is always configured and recorded. A required
 trailer that names one of the estate's blocked terms is written in the same policy as the terms, since a policy is exempt
 only from the list it declares. The rule selects no records: evaluating it reports that no subject is selected.
+
+## Concurrent paths (0.9.4)
+
+From 0.9.4 (POLICY-08), an estate makes an unresolved overlap of two assignments' permitted paths a hold with a rule of kind
+`vericairn.estate/concurrent-paths`, version 1, in a policy whose `appliesTo` is a `repository` selection: the repository's
+identity, the estate's own or a repository resource's, and selectors in the policy grammar that say which shared paths count. The
+rule has no parameters. One policy covers one repository, so an estate that holds overlaps in two repositories declares two.
+
+```json
+{
+  "appliesTo": { "kind": "repository", "repository": "<repository-resource-id>", "selectors": ["docs/operator-guide.md", "docs/api-v1.md"] },
+  "rules": [{ "key": "held-guides", "kind": "vericairn.estate/concurrent-paths", "version": 1, "parameters": {} }]
+}
+```
+
+The rule reads the [overlap check](cli.md#vericairn-work-overlap-094): an assignment's effective permitted paths are its brief's
+interpretable patterns less its `excludedChanges`, it is active until its work is integrated, abandoned, accepted or retired, and
+two active assignments in the repository overlap when some valid path is in both. Its subjects are the unordered pairs of active
+assignments whose effective paths share a path within the selection. A pair is:
+
+- `satisfied` when it runs in sequence, the later's brief naming the earlier in `after`;
+- `unavailable` when an assignment names no repository and no run of it named one, so that it is compared as possibly in any
+  repository, or when the comparison within the selection reached its bound undetermined;
+- `unmet` otherwise.
+
+Disjoint effective paths make no subject: when one owner keeps the shared paths and every other party's brief excludes them, the
+pair no longer overlaps within the selection. A selection that no pair meets, as when the last pair's overlap was excluded, is `satisfied` with no
+subject, so the resolved state holds nothing. A pair's finding names the subject as the two assignments' lineage identities joined
+by `+`, in ordinal order, with the repository, the later assignment as its anchor and the exact current revisions of both as its
+evidence. The estate check and status evaluate the rule from the records alone, so every machine reads the same pairs; `work
+overlap` adds what this machine's registered clones show.
+
+At `refuse`, from the policy's `startsAt`, the rule adds a surface, assignment start. The runtime's write boundary refuses, before
+writing, a new assignment (`assignment.concurrent-paths`), a run admission and a new attempt (`attempt.concurrent-paths`) that leave
+an unmet or unavailable pair, naming each pair, its policy and rule and the remedies that can apply: record the later assignment
+with `after` naming the earlier, or exclude the shared paths from every brief but the owner's with `excludedChanges`, and, for an
+attempt or a run on assignments already recorded, a policy exception for the exact pair. A refused new assignment or revision is
+offered only the first two, since an exception cannot pin a revision that does not exist yet. A revision of an
+assignment is refused only for a pair its previous revision did not already leave unmet, unavailable or excepted, so a corrective
+revision is never held by a pair it inherited, while that pair still holds the assignment's attempts and runs. Record validation
+never refuses: a pair recorded before the policy, at a lower level, by an older runtime or in another clone is reported and held only
+when work on it starts. A concurrent-paths finding never holds a release submission, at any level: its pairs hold only assignment
+start, run admission and new attempts, and the estate check and status report every pair. At `warn` and `remind` the pairs are findings and hold nothing. `goal step` records the later of a held
+overlap with `after` naming the earlier, so its routing satisfies the rule. Every assignment-start refusal, of a new assignment, a
+revision, a run admission or a new attempt, reads this machine's registered clones for what they show of each assignment's release
+(a change's head reachable from the repository's main line, labeled as observed here), as the overlap check's `after` waits do, so a
+start can pass on a machine whose clone shows the earlier change merged while the estate check and status, from the records alone,
+still show the pair until a `change-merge` operation or an acceptance records it.
+
+An exception covers one exact pair of assignment revisions with a `pair` target, `{"kind": "pair", "assignments": [<assignment
+reference>, <assignment reference>]}`, each reference a `{type, id, hash}` of an assignment revision, the two of different
+assignments, in either order. A concurrent-paths rule takes only pair targets, and only such a rule takes one; a pair target carries
+no `submission`. It applies to an unmet pair only: an unavailable pair is resolved by naming each brief's repository or narrowing
+the patterns until the comparison is determined. A newer revision of either assignment is another pair, which needs a fresh
+exception. The usual exception bounds apply: the operator, or a delegate whose grant names the exact policy, rule and target, and
+never one whose own assignment is in the pair. From 0.9.4, for every kind, an exception whose delegated authority reference does not
+resolve to the exact record it names is not applied, failing closed: the finding it would cover stands, and the evaluation goes on
+rather than stopping at it. An exception pins revisions that already exist, so it covers a pair already recorded,
+such as one recorded before the policy or in another clone; a new assignment is first recorded resolved, in sequence or with the
+shared paths excluded.
 
 ## Required flow steps (0.9.2)
 
