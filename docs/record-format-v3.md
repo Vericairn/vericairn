@@ -706,6 +706,47 @@ include this contract, and the generic record reader advances to
 `vericairn.records/readers/11`, which carries the fields of this section and the
 two before it.
 
+## Standing outputs (0.9.4)
+
+GOAL-08 adds fields to `possibility`, `ask` and `operator-request`, and a goal's
+`plan.standing.outputs`, within format 3, and no record type: every output of a
+standing agent's occurrence is a record another principal disposes of. A record
+without them behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `possibility` | Optional `raisedBy: {goal, occurrence, assignment, run?}` names a standing agent's goal by its first revision, the occurrence key, the assignment of the goal's work order that carries that key, recorded before it, whose contributor is the record's author, and, for an agent, the agent run of that assignment by the author, in flight when the record is written; a result that already settles the occurrence refuses it (`standing.raised-by`). Such a possibility is raised `open` with a `fingerprint` and at least one source (`standing.possibility`); its occurrence records at most `plan.standing.outputs.possibilities` (five when unset) possibilities, of which at most `drafts` (three) carry a `draft`, and one summary possibility, the one with `extras`, read in the goal revision in force when the possibility was first raised (the latest activated before it) and counting each other possibility of the occurrence at its revision as it stood, a revision counting for the draft or extras it adds (`standing.output-cap`); a second open possibility of the same agent with the same fingerprint, read as each stood when it is written, is refused (`standing.duplicate-output`); and where one with that fingerprint was declined, a new one names it in `raisesAgain` with at least one `evidence` item (`standing.raises-again`). A revision keeps exactly the `raisedBy` and `fingerprint` its chain's first revision names, and a revision of a possibility no standing agent raised names no `raisedBy` (`standing.raised-by`); the rules apply by the first revision's `raisedBy`, whatever the revision's body says. One that changes the disposition or `adoptedAs` is refused by the possibility's author and by an agent tied to the goal, as the `ask` row reads ties (`standing.own-output`; `standing.output-now` where only records written after it tie the agent). On any possibility, a revision of one whose revision before it carries `disclosure: held` that changes its disposition or `adoptedAs` is refused for an agent, adopting it takes an operator who is a person, and so does a revision that drops `disclosure` (`standing.held`). On any possibility, at any format, a revision that adopts it, recorded by the author of its first revision, is refused (`standing.own-output`) when its chain carries a field of this section; otherwise the write boundary refuses it (`standing.output-now`), and an adoption already in the estate keeps its reading. Optional on any possibility: `fingerprint` (lower-case letters, digits and `. : / _ -`, up to 200 characters); `sources`, each `{address, retrievedAt?, hash?, extents?}`; `evidence`, each `{stance: for|against, statement, sources?}`, the sources by index, with no scores (`possibility.evidence`); `reviewTriggers`, each `{at}` or `{condition}` (`possibility.review-trigger`); `links`, each `{relation: duplicate-of|supersedes, possibility, hash}` naming another possibility at its exact hash (`possibility.link`); `draft: {key?, title, intent, scope, deliverables, exitQuestion}`; `disclosure: held`; `extras`; `raisesAgain`. |
+| `ask` | Optional `raisedBy`, as a possibility's, kept by every revision as its first revision names it (`standing.raised-by`). Such an ask is put to a person other than its author, names a revision of the agent's goal in `goal`, and does not open with the words of the runtime's own asks about a goal (`standing.ask`); no revision withdraws it, with `raisedBy` or without (`standing.own-output`): a decision of the person asked disposes of it. A `decision` whose `answers` names such an ask, or one of the runtime's own asks about a standing agent's goal below, answers nothing when its author raised the ask or is an agent tied to the goal, whatever its `decidedBy` names, so the ask stays waiting, counted among the open outputs, and a failure pause holds. An agent is tied when any `assignment` of the work order of any revision of the goal names it as `contributor`, or any revision of the goal's `roles`, or of the `roster` where the goal's roles do not name its work step's role, has named it for that role; ties are read from the records whatever their `at`, and only grow. Such a decision is an error (`standing.own-output`) when its author raised the ask or a record tying it was written before the later of the decision and the ask revision it names, and otherwise reported (`standing.output-now`). The author of one of the runtime's asks is not refused for being its author: a principal nothing ties to the goal, such as the builder whose goal step wrote the ask, records the person's decision on it. |
+| `operator-request` | Optional `raisedBy`, as a possibility's, kept by every revision as its first revision names it (`standing.raised-by`). Such a request, and each revision of it, is of kind `publication`, pins the agent's work order and is put to an operator other than its author (`standing.publication`): its exact text, labeled the agent's draft. An `operator-request-close` or an `operator-request` observation of it is recorded by an operator who is a person, never by its author or `askedBy` (`standing.own-output`) and never by an agent, whatever `operatorWords` it cites (`standing.publication`). |
+| `goal` | Optional `plan.standing.outputs: {possibilities?, drafts?, open?}`: possibilities per occurrence (1 to 20, five when unset), drafts among them (no more than the possibilities, three when unset; `standing.outputs`) and open outputs (1 to 1,000, ten when unset). |
+
+A standing agent's open outputs are its possibilities still open, its asks still
+waiting and its publication requests not closed. While they reach `open`, its due
+occurrences are deferred, and an `agent-run` operation of the goal is refused,
+judged by the records before it (`operation.standing`). The runtime's write
+boundary also refuses, with `standing.output-now`, a new disposition of a
+standing agent's possibility, or a new decision answering a standing agent's ask
+or one of the runtime's asks about its goal, by an agent tied to the goal only by
+records written after it. Because ties only grow, a later roster or
+assignment change makes no record already in the estate an error and is never
+refused for one; it can make an answered ask wait again for the person, as a
+decision by an agent it ties answers nothing from then on, and it never makes a
+waiting ask answered. The runtime takes
+an ask for its own renewal, period-cap or failure-pause ask only when its first
+revision names no `raisedBy`, it is put to a person and its author took the
+goal's steps as the records stood when it was written (an operator, the sponsor
+when a person, a holder of `local-engineering` or a dispatcher whose grant names
+the goal); another principal's ask in the same words holds back none of them.
+goal step writes and signs these asks as its caller, so an agent that carries the
+occurrences and may itself take the goal's steps can write one in their words, as
+it could by calling goal step; its own answer to one answers nothing.
+
+A reader of format 3 that predates these fields refuses a record that carries
+one of them as an unknown key, as any later format-3 field, so the estate's pin
+keeps every machine on a release that reads them. A format-2 estate refuses them.
+`records describe possibility`, `records describe ask` and `records describe
+operator-request` include this contract.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

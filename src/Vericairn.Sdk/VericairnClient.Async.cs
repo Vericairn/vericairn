@@ -250,6 +250,10 @@ public sealed partial class VericairnClient
     public Task<WriteOutcome> ReviewResultAsync(ResultReviewRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(ReviewResult), async token => (await PostAsync<ResultReviewRequest, WriteOutcome>("/v1/work/review", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReviewResult)), cancellationToken);
 
+    /// <summary>The cancellable StandingOutput operation, with a deadline covering the complete response.</summary>
+    public Task<WriteOutcome> StandingOutputAsync(StandingOutputRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(StandingOutput), async token => (await PostAsync<StandingOutputRequest, WriteOutcome>("/v1/standing/outputs", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(StandingOutput)), cancellationToken);
+
     /// <summary>The cancellable Amend operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> AmendAsync(AmendRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(Amend), async token => (await PostAsync<AmendRequest, WriteOutcome>("/v1/work/amend", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(Amend)), cancellationToken);

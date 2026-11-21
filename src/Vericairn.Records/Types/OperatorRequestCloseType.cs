@@ -26,7 +26,7 @@ public sealed class OperatorRequestCloseType : IRecordType
         new("reason", "string", false, "Required when dismissed.", 3),
         new("link", "string", false, "Optional evidence or observed destination; required for a completed publication.", 3),
         new("evidence", "object[]", false, "Evidence with summary and optional hash and location.", 3),
-        new("operatorWords", "object", false, "Required for an agent: by (the operator), statement (verbatim), source (citation) and at (when said). The agent remains the record's author.", 3),
+        new("operatorWords", "object", false, "Required for an agent: by (the operator), statement (verbatim), source (citation) and at (when said). The agent remains the record's author. From 0.9.4 a standing agent's publication request is closed by an operator who is a person directly, never by an agent citing words.", 3),
     ];
 
     /// <inheritdoc />
@@ -83,6 +83,9 @@ internal static class OperatorRequestRules
                 context.Error("operator-request.time", "A close follows its recorded request.");
             if (OperatorRequests.Closures(context.Model, request).Any(r => r.Id != context.Record.Id))
                 context.Error("operator-request.closed", "The request already has an outcome; a second close is refused.");
+            // From 0.9.4 (GOAL-08): a standing agent's publication request is closed by an operator who is a person, directly.
+            if (request.Type == "operator-request")
+                StandingOutputs.ValidateClosure(context, request);
         }
         if (context.Record.Signatures.Count == 0)
             context.Error("signature.required", "An operator request's outcome requires its author's admitted-device signature.");

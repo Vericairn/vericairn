@@ -463,7 +463,8 @@ public static class Routing
         return model.CurrentPrincipal(principal) is RecordEnvelope record ? EstateModel.BodyString(record, "name") ?? principal ?? "?" : principal ?? "?";
     }
 
-    private static List<string>? Named(JsonElement body, string role)
+    /// <summary>The principals a body's roles name for a role, in order, once each; null when they do not name it.</summary>
+    internal static List<string>? Named(JsonElement body, string role)
     {
         if (!body.TryGetProperty("roles", out JsonElement roles) || roles.ValueKind != JsonValueKind.Array)
         {

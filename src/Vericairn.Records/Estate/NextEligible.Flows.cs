@@ -258,9 +258,10 @@ public static partial class NextEligible
     {
         string? sponsor = Routing.Asked(model, goal, null, machine.Now);
         IReadOnlyList<string> trigger = model.Chain(attention.Trigger);
-        // From 0.9.4 (GOAL-07) a standing agent's failure pause counts only the ask goal step recorded for it, never another ask about the run.
+        // From 0.9.4 (GOAL-07) a standing agent's failure pause counts only the ask goal step recorded for it, never another ask about the run;
+        // from GOAL-08 recognized by who wrote it (StandingAgents.RuntimeAsk), never by its words alone.
         List<RecordEnvelope> asks = Routing.AsksOf(model, goal).Where(a => model.Latest(a).Subject is RecordReference subject && trigger.Contains(subject.Id)
-            && (!attentionOnly || (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(AttentionQuestion, StringComparison.Ordinal))).ToList();
+            && (!attentionOnly || ((EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(AttentionQuestion, StringComparison.Ordinal) && StandingAgents.RuntimeAsk(model, goal, a)))).ToList();
         IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
         var source = new Routing.Source(null, "who decides for the goal, its sponsor");
         RecordEnvelope? waiting = asks.LastOrDefault(a => Asks.IsWaiting(Asks.State(model, a).State));

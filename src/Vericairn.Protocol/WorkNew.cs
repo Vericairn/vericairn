@@ -16,4 +16,14 @@ namespace Vericairn.Protocol;
 /// <param name="Inputs">Input references as type:id; omitted means an empty list.</param>
 public sealed record WorkNewRequest(string By, string? Key = null, string? Title = null, string? Intent = null,
     IReadOnlyList<string>? Scope = null, string? ExitQuestion = null, IReadOnlyList<string>? Deliverables = null,
-    string? Kind = "ordinary", IReadOnlyList<string>? After = null, IReadOnlyList<string>? Inputs = null);
+    string? Kind = "ordinary", IReadOnlyList<string>? After = null, IReadOnlyList<string>? Inputs = null)
+{
+    /// <summary>
+    /// From 0.9.4 (GOAL-08): an open possibility to adopt, by any revision's id. Its draft work order supplies every field the request
+    /// leaves out, the possibility joins the inputs, and the possibility's revision adopting it as the new work order is stored with it.
+    /// Its author, whoever raised it, and any agent tied to its standing agent (named by an assignment of its work or by a revision of its
+    /// role), is refused: another principal adopts it.
+    /// A held finding's work order carries disclosure held.
+    /// </summary>
+    public string? FromPossibility { get; init; }
+}

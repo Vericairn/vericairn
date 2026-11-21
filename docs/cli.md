@@ -1255,6 +1255,53 @@ written, as a live read shows at once. The same view is `GET /v1/goals/{id}/due`
 `goal_due`; `GoalStepRequest` gains `occurrence` and `now`, and `GoalActionRequest` gains `stopRuns`. Community carries one
 occurrence per command, by hand or by the owner's script; unattended dispatch is the carrier's, which honors `runsOn`.
 
+## Standing outputs and `work new --from-possibility` (0.9.4)
+
+From 0.9.4 (GOAL-08), every output of a standing agent's occurrence is a record another principal disposes of. The contributor of
+the assignment that carries the occurrence records it, through the MCP tools `standing_possibility`, `standing_question` and
+`standing_publication`, `POST /v1/standing/outputs` or the SDK's `StandingOutput`, and the runtime names in its `raisedBy` the goal,
+the occurrence, the assignment and, for an agent, its run in flight. No standing agent adopts, declines, parks, answers or withdraws
+its own output.
+
+- **A recommendation** is an open possibility with a `fingerprint`, the flow's rule for what makes two the same, and its sources;
+  optionally evidence for and against (no scores), review triggers, links to possibilities it duplicates or supersedes, and
+  `disclosure: held` for a security finding. A second open possibility of the agent with the same fingerprint is refused, and a
+  declined one is raised again only by naming it in `raisesAgain` with new evidence. Its raiser may revise an open one, keeping its
+  `raisedBy` and fingerprint, to add evidence; a revision is judged by the `raisedBy` of the record it revises, so leaving it out
+  changes no rule. No agent declines, parks or adopts a held finding: a person does, only an operator who is a person adopts it or
+  ends its hold, and the same holds for a held possibility no standing agent raised.
+- **Proposed work** is a possibility with a `draft` work order. `vericairn work new --from-possibility <id> --by <planner>` adopts it:
+  the draft supplies every field the command leaves out, the possibility joins the work order's inputs, and the possibility's revision
+  adopting it as the new work order is stored with it. Its author, whoever raised it, and any agent tied to the standing agent (as
+  a question's answer reads it, below), is refused, and a possibility revision recording its author's adoption is refused as well;
+  a held finding is adopted only by an operator who is a person, and its work order carries `disclosure: held`, so the checked push
+  keeps its key and text out of a public repository until its release is published.
+- **A question** is an ask to a person, who decides for the goal when none is named; a decision of that person answers it. A
+  decision recorded by the agent that asked, or by any agent tied to the standing agent, is refused, whatever `decidedBy` it
+  names, and answers nothing; the same holds for the renewal, period-cap and failure-pause asks goal step puts about the agent,
+  so no agent ends its own failure pause. An agent is tied when any assignment of the goal's work has named it as contributor,
+  or any revision of the goal's role, in the goal's own roles or the roster, has named it, whatever date a record claims and
+  whatever the roster names now. Both only grow, so a roster or assignment change can re-open an answered ask for the person and
+  never closes one: a decision an agent recorded before it was tied stops answering once it is. Any principal nothing ties to the
+  agent, such as the estate's builder, still records the person's decision for them, on the renewal and failure-pause asks its
+  own goal step wrote as well.
+- **Words outside the estate** are a publication request to an operator: the exact text, labeled the agent's draft, pinning the
+  agent's work order. It dispatches nothing, and only an operator who is a person closes it, directly: no agent closes it, citing
+  the operator's words or not.
+
+```sh
+vericairn work new --from-possibility <possibility id> --by <planner> --key IDX-1
+vericairn goal propose ... --standing example/researcher@1.0.0 --outputs possibilities=5 --outputs drafts=3 --outputs open=10
+```
+
+An occurrence records at most `--outputs possibilities` possibilities (five when omitted), of which at most `drafts` (three) carry a
+draft work order; further ideas join one summary possibility, which lists them in `extras`. Each output, and each revision that adds a
+draft or extras, is judged against the caps of the goal revision in force when the output was raised, so lowering the caps judges only
+what is raised afterwards. While the agent's open outputs, its possibilities still open, asks still waiting and publication requests
+not closed, reach `open` (ten when omitted), its occurrences defer and no run of it starts. `goal due`, `status` and `progress` show
+its open outputs; an occurrence's brief states its output caps and names the agent's earlier open and declined possibilities among
+its sources.
+
 ## `vericairn estate first-authority` (0.9.3)
 
 From 0.9.3 (CODE-72), `vericairn estate first-authority` names the estate's first authority in the manifest's

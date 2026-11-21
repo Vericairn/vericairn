@@ -231,7 +231,9 @@ public class McpTests
                 Assert.False(registry.Visible().Single(t => t.Name == name).Writes);
             Assert.Equal(["goal_decide", "goal_due", "goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
             Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal) && t.Name != "goal_decide"), t => Assert.False(t.Writes));
-            Assert.Equal(["document_review", "goal_decide", "work_amend", "work_attempt", "work_progress", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
+            // From 0.9.4 (GOAL-08) the standing outputs' three writes too, each refused for an assignment that carries no occurrence.
+            Assert.Equal(["document_review", "goal_decide", "standing_possibility", "standing_publication", "standing_question", "work_amend", "work_attempt", "work_progress", "work_result"],
+                registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
 
             // Every tool the worker sees, called with arguments that name the goal and ask for its activation and acceptance, changes nothing about
             // the goal, and none answers the ask: no decision is recorded, and the ask still waits.

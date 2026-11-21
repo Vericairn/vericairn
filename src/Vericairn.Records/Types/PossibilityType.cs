@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
@@ -39,6 +40,16 @@ public sealed class PossibilityType : IRecordType
         new("disposition", string.Join('|', Dispositions), true, "What has become of it; a revision records a new disposition.", 2),
         new("reason", "string", false, "Why it was parked, adopted or declined; required unless it is open.", 2),
         new("adoptedAs", "reference", false, "The work order, decision or goal it became: {type, id, hash?}; required when adopted.", 2),
+        new("raisedBy", "object", false, "From 0.9.4, a standing agent's output: goal (the standing agent's goal, its first revision), occurrence (the occurrence key), assignment (the assignment carrying it, whose contributor records it) and, for an agent, run (the agent run it records it in, in flight). Raised open, with a fingerprint and a source; within the occurrence's caps; no second open one of the agent with the same fingerprint; disposed of only by another principal, never by an agent tied to the standing agent's goal (named by an assignment of its work or by a revision of its role); every revision keeps it and the fingerprint as the first revision names them.", 3),
+        new("fingerprint", "string", false, "From 0.9.4, what makes two possibilities the same, by the flow's rule: lower-case letters, digits and . : / _ -, up to 200 characters.", 3),
+        new("sources", "object[]", false, "From 0.9.4, where it was found or how it reproduces: each an address with optional retrievedAt, content hash and the extents relied on.", 3),
+        new("evidence", "object[]", false, "From 0.9.4, evidence for and against, with no scores: each a stance (for|against), a statement and optionally the sources it rests on, by index.", 3),
+        new("reviewTriggers", "object[]", false, "From 0.9.4, what calls for it to be read again: each a time (at) or a condition.", 3),
+        new("links", "object[]", false, "From 0.9.4, other possibilities it relates to: each a relation (duplicate-of|supersedes), a possibility id and its exact hash.", 3),
+        new("draft", "object", false, "From 0.9.4, proposed work as a draft work order (key?, title, intent, scope, deliverables, exitQuestion), adopted by work new --from-possibility by a principal other than its author.", 3),
+        new("disclosure", "held", false, "From 0.9.4, a held finding: no agent disposes of it, a person does; only an operator who is a person adopts it or ends its hold, by a revision without it; adopted by work new --from-possibility, its work order is held from disclosure too.", 3),
+        new("extras", "string[]", false, "From 0.9.4, a standing occurrence's summary possibility: the further ideas past its cap, one line each; one per occurrence.", 3),
+        new("raisesAgain", "ulid", false, "From 0.9.4, the declined possibility of the same standing agent and fingerprint that this one raises again, with new evidence.", 3),
     ];
 
     /// <inheritdoc />
@@ -52,7 +63,32 @@ public sealed class PossibilityType : IRecordType
         string? disposition = body.Enum("disposition", true, Dispositions);
         body.Text("reason", disposition is not null and not "open", 4000);
         BodyReader? adopted = body.Nested("adoptedAs", disposition == "adopted");
+        StandingOutputs.RaisedBy? raised = null;
+        bool since = body.Since(3, "raisedBy");
+        bool later = StandingOutputs.RevisesLaterFormat(context);
+        if (since || later)
+        {
+            raised = StandingOutputs.ValidateRaisedBy(context, since ? body.Nested("raisedBy", false) : null);
+        }
+
+        if (body.Since(3, "fingerprint")) StandingOutputs.Fingerprint(body);
+        if (body.Since(3, "sources")) StandingOutputs.Sources(body);
+        if (body.Since(3, "evidence")) StandingOutputs.Evidence(body);
+        if (body.Since(3, "reviewTriggers")) StandingOutputs.ReviewTriggers(body);
+        if (body.Since(3, "links")) StandingOutputs.Links(context, body);
+        if (body.Since(3, "draft")) StandingOutputs.Draft(body);
+        if (body.Since(3, "disclosure")) body.Enum("disclosure", false, "held");
+        if (body.Since(3, "extras")) StandingOutputs.Extras(body);
+        if (body.Since(3, "raisesAgain")) body.Ulid("raisesAgain", false);
         body.NoOtherKeys();
+        if (context.Format >= 3 || later)
+        {
+            StandingOutputs.ValidatePossibility(context, raised, disposition);
+        }
+
+        // From 0.9.4 (GOAL-08), at every format: a possibility's author does not adopt it, whoever raised it.
+        StandingOutputs.ValidateAdoption(context, disposition);
+
         if (adopted is not null)
         {
             RecordReference? reference = RecordParser.ParseReference(adopted.Element, adopted.Location, context.Findings);

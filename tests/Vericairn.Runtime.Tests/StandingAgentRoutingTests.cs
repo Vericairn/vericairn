@@ -142,13 +142,19 @@ public class StandingAgentRoutingTests
         Assert.Equal("none", waiting.Outcome);
         Assert.Contains("paused by its failures", waiting.Message, StringComparison.Ordinal);
 
-        // The sponsor's answer lets it go on.
+        // The agent that carried the failed runs records a decision answering the pause's ask in the sponsor's name: refused, and the pause holds.
         JsonObject answer = new()
         {
             ["title"] = "Go on", ["statement"] = "Let the researcher go on.", ["summary"] = "The failures were the stand-in's.", ["synthesis"] = "The operator answers the pause.",
             ["effects"] = new JsonArray("the agent goes on"), ["affects"] = new JsonArray(), ["decidedBy"] = op, ["decidedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow),
             ["stake"] = "low", ["notAuthorized"] = new JsonArray("spending"), ["answers"] = new JsonArray(asking.Ask!.Id),
         };
+        WriteOutcome own = run.Service.NewRecord(new NewRecordRequest("decision", run.Estate.BuilderId, JsonSerializer.SerializeToElement(answer)));
+        Assert.False(own.Ok);
+        Assert.Contains(own.Problem!.Findings, f => f.Code == "standing.own-output" && f.Severity == "error");
+        Assert.Equal(("held", 3), (run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString(), run.Service.GoalDue(goal)!.Json.GetProperty("failures").GetProperty("consecutive").GetInt32()));
+
+        // The sponsor's answer lets it go on.
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, JsonSerializer.SerializeToElement(answer))));
         Assert.Equal("active", run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString());
         GoalStepResponse resumed = Step(run, goal, "resumed");
@@ -388,9 +394,9 @@ public class StandingAgentRoutingTests
 
     /// <summary>
     /// Installs the researcher flow and a standing agent of it the operator sponsors and activates: a daily schedule whose first tick was
-    /// two days ago, the request trigger, the builder in the researcher role; returns the goal's id.
+    /// two days ago, the request trigger, the builder (or the holders given) in the researcher role; returns the goal's id.
     /// </summary>
-    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null)
+    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null, string[]? holders = null)
     {
         string op = run.Estate.OperatorId;
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}"""), Supersedes: run.Estate.BuilderId)));
@@ -402,7 +408,7 @@ public class StandingAgentRoutingTests
             ["title"] = "Research the widget", ["objective"] = "Keep researching the widget between releases.",
             ["completion"] = new JsonArray(new JsonObject { ["record"] = FlowFixture.Marker("RESEARCHED") }), ["constraints"] = new JsonArray("nothing outside research/"),
             ["kind"] = "stewardship", ["sponsor"] = op, ["budget"] = budget ?? new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 3 },
-            ["roles"] = new JsonArray(FlowFixture.Role("researcher", holder ?? run.Estate.BuilderId)),
+            ["roles"] = new JsonArray(FlowFixture.Role("researcher", holders ?? [holder ?? run.Estate.BuilderId])),
             ["plan"] = new JsonObject
             {
                 ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(order),
@@ -422,6 +428,10 @@ public class StandingAgentRoutingTests
         RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
         return goal;
     }
+
+    /// <summary>One goal step of a standing agent taken by the principal named, its run capped at ten minutes, with the stand-in.</summary>
+    internal static GoalStepResponse StepAs(RunEstate run, string goal, string report, string by) =>
+        run.Service.GoalStep(goal, new GoalStepRequest(by, run.Resource, Command(run, report), WallMinutes: 10));
 
     /// <summary>One goal step of a standing agent, its run capped at ten minutes, with the stand-in in a scenario.</summary>
     internal static GoalStepResponse Step(RunEstate run, string goal, string report, string? occurrence = null, string scenario = "claude", string? branch = null) =>

@@ -10,21 +10,23 @@ namespace Vericairn.Records.Tests;
 
 /// <summary>
 /// A standing agent in a disposable format-3 estate (from 0.9.4, GOAL-07): a researcher flow with every trigger kind and one work step, the
-/// standing work order, a roster naming the builder for the researcher role, and a stewardship goal whose plan carries standing, which the
-/// operator sponsors and activates. The estate's clock moves one second with every record, and can be set.
+/// standing work order, a roster naming the builder (or, without builderHolds, the operator) for the researcher role, and a stewardship goal
+/// whose plan carries standing, which the operator sponsors and activates. The estate's clock moves one second with every record, and can be set.
 /// </summary>
 internal sealed class StandingFixture : IDisposable
 {
-    public StandingFixture(JsonArray? triggers = null, JsonObject? period = null, JsonObject? budget = null, string until = "2027-06-01T00:00:00Z", bool activate = true, string subject = "the widget", JsonObject? limits = null)
+    public StandingFixture(JsonArray? triggers = null, JsonObject? period = null, JsonObject? budget = null, string until = "2027-06-01T00:00:00Z", bool activate = true, string subject = "the widget", JsonObject? limits = null,
+        TemplateDefinition? flow = null, string role = "researcher", string subjectField = "topic", bool builderHolds = true)
     {
         Policies = new PolicyFixture();
-        Flow = FlowFixture.Install(Estate, Researcher());
+        SubjectField = subjectField;
+        Flow = flow ?? FlowFixture.Install(Estate, Researcher());
         Work = Add("work-order", new JsonObject
         {
             ["key"] = "RES-1", ["kind"] = "ordinary", ["title"] = "Research the widget", ["intent"] = "Keep researching the widget between releases.", ["scope"] = new JsonArray("path:research/"),
             ["exitQuestion"] = "Is each occurrence's research recorded?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("cited findings"),
         });
-        Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("researcher", Estate.BuilderId), FlowFixture.Role("decider", Estate.OperatorId)) });
+        Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role(role, builderHolds ? Estate.BuilderId : Estate.OperatorId), FlowFixture.Role("decider", Estate.OperatorId)) });
         Goal = Add("goal", GoalBody(triggers, period, budget, until, subject, limits));
         if (activate)
         {
@@ -37,6 +39,9 @@ internal sealed class StandingFixture : IDisposable
     public TestEstate Estate => Policies.Estate;
 
     public TemplateDefinition Flow { get; }
+
+    /// <summary>The flow's subject field the goal binds: topic for the researcher.</summary>
+    public string SubjectField { get; }
 
     public RecordEnvelope Work { get; }
 
@@ -61,7 +66,7 @@ internal sealed class StandingFixture : IDisposable
                 ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(Work.Id),
                 ["standing"] = new JsonObject
                 {
-                    ["pin"] = FlowFixture.Pin(Flow), ["subject"] = new JsonObject { ["topic"] = subject },
+                    ["pin"] = FlowFixture.Pin(Flow), ["subject"] = new JsonObject { [SubjectField] = subject },
                     ["triggers"] = triggers ?? new JsonArray(Monthly()),
                     ["period"] = period ?? new JsonObject { ["unit"] = "months", ["runs"] = 4, ["wallMinutes"] = 120 },
                     ["until"] = until,
@@ -111,17 +116,18 @@ internal sealed class StandingFixture : IDisposable
         }, builder: builder, subject: attempt.Reference);
     }
 
-    /// <summary>The intent of an agent run carrying an assignment of the goal, with a cap of ten minutes.</summary>
-    public RecordEnvelope RunIntent(RecordEnvelope assignment, string identity) => Add("operation", RunBody(assignment, identity, "not-started"));
+    /// <summary>The intent of an agent run carrying an assignment of the goal, with a cap of ten minutes, by the builder or the agent named.</summary>
+    public RecordEnvelope RunIntent(RecordEnvelope assignment, string identity, string? principal = null) => Add("operation", RunBody(assignment, identity, "not-started", principal));
 
     /// <summary>A run's settlement: its intent's revision with the status, observed and charged five minutes, and the stop asked of it when one was.</summary>
     public RecordEnvelope Settle(RecordEnvelope intent, string status, string? stoppedBy = null)
     {
         RecordEnvelope assignment = Estate.Load().ById[intent.Body.GetProperty("target").GetProperty("assignment").GetString()!];
-        JsonObject dispatched = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, "dispatched");
+        string principal = intent.Body.GetProperty("target").GetProperty("principal").GetString()!;
+        JsonObject dispatched = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, "dispatched", principal);
         dispatched["dispatchedAt"] = intent.At;
         RecordEnvelope running = Add("operation", dispatched, supersedes: intent.Id);
-        JsonObject body = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, status);
+        JsonObject body = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, status, principal);
         body["dispatchedAt"] = intent.At;
         body["observed"] = new JsonObject { ["summary"] = "The run ended.", ["at"] = RecordParser.FormatTimestamp(Estate.Clock) };
         body["usage"] = new JsonObject { ["wallMinutes"] = 5, ["unreported"] = new JsonArray() };
@@ -133,10 +139,10 @@ internal sealed class StandingFixture : IDisposable
         return Add("operation", body, supersedes: running.Id);
     }
 
-    public JsonObject RunBody(RecordEnvelope assignment, string identity, string status) => new()
+    public JsonObject RunBody(RecordEnvelope assignment, string identity, string status, string? principal = null) => new()
     {
         ["provider"] = "stand-in", ["action"] = "agent-run", ["identity"] = identity, ["intent"] = "Carry the occurrence.",
-        ["target"] = new JsonObject { ["assignment"] = assignment.Id, ["principal"] = Estate.BuilderId, ["workspace"] = "research, branch work/res-1", ["goal"] = Goal.Id },
+        ["target"] = new JsonObject { ["assignment"] = assignment.Id, ["principal"] = principal ?? Estate.BuilderId, ["workspace"] = "research, branch work/res-1", ["goal"] = Goal.Id },
         ["status"] = status, ["evidence"] = new JsonArray(), ["cap"] = new JsonObject { ["wallMinutes"] = 10, ["attemptsPerStep"] = Goal.Body.GetProperty("budget").GetProperty("attemptsPerStep").GetInt32() },
     };
 

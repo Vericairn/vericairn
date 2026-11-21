@@ -50,6 +50,8 @@ internal static class StandingView
 
         text.Append("  Runs in flight: ").Append(agent.InFlight.ToString(CultureInfo.InvariantCulture)).Append(" of ").Append(agent.Concurrency.ToString(CultureInfo.InvariantCulture))
             .Append("; failed in a row: ").Append(agent.Failures.ToString(CultureInfo.InvariantCulture)).Append(" of ").Append(agent.FailureLimit.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        text.Append("  Open outputs: ").Append(agent.OpenOutputs.ToString(CultureInfo.InvariantCulture)).Append(" of ").Append(agent.OpenCap.ToString(CultureInfo.InvariantCulture))
+            .Append(", each a possibility, ask or publication request another principal disposes of").Append('\n');
         text.Append("Triggers\n");
         foreach (StandingAgents.Trigger trigger in agent.Triggers)
         {
@@ -126,6 +128,7 @@ internal static class StandingView
             },
             ["concurrency"] = new JsonObject { ["inFlight"] = agent.InFlight, ["cap"] = agent.Concurrency },
             ["failures"] = new JsonObject { ["consecutive"] = agent.Failures, ["limit"] = agent.FailureLimit, ["latest"] = agent.FailureTrigger is null ? null : Reference(agent.FailureTrigger) },
+            ["outputs"] = new JsonObject { ["open"] = agent.OpenOutputs, ["cap"] = agent.OpenCap },
         };
     }
 
@@ -138,7 +141,7 @@ internal static class StandingView
         int due = agent.Occurrences.Count(o => o.State == "due");
         int deferred = agent.Occurrences.Count(o => o.State == "deferred");
         int settled = agent.Occurrences.Count(o => o.State == "settled");
-        return $"{EstateModel.BodyString(agent.Goal, "title")} [goal {agent.Goal.Id}]: {agent.State}; {due.ToString(CultureInfo.InvariantCulture)} due, {deferred.ToString(CultureInfo.InvariantCulture)} deferred, {settled.ToString(CultureInfo.InvariantCulture)} awaiting review; {next}{period}";
+        return $"{EstateModel.BodyString(agent.Goal, "title")} [goal {agent.Goal.Id}]: {agent.State}; {due.ToString(CultureInfo.InvariantCulture)} due, {deferred.ToString(CultureInfo.InvariantCulture)} deferred, {settled.ToString(CultureInfo.InvariantCulture)} awaiting review, {agent.OpenOutputs.ToString(CultureInfo.InvariantCulture)} outputs open; {next}{period}";
     }
 
     private static JsonObject Occurrence(StandingAgents.OccurrenceState state) => new()

@@ -322,6 +322,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public WriteOutcome Amend(AmendRequest request) => Post<AmendRequest, WriteOutcome>("/v1/work/amend", request)!;
 
     /// <inheritdoc />
+    public WriteOutcome StandingOutput(StandingOutputRequest request) => Post<StandingOutputRequest, WriteOutcome>("/v1/standing/outputs", request)!;
+
+    /// <inheritdoc />
     public IReadOnlyList<DeviceRow> Devices() => Get<List<DeviceRow>>("/v1/devices")!;
 
     /// <inheritdoc />

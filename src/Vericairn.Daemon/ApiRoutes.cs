@@ -104,6 +104,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/release-bases/{{hash}}", (string hash) => service.ReleaseBasis(hash) is { } basis ? Results.Json(basis, ProtocolJson.Options) : Results.NotFound());
         app.MapPost($"{v}/work/review", (ResultReviewRequest request) => Outcome(service.ReviewResult(request)));
         app.MapPost($"{v}/work/amend", (AmendRequest request) => Outcome(service.Amend(request)));
+        app.MapPost($"{v}/standing/outputs", (StandingOutputRequest request) => Outcome(service.StandingOutput(request)));
         app.MapPost($"{v}/work/takeover", (TakeoverRequest request) => Results.Json(service.WorkTakeover(request), ProtocolJson.Options));
         app.MapGet($"{v}/devices", () => Results.Json(service.Devices(), ProtocolJson.Options));
         app.MapPost($"{v}/devices", (DeviceCreateRequest request) => Outcome(service.DeviceCreate(request)));

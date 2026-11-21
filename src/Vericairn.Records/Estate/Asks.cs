@@ -54,8 +54,9 @@ public static class Asks
             return (recorded, []);
         }
 
+        // From 0.9.4 (GOAL-08), a standing agent's decision about its own ask, or about the runtime's asks about it, answers nothing.
         IReadOnlyList<string> chain = model.Chain(latest);
-        List<RecordEnvelope> answers = model.DecisionsAnswering(chain)
+        List<RecordEnvelope> answers = StandingOutputs.Counting(model, latest, model.DecisionsAnswering(chain))
             .OrderBy(d => d.At, StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal)
             .ToList();
         return (answers.Count > 0 ? "answered" : recorded, answers);

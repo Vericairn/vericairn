@@ -587,6 +587,33 @@ it. Both supersede their earlier verification of the same check and version, so 
 each waits as an operator request whose exact command appears only when the step is next, and only records an operator signed
 complete it.
 
+## The first standing roles (0.9.4)
+
+From 0.9.4 (PROC-08) three standing roles ship as built-in flows with triggers, available through `templates list` and
+`templates show` without copying files: `vericairn.estate/duty-carrier` 1.0.0, `vericairn.software/researcher` 1.0.0 and
+`vericairn.software/bug-hunter` 1.0.0. Each declares its trigger kinds, one role with its brief, one work step and the outputs it
+records, and never lines carried into every brief. A role grants nothing: a standing agent pins one in `goal propose --standing`, its
+roster names who fills the role, and its sponsor's activation grants its budget ([CLI](cli.md#standing-agents-goal-due-and-goal-step---occurrence-094)).
+
+| Role | Triggers | Outputs | The authority each effect needs |
+| --- | --- | --- | --- |
+| `vericairn.estate/duty-carrier` | `duty`, `request` | A result naming the duty occurrences it discharges, with their evidence; operator requests | The duty's own scope; a reserved action is never carried through a duty and becomes an operator request |
+| `vericairn.software/researcher` | `schedule`, `event` (such as a release published), `request` | Possibilities citing their sources, with a draft work order where work is proposed; asks | None to read the estate; public retrieval only where the brief permits it, with no credential, refused in a private estate; anything outward a publication request |
+| `vericairn.software/bug-hunter` | `schedule`, `event` (such as a change integrated into main), `request` | Possibilities with their reproductions and a draft fix work order | Commits on the occurrence's own branch only; no push to a protected branch, pull request or merge |
+
+Each role's brief states its fingerprint rule, so a repeat of an open or declined finding has its fingerprint, and its caps: at
+most five possibilities per occurrence, three with drafts, the rest in one summary possibility. Every output is a record another
+principal disposes of ([standing outputs](cli.md#standing-outputs-and-work-new---from-possibility-094)); a security finding carries
+`disclosure: held` for the Reviewer's review. The issue resolver and customer service follow conversation intake, in 0.9.6.
+
+```sh
+vericairn goal propose --by <sponsor> --kind stewardship --standing vericairn.software/researcher@1.0.0 --work-order RES-1 \
+  --title "Research the widget" --objective "Keep researching the widget." --done '{"type":"work-order","fields":{"key":"RESEARCHED"}}' \
+  --subject topic="the widget" --budget wallMinutes=30 --budget attemptsPerStep=2 \
+  --trigger '{"key":"monthly","kind":"schedule","unit":"months","every":1,"firstAt":"2026-12-01T00:00:00Z"}' \
+  --trigger '{"key":"asked","kind":"request"}' --period runs=4 --period wallMinutes=120
+```
+
 ## Preparing a release review (0.8.4)
 
 `vericairn release review-brief <version>` writes the candidate's review brief from the

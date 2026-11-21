@@ -3291,8 +3291,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         // From 0.9.4 (GOAL-07), a new assignment's occurrence is one its trigger makes as the records stand: an event never the agent's own,
-        // and a condition failing over the records it names; assignments already in the estate keep their reading.
-        foreach (Finding finding in model.Findings.Where(f => f.Code == StandingAgents.BoundaryCode && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
+        // and a condition failing over the records it names; assignments already in the estate keep their reading. From GOAL-08, a new
+        // disposition of a standing output, or answer to its ask, is by no agent tied to its goal, even by records written after it.
+        foreach (Finding finding in model.Findings.Where(f => f.Code is StandingAgents.BoundaryCode or StandingOutputs.BoundaryCode && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }

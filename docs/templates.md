@@ -887,6 +887,19 @@ or a document review after `docs-after`. Such an extension names its estate's
 own destinations, so it stays that estate's content and pins the base it
 extends by hash.
 
+
+### The first standing roles (0.9.4)
+
+From 0.9.4 (PROC-08) the software pack also ships three standing roles as
+built-in flows with triggers: `vericairn.estate/duty-carrier` 1.0.0 (trigger
+kinds `duty` and `request`), `vericairn.software/researcher` 1.0.0 and
+`vericairn.software/bug-hunter` 1.0.0 (both `schedule`, `event` and
+`request`). Each has one role, one work step and never lines; its role brief
+states the outputs it records, its fingerprint rule and the authority each
+effect needs, and what no grant covers becomes an operator request. A standing
+agent pins one with `goal propose --standing`; the roles, their triggers and
+outputs are in [software.md](software.md#the-first-standing-roles-094).
+
 ## Client and extension contract
 
 The API adds `GET /v1/templates`, `POST /v1/documents/new`,

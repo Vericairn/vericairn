@@ -134,6 +134,12 @@ internal static class StandingAgents
         /// <summary>The results awaiting review that defer its dispatch.</summary>
         public int AwaitingCap { get; init; } = DefaultAwaitingReview;
 
+        /// <summary>From GOAL-08: its open outputs, possibilities still open, asks still waiting and publication requests not closed.</summary>
+        public int OpenOutputs { get; init; }
+
+        /// <summary>From GOAL-08: the open outputs that defer its dispatch.</summary>
+        public int OpenCap { get; init; } = StandingOutputs.DefaultOpen;
+
         /// <summary>The occurrences that may be carried now, oldest first.</summary>
         public IEnumerable<OccurrenceState> Due => Occurrences.Where(o => o.State == "due");
 
@@ -418,6 +424,8 @@ internal static class StandingAgents
         (int failures, RecordEnvelope? failure) = Failures(model, current, assignments, runs);
         int awaitingCap = AwaitingReviewCap(current);
         int awaiting = AwaitingCount(model, order, null);
+        int openCap = StandingOutputs.CapsOf(current).Open;
+        int open = StandingOutputs.OpenCount(model, current);
         int limit = FailureLimit(current);
         int inFlight = runs.Count(r => r.InFlight);
         (string state, string reason) = status switch
@@ -437,13 +445,15 @@ internal static class StandingAgents
         var states = new List<OccurrenceState>();
         foreach (Occurrence occurrence in occurrences)
         {
-            states.Add(StateOf(model, ledger, occurrence, byKey.GetValueOrDefault(occurrence.Key), runs, state, reason, period, inFlight, awaiting, awaitingCap));
+            states.Add(StateOf(model, ledger, occurrence, byKey.GetValueOrDefault(occurrence.Key), runs, state, reason, period, inFlight, awaiting, awaitingCap, open, openCap));
         }
 
         return new Agent(current, status, state, reason, asOf, flow, step, unavailable, order, until, TJson.Text(plan, "runsOn"), period, inFlight, ledger.Concurrency, failures, limit, failure, triggers, next, states)
         {
             Awaiting = awaiting,
             AwaitingCap = awaitingCap,
+            OpenOutputs = open,
+            OpenCap = openCap,
         };
     }
 
@@ -602,7 +612,7 @@ internal static class StandingAgents
     }
 
     /// <summary>An occurrence's state from the assignment that holds its key, its runs and its result, then the agent's gates.</summary>
-    private static OccurrenceState StateOf(EstateModel model, AgentRuns.Ledger ledger, Occurrence occurrence, List<RecordEnvelope>? holders, List<AgentRuns.Run> runs, string agent, string agentReason, Period? period, int inFlight, int awaiting, int awaitingCap)
+    private static OccurrenceState StateOf(EstateModel model, AgentRuns.Ledger ledger, Occurrence occurrence, List<RecordEnvelope>? holders, List<AgentRuns.Run> runs, string agent, string agentReason, Period? period, int inFlight, int awaiting, int awaitingCap, int open, int openCap)
     {
         RecordEnvelope? holder = holders is { Count: > 0 } ? holders[^1] : null;
         if (holder is not null)
@@ -663,11 +673,11 @@ internal static class StandingAgents
 
         return Gate(new(occurrence, "due", occurrence.Summary, null, null, null));
 
-        OccurrenceState Gate(OccurrenceState due) => Gated(agent, agentReason, period, inFlight, ledger.Concurrency, awaiting, awaitingCap, due);
+        OccurrenceState Gate(OccurrenceState due) => Gated(agent, agentReason, period, inFlight, ledger.Concurrency, awaiting, awaitingCap, due, open, openCap);
     }
 
     /// <summary>An occurrence the agent's gates defer: anything but an active agent, a period whose caps are reached, or runs in flight at its concurrency.</summary>
-    private static OccurrenceState Gated(string agent, string agentReason, Period? period, int inFlight, int concurrency, int awaiting, int awaitingCap, OccurrenceState due)
+    private static OccurrenceState Gated(string agent, string agentReason, Period? period, int inFlight, int concurrency, int awaiting, int awaitingCap, OccurrenceState due, int open = 0, int openCap = int.MaxValue)
     {
         if (agent != "active")
         {
@@ -684,6 +694,12 @@ internal static class StandingAgents
             return due with { State = "deferred", Reason = $"{due.Reason}; deferred: {awaiting.ToString(CultureInfo.InvariantCulture)} of its results await review, its cap of {awaitingCap.ToString(CultureInfo.InvariantCulture)}" };
         }
 
+        // From GOAL-08: open outputs at the plan's cap defer dispatch until another principal disposes of some (§ 10).
+        if (open >= openCap)
+        {
+            return due with { State = "deferred", Reason = $"{due.Reason}; deferred: {open.ToString(CultureInfo.InvariantCulture)} of its outputs are open, its cap of {openCap.ToString(CultureInfo.InvariantCulture)}" };
+        }
+
         if (inFlight >= concurrency)
         {
             return due with { State = "deferred", Reason = $"{due.Reason}; waits: {inFlight.ToString(CultureInfo.InvariantCulture)} of its runs in flight, its concurrency of {concurrency.ToString(CultureInfo.InvariantCulture)}" };
@@ -697,7 +713,7 @@ internal static class StandingAgents
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(occurrence);
-        OccurrenceState state = Gated(agent.State, agent.Reason, agent.Period, agent.InFlight, agent.Concurrency, agent.Awaiting, agent.AwaitingCap, new OccurrenceState(occurrence, "due", occurrence.Summary, null, null, null));
+        OccurrenceState state = Gated(agent.State, agent.Reason, agent.Period, agent.InFlight, agent.Concurrency, agent.Awaiting, agent.AwaitingCap, new OccurrenceState(occurrence, "due", occurrence.Summary, null, null, null), agent.OpenOutputs, agent.OpenCap);
         return agent with { Occurrences = [.. agent.Occurrences, state] };
     }
 
@@ -788,8 +804,11 @@ internal static class StandingAgents
         }
 
         // A failure an answered ask of the pause names, and every outcome before it, no longer counts: the sponsor's answer lets the agent go on.
+        // From GOAL-08 only the pause's ask goal step recorded counts, never another principal's ask in its words, and only an answer no
+        // agent tied to the goal recorded (Asks.State leaves those out, StandingOutputs.SelfAnswer), whatever date it claims; judged before
+        // a record, such as a run's intent, by the ties written before it, so a later tie makes no earlier record wrong.
         List<RecordEnvelope> asks = [.. Routing.AsksOf(model, goal).Where(a => Counts(a) && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(NextEligible.AttentionQuestion, StringComparison.Ordinal)
-            && Asks.State(model, a) is { State: "answered" } state && state.Answers.Any(Counts))];
+            && RuntimeAsk(model, goal, a) && Answered(model, a, before))];
         int cut = -1;
         for (int i = 0; i < outcomes.Count; i++)
         {
@@ -802,6 +821,22 @@ internal static class StandingAgents
 
         List<(RecordEnvelope Record, bool Failed)> trailing = [.. outcomes.Skip(cut + 1).Reverse().TakeWhile(o => o.Failed)];
         return (trailing.Count, trailing.Count == 0 ? null : trailing[0].Record);
+    }
+
+    /// <summary>
+    /// True when an ask is answered, as <see cref="Asks.State"/> reads it now; before a record, when an answer recorded before it counted
+    /// then (<see cref="StandingOutputs.Counting"/> as of it) and its asker has not withdrawn it.
+    /// </summary>
+    private static bool Answered(EstateModel model, RecordEnvelope ask, RecordEnvelope? before)
+    {
+        if (before is null)
+        {
+            return Asks.State(model, ask).State == "answered";
+        }
+
+        RecordEnvelope latest = model.Latest(ask);
+        return EstateModel.BodyString(latest, "state") != "withdrawn"
+            && StandingOutputs.Counting(model, latest, model.DecisionsAnswering(model.Chain(latest)), before).Any(d => GoalRules.Before(d, before));
     }
 
     /// <summary>
@@ -915,13 +950,39 @@ internal static class StandingAgents
         return now >= until - lead;
     }
 
-    /// <summary>The open ask the failure pause or a period cap raised, when one waits, so goal step records no second.</summary>
+    /// <summary>
+    /// The open ask the failure pause or a period cap raised, when one waits, so goal step records no second: one goal step recorded about
+    /// the goal (<see cref="RuntimeAsk"/>), never another principal's ask in the same words.
+    /// </summary>
     public static RecordEnvelope? OpenAsk(EstateModel model, RecordEnvelope goal, string prefix, DateTimeOffset? since = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
-        return Routing.AsksOf(model, goal).Where(a => (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(prefix, StringComparison.Ordinal) && (since is null || a.AtTime >= since))
+        return Routing.AsksOf(model, goal).Where(a => a.Subject is { Type: "goal" } && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(prefix, StringComparison.Ordinal)
+                && (since is null || a.AtTime >= since) && RuntimeAsk(model, goal, a))
             .LastOrDefault(a => prefix == PeriodAsk || Asks.IsWaiting(Asks.State(model, a).State));
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-08): true when an ask of a standing agent's goal is one goal step recorded itself (its renewal ask, a period cap's
+    /// ask or its failure pause's ask), recognized by what goal step writes and signs, never by the ask's words alone: its first revision
+    /// names no raisedBy, it is put to a person, and its author took the goal's steps as the records stood when it was written, as goal
+    /// step's caller must (an operator, the sponsor when a person, a principal holding local-engineering, or a dispatcher whose grant names
+    /// the goal). Which of them it is the caller reads from its subject and opening words, which only such an author wrote; an agent that
+    /// carries the occurrences and takes no step writes none of them, whatever its words. goal step writes and signs these asks as its
+    /// caller, so an agent that carries the occurrences and may itself take the goal's steps (one holding local-engineering) writes one
+    /// in their words as it could by calling goal step; telling the runtime's own apart from such an agent's would need a mark no record
+    /// field carries yet. Its answer to one counts for nothing either way, since it carries the occurrences (<see cref="StandingOutputs.SelfAnswer"/>);
+    /// the author of one that nothing ties to the goal records the person's decision on it.
+    /// </summary>
+    public static bool RuntimeAsk(EstateModel model, RecordEnvelope goal, RecordEnvelope ask)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(ask);
+        RecordEnvelope first = StandingOutputs.FirstOf(model, ask);
+        return StandingOutputs.Of(first) is null && GoalRules.IsPerson(model, EstateModel.BodyString(first, "to"))
+            && Routing.MayTakeStep(model, model.ById.ContainsKey(goal.Id) ? model.Latest(goal) : goal, first.By, first.AtTime, first);
     }
 
     /// <summary>
@@ -968,6 +1029,14 @@ internal static class StandingAgents
         if (awaiting >= cap)
         {
             refusals.Add(("operation.standing", $"{awaiting.ToString(CultureInfo.InvariantCulture)} of standing agent {goal.Id}'s results await review, its cap of {cap.ToString(CultureInfo.InvariantCulture)}: no run starts until they are reviewed."));
+        }
+
+        // From GOAL-08: open outputs at the plan's cap hold dispatch (§ 10).
+        int open = StandingOutputs.OpenCount(model, goal, before);
+        int openCap = StandingOutputs.CapsOf(goal).Open;
+        if (open >= openCap)
+        {
+            refusals.Add(("operation.standing", $"{open.ToString(CultureInfo.InvariantCulture)} of standing agent {goal.Id}'s outputs are open, its cap of {openCap.ToString(CultureInfo.InvariantCulture)}: no run starts until another principal disposes of some."));
         }
 
         if (PeriodOf(model, goal, runs, at) is { Caps.Count: > 0 } period && period.Caps.TryGetValue("runs", out long allowed) && period.Spent.GetValueOrDefault("runs") >= allowed)
@@ -1045,6 +1114,7 @@ internal static class StandingAgents
         string? until = standing.Timestamp("until", true);
         standing.Hash("runsOn", false);
         standing.Number("awaitingReview", false, 1, 100);
+        StandingOutputs.ValidateCaps(standing.Nested("outputs", false));
         standing.NoOtherKeys();
         if (kind != "stewardship")
         {
