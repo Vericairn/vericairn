@@ -148,9 +148,9 @@ public sealed partial class EstateService
 
     /// <summary>
     /// work new --from-possibility: the work order from the possibility's draft, the request's own fields winning, with the possibility
-    /// among its inputs, and the possibility's revision adopting it as that work order, judged together and stored as one batch. The
-    /// possibility's rules refuse an adoption by its author, by an agent that carried its standing agent's occurrences, and of a held finding
-    /// by anyone but an operator who is a person.
+    /// among its inputs, and the possibility's revision adopting it as that work order, judged together and stored as one batch. Its author
+    /// is refused, whoever raised it; the possibility's rules refuse an adoption by an agent that carried its standing agent's occurrences,
+    /// and of a held finding by anyone but an operator who is a person; and a held finding's work order is held from disclosure.
     /// </summary>
     private WriteOutcome WorkNewFromPossibility(WorkNewRequest request, JsonObject body)
     {
@@ -168,6 +168,14 @@ public sealed partial class EstateService
                 return Refuse($"Possibility {possibility.Id} is {EstateModel.BodyString(possibility, "disposition")}: only an open possibility is adopted.");
             }
 
+            // Whoever raised it, a standing agent or not, a principal other than its author adopts it (design/standing-agents.md § 8).
+            RecordEnvelope raiser = StandingOutputs.FirstOf(model, possibility);
+            if (raiser.By == request.By)
+            {
+                string own = $"Possibility {raiser.Id} ({EstateModel.BodyString(raiser, "title")}) was raised by {request.By}: a principal other than its author adopts it by work new --from-possibility.";
+                return WriteOutcome.Fail(new Problem("rejected", "Not written: " + own, [new FindingDto("error", "standing.own-output", raiser.Id, own)]));
+            }
+
             JsonElement draft = possibility.Body.TryGetProperty("draft", out JsonElement d) && d.ValueKind == JsonValueKind.Object ? d : default;
             foreach (string field in new[] { "key", "title", "intent", "exitQuestion" })
             {
@@ -183,6 +191,13 @@ public sealed partial class EstateService
                 {
                     body[field] = JsonNode.Parse(value.GetRawText());
                 }
+            }
+
+            // A held finding's work order is held from disclosure too, so the checked push keeps its key and text out of public repositories
+            // until the release that carries it publishes (design/release-lines.md § 10).
+            if (EstateModel.BodyString(possibility, "disclosure") == "held")
+            {
+                body["disclosure"] = "held";
             }
 
             JsonArray inputs = body["inputs"]!.AsArray();

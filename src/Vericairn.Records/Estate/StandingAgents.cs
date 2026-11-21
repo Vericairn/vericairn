@@ -804,8 +804,9 @@ internal static class StandingAgents
         }
 
         // A failure an answered ask of the pause names, and every outcome before it, no longer counts: the sponsor's answer lets the agent go on.
+        // From GOAL-08 only the pause's ask goal step recorded counts, never another principal's ask in its words.
         List<RecordEnvelope> asks = [.. Routing.AsksOf(model, goal).Where(a => Counts(a) && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(NextEligible.AttentionQuestion, StringComparison.Ordinal)
-            && Asks.State(model, a) is { State: "answered" } state && state.Answers.Any(Counts))];
+            && RuntimeAsk(model, goal, a) && Asks.State(model, a) is { State: "answered" } state && state.Answers.Any(Counts))];
         int cut = -1;
         for (int i = 0; i < outcomes.Count; i++)
         {
@@ -931,13 +932,35 @@ internal static class StandingAgents
         return now >= until - lead;
     }
 
-    /// <summary>The open ask the failure pause or a period cap raised, when one waits, so goal step records no second.</summary>
+    /// <summary>
+    /// The open ask the failure pause or a period cap raised, when one waits, so goal step records no second: one goal step recorded about
+    /// the goal (<see cref="RuntimeAsk"/>), never another principal's ask in the same words.
+    /// </summary>
     public static RecordEnvelope? OpenAsk(EstateModel model, RecordEnvelope goal, string prefix, DateTimeOffset? since = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
-        return Routing.AsksOf(model, goal).Where(a => (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(prefix, StringComparison.Ordinal) && (since is null || a.AtTime >= since))
+        return Routing.AsksOf(model, goal).Where(a => a.Subject is { Type: "goal" } && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(prefix, StringComparison.Ordinal)
+                && (since is null || a.AtTime >= since) && RuntimeAsk(model, goal, a))
             .LastOrDefault(a => prefix == PeriodAsk || Asks.IsWaiting(Asks.State(model, a).State));
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-08): true when an ask of a standing agent's goal is one goal step recorded itself (its renewal ask, a period cap's
+    /// ask or its failure pause's ask), recognized by what goal step writes and signs, never by the ask's words alone: its first revision
+    /// names no raisedBy, it is put to a person, and its author took the goal's steps as the records stood when it was written, as goal
+    /// step's caller must (an operator, the sponsor when a person, a principal holding local-engineering, or a dispatcher whose grant names
+    /// the goal). Which of them it is the caller reads from its subject and opening words, which only such an author wrote; an agent that
+    /// carries the occurrences and takes no step writes none of them, whatever its words.
+    /// </summary>
+    public static bool RuntimeAsk(EstateModel model, RecordEnvelope goal, RecordEnvelope ask)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(ask);
+        RecordEnvelope first = StandingOutputs.FirstOf(model, ask);
+        return StandingOutputs.Of(first) is null && GoalRules.IsPerson(model, EstateModel.BodyString(first, "to"))
+            && Routing.MayTakeStep(model, model.ById.ContainsKey(goal.Id) ? model.Latest(goal) : goal, first.By, first.AtTime, first);
     }
 
     /// <summary>

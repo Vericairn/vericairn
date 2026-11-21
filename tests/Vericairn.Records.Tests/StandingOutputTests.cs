@@ -21,14 +21,17 @@ namespace Vericairn.Records.Tests;
 /// </summary>
 public class StandingOutputTests
 {
+    /// <summary>The fields of the possibilities these tests write that format 3 adds.</summary>
+    private static readonly string[] FormatThreeFields = ["raisedBy", "fingerprint", "sources", "evidence", "reviewTriggers"];
+
     private static JsonElement Element(JsonNode node) => JsonSerializer.SerializeToElement(node);
 
     /// <summary>What validating a record not yet written finds, against the estate as it stands, with the record among it.</summary>
-    private static FindingList Validate(StandingFixture fixture, string type, JsonObject body, RecordReference? subject = null, string? supersedes = null, bool builder = false)
+    private static FindingList Validate(StandingFixture fixture, string type, JsonObject body, RecordReference? subject = null, string? supersedes = null, bool builder = false, string? by = null, long format = 3)
     {
         fixture.Estate.SetClock(fixture.Estate.Clock.AddSeconds(1));
-        string by = builder ? fixture.Estate.BuilderId : fixture.Estate.OperatorId;
-        AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, Element(body), subject, supersedes, fixture.Estate.Clock, null, 3));
+        by ??= builder ? fixture.Estate.BuilderId : fixture.Estate.OperatorId;
+        AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, Element(body), subject, supersedes, fixture.Estate.Clock, null, format));
         var findings = new FindingList();
         RecordTypeRegistry.Find(type)!.Validate(new ValidationContext(fixture.Estate.Load(), record.Envelope, findings));
         return findings;
@@ -72,6 +75,48 @@ public class StandingOutputTests
         }
 
         if (extras is not null) body["extras"] = extras;
+        return body;
+    }
+
+    private static JsonObject Draft() => new()
+    {
+        ["title"] = "Cache the index", ["intent"] = "Stop reading the index on every call.", ["scope"] = new JsonArray("path:src/index/"), ["deliverables"] = new JsonArray("a cached index"),
+        ["exitQuestion"] = "Is the index read once per change?",
+    };
+
+    /// <summary>A principal the operator records: an agent or a person, with one role.</summary>
+    private static string Principal(StandingFixture fixture, string kind, string name, string role) =>
+        fixture.Estate.Add("principal", fixture.Estate.OperatorId, kind == "agent"
+            ? $$$"""{"kind":"agent","name":"{{{name}}}","roles":["{{{role}}}"],"agent":{"vendor":"Example","product":"Example Agent"}}"""
+            : $$$"""{"kind":"human","name":"{{{name}}}","roles":["{{{role}}}"]}""").Id;
+
+    /// <summary>A revision's body: the record's own, changed.</summary>
+    private static JsonObject Revised(RecordEnvelope record, Action<JsonObject> change)
+    {
+        JsonObject body = PolicyFixture.Body(record);
+        change(body);
+        return body;
+    }
+
+    private static JsonObject Ask(StandingFixture fixture, JsonObject? raised, string question = "Should the index be cached?")
+    {
+        var body = new JsonObject
+        {
+            ["to"] = fixture.Estate.OperatorId, ["question"] = question, ["recommendation"] = "Cache it.", ["consequence"] = "Nothing waits on it.", ["goal"] = fixture.Goal.Id, ["state"] = "open",
+        };
+        if (raised is not null) body["raisedBy"] = raised.DeepClone();
+        return body;
+    }
+
+    private static JsonObject Publication(StandingFixture fixture, JsonObject? raised, string to, string askedBy, string kind = "publication")
+    {
+        const string text = "The widget's index is now cached.";
+        var body = new JsonObject
+        {
+            ["to"] = to, ["askedBy"] = askedBy, ["action"] = "Publish an agent's draft", ["why"] = "Users asked.", ["recommendation"] = "Post it.", ["consequence"] = "Nothing is posted.",
+            ["kind"] = kind, ["destination"] = "the project's discussion board", ["content"] = new JsonArray(new JsonObject { ["kind"] = "text", ["hash"] = ContentHash.Sha256(Encoding.UTF8.GetBytes(text)), ["text"] = text }),
+        };
+        if (raised is not null) body["raisedBy"] = raised.DeepClone();
         return body;
     }
 
@@ -229,5 +274,274 @@ public class StandingOutputTests
         // The plan's output caps are validated: drafts are among the possibilities.
         body["plan"]!["standing"]!["outputs"] = new JsonObject { ["possibilities"] = 2, ["drafts"] = 3 };
         Assert.Contains(Validate(fixture, "goal", body, supersedes: revised.Id), f => f.Code == "standing.outputs");
+    }
+
+    [Fact]
+    public void ARevisionThatDisposesOfNothingIsWrittenAndLoadsWhoeverRevisesIt()
+    {
+        using var fixture = new StandingFixture();
+        (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+        JsonObject raised = RaisedBy(fixture, assignment, run, key);
+        RecordEnvelope possibility = fixture.Add("possibility", Possibility(raised, "cache/index"), builder: true);
+
+        // The raiser adds evidence and a draft, and the operator retitles it: neither disposes of it, and each is a valid revision.
+        JsonObject evidence = Revised(possibility, b =>
+        {
+            b["evidence"]!.AsArray().Add(new JsonObject { ["stance"] = "for", ["statement"] = "A second profile shows the read." });
+            b["draft"] = Draft();
+        });
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", evidence, supersedes: possibility.Id, builder: true)));
+        JsonObject retitled = Revised(possibility, b => b["title"] = "Read the widget's index once per change");
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", retitled, supersedes: possibility.Id)));
+
+        // Written straight to records/, as a hand edit or a sync from another clone brings them, the estate loads with no error.
+        RecordEnvelope added = fixture.Add("possibility", evidence, supersedes: possibility.Id, builder: true);
+        fixture.Add("possibility", Revised(added, b => b["title"] = "Read the widget's index once per change"), supersedes: added.Id);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+        Assert.Equal(1, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+
+        // A revision of a plain ask or a plain request that adds raisedBy is a finding, never an exception.
+        RecordEnvelope ask = fixture.Add("ask", Ask(fixture, null), builder: true);
+        Assert.Contains(Validate(fixture, "ask", Revised(ask, b => { b["raisedBy"] = raised.DeepClone(); b["state"] = "notified"; }), supersedes: ask.Id, builder: true), f => f.Code == "standing.raised-by");
+        var about = new RecordReference("work-order", fixture.Work.Id, fixture.Work.ComputedHash);
+        RecordEnvelope request = fixture.Add("operator-request", Publication(fixture, null, fixture.Estate.OperatorId, fixture.Estate.BuilderId), builder: true, subject: about);
+        Assert.Contains(Validate(fixture, "operator-request", Revised(request, b => b["raisedBy"] = raised.DeepClone()), about, request.Id, builder: true), f => f.Code == "standing.raised-by");
+        fixture.Add("ask", Revised(ask, b => { b["raisedBy"] = raised.DeepClone(); b["state"] = "notified"; }), supersedes: ask.Id, builder: true);
+        Assert.Contains(fixture.Estate.Load().Findings, f => f.Code == "standing.raised-by");
+    }
+
+    [Fact]
+    public void ARevisionKeepsWhatMakesTheStandingRulesApplyJudgedFromItsFirstRevision()
+    {
+        using var fixture = new StandingFixture();
+        (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+        JsonObject raised = RaisedBy(fixture, assignment, run, key);
+
+        // Withdrawing its ask is a disposal the agent may not make, and leaving raisedBy out of the withdrawal changes nothing.
+        RecordEnvelope ask = fixture.Add("ask", Ask(fixture, raised), builder: true);
+        FindingList shed = Validate(fixture, "ask", Revised(ask, b => { b.Remove("raisedBy"); b["state"] = "withdrawn"; }), supersedes: ask.Id, builder: true);
+        Assert.Contains(shed, f => f.Code == "standing.raised-by");
+        Assert.Contains(shed, f => f.Code == "standing.own-output");
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "ask", Revised(ask, b => b["state"] = "notified"), supersedes: ask.Id, builder: true)));
+        fixture.Add("ask", Revised(ask, b => { b.Remove("raisedBy"); b["state"] = "withdrawn"; }), supersedes: ask.Id, builder: true);
+        Assert.Contains(fixture.Estate.Load().Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+
+        // A publication request's revision keeps its raisedBy and stays a publication request.
+        var about = new RecordReference("work-order", fixture.Work.Id, fixture.Work.ComputedHash);
+        RecordEnvelope request = fixture.Add("operator-request", Publication(fixture, raised, fixture.Estate.OperatorId, fixture.Estate.BuilderId), builder: true, subject: about);
+        Assert.Contains(Validate(fixture, "operator-request", Revised(request, b => b.Remove("raisedBy")), about, request.Id, builder: true), f => f.Code == "standing.raised-by");
+        Assert.Contains(Validate(fixture, "operator-request", Revised(request, b => b["kind"] = "action"), about, request.Id, builder: true), f => f.Code == "standing.publication");
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "operator-request", Revised(request, b => b["why"] = "Users asked twice."), about, request.Id, builder: true)));
+
+        // A possibility's revision keeps raisedBy and its fingerprint as its first revision names them, whoever writes it.
+        RecordEnvelope possibility = fixture.Add("possibility", Possibility(raised, "cache/index"), builder: true);
+        FindingList dropped = Validate(fixture, "possibility", Revised(possibility, b => { b.Remove("raisedBy"); b["disposition"] = "declined"; b["reason"] = "Mine to drop."; }), supersedes: possibility.Id, builder: true);
+        Assert.Contains(dropped, f => f.Code == "standing.raised-by");
+        Assert.Contains(dropped, f => f.Code == "standing.own-output");
+        Assert.Contains(Validate(fixture, "possibility", Revised(possibility, b => b.Remove("raisedBy")), supersedes: possibility.Id), f => f.Code == "standing.raised-by");
+
+        // A revision stating the format before raisedBy leaves no rule behind either.
+        JsonObject older = Revised(possibility, b =>
+        {
+            foreach (string field in FormatThreeFields) b.Remove(field);
+            b["disposition"] = "declined";
+            b["reason"] = "Mine to drop.";
+        });
+        FindingList formatTwo = Validate(fixture, "possibility", older, supersedes: possibility.Id, builder: true, format: 2);
+        Assert.Contains(formatTwo, f => f.Code == "standing.raised-by");
+        Assert.Contains(formatTwo, f => f.Code == "standing.own-output");
+        FindingList askTwo = Validate(fixture, "ask", Revised(ask, b => { b.Remove("raisedBy"); b["state"] = "withdrawn"; }), supersedes: ask.Id, builder: true, format: 2);
+        Assert.Contains(askTwo, f => f.Code == "standing.raised-by");
+        Assert.Contains(askTwo, f => f.Code == "standing.own-output");
+    }
+
+    [Fact]
+    public void AStandingPublicationRequestIsClosedOnlyByAnOperatorWhoIsAPerson()
+    {
+        using var fixture = new StandingFixture();
+        (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+        JsonObject raised = RaisedBy(fixture, assignment, run, key);
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        var about = new RecordReference("work-order", fixture.Work.Id, fixture.Work.ComputedHash);
+        RecordEnvelope request = fixture.Add("operator-request", Publication(fixture, raised, fixture.Estate.OperatorId, fixture.Estate.BuilderId), builder: true, subject: about);
+        Assert.Equal(1, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+        var closing = new RecordReference("operator-request", request.Id, request.ComputedHash);
+
+        // The agent that raised it closes it neither as dismissed nor as done, whatever words of the operator it cites; nor does another agent.
+        JsonObject Close(string outcome)
+        {
+            var body = new JsonObject { ["outcome"] = outcome, ["operatorWords"] = new JsonObject { ["by"] = fixture.Estate.OperatorId, ["statement"] = "Go ahead.", ["source"] = "the operator's message in the project chat", ["at"] = request.At } };
+            if (outcome == "dismissed") body["reason"] = "Not now.";
+            else body["link"] = "https://example.org/discussions/1";
+            return body;
+        }
+
+        Assert.Contains(Validate(fixture, "operator-request-close", Close("dismissed"), closing, builder: true), f => f.Code == "standing.own-output");
+        Assert.Contains(Validate(fixture, "operator-request-close", Close("done"), closing, builder: true), f => f.Code == "standing.own-output");
+        Assert.Contains(Validate(fixture, "operator-request-close", Close("done"), closing, by: helper), f => f.Code == "standing.publication");
+        JsonObject observed = new()
+        {
+            ["kind"] = "operator-request", ["asOf"] = RecordParser.FormatTimestamp(fixture.Estate.Clock), ["summary"] = "Posted.", ["limitations"] = new JsonArray(),
+            ["facts"] = new JsonObject { ["outcome"] = "done", ["destination"] = "the project's discussion board", ["location"] = "https://example.org/discussions/1", ["evidenceHash"] = FlowFixture.Hash('e') },
+        };
+        Assert.Contains(Validate(fixture, "observation", observed, closing, builder: true), f => f.Code == "standing.own-output");
+        Assert.Contains(Validate(fixture, "observation", observed, closing, by: helper), f => f.Code == "standing.publication");
+
+        // Written straight to records/, the agent's close is an error the estate reports, and the operator's own close is not.
+        fixture.Add("operator-request-close", Close("dismissed"), builder: true, subject: closing);
+        Assert.Contains(fixture.Estate.Load().Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+
+        using var clean = new StandingFixture();
+        (RecordEnvelope cleanAssignment, RecordEnvelope cleanRun, string cleanKey) = Carried(clean);
+        RecordEnvelope posted = clean.Add("operator-request", Publication(clean, RaisedBy(clean, cleanAssignment, cleanRun, cleanKey), clean.Estate.OperatorId, clean.Estate.BuilderId), builder: true,
+            subject: new RecordReference("work-order", clean.Work.Id, clean.Work.ComputedHash));
+        clean.Add("operator-request-close", new JsonObject { ["outcome"] = "dismissed", ["reason"] = "Not now." }, subject: new RecordReference("operator-request", posted.Id, posted.ComputedHash));
+        Assert.False(clean.Estate.Load().Findings.HasErrors, Errors(clean.Estate.Load().Findings));
+        Assert.Equal(0, clean.Agent(clean.Estate.Clock).OpenOutputs);
+
+        // A person carrying the occurrence puts its publication request to an operator other than itself, who then closes it.
+        using var person = new StandingFixture();
+        StandingAgents.Occurrence occurrence = Assert.Single(person.Agent(person.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope own = person.Assign(occurrence, person.Estate.OperatorId);
+        var ownRaised = new JsonObject { ["goal"] = person.Goal.Id, ["occurrence"] = occurrence.Key, ["assignment"] = own.Id };
+        Assert.Contains(Validate(person, "operator-request", Publication(person, ownRaised, person.Estate.OperatorId, person.Estate.OperatorId), new RecordReference("work-order", person.Work.Id, person.Work.ComputedHash)),
+            f => f.Code == "standing.publication");
+    }
+
+    [Fact]
+    public void AHeldFindingIsDisposedOfOnlyByAPersonAndItsHoldEndsOnlyByAnOperatorWhoIsOne()
+    {
+        using var fixture = new StandingFixture();
+        (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+        JsonObject raised = RaisedBy(fixture, assignment, run, key);
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        string pat = Principal(fixture, "human", "Pat", "contributor");
+        JsonObject held = Possibility(raised, "held/finding");
+        held["disclosure"] = "held";
+        RecordEnvelope finding = fixture.Add("possibility", held, builder: true);
+        JsonObject Disposed(RecordEnvelope of, string disposition) => Revised(of, b =>
+        {
+            b["disposition"] = disposition;
+            b["reason"] = "Read it.";
+            if (disposition == "adopted") b["adoptedAs"] = new JsonObject { ["type"] = "work-order", ["id"] = fixture.Work.Id };
+        });
+
+        // No agent declines or parks it, though it neither raised it, carried an occurrence nor is named by the role.
+        Assert.Contains(Validate(fixture, "possibility", Disposed(finding, "declined"), supersedes: finding.Id, by: helper), f => f.Code == "standing.held");
+        Assert.Contains(Validate(fixture, "possibility", Disposed(finding, "parked"), supersedes: finding.Id, by: helper), f => f.Code == "standing.held");
+        Assert.Contains(Validate(fixture, "possibility", Disposed(finding, "adopted"), supersedes: finding.Id, by: helper), f => f.Code == "standing.held");
+
+        // A person declines it (design/standing-agents.md § 8: a person disposes of every held finding); only an operator who is one adopts it.
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", Disposed(finding, "declined"), supersedes: finding.Id, by: pat)));
+        Assert.Contains(Validate(fixture, "possibility", Disposed(finding, "adopted"), supersedes: finding.Id, by: pat), f => f.Code == "standing.held");
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", Disposed(finding, "adopted"), supersedes: finding.Id)));
+
+        // Its raiser adds evidence to it, but no one but an operator who is a person ends its hold.
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", Revised(finding, b => b["evidence"]!.AsArray().Add(new JsonObject { ["stance"] = "for", ["statement"] = "It reproduces." })), supersedes: finding.Id, builder: true)));
+        Assert.Contains(Validate(fixture, "possibility", Revised(finding, b => b.Remove("disclosure")), supersedes: finding.Id, builder: true), f => f.Code == "standing.held");
+        Assert.Contains(Validate(fixture, "possibility", Revised(finding, b => b.Remove("disclosure")), supersedes: finding.Id, by: pat), f => f.Code == "standing.held");
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", Revised(finding, b => b.Remove("disclosure")), supersedes: finding.Id)));
+
+        // A held possibility no standing agent raised is held all the same: an agent declines none.
+        RecordEnvelope plain = fixture.Add("possibility", new JsonObject
+        {
+            ["title"] = "A held note", ["idea"] = "The token is logged.", ["origin"] = "The builder's reading.", ["disposition"] = "open", ["disclosure"] = "held",
+        }, builder: true);
+        Assert.Contains(Validate(fixture, "possibility", Disposed(plain, "declined"), supersedes: plain.Id, by: helper), f => f.Code == "standing.held");
+        Assert.Contains(Validate(fixture, "possibility", Disposed(plain, "declined"), supersedes: plain.Id, builder: true), f => f.Code == "standing.held");
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+    }
+
+    [Fact]
+    public void EachOutputIsJudgedAgainstTheCapsInForceWhenItWasRaisedAndARevisionCountsToo()
+    {
+        using var fixture = new StandingFixture();
+        (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+        JsonObject raised = RaisedBy(fixture, assignment, run, key);
+        foreach (string fingerprint in new[] { "one", "two", "three" })
+        {
+            fixture.Add("possibility", Possibility(raised, fingerprint, draft: true), builder: true);
+        }
+
+        RecordEnvelope four = fixture.Add("possibility", Possibility(raised, "four"), builder: true);
+        RecordEnvelope five = fixture.Add("possibility", Possibility(raised, "five"), builder: true);
+
+        // The sponsor lowers the caps of a busy agent: its proposal and its activation leave the earlier outputs valid.
+        JsonObject body = fixture.GoalBody();
+        body["plan"]!["standing"]!["outputs"] = new JsonObject { ["possibilities"] = 2, ["drafts"] = 1 };
+        Assert.DoesNotContain(Validate(fixture, "goal", body, supersedes: fixture.Goal.Id), f => f.Severity == Severity.Error);
+        RecordEnvelope revised = fixture.Add("goal", body, supersedes: fixture.Goal.Id);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+        fixture.Activate(revised);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+
+        // A revision counts as its occurrence's caps count: a fourth draft is refused, and so is a second summary.
+        Assert.Contains(Validate(fixture, "possibility", Revised(four, b => b["draft"] = Draft()), supersedes: four.Id, builder: true), f => f.Code == "standing.output-cap");
+        JsonObject summary = Revised(four, b => b["extras"] = new JsonArray("Index the widget's tags too."));
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", summary, supersedes: four.Id, builder: true)));
+        fixture.Add("possibility", summary, supersedes: four.Id, builder: true);
+        Assert.Contains(Validate(fixture, "possibility", Revised(five, b => b["extras"] = new JsonArray("Drop the legacy index.")), supersedes: five.Id, builder: true), f => f.Code == "standing.output-cap");
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+    }
+
+    [Fact]
+    public void AnAgentsPlainAskInTheRuntimesWordsIsNotTakenForTheRuntimesOwn()
+    {
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 });
+        DateTimeOffset since = fixture.Estate.Clock;
+
+        // The builder's plain ask on the goal, in the period cap's words, holds back no period ask; the same ask by the operator, who takes
+        // the goal's steps as goal step's caller does, is the runtime's.
+        string question = StandingAgents.PeriodAsk + " Research the widget is reached for the period.";
+        fixture.Add("ask", Ask(fixture, null, question), builder: true, subject: fixture.Goal.Reference);
+        Assert.Null(StandingAgents.OpenAsk(fixture.Estate.Load(), fixture.Goal, StandingAgents.PeriodAsk, since));
+        RecordEnvelope runtime = fixture.Add("ask", Ask(fixture, null, question), subject: fixture.Goal.Reference);
+        Assert.Equal(runtime.Id, StandingAgents.OpenAsk(fixture.Estate.Load(), fixture.Goal, StandingAgents.PeriodAsk, since)?.Id);
+
+        // Three failed runs pause the agent; the builder's ask about the last in the failure pause's words, answered, does not lift it.
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+        RecordEnvelope? last = null;
+        foreach (string outcome in new[] { "blocked", "abandoned", "blocked" })
+        {
+            RecordEnvelope intent = fixture.RunIntent(assignment, "run-" + outcome + "-" + fixture.Estate.Clock.Ticks);
+            last = fixture.Result(assignment, outcome);
+            fixture.Settle(intent, "observed-success");
+        }
+
+        Assert.Equal(3, fixture.Agent(fixture.Estate.Clock).Failures);
+        void Answered(bool builder)
+        {
+            RecordEnvelope ask = fixture.Add("ask", Ask(fixture, null, NextEligible.AttentionQuestion + "Research the widget: its runs failed. How does the run go on?"), builder: builder, subject: last!.Reference);
+            JsonObject answer = fixture.Policies.DecisionBody();
+            answer["answers"] = new JsonArray(ask.Id);
+            fixture.Add("decision", answer);
+        }
+
+        Answered(builder: true);
+        Assert.Equal(3, fixture.Agent(fixture.Estate.Clock).Failures);
+        Answered(builder: false);
+        Assert.Equal(0, fixture.Agent(fixture.Estate.Clock).Failures);
+    }
+
+    [Fact]
+    public void AnAgentTheRoleNamesDisposesOfNoStandingOutputAtTheWriteBoundary()
+    {
+        using var fixture = new StandingFixture();
+        (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+        RecordEnvelope possibility = fixture.Add("possibility", Possibility(RaisedBy(fixture, assignment, run, key), "cache/index"), builder: true);
+
+        // The roster now names a second agent for the researcher role, which carried none of the agent's occurrences.
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        RecordEnvelope roster = Assert.Single(fixture.Estate.Load().Current("roster"));
+        fixture.Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("researcher", fixture.Estate.BuilderId, helper), FlowFixture.Role("decider", fixture.Estate.OperatorId)) }, supersedes: roster.Id);
+
+        // Its decline is reported as the roster stands, which the write boundary refuses (standing.output-now); records already in the
+        // estate keep their reading, so it is no error of the estate.
+        JsonObject declined = Revised(possibility, b => { b["disposition"] = "declined"; b["reason"] = "Not worth it."; });
+        FindingList findings = Validate(fixture, "possibility", declined, supersedes: possibility.Id, by: helper);
+        Assert.Contains(findings, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info && f.Message.Contains(helper, StringComparison.Ordinal));
+        Assert.Equal(string.Empty, Errors(findings));
+        Assert.DoesNotContain(Validate(fixture, "possibility", declined, supersedes: possibility.Id), f => f.Code == StandingOutputs.BoundaryCode);
     }
 }

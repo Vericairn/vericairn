@@ -102,6 +102,105 @@ public class StandingOutputJourneyTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void NoAuthorAdoptsItsOwnPossibilityAndAHeldFindingAdoptedStaysHeld()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        (string _, string assignment) = Carried(run);
+
+        // A plain possibility the builder wrote outside any occurrence, with a draft: its author does not adopt it by work new
+        // --from-possibility, as the option says; the operator does.
+        JsonObject plain = Possibility("plain/idea", draft: true);
+        plain["origin"] = "The builder's own note.";
+        plain["disposition"] = "open";
+        string idea = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("possibility", builder, JsonSerializer.SerializeToElement(plain)))).Id;
+        WriteOutcome own = run.Service.WorkNew(new WorkNewRequest(builder, Key: "IDEA-0") { FromPossibility = idea });
+        Assert.False(own.Ok);
+        Assert.Contains(own.Problem!.Findings, f => f.Code == "standing.own-output");
+        Assert.Equal("open", EstateModel.BodyString(run.Estate.Load().Latest(run.Estate.Load().ById[idea]), "disposition"));
+        RunEstate.Ok(run.Service.WorkNew(new WorkNewRequest(op, Key: "IDEA-1") { FromPossibility = idea }));
+
+        // A held finding the operator adopts becomes a held work order, which the disclosure hold keeps out of public pushes.
+        JsonObject finding = Possibility("held/finding", draft: true);
+        finding["disclosure"] = "held";
+        string held = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(builder, assignment, "possibility", JsonSerializer.SerializeToElement(finding)))).Id;
+        RecordWritten order = RunEstate.Ok(run.Service.WorkNew(new WorkNewRequest(op, Key: "SEC-1") { FromPossibility = held }));
+        Assert.Equal("held", EstateModel.BodyString(run.Estate.Load().ById[order.Id], "disclosure"));
+        Assert.Contains(DisclosureHolds.Active(run.Estate.Load()), h => h.Key == "SEC-1");
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AnAgentsAskInTheRenewalAsksWordsHoldsBackNoRenewalAsk()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        // A term of six hours asks within its last three; the clock is controlled to an hour before its until time.
+        DateTimeOffset until = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddHours(6).ToUnixTimeSeconds());
+        string goal = StandingAgentRoutingTests.Standing(run, until: RecordParser.FormatTimestamp(until));
+        run.Service.FlowClock = new FixedClock(until.AddHours(-1));
+
+        // The builder writes a plain ask about the goal's revision in the renewal ask's words; goal step still asks the sponsor itself.
+        RecordEnvelope current = run.Estate.Load().ById[goal];
+        string forged = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("ask", run.Estate.BuilderId, RunEstate.Json($$"""
+            {"to":"{{op}}","question":"{{StandingAgents.RenewalAsk}} Research the widget before its until time?","recommendation":"Let it lapse.","consequence":"Nothing.","goal":"{{goal}}","state":"open"}
+            """), Subject: $"goal:{goal}:{current.ComputedHash}"))).Id;
+        GoalStepResponse renewal = StandingAgentRoutingTests.Step(run, goal, "renewal");
+        Assert.True(renewal.Ok, renewal.Message);
+        Assert.Equal(("ask", "attention"), (renewal.Outcome, renewal.Route));
+        Assert.NotEqual(forged, renewal.Ask!.Id);
+        Assert.Equal(op, run.Estate.Load().ById[renewal.Ask.Id].By);
+    }
+
+    [Fact]
+    public void TheWriteBoundaryRefusesADispositionByAnAgentTheStandingAgentsRoleNames()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string helper = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Helper","roles":["contributor"],"agent":{"vendor":"Example","product":"Example Agent"}}""")))).Id;
+        (string goal, string assignment) = Carried(run, [builder, helper]);
+        string possibility = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(builder, assignment, "possibility", JsonSerializer.SerializeToElement(Possibility("cache/index"))))).Id;
+
+        // The helper, which the role names and which carried none of the occurrences, does not decline it (standing.output-now).
+        JsonObject declined = JsonNode.Parse(run.Estate.Load().ById[possibility].Body.GetRawText())!.AsObject();
+        declined["disposition"] = "declined";
+        declined["reason"] = "Not worth it.";
+        WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("possibility", helper, JsonSerializer.SerializeToElement(declined), Supersedes: possibility));
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == "error");
+        Assert.Equal(1, JsonDocument.Parse(run.Service.GoalDue(goal)!.Json.GetRawText()).RootElement.GetProperty("outputs").GetProperty("open").GetInt32());
+
+        // The operator, a person, declines it.
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("possibility", op, JsonSerializer.SerializeToElement(declined), Supersedes: possibility)));
+        Assert.Equal(0, JsonDocument.Parse(run.Service.GoalDue(goal)!.Json.GetRawText()).RootElement.GetProperty("outputs").GetProperty("open").GetInt32());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    /// <summary>A standing agent whose occurrence goal step routed to the builder, with a second run of it in flight; its goal and assignment.</summary>
+    private static (string Goal, string Assignment) Carried(RunEstate run, string[]? holders = null)
+    {
+        string goal = StandingAgentRoutingTests.Standing(run, holders: holders);
+        GoalStepResponse first = StandingAgentRoutingTests.Step(run, goal, "first");
+        Assert.True(first.Ok, first.Message);
+        Assert.Equal(run.Estate.BuilderId, first.Principal);
+        run.Settled(first.Run!.Run);
+        AgentRuns.Run original = AgentRuns.Find(run.Estate.Load(), first.Run.Run)!;
+        JsonObject intent = JsonNode.Parse(original.Intent.Body.GetRawText())!.AsObject();
+        intent["identity"] = "agent-run:outputs";
+        RecordReference? subject = original.Intent.Subject;
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("operation", run.Estate.OperatorId, RunEstate.Json(intent.ToJsonString()), Subject: subject is null ? null : $"{subject.Type}:{subject.Id}")));
+        return (goal, first.Assignment!.Id);
+    }
+
+    /// <summary>A fixed clock, the runtime's controlled time.</summary>
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
     private static JsonObject Possibility(string fingerprint, bool draft = false)
     {
         var body = new JsonObject

@@ -39,7 +39,7 @@ public sealed class AskType : IRecordType
         new("goal", "ulid", false, "The goal the ask belongs to, when it does.", 2),
         new("state", string.Join('|', States), true, "open when asked; notified when a notification went out, whose delivery stays unknown; withdrawn when the asker takes it back.", 2),
         new("assignment", "ulid", false, "The assignment routing stored together with this ask, of the principal asked, which holds its step only with it.", 2),
-        new("raisedBy", "object", false, "From 0.9.4, a standing agent's question: goal (its goal's first revision), occurrence, assignment and, for an agent, run, as a possibility's. Put to a person other than its author, belonging to the agent's goal and disposed of by that person's decision; its author never withdraws it.", 3),
+        new("raisedBy", "object", false, "From 0.9.4, a standing agent's question: goal (its goal's first revision), occurrence, assignment and, for an agent, run, as a possibility's. Put to a person other than its author, belonging to the agent's goal and disposed of by that person's decision; its author never withdraws it, and every revision keeps raisedBy as the first revision names it.", 3),
     ];
 
     /// <inheritdoc />
@@ -55,7 +55,8 @@ public sealed class AskType : IRecordType
         string? goal = body.Ulid("goal", false);
         string? state = body.Enum("state", true, States);
         string? assigned = body.Ulid("assignment", false);
-        StandingOutputs.RaisedBy? raised = body.Since(3, "raisedBy") ? StandingOutputs.ValidateRaisedBy(context, body.Nested("raisedBy", false)) : null;
+        bool since = body.Since(3, "raisedBy");
+        StandingOutputs.RaisedBy? raised = since || StandingOutputs.RevisesLaterFormat(context) ? StandingOutputs.ValidateRaisedBy(context, since ? body.Nested("raisedBy", false) : null) : null;
         body.NoOtherKeys();
         StandingOutputs.ValidateAsk(context, raised, to, goal, state);
         context.RequireReference("to", to, "principal");

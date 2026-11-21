@@ -388,9 +388,9 @@ public class StandingAgentRoutingTests
 
     /// <summary>
     /// Installs the researcher flow and a standing agent of it the operator sponsors and activates: a daily schedule whose first tick was
-    /// two days ago, the request trigger, the builder in the researcher role; returns the goal's id.
+    /// two days ago, the request trigger, the builder (or the holders given) in the researcher role; returns the goal's id.
     /// </summary>
-    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null)
+    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null, string[]? holders = null)
     {
         string op = run.Estate.OperatorId;
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}"""), Supersedes: run.Estate.BuilderId)));
@@ -402,7 +402,7 @@ public class StandingAgentRoutingTests
             ["title"] = "Research the widget", ["objective"] = "Keep researching the widget between releases.",
             ["completion"] = new JsonArray(new JsonObject { ["record"] = FlowFixture.Marker("RESEARCHED") }), ["constraints"] = new JsonArray("nothing outside research/"),
             ["kind"] = "stewardship", ["sponsor"] = op, ["budget"] = budget ?? new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 3 },
-            ["roles"] = new JsonArray(FlowFixture.Role("researcher", holder ?? run.Estate.BuilderId)),
+            ["roles"] = new JsonArray(FlowFixture.Role("researcher", holders ?? [holder ?? run.Estate.BuilderId])),
             ["plan"] = new JsonObject
             {
                 ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(order),

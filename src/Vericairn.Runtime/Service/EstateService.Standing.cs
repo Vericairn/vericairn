@@ -140,9 +140,10 @@ public sealed partial class EstateService
                 : (null, new GoalStepResponse(current.Id, "none", $"Nothing to dispatch: standing agent {title} is paused by its failures ({failure.Route.Reason}).", true));
         }
 
-        // One ask before the until time summarizes the period and the evaluation and asks the sponsor to renew it (§ 5).
+        // One ask before the until time summarizes the period and the evaluation and asks the sponsor to renew it (§ 5); from GOAL-08 only
+        // the renewal ask goal step recorded counts, never another principal's ask in its words (StandingAgents.RuntimeAsk).
         if (StandingAgents.RenewalDue(model, current, now) && !Routing.AsksOf(model, current).Any(a => a.Subject?.Id == current.Id
-            && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(StandingAgents.RenewalAsk, StringComparison.Ordinal)))
+            && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(StandingAgents.RenewalAsk, StringComparison.Ordinal) && StandingAgents.RuntimeAsk(model, current, a)))
         {
             return (null, Renewal(model, current, agent, request));
         }

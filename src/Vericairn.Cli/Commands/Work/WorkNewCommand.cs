@@ -22,7 +22,7 @@ internal sealed class WorkNewCommand : Command
         var kindOption = new Option<string?>("--kind") { Description = "ordinary or milestone.", DefaultValueFactory = _ => "ordinary" };
         var afterOption = new Option<string[]>("--after") { Description = "Work-order record id this work starts after; repeat for each dependency." };
         var inputOption = new Option<string[]>("--input") { Description = "Input reference as type:id; repeat for each input." };
-        var possibilityOption = new Option<string?>("--from-possibility") { Description = "From 0.9.4: adopt an open possibility, by any revision's id: its draft work order supplies every field left out, it joins the inputs, and its revision adopting it as the new work order is stored with it. A principal other than its author adopts it, and no agent that carried its standing agent's occurrences." };
+        var possibilityOption = new Option<string?>("--from-possibility") { Description = "From 0.9.4: adopt an open possibility, by any revision's id: its draft work order supplies every field left out, it joins the inputs, and its revision adopting it as the new work order is stored with it. A principal other than its author adopts it, whoever raised it, and no agent that carried its standing agent's occurrences; a held finding's work order is held from disclosure too." };
         Options.Add(byOption);
         Options.Add(keyOption);
         Options.Add(titleOption);

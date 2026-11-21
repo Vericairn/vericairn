@@ -1253,14 +1253,19 @@ its own output.
 - **A recommendation** is an open possibility with a `fingerprint`, the flow's rule for what makes two the same, and its sources;
   optionally evidence for and against (no scores), review triggers, links to possibilities it duplicates or supersedes, and
   `disclosure: held` for a security finding. A second open possibility of the agent with the same fingerprint is refused, and a
-  declined one is raised again only by naming it in `raisesAgain` with new evidence.
+  declined one is raised again only by naming it in `raisesAgain` with new evidence. Its raiser may revise an open one, keeping its
+  `raisedBy` and fingerprint, to add evidence; a revision is judged by the `raisedBy` of the record it revises, so leaving it out
+  changes no rule. No agent declines, parks or adopts a held finding: a person does, only an operator who is a person adopts it or
+  ends its hold, and the same holds for a held possibility no standing agent raised.
 - **Proposed work** is a possibility with a `draft` work order. `vericairn work new --from-possibility <id> --by <planner>` adopts it:
   the draft supplies every field the command leaves out, the possibility joins the work order's inputs, and the possibility's revision
-  adopting it as the new work order is stored with it. Its author, and any agent that carried the standing agent's occurrences, is
-  refused; a held finding is adopted only by an operator who is a person.
+  adopting it as the new work order is stored with it. Its author, whoever raised it, and any agent that carried the standing agent's
+  occurrences, is refused; a held finding is adopted only by an operator who is a person, and its work order carries
+  `disclosure: held`, so the checked push keeps its key and text out of a public repository until its release is published.
 - **A question** is an ask to a person, who decides for the goal when none is named; a decision of that person answers it.
 - **Words outside the estate** are a publication request to an operator: the exact text, labeled the agent's draft, pinning the
-  agent's work order. It dispatches nothing.
+  agent's work order. It dispatches nothing, and only an operator who is a person closes it, directly: no agent closes it, citing
+  the operator's words or not.
 
 ```sh
 vericairn work new --from-possibility <possibility id> --by <planner> --key IDX-1
@@ -1268,10 +1273,12 @@ vericairn goal propose ... --standing example/researcher@1.0.0 --outputs possibi
 ```
 
 An occurrence records at most `--outputs possibilities` possibilities (five when omitted), of which at most `drafts` (three) carry a
-draft work order; further ideas join one summary possibility, which lists them in `extras`. While the agent's open outputs, its
-possibilities still open, asks still waiting and publication requests not closed, reach `open` (ten when omitted), its occurrences
-defer and no run of it starts. `goal due`, `status` and `progress` show its open outputs; an occurrence's brief states its output
-caps and names the agent's earlier open and declined possibilities among its sources.
+draft work order; further ideas join one summary possibility, which lists them in `extras`. Each output, and each revision that adds a
+draft or extras, is judged against the caps of the goal revision in force when the output was raised, so lowering the caps judges only
+what is raised afterwards. While the agent's open outputs, its possibilities still open, asks still waiting and publication requests
+not closed, reach `open` (ten when omitted), its occurrences defer and no run of it starts. `goal due`, `status` and `progress` show
+its open outputs; an occurrence's brief states its output caps and names the agent's earlier open and declined possibilities among
+its sources.
 
 ## `vericairn estate first-authority` (0.9.3)
 

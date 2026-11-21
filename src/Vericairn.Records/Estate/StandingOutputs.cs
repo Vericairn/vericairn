@@ -18,7 +18,8 @@ namespace Vericairn.Records.Estate;
 /// that recorded it, and only that assignment's contributor records it. A possibility carries a fingerprint: a second open possibility of
 /// the same agent with the same fingerprint is refused, and raising a declined one again names it with new evidence. An occurrence records
 /// at most its plan's possibilities and drafts, extras joining one summary possibility; open outputs past the plan's cap defer dispatch.
-/// No standing agent adopts, declines, parks, answers or withdraws its own output.
+/// No standing agent adopts, declines, parks, answers, withdraws or closes its own output, and no agent disposes of a held finding. Every
+/// revision is judged by the chain it revises, so what its own body leaves out stops no rule from applying.
 /// </summary>
 internal static partial class StandingOutputs
 {
@@ -63,12 +64,55 @@ internal static partial class StandingOutputs
             : null;
     }
 
+    /// <summary>
+    /// True when a record states a format before 3 and revises a record of its type that states 3 or later: a revision cannot leave the
+    /// standing rules behind by stating the format before them, so its chain's rules judge it as they judge a format-3 revision.
+    /// </summary>
+    public static bool RevisesLaterFormat(ValidationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.Format < 3 && context.Find(context.Record.Supersedes) is { } previous && previous.Type == context.Record.Type && previous.Format >= 3;
+    }
+
+    /// <summary>
+    /// The first revision of a record's chain of its own type: the record itself when it supersedes none of its type. Its raisedBy is the
+    /// chain's, whatever a later revision's body says.
+    /// </summary>
+    public static RecordEnvelope FirstOf(EstateModel model, RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(record);
+        RecordEnvelope current = record;
+        var seen = new HashSet<string>(StringComparer.Ordinal) { current.Id };
+        while (current.Supersedes is string prior && model.ById.TryGetValue(prior, out RecordEnvelope? earlier) && earlier.Type == record.Type && seen.Add(earlier.Id))
+        {
+            current = earlier;
+        }
+
+        return current;
+    }
+
     /// <summary>A standing plan's output caps: its plan.standing.outputs, or five possibilities, three drafts and ten open outputs.</summary>
     public static OutputCaps CapsOf(RecordEnvelope goal)
     {
         ArgumentNullException.ThrowIfNull(goal);
         JsonElement outputs = TJson.Object(StandingAgents.Plan(goal), "outputs");
         return new OutputCaps(Number(outputs, "possibilities") ?? DefaultPossibilities, Number(outputs, "drafts") ?? DefaultDrafts, Number(outputs, "open") ?? DefaultOpen);
+    }
+
+    /// <summary>
+    /// The revision of a standing agent's goal in force when a record was written, whose caps judge it: the latest revision written before it
+    /// that an activation counting before it made active, else the latest revision written before it, else the revision named. A later
+    /// revision, such as a sponsor's lowering the caps, judges only what is written after it is in force.
+    /// </summary>
+    public static RecordEnvelope InForce(EstateModel model, RecordEnvelope goal, RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(record);
+        List<RecordEnvelope> written = [.. model.Chain(model.Latest(goal)).Select(model.ById.GetValueOrDefault).OfType<RecordEnvelope>()
+            .Where(r => r.Type == "goal" && GoalRules.Before(r, record))];
+        return written.LastOrDefault(r => GoalRules.Statuses(model, r, record).Any(s => EstateModel.BodyString(s, "status") == "active")) ?? written.LastOrDefault() ?? goal;
     }
 
     /// <summary>Validates a plan's outputs caps: possibilities per occurrence, drafts among them and open outputs.</summary>
@@ -174,39 +218,44 @@ internal static partial class StandingOutputs
     /// <summary>
     /// Validates a record's raisedBy (§ 8): the standing agent's goal by its first revision, the occurrence key, the assignment of that goal's
     /// work order that names the key and whose contributor records this output, and, for an agent, the run of that assignment it records it
-    /// in, in flight when it does; an occurrence already settled records no further output. A revision keeps what its first revision named.
+    /// in, in flight when it does; an occurrence already settled records no further output. A revision is judged against the chain it
+    /// revises: it keeps exactly the raisedBy its first revision names, or names none when that names none, and what is returned is the
+    /// chain's, so leaving raisedBy out of a revision stops no standing rule from applying to it.
     /// </summary>
     public static RaisedBy? ValidateRaisedBy(ValidationContext context, BodyReader? raised)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (raised is null)
+        string? goalId = null, key = null, assignmentId = null, runId = null;
+        if (raised is not null)
         {
-            return null;
+            goalId = raised.Ulid("goal", true);
+            key = raised.Text("occurrence", true, 600);
+            assignmentId = raised.Ulid("assignment", true);
+            runId = raised.Ulid("run", false);
+            raised.NoOtherKeys();
         }
 
-        string? goalId = raised.Ulid("goal", true);
-        string? key = raised.Text("occurrence", true, 600);
-        string? assignmentId = raised.Ulid("assignment", true);
-        string? runId = raised.Ulid("run", false);
-        raised.NoOtherKeys();
+        if (context.Find(context.Record.Supersedes) is { } previous && previous.Type == context.Record.Type)
+        {
+            // The checks below were made when the output was first recorded; a revision changes nothing of what raised it.
+            RecordEnvelope first = FirstOf(context.Model, previous);
+            JsonElement original = TJson.Object(first.Body, "raisedBy");
+            if (!Same(original, raised?.Element ?? default))
+            {
+                context.Error("standing.raised-by", original.ValueKind == JsonValueKind.Undefined
+                    ? "A revision of a record no standing agent raised names no raisedBy: a standing output is raised as one, by its occurrence's contributor."
+                    : $"A revision of a standing output keeps the raisedBy its first revision {first.Id} names, exactly: what raised it does not change, and leaving it out stops no rule from applying.");
+            }
+
+            return Of(first);
+        }
+
         if (goalId is null || key is null || assignmentId is null)
         {
             return null;
         }
 
         var named = new RaisedBy(goalId, key, assignmentId, runId);
-        RecordEnvelope? previous = context.Find(context.Record.Supersedes) is { } prior && prior.Type == context.Record.Type ? prior : null;
-        if (previous is not null)
-        {
-            // A revision keeps what raised the output exactly; the checks below were made when it was first recorded.
-            if (CanonicalJson.Serialize(TJson.Object(previous.Body, "raisedBy")) != CanonicalJson.Serialize(raised.Element))
-            {
-                context.Error("standing.raised-by", "A revision of a standing output keeps its raisedBy exactly: what raised it does not change.");
-            }
-
-            return named;
-        }
-
         RecordEnvelope? goal = context.Find(goalId);
         if (goal is not { Type: "goal" } || context.Model.Chain(goal)[0] != goal.Id || !StandingAgents.IsStanding(context.Model.Latest(goal)))
         {
@@ -259,19 +308,25 @@ internal static partial class StandingOutputs
     /// <summary>
     /// Validates what a standing agent's possibility adds to a possibility (§§ 8 and 10): on its first revision it is open, carries a
     /// fingerprint and at least one source, stays within its occurrence's caps, is no second open possibility of the agent with that
-    /// fingerprint, and names a declined one it raises again with new evidence. A revision keeps its fingerprint, and a revision that
-    /// disposes of it is never the agent's own: not its author, no agent that carried one of the standing agent's occurrences before it,
-    /// and no agent the goal's role names; a held finding is disposed of only by an operator who is a person.
+    /// fingerprint, and names a declined one it raises again with new evidence. A revision keeps its fingerprint, counts against the caps
+    /// for what it adds, and one that disposes of it is never the agent's own: not its author, no agent that carried one of the standing
+    /// agent's occurrences before it, and no agent the goal's role names. Every possibility's held finding (§§ 8 and 9) is disposed of by a
+    /// person only, adopted only by an operator who is one, and its hold ends only by an operator who is a person.
     /// </summary>
     public static void ValidatePossibility(ValidationContext context, RaisedBy? raised, string? disposition)
     {
         ArgumentNullException.ThrowIfNull(context);
         RecordEnvelope record = context.Record;
-        RecordEnvelope? previous = context.Find(record.Supersedes) is { Type: "possibility" } prior ? prior : null;
-        RecordEnvelope? first = previous is null ? null : context.Model.ById.GetValueOrDefault(context.Model.Chain(previous)[0]);
-        if (previous is not null)
+        if (context.Find(record.Supersedes) is { Type: "possibility" } previous)
         {
-            ValidateRevision(context, previous, first!, disposition);
+            RecordEnvelope first = FirstOf(context.Model, previous);
+            bool disposes = disposition != EstateModel.BodyString(previous, "disposition") || !Same(TJson.Object(record.Body, "adoptedAs"), TJson.Object(previous.Body, "adoptedAs"));
+            ValidateHeld(context, previous, first, disposition, disposes);
+            if (raised is not null)
+            {
+                ValidateRevision(context, previous, first, raised, disposes);
+            }
+
             return;
         }
 
@@ -296,29 +351,7 @@ internal static partial class StandingOutputs
             context.Error("standing.possibility", "A standing agent's possibility cites at least one source: where it was found, or how it reproduces.");
         }
 
-        if (context.Find(raised.Goal) is not { Type: "goal" } goal)
-        {
-            return;
-        }
-
-        // Caps per occurrence: its plan's possibilities, drafts among them, and one summary possibility that the extras join.
-        OutputCaps caps = CapsOf(context.Model.Latest(goal));
-        List<RecordEnvelope> earlier = [.. Raised(context.Model, raised.Goal, record).Where(r => r.Type == "possibility" && Of(r)?.Occurrence == raised.Occurrence)];
-        bool summary = record.Body.TryGetProperty("extras", out _);
-        bool draft = record.Body.TryGetProperty("draft", out _);
-        if (summary && earlier.Any(r => r.Body.TryGetProperty("extras", out _)))
-        {
-            context.Error("standing.output-cap", $"Occurrence {raised.Occurrence} has its summary possibility already: its extras join that one, which another principal disposes of.");
-        }
-        else if (!summary && earlier.Count(r => !r.Body.TryGetProperty("extras", out _)) >= caps.Possibilities)
-        {
-            context.Error("standing.output-cap", $"Occurrence {raised.Occurrence} has recorded {caps.Possibilities.ToString(CultureInfo.InvariantCulture)} possibilities, its cap: further ideas join one summary possibility, listed in its extras.");
-        }
-        else if (draft && earlier.Count(r => r.Body.TryGetProperty("draft", out _)) >= caps.Drafts)
-        {
-            context.Error("standing.output-cap", $"Occurrence {raised.Occurrence} has recorded {caps.Drafts.ToString(CultureInfo.InvariantCulture)} possibilities with a draft work order, its cap: further proposed work joins its summary possibility.");
-        }
-
+        ValidateOutputCaps(context, raised, null, null);
         if (fingerprint is null)
         {
             return;
@@ -328,7 +361,7 @@ internal static partial class StandingOutputs
         List<RecordEnvelope> same = [.. Raised(context.Model, raised.Goal, record).Where(r => r.Type == "possibility" && EstateModel.BodyString(r, "fingerprint") == fingerprint)];
         if (same.Select(r => AsOf(context.Model, r, record)).FirstOrDefault(r => r is not null && EstateModel.BodyString(r, "disposition") == "open") is RecordEnvelope open)
         {
-            context.Error("standing.duplicate-output", $"Possibility {context.Model.Chain(open)[0]} of this standing agent with fingerprint '{fingerprint}' is open: a second open one is refused; add to that one instead.");
+            context.Error("standing.duplicate-output", $"Possibility {context.Model.Chain(open)[0]} of this standing agent with fingerprint '{fingerprint}' is open: a second open one is refused; add to that one instead, by a revision that keeps its raisedBy and fingerprint.");
         }
 
         List<RecordEnvelope> declined = [.. same.Where(r => AsOf(context.Model, r, record) is RecordEnvelope standing && EstateModel.BodyString(standing, "disposition") == "declined")];
@@ -348,27 +381,53 @@ internal static partial class StandingOutputs
         }
     }
 
-    /// <summary>A revision of a possibility: the fingerprint and raisedBy kept, and a disposition by its own agent refused.</summary>
-    private static void ValidateRevision(ValidationContext context, RecordEnvelope previous, RecordEnvelope first, string? disposition)
+    /// <summary>
+    /// The caps of an occurrence (§ 10), as the goal revision in force when the output was first raised states them: its plan's
+    /// possibilities, drafts among them and one summary possibility that the extras join. Each other possibility of the occurrence counts
+    /// at its revision as it stood before this record; a first revision counts for all it carries, and a revision for what it adds: a draft,
+    /// extras, or a summary possibility that drops its extras and so joins the possibilities.
+    /// </summary>
+    private static void ValidateOutputCaps(ValidationContext context, RaisedBy raised, RecordEnvelope? previous, RecordEnvelope? first)
     {
         RecordEnvelope record = context.Record;
-        if (Of(first) is not RaisedBy raised)
+        bool summary = Has(record, "extras");
+        bool addsSummary = summary && (previous is null || !Has(previous, "extras"));
+        bool addsPossibility = !summary && (previous is null || Has(previous, "extras"));
+        bool addsDraft = Has(record, "draft") && (previous is null || !Has(previous, "draft"));
+        if ((!addsSummary && !addsPossibility && !addsDraft) || context.Find(raised.Goal) is not { Type: "goal" } goal)
         {
-            if (record.Body.TryGetProperty("raisedBy", out _))
-            {
-                context.Error("standing.raised-by", "A standing output is raised as one: a revision of a possibility no standing agent raised names no raisedBy.");
-            }
-
             return;
         }
 
-        if (!record.Body.TryGetProperty("raisedBy", out _) || EstateModel.BodyString(record, "fingerprint") != EstateModel.BodyString(previous, "fingerprint"))
+        OutputCaps caps = CapsOf(InForce(context.Model, goal, first ?? record));
+        string own = first?.Id ?? record.Id;
+        List<RecordEnvelope> others = [.. Raised(context.Model, raised.Goal, record)
+            .Where(r => r.Type == "possibility" && r.Id != own && Of(r)?.Occurrence == raised.Occurrence)
+            .Select(r => AsOf(context.Model, r, record)).OfType<RecordEnvelope>()];
+        if (addsSummary && others.Any(r => Has(r, "extras")))
         {
-            context.Error("standing.raised-by", "A revision of a standing agent's possibility keeps its raisedBy and its fingerprint.");
+            context.Error("standing.output-cap", $"Occurrence {raised.Occurrence} has its summary possibility already: its extras join that one, which another principal disposes of.");
+        }
+        else if (addsPossibility && others.Count(r => !Has(r, "extras")) >= caps.Possibilities)
+        {
+            context.Error("standing.output-cap", $"Occurrence {raised.Occurrence} has recorded {caps.Possibilities.ToString(CultureInfo.InvariantCulture)} possibilities, its cap: further ideas join one summary possibility, listed in its extras.");
+        }
+        else if (addsDraft && others.Count(r => Has(r, "draft")) >= caps.Drafts)
+        {
+            context.Error("standing.output-cap", $"Occurrence {raised.Occurrence} has recorded {caps.Drafts.ToString(CultureInfo.InvariantCulture)} possibilities with a draft work order, its cap: further proposed work joins its summary possibility.");
+        }
+    }
+
+    /// <summary>A revision of a standing agent's possibility: its fingerprint kept, what it adds within the caps, and a disposition by its own agent refused.</summary>
+    private static void ValidateRevision(ValidationContext context, RecordEnvelope previous, RecordEnvelope first, RaisedBy raised, bool disposes)
+    {
+        RecordEnvelope record = context.Record;
+        if (EstateModel.BodyString(record, "fingerprint") != EstateModel.BodyString(first, "fingerprint"))
+        {
+            context.Error("standing.raised-by", $"A revision of a standing agent's possibility keeps the fingerprint its first revision {first.Id} names.");
         }
 
-        bool disposes = disposition != EstateModel.BodyString(previous, "disposition")
-            || CanonicalJson.Serialize(TJson.Object(record.Body, "adoptedAs")) != CanonicalJson.Serialize(TJson.Object(previous.Body, "adoptedAs"));
+        ValidateOutputCaps(context, raised, previous, first);
         if (!disposes)
         {
             return;
@@ -396,8 +455,34 @@ internal static partial class StandingOutputs
                 context.Findings.Info(BoundaryCode, context.Location, $"{by} is an agent the role {step.Role} of standing agent {raised.Goal} names: no standing agent disposes of its own outputs, so another principal does.");
             }
         }
+    }
 
-        if (EstateModel.BodyString(first, "disclosure") == "held" && disposition is "adopted" && (!GoalRules.IsPerson(context.Model, by) || !context.HasRole(by, Roles.Operator)))
+    /// <summary>
+    /// A held finding (§§ 8 and 9; design/estate-advisor.md § 8): a possibility whose revision as it stands carries disclosure held, whoever
+    /// raised it and whether a standing agent did or not. No agent disposes of it, a person does; only an operator who is a person adopts it;
+    /// and only an operator who is a person ends its hold, by a revision without disclosure, since what is disclosed is the operator's choice.
+    /// </summary>
+    private static void ValidateHeld(ValidationContext context, RecordEnvelope previous, RecordEnvelope first, string? disposition, bool disposes)
+    {
+        RecordEnvelope record = context.Record;
+        bool held = EstateModel.BodyString(previous, "disclosure") == "held";
+        if (!held && EstateModel.BodyString(record, "disclosure") != "held")
+        {
+            return;
+        }
+
+        bool person = GoalRules.IsPerson(context.Model, record.By);
+        bool operatorPerson = person && context.HasRole(record.By, Roles.Operator);
+        if (held && EstateModel.BodyString(record, "disclosure") != "held" && !operatorPerson)
+        {
+            context.Error("standing.held", $"Possibility {first.Id} is a held finding: only an operator who is a person ends its hold, by a revision without disclosure.");
+        }
+
+        if (disposes && !person)
+        {
+            context.Error("standing.held", $"Possibility {first.Id} is a held finding: a person disposes of it, never an agent; {record.By} neither adopts, declines nor parks it.");
+        }
+        else if (disposes && disposition == "adopted" && !operatorPerson)
         {
             context.Error("standing.held", $"Possibility {first.Id} is a held finding: an operator who is a person adopts it, after the Reviewer's review.");
         }
@@ -405,8 +490,8 @@ internal static partial class StandingOutputs
 
     /// <summary>
     /// Validates what a standing agent's ask adds (§ 8): it is put to a person other than its author, belongs to the agent's goal, never
-    /// opens with the words the runtime's own asks open with, and is never withdrawn by its author: a decision of the person asked disposes
-    /// of it.
+    /// opens with the words the runtime's own asks open with, and is never withdrawn: a decision of the person asked disposes of it, and a
+    /// revision is judged by the raisedBy of the chain it revises, so leaving it out of a withdrawal changes nothing.
     /// </summary>
     public static void ValidateAsk(ValidationContext context, RaisedBy? raised, string? to, string? goal, string? state)
     {
@@ -421,7 +506,7 @@ internal static partial class StandingOutputs
         {
             if (state == "withdrawn")
             {
-                context.Error("standing.own-output", "A standing agent's ask is disposed of by a decision of the person asked; its author does not withdraw it.");
+                context.Error("standing.own-output", "A standing agent's ask is disposed of by a decision of the person asked; withdrawing it is a disposal, and its author does not make it.");
             }
 
             return;
@@ -446,12 +531,13 @@ internal static partial class StandingOutputs
 
     /// <summary>
     /// Validates what a standing agent's operator request adds (§ 8): words outside the estate, a publication request pinning the agent's
-    /// work order, whose exact text the operator approves; it dispatches nothing.
+    /// work order, put to an operator other than its author, whose exact text the operator approves; it dispatches nothing. Every revision
+    /// stays one, judged by the raisedBy of the chain it revises.
     /// </summary>
     public static void ValidateOperatorRequest(ValidationContext context, RaisedBy? raised)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (raised is null || context.Find(context.Record.Supersedes) is { Type: "operator-request" })
+        if (raised is null)
         {
             return;
         }
@@ -461,12 +547,50 @@ internal static partial class StandingOutputs
             context.Error("standing.publication", "A standing agent's operator request is a publication request: its words outside the estate, labeled its draft, which the operator approves.");
         }
 
+        if (EstateModel.BodyString(context.Record, "to") == context.Record.By)
+        {
+            context.Error("standing.publication", "A standing agent's publication request is put to an operator other than its author, who closes it; no one closes their own output.");
+        }
+
         if (context.Find(raised.Goal) is { Type: "goal" } goal && FlowRuns.Work(context.Model, context.Model.Latest(goal)) is RecordEnvelope order
             && (context.Record.Subject is null || !context.Model.Chain(order).Contains(context.Record.Subject.Id)))
         {
             context.Error("standing.publication", $"A standing agent's publication request pins its work order {EstateModel.BodyString(order, "key") ?? order.Id}.");
         }
     }
+
+    /// <summary>
+    /// Validates a closure of an operator request, an operator-request-close or an operator-request observation (§ 8): one of a standing
+    /// agent's publication request, by the raisedBy of its chain, is closed only by an operator who is a person, directly; never by its
+    /// raiser and never by an agent, whatever words of the operator it cites, so no standing agent records its own words as published or
+    /// dismissed, or frees its open-output cap.
+    /// </summary>
+    public static void ValidateClosure(ValidationContext context, RecordEnvelope request)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(request);
+        RecordEnvelope first = FirstOf(context.Model, request);
+        if (Of(first) is null)
+        {
+            return;
+        }
+
+        string by = context.Record.By;
+        if (by == first.By || by == EstateModel.BodyString(first, "askedBy"))
+        {
+            context.Error("standing.own-output", $"Operator request {first.Id} is a standing agent's publication request {by} raised: no standing agent closes its own output, whatever words it cites; an operator who is a person closes it.");
+        }
+        else if (!GoalRules.IsPerson(context.Model, by) || !context.HasRole(by, Roles.Operator))
+        {
+            context.Error("standing.publication", $"Operator request {first.Id} is a standing agent's publication request: an operator who is a person closes it directly, and {by} does not, whatever words of the operator it cites.");
+        }
+    }
+
+    /// <summary>True when two body values are the same: both absent, or present with one canonical form. An absent value is never serialized.</summary>
+    private static bool Same(JsonElement a, JsonElement b) =>
+        a.ValueKind == JsonValueKind.Undefined || b.ValueKind == JsonValueKind.Undefined ? a.ValueKind == b.ValueKind : CanonicalJson.Serialize(a) == CanonicalJson.Serialize(b);
+
+    private static bool Has(RecordEnvelope record, string name) => record.Body.ValueKind == JsonValueKind.Object && record.Body.TryGetProperty(name, out _);
 
     /// <summary>Validates a possibility's fingerprint: lower-case letters, digits and . : / _ -, up to 200 characters.</summary>
     public static void Fingerprint(BodyReader body) => body.Text("fingerprint", false, 200, FingerprintPattern(), "lower-case letters, digits and . : / _ -");
