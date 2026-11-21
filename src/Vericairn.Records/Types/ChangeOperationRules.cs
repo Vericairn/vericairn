@@ -105,7 +105,7 @@ internal static class ChangeOperationRules
                 && status == "uncertain" && !string.IsNullOrWhiteSpace(EstateModel.BodyString(context.Record, "reconciliation"));
             foreach (JsonProperty fact in oldTarget.EnumerateObject())
             {
-                if (retry && fact.Name is "base" or "remoteHead" or "targetHead" or "basis") continue;
+                if (retry && fact.Name is "base" or "remoteHead" or "targetHead") continue;
                 if (!target.TryGetProperty(fact.Name, out JsonElement kept) || CanonicalJson.Serialize(kept) != CanonicalJson.Serialize(fact.Value))
                     context.Error("operation.change-target", "A repository operation keeps every pinned target fact; a different head needs a new intent.");
             }
@@ -120,26 +120,31 @@ internal static class ChangeOperationRules
     }
 
     /// <summary>
-    /// From 0.9.4 (FIX-154) a push records where its scan began, beside its base: <c>merge-base</c>, or the id of the checked push of the
-    /// same repository, destination and branch that it continued, whose head is its base. Which pushes are complete is derived from these
-    /// records by the runtime; a reader before 0.9.4 keeps the field as one more target fact and ignores it.
+    /// From 0.9.4 (FIX-154) a push records where its scan began, beside its base, from its dispatch on: <c>merge-base</c>, or the id of the
+    /// observed checked push of the same repository, destination, branch and target that it continued, whose head is its base. Which pushes
+    /// are complete is derived from these records by the runtime. Like every target fact other than a retry's base and heads, a recorded
+    /// basis is never changed or dropped by a later revision, a retry's included, so a reader before 0.9.4, whose rule lets a retry change
+    /// only <c>base</c>, <c>remoteHead</c> and <c>targetHead</c>, keeps it as one more target fact and ignores it; a push refused before
+    /// its dispatch records none, so its retry may record one.
     /// </summary>
     private static void Basis(ValidationContext context, string? action, JsonElement target)
     {
         string? basis = Text(target, "basis");
-        if (action != "change-push" || basis is null || Text(target, "base") is not string scanBase)
+        if (action != "change-push" || basis is null)
         {
-            context.Error(BasisCode, "Only a checked push records a basis, beside its base.");
+            context.Error(BasisCode, "Only a checked push records a basis.");
             return;
         }
         if (basis == "merge-base") return;
+        // A retry's revision before its dispatch keeps the basis without the base it finds again; the dispatch records both.
+        string? scanBase = Text(target, "base");
         RecordEnvelope? continued = Identity.Ulid.IsValid(basis) ? context.Find(basis) : null;
         JsonElement other = continued is not null && continued.Body.TryGetProperty("target", out JsonElement found) ? found : default;
         if (continued is not { Type: "operation" } || EstateModel.BodyString(continued, "action") != "change-push"
-            || EstateModel.BodyString(continued, "status") != "observed-success" || Text(other, "head") != scanBase
+            || EstateModel.BodyString(continued, "status") != "observed-success" || scanBase is not null && Text(other, "head") != scanBase
             || Text(other, "repository") != Text(target, "repository") || Text(other, "destination") != Text(target, "destination")
-            || Text(other, "branch") != Text(target, "branch"))
-            context.Error(BasisCode, "A push's basis is merge-base or the observed checked push of the same repository and branch whose head is its base.");
+            || Text(other, "branch") != Text(target, "branch") || Text(other, "target") != Text(target, "target"))
+            context.Error(BasisCode, "A push's basis is merge-base or the observed checked push of the same repository, branch and target whose head is its base.");
     }
 
     internal const string BasisCode = "operation.change-basis";

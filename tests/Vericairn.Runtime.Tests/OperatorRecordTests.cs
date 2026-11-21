@@ -123,7 +123,8 @@ public sealed class OperatorRecordTests
         Assert.False(first.Ok);
         RecordEnvelope failed = LatestPush(f);
         Assert.Equal("known-failure", EstateModel.BodyString(failed, "status"));
-        Assert.Equal("merge-base", failed.Body.GetProperty("target").GetProperty("basis").GetString());
+        // Refused before its dispatch, the push records no basis; its retry records the one it finds.
+        Assert.False(failed.Body.GetProperty("target").TryGetProperty("basis", out _));
         f.Fail = null;
         f.Reopen();
         OperatorRecordResponse resumed = f.Run("The scanner is repaired; nothing was pushed.");

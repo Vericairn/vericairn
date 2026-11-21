@@ -57,24 +57,33 @@ public sealed partial class EstateService
             string directory = ChangeClone(claim.Configuration);
             string remote = claim.Configuration.Provider.PushRemote(claim.Configuration.Destination);
             // FIX-154: the scan covers every commit the target does not hold: it begins at the head of the newest complete recorded push
-            // of the branch that the remote branch still holds, which the adapter checks, or else at the merge base with the target.
+            // of the branch against the declared target that the remote branch still holds, which the adapter checks, or else at the
+            // merge base with the target. A retry of a push that recorded its basis keeps it, as every reader requires of a retry's
+            // target facts other than its base and heads: it offers the adapter only that basis, and refuses if it no longer applies.
             IReadOnlyList<PushCoverage.Covered> covered;
-            lock (gate) covered = PushCoverage.Covering(session.Load(), claim.Configuration.Repository.Id, claim.Configuration.Destination, request.Branch);
+            lock (gate) covered = PushCoverage.Covering(session.Load(), claim.Configuration.Repository.Id, claim.Configuration.Destination, request.Branch, claim.Configuration.Target);
+            string? kept = claim.Body["target"]!["basis"]?.GetValue<string>();
+            if (kept is not null) covered = [.. covered.Where(c => c.Operation == kept)];
             string[] recorded = [.. covered.Select(c => c.Head)];
             PushPlan plan = adapter.Prepare(directory, remote, request.Branch, claim.Configuration.Target, request.Head, recorded);
             if (plan.Head != request.Head || plan.Branch != request.Branch || plan.Target != claim.Configuration.Target
                 || !Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.TargetHead))
                 throw new ProviderRefusedException("The adapter's push plan does not match the requested head and branches.");
+            string basis = covered.FirstOrDefault(c => c.Head == plan.Base)?.Operation ?? PushCoverage.MergeBase;
+            if (kept is not null && basis != kept)
+                throw new ProviderRefusedException("This retry continues the basis its earlier attempt recorded, which no longer applies: the remote branch no longer holds the push it continued. Nothing was pushed; push a new head of the branch, which scans from the merge base.");
             JsonObject target = claim.Body["target"]!.AsObject();
             target["base"] = plan.Base;
             target["remoteHead"] = plan.RemoteHead ?? string.Empty;
             target["targetHead"] = plan.TargetHead;
-            target["basis"] = covered.FirstOrDefault(c => c.Head == plan.Base)?.Operation ?? PushCoverage.MergeBase;
             SecretScan scan = scanner.Scan(directory, plan);
             claim.Body["scan"] = JsonSerializer.SerializeToNode(scan, ChangeJson);
             if (!scan.Passed(plan)) throw new ProviderRefusedException("The scan of exactly the push's commits did not pass.");
             string? warned = CheckPushedMessages(claim, adapter, directory, plan);
             RefuseHeldDisclosure(claim, adapter, directory, plan);
+            // The basis is recorded from the dispatch on, where the scan passed: a push refused before it records none, so its retry may
+            // choose one (FIX-154).
+            target["basis"] = basis;
             // The dispatch record precedes the push, which runs within its two-minute bound: the session must outlast it (ID-16).
             PresenceEffectAhead();
             DispatchChange(claim);
@@ -528,8 +537,8 @@ public sealed partial class EstateService
     // A host's removal reason enters a record only as a short upper-case token, never as free text.
     private static string? QueueReason(string? reason) => reason is { Length: > 0 and <= 64 } && reason.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') && char.IsAsciiLetterUpper(reason[0]) ? reason : null;
 
-    // A recorded push, observed at the remote after its scan of exactly the pushed commits passed, and, where asked, complete: its scan
-    // began at the merge base or at an earlier complete push of the branch (FIX-154). Caller holds the gate.
+    // A recorded push, observed at the remote after its scan of exactly the pushed commits passed, and, where asked, complete against the
+    // declaration's current target: its scan began at the merge base or at an earlier complete push of the branch (FIX-154). Caller holds the gate.
     private bool ScannedPush(ChangeClaim claim, string? branch, string head, bool complete = false)
     {
         EstateModel model = session.Load();
@@ -537,7 +546,7 @@ public sealed partial class EstateService
             && EstateModel.BodyString(o, "status") == "observed-success" && o.Body.TryGetProperty("target", out JsonElement t)
             && ChangeText(t, "repository") == claim.Configuration.Repository.Id && ChangeText(t, "branch") == branch
             && ChangeText(t, "head") == head && ChangeText(t, "destination") == claim.Configuration.Destination
-            && (!complete || PushCoverage.Complete(model, o)));
+            && (!complete || PushCoverage.Complete(model, o, claim.Configuration.Target)));
     }
 
     // The identity a change's effect is reconciled under. A head whose recorded push of the branch was not complete, as a push before
@@ -548,7 +557,7 @@ public sealed partial class EstateService
         string identity = $"{configuration.Provider.Provider}:{configuration.Repository.Id}:{action}:{name}:{head}:{configuration.Product.ComputedHash[7..]}";
         if (action != "change-push") return identity;
         RecordEnvelope? prior = model.Current("operation").FirstOrDefault(o => EstateModel.BodyString(o, "identity") == identity);
-        return prior is not null && EstateModel.BodyString(prior, "status") == "observed-success" && !PushCoverage.Complete(model, prior)
+        return prior is not null && EstateModel.BodyString(prior, "status") == "observed-success" && !PushCoverage.Complete(model, prior, configuration.Target)
             ? identity + ":after:" + prior.Id : identity;
     }
 
@@ -701,9 +710,9 @@ public sealed partial class EstateService
                 body["target"]![action == "change-merge" ? "pullRequest" : "branch"] = name;
                 if (prior is not null)
                 {
-                    // What the push observed and where its scan began are found again by the retry (FIX-154 adds the basis).
+                    // What the push observed is found again by the retry; a basis its earlier attempt recorded is kept (FIX-154).
                     foreach (JsonProperty fact in prior.Body.GetProperty("target").EnumerateObject())
-                        if (fact.Name is not ("base" or "remoteHead" or "targetHead" or "basis") && body["target"]![fact.Name] is null)
+                        if (fact.Name is not ("base" or "remoteHead" or "targetHead") && body["target"]![fact.Name] is null)
                             body["target"]![fact.Name] = JsonNode.Parse(fact.Value.GetRawText());
                     body["status"] = "uncertain";
                     body["dispatchedAt"] = Now();

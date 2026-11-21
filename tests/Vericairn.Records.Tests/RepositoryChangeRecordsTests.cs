@@ -48,17 +48,19 @@ public sealed class RepositoryChangeRecordsTests
         Assert.Contains(fixture.Estate.Load().Findings, f => f.Code == "operation.push-scan");
     }
 
-    // FIX-154: a push records where its scan began, beside its base: the merge base, or the observed push of the same repository and
-    // branch that it continued, whose head is its base. Nothing else records a basis.
+    // FIX-154: a push records where its scan began: the merge base, or the observed push of the same repository, branch and target that it
+    // continued, whose head is its base where the revision records one (a retry's revision before its dispatch keeps the basis without
+    // the base it finds again). Nothing else records a basis.
     [Theory]
     [InlineData("merge-base", true)]
     [InlineData("continued", true)]
     [InlineData("other-branch", false)]
     [InlineData("other-head", false)]
+    [InlineData("other-target", false)]
     [InlineData("not-observed", false)]
     [InlineData("unknown", false)]
     [InlineData("on-a-merge", false)]
-    [InlineData("no-base", false)]
+    [InlineData("no-base", true)]
     public void APushsBasisIsTheMergeBaseOrTheObservedPushOfTheBranchItContinued(string basis, bool valid)
     {
         using var fixture = new Fixture();
@@ -67,6 +69,7 @@ public sealed class RepositoryChangeRecordsTests
         first["identity"] = "example-first";
         first["target"]!["head"] = basis == "other-head" ? Basis : earlier;
         first["target"]!["branch"] = basis == "other-branch" ? "work/other" : "work/change";
+        if (basis == "other-target") first["target"]!["target"] = "dev";
         first["target"]!["base"] = Basis;
         first["scan"] = new JsonObject { ["tool"] = "scanner", ["version"] = "1.0.0", ["range"] = Basis + ".." + first["target"]!["head"]!.GetValue<string>(), ["verdict"] = "passed", ["findingCount"] = 0 };
         RecordEnvelope continued = fixture.Dispatch(first);
@@ -83,10 +86,11 @@ public sealed class RepositoryChangeRecordsTests
         Assert.Equal(valid, !fixture.Estate.Load().Findings.Any(f => f.Code == "operation.change-basis"));
     }
 
+    // A retry after a known failure may find its base and heads again but keeps a recorded basis, as a reader before 0.9.4 requires.
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void OnlyARetryAfterAKnownFailureFindsItsBaseAndBasisAgain(bool retry)
+    public void ARetryFindsItsBaseAgainButKeepsTheBasisItRecorded(bool keepsBasis)
     {
         using var fixture = new Fixture();
         JsonObject body = fixture.Body("change-push");
@@ -94,16 +98,16 @@ public sealed class RepositoryChangeRecordsTests
         body["target"]!["base"] = Basis;
         body["target"]!["basis"] = "merge-base";
         RecordEnvelope intent = fixture.Estate.Add("operation", fixture.Estate.OperatorId, body.ToJsonString());
-        body["status"] = retry ? "known-failure" : "not-started";
-        body["observed"] = new JsonObject { ["summary"] = "The scan did not pass.", ["at"] = RecordParser.FormatTimestamp(fixture.Estate.Clock.AddSeconds(1)) };
+        body["status"] = "known-failure";
+        body["observed"] = new JsonObject { ["summary"] = "The push was refused.", ["at"] = RecordParser.FormatTimestamp(fixture.Estate.Clock.AddSeconds(1)) };
         RecordEnvelope failed = fixture.Estate.Add("operation", fixture.Estate.OperatorId, body.ToJsonString(), supersedes: intent.Id);
         body["status"] = "uncertain";
         body["dispatchedAt"] = RecordParser.FormatTimestamp(fixture.Estate.Clock.AddSeconds(1));
-        body["reconciliation"] = "The scanner was installed again; nothing was pushed.";
+        body["reconciliation"] = "The remote branch was observed; nothing was pushed.";
         body["target"]!["base"] = Head;
-        body["target"]!.AsObject().Remove("basis");
+        if (!keepsBasis) body["target"]!.AsObject().Remove("basis");
         fixture.Estate.Add("operation", fixture.Estate.OperatorId, body.ToJsonString(), supersedes: failed.Id);
-        Assert.Equal(retry, !fixture.Estate.Load().Findings.Any(f => f.Code == "operation.change-target"));
+        Assert.Equal(keepsBasis, !fixture.Estate.Load().Findings.Any(f => f.Code == "operation.change-target"));
     }
 
     [Fact]

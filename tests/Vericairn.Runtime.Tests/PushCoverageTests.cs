@@ -32,7 +32,7 @@ public sealed class PushCoverageTests : IDisposable
     private readonly string hooks;
     private readonly TestEstate estate = new(recordFormat: 3);
     private readonly RecordEnvelope repository;
-    private readonly RecordEnvelope product;
+    private RecordEnvelope product;
     private readonly LocalRemote provider;
     private readonly PlantedScanner planted;
     private EstateService? service;
@@ -48,10 +48,7 @@ public sealed class PushCoverageTests : IDisposable
         Directory.CreateDirectory(hooks);
         File.WriteAllText(configuration, string.Empty);
         repository = estate.Add("resource", estate.OperatorId, """{"kind":"repository","name":"Widget","role":"Source","location":{"github":"Example/widget"},"visibility":"private"}""");
-        product = estate.Add("product", estate.OperatorId, $$"""
-            {"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],
-             "changes":{"provider":"memory-pull-requests","repository":"{{repository.Id}}","target":"main","requiredChecks":["tests"]} }
-            """);
+        product = estate.Add("product", estate.OperatorId, ProductBody("main"));
         RepositoryClones.Register(estate.Estate.Id, repository.Id, clone);
         provider = new LocalRemote(remote);
         planted = new PlantedScanner(this);
@@ -88,7 +85,7 @@ public sealed class PushCoverageTests : IDisposable
         Assert.False(again.Ok, again.Message);
         Assert.EndsWith(":after:" + incomplete!.Id, again.Identity, StringComparison.Ordinal);
         RecordEnvelope scanned = Current(again);
-        Assert.Equal("merge-base", Target(scanned, "basis"));
+        Assert.Null(Target(scanned, "basis"));
         Assert.Equal(MergeBase() + ".." + key, scanned.Body.GetProperty("scan").GetProperty("range").GetString());
         Assert.Equal("findings", scanned.Body.GetProperty("scan").GetProperty("verdict").GetString());
 
@@ -98,7 +95,7 @@ public sealed class PushCoverageTests : IDisposable
         Assert.Equal("known-failure", next.Status);
         RecordEnvelope refused = Current(next);
         Assert.Equal(MergeBase(), Target(refused, "base"));
-        Assert.Equal("merge-base", Target(refused, "basis"));
+        Assert.Null(Target(refused, "basis"));
         Assert.Equal("findings", refused.Body.GetProperty("scan").GetProperty("verdict").GetString());
         Assert.Equal(key, RemoteHead());
         Assert.Null(provider.MergedHead);
@@ -150,8 +147,9 @@ public sealed class PushCoverageTests : IDisposable
         ChangeResponse pushed = Service.ChangesPush(Push(head));
         Assert.False(pushed.Ok, pushed.Message);
         RecordEnvelope refused = Current(pushed);
-        Assert.Equal(keepsFirst ? one.Id : "merge-base", Target(refused, "basis"));
+        Assert.True(one.Id.Length > 0);
         Assert.Equal(keepsFirst ? first : MergeBase(), Target(refused, "base"));
+        Assert.Equal((keepsFirst ? first : MergeBase()) + ".." + head, refused.Body.GetProperty("scan").GetProperty("range").GetString());
         Assert.Equal(rewritten, RemoteHead());
     }
 
@@ -231,7 +229,8 @@ public sealed class PushCoverageTests : IDisposable
         planted.Unavailable = true;
         ChangeResponse failed = Service.ChangesPush(Push(head));
         Assert.Equal("known-failure", failed.Status);
-        Assert.Equal("merge-base", Target(Current(failed), "basis"));
+        // Refused before its dispatch, the push recorded no basis, so its retry may record one.
+        Assert.Null(Target(Current(failed), "basis"));
         planted.Unavailable = false;
 
         // A complete push of an earlier head of the branch lands meanwhile; the retry continues from it.
@@ -263,6 +262,131 @@ public sealed class PushCoverageTests : IDisposable
         // The adapter refuses it too, whatever calls it.
         Assert.Throws<ProviderRefusedException>(() => Adapter().Prepare(clone, remote, "main", "main", head, []));
     }
+
+    // The Reviewer's probe: a push complete against the target the declaration named then counts for nothing once the operator moves the
+    // declaration to another target. dev holds a commit main does not hold, which no push scanned; a branch off dev is pushed while dev is
+    // the target; the declaration moves to main; the next head's push scans from the merge base with main and is refused, and neither
+    // head merges into main, the first on its old push included.
+    [Fact]
+    public void APushCompleteAgainstAnEarlierTargetCountsForNothingOnceTheDeclarationMoves()
+    {
+        Git(clone, "checkout", "-q", "-b", "dev", "main");
+        string devOnly = Commit("dev.txt", "Only dev holds this.\n", "A change only dev holds");
+        planted.Secrets.Add(devOnly);
+        Git(clone, "push", "-q", "--no-verify", remote, "dev");
+        Reopen(() => product = estate.Add("product", estate.OperatorId, ProductBody("dev"), supersedes: product.Id));
+        Git(clone, "checkout", "-q", "-B", Branch, "dev");
+        string first = Commit("one.txt", "One.\n", "Add one");
+        RecordEnvelope one = Pushed(first);
+        Assert.Equal(devOnly, Target(one, "base"));
+        Assert.Equal("dev", Target(one, "target"));
+
+        Reopen(() => product = estate.Add("product", estate.OperatorId, ProductBody("main"), supersedes: product.Id));
+        string second = Commit("two.txt", "Two.\n", "Add two");
+        ChangeResponse next = Service.ChangesPush(Push(second));
+        Assert.False(next.Ok, next.Message);
+        RecordEnvelope refused = Current(next);
+        Assert.Equal(MergeBase(), Target(refused, "base"));
+        Assert.Equal("findings", refused.Body.GetProperty("scan").GetProperty("verdict").GetString());
+        Assert.Equal(first, RemoteHead());
+
+        ChangeResponse merge = Merge(second);
+        Assert.False(merge.Ok, merge.Message);
+        Assert.Contains("No complete checked push of this exact head", merge.Message, StringComparison.Ordinal);
+        ChangeResponse old = Merge(first);
+        Assert.False(old.Ok, old.Message);
+        Assert.Contains("No complete checked push of this exact head", old.Message, StringComparison.Ordinal);
+        Assert.Null(provider.MergedHead);
+        Assert.Equal(0, Service.Validate().Errors);
+    }
+
+    // Pushes whose bases name each other, one by the older rule and one by its recorded basis, rest on nothing: neither is complete,
+    // neither head merges, and the next push scans from the merge base.
+    [Fact]
+    public void ACycleOfBasisReferencesIsNotComplete()
+    {
+        string first = Commit("one.txt", "One.\n", "Add one");
+        string second = Commit("two.txt", "Two.\n", "Add two");
+        Git(clone, "push", "-q", "--no-verify", remote, Branch);
+        Reopen(() =>
+        {
+            RecordEnvelope a = RecordedPush(second, first, first, MergeBase());
+            RecordedPush(first, second, second, MergeBase(), a.Id);
+        });
+        Assert.False(Merge(second).Ok);
+        Assert.False(Merge(first).Ok);
+        Assert.Null(provider.MergedHead);
+        string head = Commit("three.txt", "Three.\n", "Add three");
+        RecordEnvelope three = Pushed(head);
+        Assert.Equal("merge-base", Target(three, "basis"));
+        Assert.Equal(MergeBase() + ".." + head, three.Body.GetProperty("scan").GetProperty("range").GetString());
+        Assert.Equal(0, Service.Validate().Errors);
+    }
+
+    // A push offers its adapter the sixteen newest complete pushes' heads: an older complete push the remote branch still holds is not
+    // among them, so the scan starts at the merge base.
+    [Fact]
+    public void OnlyTheSixteenNewestCompletePushesAreOffered()
+    {
+        string[] heads = [.. Enumerable.Range(1, 17).Select(i => Commit($"file{i}.txt", $"Content {i}.\n", $"Add file {i}"))];
+        var pushes = new List<RecordEnvelope>();
+        Reopen(() =>
+        {
+            for (int i = 0; i < heads.Length; i++)
+                pushes.Add(i == 0 ? RecordedPush(heads[0], MergeBase(), string.Empty, MergeBase()) : RecordedPush(heads[i], heads[i - 1], heads[i - 1], MergeBase()));
+        });
+        IReadOnlyList<Changes.PushCoverage.Covered> covered = Changes.PushCoverage.Covering(Service.Session.Load(), repository.Id, Destination, Branch, "main");
+        Assert.Equal(16, covered.Count);
+        Assert.Equal(heads[16], covered[0].Head);
+        Assert.DoesNotContain(covered, c => c.Operation == pushes[0].Id);
+        Assert.True(Changes.PushCoverage.Complete(Service.Session.Load(), pushes[0], "main"));
+
+        // The remote branch is rewritten to hold only the oldest of them.
+        Git(clone, "checkout", "-q", "-B", Branch, heads[0]);
+        Commit("rewritten.txt", "Rewritten.\n", "Rewrite the branch");
+        Git(clone, "push", "-q", "--force", "--no-verify", remote, Branch);
+        string head = Commit("next.txt", "Next.\n", "Add next");
+        RecordEnvelope pushed = Pushed(head);
+        Assert.Equal("merge-base", Target(pushed, "basis"));
+        Assert.Equal(MergeBase() + ".." + head, pushed.Body.GetProperty("scan").GetProperty("range").GetString());
+        Assert.Equal(0, Service.Validate().Errors);
+    }
+
+    // A branch that takes in a newer target is scanned from its last complete push, which its merge descends from; a branch never pushed
+    // that takes in the target is scanned from the merge base, which is then the target's newer head, so none of the target's commits.
+    [Fact]
+    public void AMergeOfTheTargetIntoTheBranchIsCoveredFromItsLastCompletePushOrTheMergeBase()
+    {
+        string first = Commit("one.txt", "One.\n", "Add one");
+        RecordEnvelope one = Pushed(first);
+        Git(clone, "checkout", "-q", "main");
+        string landed = Commit("main.txt", "Landed.\n", "Land another change");
+        Git(clone, "push", "-q", "--no-verify", remote, "main");
+        Git(clone, "checkout", "-q", Branch);
+        Git(clone, "merge", "-q", "--no-ff", "-m", "Take in main", "main");
+        string merged = Git(clone, "rev-parse", "HEAD");
+        RecordEnvelope two = Pushed(merged);
+        Assert.Equal(one.Id, Target(two, "basis"));
+        Assert.Equal(first + ".." + merged, two.Body.GetProperty("scan").GetProperty("range").GetString());
+        Assert.Equal(landed, Target(two, "targetHead"));
+        ChangeResponse merge = Merge(merged);
+        Assert.True(merge.Ok, merge.Message);
+
+        Git(clone, "checkout", "-q", "-b", "work/fresh", Git(clone, "rev-parse", "main~1"));
+        Commit("fresh.txt", "Fresh.\n", "Add fresh");
+        Git(clone, "merge", "-q", "--no-ff", "-m", "Take in main", "main");
+        string fresh = Git(clone, "rev-parse", "HEAD");
+        ChangeResponse pushed = Service.ChangesPush(new(product.Id, "work/fresh", fresh, estate.OperatorId));
+        Assert.True(pushed.Ok, pushed.Message);
+        Assert.Equal(landed, Target(Current(pushed), "base"));
+        Assert.Equal("merge-base", Target(Current(pushed), "basis"));
+        Assert.Equal(0, Service.Validate().Errors);
+    }
+
+    private string ProductBody(string target) => $$"""
+        {"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],
+         "changes":{"provider":"memory-pull-requests","repository":"{{repository.Id}}","target":"{{target}}","requiredChecks":["tests"]} }
+        """;
 
     private ChangesPushRequest Push(string head) => new(product.Id, Branch, head, estate.OperatorId);
 
@@ -305,7 +429,7 @@ public sealed class PushCoverageTests : IDisposable
 
     // A checked push of the branch as a release before 0.9.4 recorded it: no basis, its base the remote head or, for a new branch, the
     // merge base, its scan passed over exactly that range, observed at the remote. Written before the service opens.
-    private RecordEnvelope RecordedPush(string head, string basis, string remoteHead, string targetHead)
+    private RecordEnvelope RecordedPush(string head, string basis, string remoteHead, string targetHead, string? recordedBasis = null)
     {
         var body = new JsonObject
         {
@@ -319,6 +443,7 @@ public sealed class PushCoverageTests : IDisposable
             },
             ["requiredChecks"] = new JsonArray("tests"), ["evidence"] = new JsonArray(),
         };
+        if (recordedBasis is not null) body["target"]!["basis"] = recordedBasis;
         RecordEnvelope intent = estate.Add("operation", estate.OperatorId, body.ToJsonString(), product.Reference);
         body["status"] = "dispatched";
         body["dispatchedAt"] = RecordParser.FormatTimestamp(estate.Clock.AddSeconds(1));

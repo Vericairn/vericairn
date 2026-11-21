@@ -71,9 +71,10 @@ whatever route brought it to the branch: a plain `git push`, an agent's shell, a
 clone without the guard or an edit on the host. The scan, the commit-message check
 and the disclosure hold read the range from the push's base:
 
-- the head of the newest complete recorded push of the same repository and branch,
-  when the remote branch, as the adapter observes it at the remote now, still holds
-  that head and the new head descends from it;
+- the head of the newest complete recorded push of the same repository and branch
+  against the target the declaration names now, when the remote branch, as the
+  adapter observes it at the remote now, still holds that head and the new head
+  descends from it;
 - otherwise the merge base of the new head with the target branch's observed head,
   also when a recorded head is missing from the clone or its ancestry cannot be read.
 
@@ -82,10 +83,22 @@ or the head of an earlier complete push of the branch. The runtime derives this 
 the records, those written before 0.9.4 included: an older push to a new branch,
 whose recorded remote head is empty, began at the merge base, as every release did;
 an older push to an existing branch began at the remote branch's head, and counts
-only where an earlier complete push of the branch left that head. Each new push
-records where its scan began as the target fact `basis`: `merge-base`, or the
-operation id of the complete push it continued, whose head is its base. A retry
-after a known failure finds its base and basis again.
+only where an earlier complete push of the branch left that head. A push counts
+only against the target it was scanned against: once the operator moves the
+declaration to another target, the branch's earlier pushes count for nothing, its
+next push scans from the merge base with the new target, and a head pushed before
+the move is pushed again before it merges.
+
+From its dispatch on, each new push records where its scan began as the target fact
+`basis`: `merge-base`, or the operation id of the complete push it continued, whose
+head is its base. A push refused before its dispatch, by its scan, its messages or
+the disclosure hold, records none, so its retry records the basis it finds. A retry
+of a push refused after its dispatch keeps the basis it recorded, as it keeps every
+target fact other than `base`, `remoteHead` and `targetHead`: it offers the adapter
+only that basis, and is refused, pushing nothing, when the remote branch no longer
+holds the push it continued; push a new head of the branch then. A runtime before
+0.9.4 reads `basis` as one more target fact, which no revision changes or drops, and
+ignores it; its merge gate still takes any observed push of the head.
 
 Before 0.9.4 the scan of an existing branch began at the remote branch's head, so
 commits that reached the branch some other way were never scanned, message-checked

@@ -14,6 +14,8 @@ namespace Vericairn.Runtime.Changes;
 /// zero-finding scan of exactly its range, whose base was the merge base with its target or the head of an earlier complete push of the
 /// same repository and branch, so every commit its head carries that the target does not hold was scanned and its message checked by a
 /// recorded checked push. Derived from the records, older ones included; a push records its basis in <c>target.basis</c> from 0.9.4.
+/// Only a push scanned against the declaration's current target counts: one recorded against another target, as before the operator
+/// moved the declaration, says nothing about what the current target holds, so its branch falls back to the merge base.
 /// </summary>
 internal static class PushCoverage
 {
@@ -27,30 +29,34 @@ internal static class PushCoverage
     internal sealed record Covered(string Operation, string Head);
 
     /// <summary>
-    /// The complete recorded pushes of a repository's branch at a destination, newest first, one for each head, at most <see cref="Limit"/>:
-    /// the candidates a push's base is chosen from.
+    /// The complete recorded pushes of a repository's branch at a destination against a target, newest first, one for each head, at most
+    /// <see cref="Limit"/>: the candidates a push's base is chosen from.
     /// </summary>
-    internal static IReadOnlyList<Covered> Covering(EstateModel model, string repository, string destination, string branch)
+    internal static IReadOnlyList<Covered> Covering(EstateModel model, string repository, string destination, string branch, string target)
     {
         ArgumentNullException.ThrowIfNull(model);
-        var judge = new Judge(model, Pushes(model, repository, destination, branch));
+        var judge = new Judge(model, Pushes(model, repository, destination, branch, target));
         return [.. judge.Pushes.Where(judge.Complete).OrderByDescending(p => p.AtTime).ThenByDescending(p => p.Id, StringComparer.Ordinal)
             .DistinctBy(p => Text(p, "head"), StringComparer.Ordinal).Take(Limit).Select(p => new Covered(p.Id, Text(p, "head")!))];
     }
 
-    /// <summary>Whether a recorded push is complete. Anything other than a current, observed checked push is not.</summary>
-    internal static bool Complete(EstateModel model, RecordEnvelope push)
+    /// <summary>
+    /// Whether a recorded push is complete against the target the declaration names now. Anything other than a current, observed checked
+    /// push scanned against that target is not.
+    /// </summary>
+    internal static bool Complete(EstateModel model, RecordEnvelope push, string target)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(push);
         if (!model.IsCurrent(push) || !Observed(push) || Text(push, "repository") is not string repository || Text(push, "destination") is not string destination
-            || Text(push, "branch") is not string branch) return false;
-        return new Judge(model, Pushes(model, repository, destination, branch)).Complete(push);
+            || Text(push, "branch") is not string branch || Text(push, "target") != target) return false;
+        return new Judge(model, Pushes(model, repository, destination, branch, target)).Complete(push);
     }
 
-    // The current, observed checked pushes of a branch.
-    private static List<RecordEnvelope> Pushes(EstateModel model, string repository, string destination, string branch) =>
-        [.. model.Current("operation").Where(o => Observed(o) && Text(o, "repository") == repository && Text(o, "destination") == destination && Text(o, "branch") == branch)];
+    // The current, observed checked pushes of a branch, scanned against the target.
+    private static List<RecordEnvelope> Pushes(EstateModel model, string repository, string destination, string branch, string target) =>
+        [.. model.Current("operation").Where(o => Observed(o) && Text(o, "repository") == repository && Text(o, "destination") == destination
+            && Text(o, "branch") == branch && Text(o, "target") == target)];
 
     // A checked push observed at the remote after its scan of exactly base..head passed with no finding, as the record rules require of it.
     private static bool Observed(RecordEnvelope push) => EstateModel.BodyString(push, "action") == "change-push"

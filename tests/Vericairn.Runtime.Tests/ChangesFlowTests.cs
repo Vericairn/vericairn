@@ -771,6 +771,35 @@ public sealed class ChangesFlowTests
         Assert.NotEmpty(Vericairn.Runtime.Changes.ChangeGate.QueuedRefusals(Merged, Required, queue, false));
     }
 
+    // FIX-154: a push refused after its dispatch has recorded its basis. Its retry keeps that basis, as a reader before 0.9.4 requires of
+    // every target fact of a retry but its base and heads: it offers the adapter only that basis, and is refused where it no longer applies.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ARetryAfterARefusalAtThePushKeepsTheBasisItRecorded(bool stillHeld)
+    {
+        using var f = new Fixture();
+        string earlier = new('d', 40);
+        ChangeResponse first = f.Service.ChangesPush(f.Push with { Head = earlier });
+        Assert.True(first.Ok, first.Message);
+        f.Adapter.ChooseBase = recorded => recorded.Count > 0 ? recorded[0] : Basis;
+        int pushes = 0;
+        f.Adapter.BeforePush = () => { if (pushes++ == 0) throw new ProviderRefusedException("The remote branch moved."); };
+        ChangeResponse refused = f.Service.ChangesPush(f.Push);
+        Assert.Equal("known-failure", refused.Status);
+        Assert.Equal(first.Operation!.Id, f.Current("change-push").Body.GetProperty("target").GetProperty("basis").GetString());
+        if (!stillHeld) f.Adapter.ChooseBase = _ => Basis;
+        ChangeResponse retried = f.Service.ChangesPush(f.Push with { Reconciliation = "The remote branch was observed; nothing was pushed." });
+        Assert.Equal(stillHeld, retried.Ok);
+        Assert.Equal([earlier], f.Adapter.Recorded[^1]);
+        if (!stillHeld) Assert.Contains("no longer applies", retried.Message, StringComparison.Ordinal);
+        EstateModel model = f.Service.Session.Load();
+        IReadOnlyList<string> chain = model.Chain(model.ById[retried.Operation!.Id]);
+        Assert.All(chain.Select(id => model.ById[id]).Where(r => r.Body.GetProperty("target").TryGetProperty("basis", out _)),
+            r => Assert.Equal(first.Operation.Id, r.Body.GetProperty("target").GetProperty("basis").GetString()));
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
     [Fact]
     public void AMergeOfAHeadNoScannedPushRecordsIsRefusedBeforeTheMerge()
     {
