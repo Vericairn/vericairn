@@ -5,6 +5,7 @@ using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
@@ -97,8 +98,10 @@ public sealed class AvailabilityRoutingTests
         run.Service.EnableEvents(Path.Combine(run.Scratch, "live"), clock);
         Roster(run, ("builder", [builder]));
         Order(run, "W-2", "builder");
-        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Look."))).Id;
-        Order(run, "W-3", "builder", attempt);
+        // A record a service principal wrote is outside-derived as an agent's is: a step naming it reads.
+        string service = Service(run, "Test Service");
+        string written = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("ask", service, RunEstate.Json($$"""{"to":"{{op}}","question":"Is the widget's schema current?","recommendation":"Read it.","consequence":"Nothing waits.","state":"open"}""")))).Id;
+        Order(run, "W-3", "builder", ("ask", written));
 
         // No launcher here starts the builder's harness, so without a session no agent carries a step.
         Assert.Equal("unavailable", Route(run, "W-2").GetProperty("state").GetString());
@@ -122,11 +125,11 @@ public sealed class AvailabilityRoutingTests
         Assert.Equal([run.Assignment, routed.Assignment.Id], Assert.Single(run.Service.Presence().Sessions).Holds);
         Assert.Equal("assigned", Route(run, "W-2").GetProperty("state").GetString());
 
-        // A step whose exposure reads (an input the agent wrote) is never routed to the session.
+        // A step whose exposure reads (an input a service principal wrote) is never routed to the session.
         JsonElement reading = Route(run, "W-3");
         Assert.Equal("unavailable", reading.GetProperty("state").GetString());
         Assert.Contains(Assert.Single(reading.GetProperty("candidates").EnumerateArray()).GetProperty("reasons").EnumerateArray(),
-            r => r.GetString()!.Contains("takes no step whose exposure reads", StringComparison.Ordinal) && r.GetString()!.Contains($"attempt {attempt}) was written by the agent Test Builder", StringComparison.Ordinal));
+            r => r.GetString()!.Contains("takes no step whose exposure reads", StringComparison.Ordinal) && r.GetString()!.Contains($"(ask {written}) was written by Test Service, which is no person", StringComparison.Ordinal));
 
         // No attempt within five minutes counts as a lapse of the live session: attention, a local observation.
         clock.Advance(TimeSpan.FromSeconds(PresenceVocabulary.SessionAttemptSeconds - 1));
@@ -169,7 +172,7 @@ public sealed class AvailabilityRoutingTests
         Assert.Contains("not a principal the roster names for the step's role, builder", run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op, stranger) { Basis = ask }).Message, StringComparison.Ordinal);
         Assert.Contains("does not record this hand-over", run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, builder, helper) { Basis = ask }).Message, StringComparison.Ordinal);
         Assert.Contains("is already Test Builder's", run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op, builder) { Basis = ask }).Message, StringComparison.Ordinal);
-        Assert.Contains("is no ask about assignment", run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op, helper) { Basis = run.Goal }).Message, StringComparison.Ordinal);
+        Assert.Contains("is no standing lapse ask about assignment", run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op, helper) { Basis = run.Goal }).Message, StringComparison.Ordinal);
         Assert.Equal(assignments, run.Service.Records("assignment").Count);
 
         // The operator hands it to the helper, citing the ask: the hand-over records its basis, and the builder's work no longer counts.
@@ -193,6 +196,78 @@ public sealed class AvailabilityRoutingTests
         Assert.Equal("withdrawn", Asks.State(model, model.ById[ask]).State);
         Assert.Equal(0, run.Service.Check().Errors);
     }
+
+    [Fact]
+    public void ABasisIsAStandingLapseAskWhoseSessionIsStillLapsedAndTheLiveHoldersWorkStillCounts()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string helper = Agent(run, "Test Helper");
+        Roster(run, ("builder", [builder, helper]));
+        var clock = new SteppedClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        run.Service.EnableEvents(Path.Combine(run.Scratch, "live"), clock);
+        PresenceLease lease = run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "a builder session")).Lease!;
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Build the widget."))).Id;
+        clock.Advance(TimeSpan.FromSeconds(90 + PresenceVocabulary.DefaultReassignAfterSeconds));
+        run.Service.SweepPresence();
+        string ask = Assert.Single(run.Service.Records("ask")).Id;
+
+        // The session's heartbeat restores the lease: before the sweep withdraws the ask it no longer stands, and after it is withdrawn.
+        Assert.True(run.Service.PresenceHeartbeat(lease.Lease).Ok);
+        Assert.Contains("no longer stands for a lapse", run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op, helper) { Basis = ask }).Message, StringComparison.Ordinal);
+        run.Service.SweepPresence();
+        Assert.Equal("live", Assert.Single(run.Service.Presence().Sessions).State);
+        Assert.Contains("is no standing lapse ask about assignment", run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op, helper) { Basis = ask }).Message, StringComparison.Ordinal);
+
+        // Written by hand, a hand-over citing the withdrawn ask is invalid.
+        RecordEnvelope order = run.Estate.Load().ById[run.Estate.Load().ById[run.Assignment].Subject!.Id];
+        var operatorSigner = new StoreSigner(new FileKeyStore(VericairnHome.Path()), run.OperatorDevice);
+        run.Estate.SetClock(DateTimeOffset.UtcNow);
+        RecordEnvelope forged = run.Estate.Add("assignment", op, Handover(helper, ask), order.Reference, signer: operatorSigner);
+        Assert.Contains(run.Estate.Load().Findings, f => f.Code == "assignment.basis" && f.Location.Contains(forged.Id, StringComparison.Ordinal));
+        File.Delete(Path.Combine(run.Estate.Root, forged.ExpectedPath));
+
+        // The live holder's result still counts.
+        RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, builder, RunEstate.Json("""{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}"""))));
+        Assert.Equal("awaiting review", Assert.Single(WorkView.AssignmentItems(run.Estate.Load()), i => i.AssignmentId == run.Assignment).State);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AnAskTheReceivingAgentWroteItselfIsNoBasisWithNoPresenceKept()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string helper = Agent(run, "Test Helper");
+        Roster(run, ("builder", [builder, helper]));
+        RecordEnvelope assignment = run.Estate.Load().ById[run.Assignment];
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Build the widget."))).Id;
+
+        // The helper writes an ask about the builder's assignment, even in the sweep's words; no presence is kept here.
+        string own = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("ask", helper, RunEstate.Json($$"""{"to":"{{op}}","question":"Session 0123456789abcdef0123456789abcdef of Test Builder, which holds assignment {{run.Assignment}} of W-1, lapsed at 2026-11-21T12:00:00Z: its transport renewed its lease no more. Hand the step to another principal of its role?","recommendation":"Hand it to me.","consequence":"It waits.","state":"open"}"""), $"assignment:{assignment.Id}:{assignment.ComputedHash}"))).Id;
+        TakeoverResponse refused = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op, helper) { Basis = own });
+        Assert.False(refused.Ok);
+        Assert.Contains("is no standing lapse ask about assignment", refused.Message, StringComparison.Ordinal);
+
+        // Written by hand, a hand-over citing it is invalid; the builder's work still counts.
+        RecordEnvelope order = run.Estate.Load().ById[assignment.Subject!.Id];
+        var operatorSigner = new StoreSigner(new FileKeyStore(VericairnHome.Path()), run.OperatorDevice);
+        run.Estate.SetClock(DateTimeOffset.UtcNow);
+        RecordEnvelope forged = run.Estate.Add("assignment", op, Handover(helper, own), order.Reference, signer: operatorSigner);
+        Assert.Contains(run.Estate.Load().Findings, f => f.Code == "assignment.basis" && f.Location.Contains(forged.Id, StringComparison.Ordinal));
+        File.Delete(Path.Combine(run.Estate.Root, forged.ExpectedPath));
+        RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, builder, RunEstate.Json("""{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}"""))));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    private static string Handover(string contributor, string basis) => new System.Text.Json.Nodes.JsonObject
+    {
+        ["contributor"] = contributor,
+        ["brief"] = System.Text.Json.Nodes.JsonNode.Parse(RunEstate.Brief),
+        ["basis"] = basis,
+    }.ToJsonString();
 
     [Fact]
     public void QuietHoursHoldNotificationsUntilTheWindowEndsAndRemindersArriveAtItsStart()
@@ -258,9 +333,18 @@ public sealed class AvailabilityRoutingTests
             roles = roles.Select(r => new { role = r.Role, principals = r.Principals }),
         })))));
 
-    private static void Order(RunEstate run, string key, string role, string? input = null)
+    /// <summary>A service principal with an admitted device whose key this machine holds.</summary>
+    private static string Service(RunEstate run, string name)
     {
-        string inputs = $$"""{"type":"goal","id":"{{run.Goal}}"}""" + (input is null ? string.Empty : $$""",{"type":"attempt","id":"{{input}}"}""");
+        string service = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", run.Estate.OperatorId, RunEstate.Json($$"""{"kind":"service","name":"{{name}}","roles":["contributor"]}""")))).Id;
+        string device = RunEstate.Ok(run.Service.DeviceCreate(new DeviceCreateRequest(service, name + "'s device", "file"))).Id;
+        RunEstate.Ok(run.Service.DeviceAdmit(new AdmitRequest(device, run.Estate.OperatorId, "Signs " + name + "'s records.")));
+        return service;
+    }
+
+    private static void Order(RunEstate run, string key, string role, (string Type, string Id)? input = null)
+    {
+        string inputs = $$"""{"type":"goal","id":"{{run.Goal}}"}""" + (input is not { } named ? string.Empty : $$""",{"type":"{{named.Type}}","id":"{{named.Id}}"}""");
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId, RunEstate.Json($$"""{"key":"{{key}}","kind":"ordinary","title":"Order {{key}}","intent":"Work.","scope":["work"],"exitQuestion":"Done?","inputs":[{{inputs}}],"deliverables":["work"],"role":"{{role}}"}"""))));
     }
 }

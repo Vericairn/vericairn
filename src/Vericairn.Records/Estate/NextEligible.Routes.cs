@@ -158,7 +158,7 @@ public static partial class NextEligible
     {
         string role = Routing.RoleOf(order);
         return RouteOf(model, goal, status, ledger, role, Routing.ReservedAction(role), assignments, Routing.AsksAbout(model, goal, order), runs, machine, null,
-            sessionExposure: Routing.SessionExposure(model, goal, order));
+            sessionExposure: Routing.SessionExposure(model, goal, order, Routing.StepRecords(model, assignments)));
     }
 
     /// <summary>

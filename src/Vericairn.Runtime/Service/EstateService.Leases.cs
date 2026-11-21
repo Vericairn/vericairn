@@ -523,6 +523,26 @@ public sealed partial class EstateService
         return items;
     }
 
+    /// <summary>
+    /// From 0.9.4 (GOAL-11): true when a lapse ask still stands for a lapse now: this runtime keeps presence, and a lease's lapse holding the
+    /// assignment, the one that recorded the ask, still stands, its session not live again. Caller holds the gate.
+    /// </summary>
+    private bool LapseStands(EstateModel model, RecordEnvelope assignment, RecordEnvelope ask)
+    {
+        if (!PresenceKept)
+        {
+            return false;
+        }
+
+        List<PresenceLeaseState> leases = ReadLeases();
+        AttributeWrites(model, leases);
+        ExpireLeases(leases, PresenceClock.GetUtcNow());
+        string identity = model.Chain(model.Latest(assignment))[0];
+        string asked = model.Chain(model.Latest(ask))[0];
+        return LapsedHoldings(model, leases, PresenceClock.GetUtcNow())
+            .Any(h => model.Chain(h.Assignment)[0] == identity && h.Ask is string recorded && model.ById.TryGetValue(recorded, out RecordEnvelope? stood) && model.Chain(stood)[0] == asked);
+    }
+
     /// <summary>One lapse holding work: the lapsed lease, the open assignment it holds, since when, the goal and who is asked.</summary>
     /// <param name="Lease">The lease.</param>
     /// <param name="Assignment">The assignment at its current revision.</param>

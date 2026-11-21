@@ -157,7 +157,7 @@ public static partial class NextEligible
                 : null;
             Route route = RouteOf(model, current, status, ledger, role, Routing.ReservedAction(role), assignments, asks, runs, machine, candidate => (person || personal is not null) && candidate.IsAgent
                 ? candidate with { Available = false, Reasons = [.. candidate.Reasons, personal ?? $"the flow marks the {role} role a person's, and an agent never holds it"], Session = null }
-                : candidate, sessionExposure: Routing.SessionExposure(model, current, position.Work, instance.Inputs.Select(i => i.Carrier)));
+                : candidate, sessionExposure: Routing.SessionExposure(model, current, position.Work, instance.Inputs.Select(i => i.Carrier).Concat(Routing.StepRecords(model, assignments))));
             steps.Add(new FlowStepRoute(instance, route));
         }
 

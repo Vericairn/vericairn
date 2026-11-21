@@ -272,8 +272,9 @@ public sealed class AssignmentType : IRecordType
             context.Error("assignment.contributor", $"Contributor {contributor} has no principal record; contributors are admitted before work is assigned to them.");
         }
 
-        // From 0.9.4 (GOAL-11): a hand-over citing a lapse ask is a person's act, never an agent's, and takes over the step of the
-        // assignment the ask is about.
+        // From 0.9.4 (GOAL-11): a hand-over citing a lapse ask is a person's act, never an agent's, and its basis is the standing lapse ask
+        // the presence sweep recorded about the very assignment it takes the step over from: open or notified when it is recorded, neither
+        // withdrawn nor answered, and signed by that assignment's author, as the sweep signs it. An ask any other principal wrote is none.
         if (basis is not null && context.RequireReference("basis", basis, "ask") is RecordEnvelope ask)
         {
             if (!GoalRules.IsPerson(context.Model, by))
@@ -285,11 +286,12 @@ public sealed class AssignmentType : IRecordType
                 context.Error("assignment.basis", "A hand-over citing a lapse ask is recorded by the person taking the step over, who decides for its goal or an operator.");
             }
 
-            if (ask.Subject is not { Type: "assignment" } about || context.Find(about.Id) is not RecordEnvelope lapsed
-                || lapsed.Subject is null || order is null || !context.Model.Chain(context.Model.Latest(order)).Contains(lapsed.Subject.Id)
-                || FlowRuns.StepOf(lapsed) != FlowRuns.StepOf(context.Record) || StandingAgents.KeyOf(lapsed) != StandingAgents.KeyOf(context.Record))
+            string carried = Routing.HoldingKey(context.Record.Body);
+            RecordEnvelope? lapsed = order is null ? null
+                : Routing.Assignments(context.Model, order).LastOrDefault(a => a.Id != context.Record.Id && GoalRules.Before(a, context.Record) && Routing.HoldingKey(a.Body) == carried);
+            if (lapsed is null || !Routing.LapseAsk(context.Model, ask, lapsed, context.Record))
             {
-                context.Error("assignment.basis", $"Ask {basis} is about no assignment of this step; a hand-over's basis is the lapse ask about the assignment it takes the step over from.");
+                context.Error("assignment.basis", $"Ask {basis} is no standing lapse ask about the assignment this hand-over takes the step over from{(lapsed is null ? string.Empty : $" ({lapsed.Id})")}: a hand-over's basis is the ask the presence sweep recorded when the session holding that assignment lapsed, open when the hand-over is recorded, neither withdrawn nor answered.");
             }
         }
     }

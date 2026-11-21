@@ -100,7 +100,7 @@ public class PolicyGoldenFixtureTests
         qualification["reach"] = new JsonObject { ["file"] = "readable", ["host"] = "reachable" };
         progress.Estate.Add("harness-qualification", progress.Estate.OperatorId, qualification.ToJsonString());
         // From 0.9.4 (GOAL-11) a person's hand-over cites the lapse ask about the agent's assignment it takes the step over from.
-        RecordEnvelope lapseAsk = progress.Estate.Add("ask", progress.Estate.OperatorId, $$"""{"to":"{{progress.Estate.OperatorId}}","question":"Hand the step to another principal of its role?","recommendation":"Hand it over, citing this ask.","consequence":"The step waits with the lapsed session.","state":"open"}""", progress.Assignment.Reference);
+        RecordEnvelope lapseAsk = progress.Estate.Add("ask", progress.Assignment.By, $$"""{"to":"{{progress.Estate.OperatorId}}","question":"Session 0123456789abcdef0123456789abcdef of Test Builder, which holds assignment {{progress.Assignment.Id}} of W-1, lapsed at 2026-10-13T12:05:00Z: its transport renewed its lease no more. Hand the step to another principal of its role?","recommendation":"Hand it over, citing this ask.","consequence":"The step waits with the lapsed session.","state":"open"}""", progress.Assignment.Reference);
         JsonObject handover = JsonNode.Parse(progress.Assignment.Body.GetRawText())!.AsObject();
         handover["contributor"] = progress.Estate.OperatorId;
         handover["basis"] = lapseAsk.Id;

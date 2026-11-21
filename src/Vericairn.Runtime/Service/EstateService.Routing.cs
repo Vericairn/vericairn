@@ -319,8 +319,10 @@ public sealed partial class EstateService
                 : order is null ? $"Assignment {held.Id} delegates no work order of this estate."
                 : orderStatus is "accepted" or "retired" ? $"Work order {EstateModel.BodyString(order, "key")} is {orderStatus}: no step of it is left to take over."
                 : assignments.Count == 0 || assignments[^1].Id != held.Id ? $"Assignment {held.Id} no longer holds {(step is null ? string.Empty : $"step {step} of ")}work order {EstateModel.BodyString(order, "key")}: assignment {(assignments.Count == 0 ? "none" : assignments[^1].Id)} does."
-                : request.Basis is not null && (basis is null || basis.Subject is not { Type: "assignment" } about || !model.Chain(held).Contains(about.Id))
-                    ? $"Ask {request.Basis} is no ask about assignment {held.Id}: a hand-over's basis is the lapse ask about the assignment it takes the step over from."
+                : request.Basis is not null && (basis is null || !Routing.LapseAsk(model, basis, held))
+                    ? $"Ask {request.Basis} is no standing lapse ask about assignment {held.Id}: a hand-over's basis is the ask the presence sweep recorded when the session holding it lapsed, still open, neither withdrawn nor answered."
+                : request.Basis is not null && !LapseStands(model, held, basis!)
+                    ? $"Ask {request.Basis} no longer stands for a lapse: the session holding assignment {held.Id} is live again, or this runtime keeps no presence that shows it lapsed, so the step stays with its holder."
                 : request.Basis is not null && session.Manifest.RecordFormat < 3 ? "A hand-over citing a lapse ask records its basis, which needs record format 3; this estate writes an earlier format."
                 : !toPerson && model.CurrentPrincipal(person) is null ? $"{person} is no principal of this estate."
                 : !toPerson && request.Basis is null ? $"{personName} ({person}) is not a person: a step an agent holds goes to anyone but a person only by a hand-over citing the lapse ask about it (--basis <ask>)."

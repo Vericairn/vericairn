@@ -19,7 +19,7 @@ namespace Vericairn.Records.Estate;
 /// reaches only a person who holds that action, an operator or the grantee of a grant in force, or an agent such a grant covers.
 /// When none is available the step is an ask; nothing here ever falls back to a principal the roster does not name.
 /// </summary>
-public static class Routing
+public static partial class Routing
 {
     /// <summary>The role a work order is carried in when it names none.</summary>
     public const string DefaultRole = "builder";
@@ -434,9 +434,11 @@ public static class Routing
     /// <summary>
     /// From 0.9.4 (GOAL-11; design/holds-reads-sends.md § 7): why a step's exposure reads, so that no live session takes it, since the
     /// runtime cannot see a session's own facts; empty when it reads nothing. Until the exposure algorithm is built (RUN-06) this judges
-    /// conservatively from what the records show: a step reads when its goal, its work order, a record the work order names among its
-    /// inputs, or a record the step pins was written by an agent principal (outside-derived, since a session's exposure is unknown), is a
-    /// conversation observation (outside text), or cannot be resolved here (unknown counts as present).
+    /// conservatively from what the records show: a step reads when its goal, a record the goal names among its inputs, its work order, a
+    /// record the work order names among its inputs, or a record the step carries (a record it pins, and for a step already held its
+    /// assignments, their attempts and results and the reviews of those results) was written by any principal that is not a person
+    /// (an agent's or a service's records are outside-derived, a session's exposure being unknown), is a conversation observation
+    /// (outside text), or cannot be resolved here (unknown counts as present).
     /// </summary>
     public static IReadOnlyList<string> SessionExposure(EstateModel model, RecordEnvelope goal, RecordEnvelope? order, IEnumerable<RecordEnvelope?>? pinned = null)
     {
@@ -457,9 +459,9 @@ public static class Routing
                 return;
             }
 
-            if (model.CurrentPrincipal(record.By) is { } author && EstateModel.BodyString(author, "kind") == "agent")
+            if (!GoalRules.IsPerson(model, record.By))
             {
-                reasons.Add($"{what} ({record.Type} {record.Id}) was written by the agent {NameOf(model, record.By)}, so it is outside-derived");
+                reasons.Add($"{what} ({record.Type} {record.Id}) was written by {NameOf(model, record.By)}, which is no person, so it is outside-derived");
             }
             else if (record.Type == "observation" && EstateModel.BodyString(record, "kind") == "conversation")
             {
@@ -467,7 +469,13 @@ public static class Routing
             }
         }
 
-        Judge(model.Latest(goal), "the goal");
+        RecordEnvelope latest = model.Latest(goal);
+        Judge(latest, "the goal");
+        foreach (JsonElement input in TJson.Array(latest.Body, "inputs"))
+        {
+            Judge(TJson.Text(input, "id") is string id && model.ById.TryGetValue(id, out RecordEnvelope? named) ? model.Latest(named) : null, "an input of the goal");
+        }
+
         if (order is not null)
         {
             RecordEnvelope current = model.Latest(order);
@@ -480,11 +488,71 @@ public static class Routing
 
         foreach (RecordEnvelope? record in pinned ?? [])
         {
-            Judge(record, "a record the step pins");
+            Judge(record, "a record the step carries");
         }
 
         return reasons;
     }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11): what a step already held carries for its exposure: each assignment, its attempts, their results and the
+    /// reviews of those results, which a session would read when the step goes on with it.
+    /// </summary>
+    public static IEnumerable<RecordEnvelope> StepRecords(EstateModel model, IEnumerable<RecordEnvelope> assignments)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignments);
+        foreach (RecordEnvelope assignment in assignments)
+        {
+            yield return assignment;
+            foreach (RecordEnvelope attempt in WorkView.AttemptsOf(model, assignment))
+            {
+                yield return attempt;
+                if (WorkView.ResultOf(model, attempt) is RecordEnvelope result)
+                {
+                    yield return result;
+                    foreach (RecordEnvelope review in model.About(result.Id, "review").Where(model.IsCurrent))
+                    {
+                        yield return review;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11; design/events-and-presence.md § 10): true when an ask is a standing lapse ask about an assignment, as of a
+    /// record when one is given: the ask the runtime's presence sweep records when the session holding the assignment lapsed, about that
+    /// exact assignment and signed by the principal that recorded it (the sweep signs with no other key), in the sweep's words, still
+    /// open or notified, neither withdrawn nor answered by a decision. A hand-over's basis is such an ask; an ask any other principal
+    /// wrote, a withdrawn one and an answered one are not.
+    /// </summary>
+    public static bool LapseAsk(EstateModel model, RecordEnvelope ask, RecordEnvelope assignment, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(ask);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (ask.Type != "ask" || !model.ById.ContainsKey(ask.Id))
+        {
+            return false;
+        }
+
+        IReadOnlyList<string> revisions = model.Chain(model.Latest(ask));
+        RecordEnvelope first = model.ById[revisions[0]];
+        RecordEnvelope? standing = revisions.Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>().LastOrDefault(r => before is null || GoalRules.Before(r, before));
+        if (standing is null || first.Subject is not { Type: "assignment" } about || !model.Chain(model.Latest(assignment)).Contains(about.Id)
+            || !model.ById.TryGetValue(about.Id, out RecordEnvelope? named) || first.By != named.By
+            || EstateModel.BodyString(first, "question") is not string question || !LapseQuestion().IsMatch(question) || !question.Contains($" assignment {about.Id} ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return EstateModel.BodyString(standing, "state") is "open" or "notified"
+            && !model.DecisionsAnswering(revisions).Any(d => before is null || GoalRules.Before(d, before));
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\ASession .+ (?:which holds|was given) assignment [0-9A-HJKMNP-TV-Z]{26} .+ Hand the step to another principal of its role\?\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex LapseQuestion();
 
     /// <summary>
     /// Who decides for a goal: its sponsor when the sponsor is a person, and otherwise the operator who activated it, or the estate's
