@@ -56,10 +56,51 @@ vericairn changes open --product <product-id> --branch work/change --head <commi
 
 The push intent is recorded first. The git adapter reads the remote branch's
 actual head without fetching. For an existing branch, that head must be a known
-ancestor of the requested head. For a new branch, the scan starts at the merge
-base with the remote target branch. Missing local objects refuse the operation;
-update the clone separately before retrying. Shallow clones are refused because
-they cannot establish the complete commit range.
+ancestor of the requested head. The scan covers every commit the push carries
+that the target does not hold, as [Coverage](#coverage-094) describes. Missing
+local objects refuse the operation; update the clone separately before retrying.
+Shallow clones are refused because they cannot establish the complete commit range.
+From 0.9.4 (FIX-154) a push to the declared target branch itself is refused before
+anything is recorded, with the code `change.target-push`, and nothing relaxes it:
+a target takes commits only through a checked merge.
+
+### Coverage (0.9.4)
+
+From 0.9.4 (FIX-154), a checked push covers every commit its target does not hold,
+whatever route brought it to the branch: a plain `git push`, an agent's shell, a
+clone without the guard or an edit on the host. The scan, the commit-message check
+and the disclosure hold read the range from the push's base:
+
+- the head of the newest complete recorded push of the same repository and branch,
+  when the remote branch, as the adapter observes it at the remote now, still holds
+  that head and the new head descends from it;
+- otherwise the merge base of the new head with the target branch's observed head,
+  also when a recorded head is missing from the clone or its ancestry cannot be read.
+
+A recorded push is complete when its own base was the merge base with the target,
+or the head of an earlier complete push of the branch. The runtime derives this from
+the records, those written before 0.9.4 included: an older push to a new branch,
+whose recorded remote head is empty, began at the merge base, as every release did;
+an older push to an existing branch began at the remote branch's head, and counts
+only where an earlier complete push of the branch left that head. Each new push
+records where its scan began as the target fact `basis`: `merge-base`, or the
+operation id of the complete push it continued, whose head is its base. A retry
+after a known failure finds its base and basis again.
+
+Before 0.9.4 the scan of an existing branch began at the remote branch's head, so
+commits that reached the branch some other way were never scanned, message-checked
+or held by a later checked push built on them, and pushing again a head the remote
+already held scanned an empty range. A push could also fast-forward the target
+itself, which skipped the merge gate. The adapter takes the heads of the branch's
+complete pushes, newest first, at most sixteen, and checks each against the remote
+branch by the real objects, never by the clone's remote-tracking refs.
+
+A checked merge takes only a complete push of its exact head. A head whose recorded
+push was not complete, such as one a release before 0.9.4 pushed from a remote head
+that a plain push left, is refused by `changes merge`: push it again with `changes
+push`, which records it under an identity of its own beside the earlier push and
+scans it from the merge base, then merge. A branch pushed before 0.9.4 whose remote
+head came from a complete checked push of it needs nothing new.
 
 Gitleaks 8.25.0 or later must be installed by the user; an older one leaves the
 scanner unavailable. It scans exactly `base..head` with redaction, Vericairn's own
@@ -317,7 +358,8 @@ stale-head checks refuse the merge, as do incomplete pagination, a changed head,
 a different target, a closed pull request and an absent requirement declaration.
 The merge also needs a successful scanned push of that exact head to the pull
 request's branch, so a pull request opened elsewhere is pushed with `changes push`
-first.
+first. From 0.9.4 (FIX-154) that push must be complete, as
+[Coverage](#coverage-094) describes.
 Fork pull requests are not supported by this provider.
 
 The successful check inventory is recorded before the merge request. GitHub's
@@ -450,6 +492,11 @@ before them keeps working. The GitHub
 implementation uses bounded gh processes; `MemoryPullRequestProvider` is an
 independent in-memory implementation for controlled use. `IPushAdapter` implements
 `vericairn.adapter.push/1`; `ISecretScanner` implements `vericairn.scanner.secrets/1`.
+From 0.9.4 (FIX-154) the runtime prepares and pushes through the `Prepare` and
+`Push` overloads that take the heads of the branch's complete recorded pushes; their
+default implementations refuse, so an adapter written before them takes no checked
+push rather than choosing a base of its own. `GitPushAdapter`'s overloads without
+those heads scan from the merge base with the target.
 The host registers implementations explicitly. An unavailable declared provider
 is refused; the runtime never chooses a replacement destination.
 

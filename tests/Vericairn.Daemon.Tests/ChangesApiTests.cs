@@ -67,9 +67,13 @@ public sealed class ChangesApiTests
     private sealed class LocalStandIn : IPushAdapter, ISecretScanner
     {
         private string? remoteHead;
-        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) => new(branch, target, head, Basis, null, Basis);
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) =>
+            throw new InvalidOperationException("The runtime prepares a push with the records' heads.");
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head, IReadOnlyList<string> recorded) => new(branch, target, head, Basis, null, Basis);
         public SecretScan Scan(string directory, PushPlan plan) => new("stand-in", "1.0.0", plan.Range, "passed", 0);
-        public void Push(string directory, string remote, PushPlan plan, SecretScan scan)
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan) =>
+            throw new InvalidOperationException("The runtime pushes with the records' heads.");
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan, IReadOnlyList<string> recorded)
         {
             Assert.True(scan.Passed(plan));
             remoteHead = plan.Head;

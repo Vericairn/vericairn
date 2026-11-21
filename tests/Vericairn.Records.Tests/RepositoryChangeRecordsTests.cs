@@ -48,6 +48,64 @@ public sealed class RepositoryChangeRecordsTests
         Assert.Contains(fixture.Estate.Load().Findings, f => f.Code == "operation.push-scan");
     }
 
+    // FIX-154: a push records where its scan began, beside its base: the merge base, or the observed push of the same repository and
+    // branch that it continued, whose head is its base. Nothing else records a basis.
+    [Theory]
+    [InlineData("merge-base", true)]
+    [InlineData("continued", true)]
+    [InlineData("other-branch", false)]
+    [InlineData("other-head", false)]
+    [InlineData("not-observed", false)]
+    [InlineData("unknown", false)]
+    [InlineData("on-a-merge", false)]
+    [InlineData("no-base", false)]
+    public void APushsBasisIsTheMergeBaseOrTheObservedPushOfTheBranchItContinued(string basis, bool valid)
+    {
+        using var fixture = new Fixture();
+        string earlier = new('d', 40);
+        JsonObject first = fixture.Body("change-push");
+        first["identity"] = "example-first";
+        first["target"]!["head"] = basis == "other-head" ? Basis : earlier;
+        first["target"]!["branch"] = basis == "other-branch" ? "work/other" : "work/change";
+        first["target"]!["base"] = Basis;
+        first["scan"] = new JsonObject { ["tool"] = "scanner", ["version"] = "1.0.0", ["range"] = Basis + ".." + first["target"]!["head"]!.GetValue<string>(), ["verdict"] = "passed", ["findingCount"] = 0 };
+        RecordEnvelope continued = fixture.Dispatch(first);
+        if (basis != "not-observed")
+        {
+            first["status"] = "observed-success";
+            continued = fixture.Estate.Add("operation", fixture.Estate.OperatorId, first.ToJsonString(), supersedes: continued.Id);
+        }
+        JsonObject body = fixture.Body(basis == "on-a-merge" ? "change-merge" : "change-push");
+        body["target"]!["branch"] = "work/change";
+        if (basis != "no-base") body["target"]!["base"] = earlier;
+        body["target"]!["basis"] = basis switch { "merge-base" => "merge-base", "unknown" => new string('0', 26), _ => continued.Id };
+        fixture.Estate.Add("operation", fixture.Estate.OperatorId, body.ToJsonString());
+        Assert.Equal(valid, !fixture.Estate.Load().Findings.Any(f => f.Code == "operation.change-basis"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OnlyARetryAfterAKnownFailureFindsItsBaseAndBasisAgain(bool retry)
+    {
+        using var fixture = new Fixture();
+        JsonObject body = fixture.Body("change-push");
+        body["target"]!["branch"] = "work/change";
+        body["target"]!["base"] = Basis;
+        body["target"]!["basis"] = "merge-base";
+        RecordEnvelope intent = fixture.Estate.Add("operation", fixture.Estate.OperatorId, body.ToJsonString());
+        body["status"] = retry ? "known-failure" : "not-started";
+        body["observed"] = new JsonObject { ["summary"] = "The scan did not pass.", ["at"] = RecordParser.FormatTimestamp(fixture.Estate.Clock.AddSeconds(1)) };
+        RecordEnvelope failed = fixture.Estate.Add("operation", fixture.Estate.OperatorId, body.ToJsonString(), supersedes: intent.Id);
+        body["status"] = "uncertain";
+        body["dispatchedAt"] = RecordParser.FormatTimestamp(fixture.Estate.Clock.AddSeconds(1));
+        body["reconciliation"] = "The scanner was installed again; nothing was pushed.";
+        body["target"]!["base"] = Head;
+        body["target"]!.AsObject().Remove("basis");
+        fixture.Estate.Add("operation", fixture.Estate.OperatorId, body.ToJsonString(), supersedes: failed.Id);
+        Assert.Equal(retry, !fixture.Estate.Load().Findings.Any(f => f.Code == "operation.change-target"));
+    }
+
     [Fact]
     public void ScanRecordsRejectFindingContentsAndProcessOutput()
     {
