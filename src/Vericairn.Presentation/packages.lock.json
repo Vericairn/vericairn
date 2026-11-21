@@ -11,8 +11,8 @@
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Records": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.9.3-dev, )",
+          "Vericairn.Records": "[0.9.3-dev, )"
         }
       }
     }
