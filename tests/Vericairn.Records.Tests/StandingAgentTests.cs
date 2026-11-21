@@ -715,6 +715,112 @@ public class StandingAgentTests
     /// <summary>Removes a record's file, as the operator removes a copy.</summary>
     internal static void Remove(StandingFixture fixture, RecordEnvelope record) => File.Delete(Path.Combine(fixture.Estate.Root, record.ExpectedPath.Replace('/', Path.DirectorySeparatorChar)));
 
+    /// <summary>
+    /// The ways a writer of files leaves a record unread (FIX-156's review): a copy of its identifier dated in an earlier month, one dated in
+    /// a later month, a record of another type carrying it, and two new files sharing a fresh identifier that both supersede it. Returns the
+    /// files written, for removal.
+    /// </summary>
+    internal static readonly string[] UnreadShapes = ["earlier", "later", "other-type", "fresh-pair"];
+
+    internal static IReadOnlyList<RecordEnvelope> LeaveUnread(StandingFixture fixture, RecordEnvelope original, string shape)
+    {
+        DateTimeOffset now = fixture.Estate.Clock;
+        JsonObject body = PolicyFixture.Body(original);
+        try
+        {
+            switch (shape)
+            {
+                case "earlier":
+                    return [Reusing(fixture, original, body, EarlierMonth, original.Supersedes)];
+                case "later":
+                    return [Reusing(fixture, original, body, LaterMonth, original.Supersedes)];
+                case "other-type":
+                    return [fixture.Estate.Add("decision", fixture.Estate.BuilderId, fixture.Policies.DecisionBody().ToJsonString(), id: original.Id)];
+                default:
+                    string fresh = Records.Identity.Ulid.NewUlid(fixture.Estate.Clock).Value;
+                    RecordEnvelope first = fixture.Estate.Add(original.Type, fixture.Estate.BuilderId, body.ToJsonString(), original.Subject, original.Id, id: fresh);
+                    fixture.Estate.SetClock(LaterMonth);
+                    RecordEnvelope second = fixture.Estate.Add(original.Type, fixture.Estate.BuilderId, body.ToJsonString(), original.Subject, original.Id, id: fresh);
+                    return [first, second];
+            }
+        }
+        finally
+        {
+            fixture.Estate.SetClock(now.AddSeconds(1));
+        }
+    }
+
+    [Fact]
+    public void LeavingTheCarriersDeviceOrAdmissionUnreadLowersNeitherItsFailuresNorItsOpenOutputs()
+    {
+        // The Reviewer's probe of FIX-156: three runs exit cleanly after the carrier, signing with its admitted device, recorded a blocked result
+        // in each, and in the third it raised a possibility and asked a question. Leaving the carrier's device or its admission unread, by any of
+        // the four shapes, makes its signed records stop counting; they are read against the agent all the same: three failures, two open
+        // outputs, the agent held and a run intent refused. Removing the files reads the estate as before. Leaving the operator's device unread,
+        // which signed the runs' intents and settlements, the goal's activation and the assignment, holds the agent with the same counts.
+        foreach (string target in new[] { "device", "admission", "operator-device" })
+        {
+            foreach (string shape in UnreadShapes)
+            {
+                using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+                StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+                RecordEnvelope assignment = fixture.Assign(occurrence);
+                for (int i = 1; i <= 3; i++)
+                {
+                    RecordEnvelope intent = fixture.RunIntent(assignment, "run-" + i);
+                    fixture.Result(assignment, "blocked");
+                    if (i == 3)
+                    {
+                        var raised = new JsonObject { ["goal"] = fixture.Goal.Id, ["occurrence"] = occurrence.Key, ["assignment"] = assignment.Id, ["run"] = intent.Id };
+                        fixture.Add("possibility", new JsonObject
+                        {
+                            ["title"] = "Cache the widget's index", ["idea"] = "Reading the index on every call costs a second.", ["origin"] = "The researcher's occurrence.", ["disposition"] = "open",
+                            ["raisedBy"] = raised.DeepClone(), ["fingerprint"] = "cache/index", ["sources"] = new JsonArray(new JsonObject { ["address"] = "https://example.org/widget/index" }),
+                        }, builder: true);
+                        fixture.Add("ask", new JsonObject
+                        {
+                            ["to"] = fixture.Estate.OperatorId, ["question"] = "Should the index be cached?", ["recommendation"] = "Cache it.", ["consequence"] = "Nothing waits on it.",
+                            ["goal"] = fixture.Goal.Id, ["state"] = "open", ["raisedBy"] = raised.DeepClone(),
+                        }, builder: true);
+                    }
+
+                    fixture.Settle(intent, "observed-success");
+                }
+
+                EstateModel before = fixture.Estate.Load();
+                Assert.False(before.Findings.HasErrors, string.Join('\n', before.Findings.Where(f => f.Severity == Severity.Error)));
+                StandingAgents.Agent held = fixture.Agent(fixture.Estate.Clock);
+                Assert.Equal(("held", 3, 2), (held.State, held.Failures, held.OpenOutputs));
+
+                RecordEnvelope original = target switch
+                {
+                    "device" => fixture.Policies.BuilderDevice,
+                    "admission" => Assert.Single(before.OfType("admission"), a => a.Subject?.Id == fixture.Policies.BuilderDevice.Id),
+                    _ => fixture.Policies.OperatorDevice,
+                };
+                IReadOnlyList<RecordEnvelope> written = LeaveUnread(fixture, original, shape);
+                EstateModel model = fixture.Estate.Load();
+                Assert.True(model.IsUnreadable(original.Id), $"{target}, {shape}");
+                string signer = target == "operator-device" ? fixture.Estate.OperatorId : fixture.Estate.BuilderId;
+                Assert.Contains(model.Records, r => r.By == signer && r.Type is "result" or "operation" && !model.Counts(r));
+                StandingAgents.Agent agent = fixture.Agent(fixture.Estate.Clock);
+                Assert.True(("held", 3, 2) == (agent.State, agent.Failures, agent.OpenOutputs), $"{target}, {shape}: {(agent.State, agent.Failures, agent.OpenOutputs)}");
+                Assert.Contains("record.duplicate-id", agent.Reason, StringComparison.Ordinal);
+                Assert.All(agent.Occurrences, o => Assert.NotEqual("due", o.State));
+                Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+
+                foreach (RecordEnvelope file in written)
+                {
+                    Remove(fixture, file);
+                }
+
+                StandingAgents.Agent restored = fixture.Agent(fixture.Estate.Clock);
+                Assert.Equal(("held", 3, 2), (restored.State, restored.Failures, restored.OpenOutputs));
+                Assert.Contains("failed in a row", restored.Reason, StringComparison.Ordinal);
+            }
+        }
+    }
+
     [Fact]
     public void ARecordReusingASettlementsIdentifierTakesBackNoFailureWhateverItsMonth()
     {

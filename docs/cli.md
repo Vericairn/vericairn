@@ -1266,9 +1266,11 @@ records names no one who decides for the goal, and its runs never take a result 
 From 0.9.4 (FIX-156), a record carrying another record's identifier is never read in its place, whatever its date or path: the estate
 reads neither of them, nor any record of their line (`record.duplicate-id`, `record.duplicate-line`), and refuses every write until
 all but one is removed. Such records count against the agent: a run of the goal that cannot be read counts as failed, a run an
-unread record names counts as its own records decide it or as failed, an output that cannot be read stays open, an answer that
-cannot be read answers nothing, and `goal due` reads an agent that any unread record names `held`, naming that record, so `goal
-step` dispatches nothing of it ([record format 3](record-format-v3.md#identifiers-more-than-one-record-carries-094)).
+unread record names counts as its own records decide it or as failed, an output that cannot be read stays open, and an answer that
+cannot be read answers nothing. An unread device, admission, principal or grant leaves the records resting on it counting for
+nothing, so while any record is unread, a record that does not count is read against the agent and never for it: its blocked
+results and runs count toward failures and its outputs stay open. Every standing agent then reads `held` in `goal due`, naming
+the unread record, and `goal step` dispatches nothing of it ([record format 3](record-format-v3.md#identifiers-more-than-one-record-carries-094)).
 
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]

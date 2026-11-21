@@ -727,10 +727,14 @@ leaves unread because their line holds an identifier more than one record carrie
 (see [Identifiers more than one record carries](#identifiers-more-than-one-record-carries-094))
 count against the agent: a line of the goal's `agent-run` operations that is not
 read counts as one failed run for each intent it holds, at least one, at the
-latest `at` among its records; and a run that an unread record names, by its
+latest `at` among its records; a run that an unread record names, by its
 assignment, an attempt or result on it or a record of its lineage, counts as its
 own records decide it when they make it a success or a failure, and otherwise as
-failed. From 0.9.4 the worker
+failed; and while any record is unread, a record that does not count, whose
+device, admission, principal or grant may be the unread one, is read as a tied
+agent's record: an intent, a revision, an attempt or a blocked or abandoned
+result counts toward a failure, and none makes a success, cancels, corrects or
+stops a run. From 0.9.4 the worker
 names in `observed.reference` of an observed success the latest `completed` or
 `partial` result its agent recorded during the run, on an attempt recorded during
 the run, as it sees them at the run's exit, and names none otherwise; a reader
@@ -833,15 +837,24 @@ In these readings leaving a record unread can only fail toward the person:
   by nobody;
 - an unread assignment of the goal's work, or revision of a roster, ties the agents
   it names to the goal, as if it were read;
-- a standing agent reads `held` while any unread record names one of its records,
-  by its subject, the record it supersedes or any value of its body: a revision of
-  its goal or work order, an assignment of that work order, an attempt or result on
-  one, a record of one of its runs, or a revision of one of its outputs or of an
-  ask about its goal. `goal due` names that record, and `goal step` dispatches
-  nothing of the agent until the duplicate is removed: its status, gates and
-  occurrences may rest on what is not read, so nothing of it is read in its place.
+- a record left unread can make others stop counting: the device, admission,
+  principal or grant a record's signature or authority rests on may be the unread
+  one, and a copy of a device's identifier, or two new files superseding it, leaves
+  every record that device signed counting for nothing. So while any record is
+  unread, a record that does not count is read against standing agents as a tied
+  agent's record is, and never for them: its blocked or abandoned results, intents
+  and revisions count toward failures, its outputs stay open until a revision that
+  counts disposes of them, its assignments and roster revisions tie, and it makes
+  no success, cancellation, correction, stop, answer or disposition;
+- every standing agent reads `held` while the estate leaves any record unread,
+  whatever its status reads, unless it is stopped or not dispatched here: what its
+  records rest on reaches, through their devices, admissions, principals and grants,
+  records anywhere in the estate. `goal due` names the unread record (one that names
+  a record of the agent when there is one), and `goal step` dispatches nothing of
+  the agent until all but one of the records carrying the identifier is removed.
 
-Elsewhere an unread line reads as absent, as if its files had been removed: no
+Elsewhere an unread line reads as absent, as if its files had been removed, and
+so do the records resting on it, such as those an unread device signed: no
 reading takes any of its records, or any copy's content, in another's place. A
 record that restricted another, such as a goal status, a review or a history
 checkpoint's closing, restricts nothing while it is unread, as when its file is

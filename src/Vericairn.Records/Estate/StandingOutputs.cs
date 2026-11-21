@@ -158,7 +158,11 @@ internal static partial class StandingOutputs
         ArgumentNullException.ThrowIfNull(goal);
         string identity = model.ById.ContainsKey(goal.Id) ? model.Chain(model.Latest(goal))[0] : goal.Id;
         int open = 0;
-        foreach (RecordEnvelope first in Raised(model, identity, before))
+        // From FIX-156, while the estate leaves a record unread, an output whose first revision does not count is read too, against the agent:
+        // its device, admission, principal or grant may be the unread record, and it stays open until a revision that counts disposes of it.
+        IEnumerable<RecordEnvelope> unverified = OutputTypes.SelectMany(type => StandingAgents.AgainstOnly(model, type))
+            .Where(r => (r.Supersedes is null || !model.ById.TryGetValue(r.Supersedes, out RecordEnvelope? prior) || prior.Type != r.Type) && Of(r)?.Goal == identity && (before is null || GoalRules.Before(r, before)));
+        foreach (RecordEnvelope first in Raised(model, identity, before).Concat(unverified))
         {
             if (AsOf(model, first, before) is not RecordEnvelope standing)
             {
@@ -232,7 +236,7 @@ internal static partial class StandingOutputs
             RecordEnvelope later = model.ById[id];
             string? said = EstateModel.BodyString(later, "disposition");
             JsonElement adopting = TJson.Object(later.Body, "adoptedAs");
-            if ((said == disposition && Same(adopting, adopted)) || later.By == first.By || (goal is not null && Tied(model, goal, later.By, asOf)))
+            if ((said == disposition && Same(adopting, adopted)) || later.By == first.By || (goal is not null && Tied(model, goal, later.By, asOf)) || StandingAgents.ReadAgainst(model, later))
             {
                 continue;
             }
@@ -633,8 +637,9 @@ internal static partial class StandingOutputs
             }
         }
 
-        // From FIX-156 a record the loader left out as unreadable ties every agent it would tie, so no reused identifier unties one.
-        foreach (RecordEnvelope assignment in model.OfType("assignment").Concat(model.Unreadable.Where(r => r.Type == "assignment")))
+        // From FIX-156 a record the loader left out as unreadable ties every agent it would tie, so no reused identifier unties one; and while one
+        // is unread, so does a record that does not count, whose device, admission, principal or grant may be the unread one.
+        foreach (RecordEnvelope assignment in model.OfType("assignment").Concat(model.Unreadable.Where(r => r.Type == "assignment")).Concat(StandingAgents.AgainstOnly(model, "assignment")))
         {
             if (assignment.Subject is not null && orders.Contains(assignment.Subject.Id) && EstateModel.BodyString(assignment, "contributor") is string contributor)
             {
@@ -660,7 +665,7 @@ internal static partial class StandingOutputs
 
             if (roster)
             {
-                foreach (RecordEnvelope record in model.OfType("roster").Concat(model.Unreadable.Where(r => r.Type == "roster")))
+                foreach (RecordEnvelope record in model.OfType("roster").Concat(model.Unreadable.Where(r => r.Type == "roster")).Concat(StandingAgents.AgainstOnly(model, "roster")))
                 {
                     Name(Routing.Named(record.Body, role) ?? [], role, record);
                 }

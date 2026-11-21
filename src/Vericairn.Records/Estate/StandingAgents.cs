@@ -435,7 +435,6 @@ internal static partial class StandingAgents
             "active" when step is null => ("unavailable", $"flow {flow!.Pin.Id} declares no single routed work step, which each occurrence carries as one assignment"),
             "active" when order is null => ("unavailable", "its work order is missing"),
             "active" when until is { } u && asOf >= u => ("lapsed", $"its until time {RecordParser.FormatTimestamp(u)} has passed: it returns to its sponsor, and a renewal is a goal revision its sponsor activates"),
-            "active" when unreadable is not null => ("held", $"record {unreadable.Id}, which names a record of the agent, is not read: its line holds an identifier more than one record carries (record.duplicate-id), so nothing of the agent is read in its place, and it is held until all but one of those records is removed"),
             "active" when failures >= limit => ("held", $"{failures.ToString(CultureInfo.InvariantCulture)} of its runs failed in a row, its limit of {limit.ToString(CultureInfo.InvariantCulture)}: it is paused until its sponsor answers the ask about it"),
             "active" => ("active", "its occurrences are carried one per goal step, within its caps"),
             "abandoned" => ("stopped", "the goal is abandoned: nothing of it is dispatched again"),
@@ -443,6 +442,14 @@ internal static partial class StandingAgents
             "proposed" => ("proposed", "the goal is proposed: nothing is dispatched until its sponsor activates it"),
             _ => (status, $"the goal is {status}: nothing of it is dispatched"),
         };
+
+        // From FIX-156: while the estate leaves any record unread, every standing agent not stopped or unavailable here is held, whatever its
+        // status reads, since any record of it may rest on the unread one, by what it names or by the device, admission, principal or grant
+        // that makes it count.
+        if (unreadable is not null && state is not ("stopped" or "unavailable"))
+        {
+            (state, reason) = ("held", $"record {unreadable.Id} is not read, its line holding an identifier more than one record carries (record.duplicate-id): any record of the agent may rest on it, by what it names or by the device, admission, principal or grant that makes it count, so nothing of the agent is read in its place, and it is held until all but one of those records is removed");
+        }
 
         var states = new List<OccurrenceState>();
         foreach (Occurrence occurrence in occurrences)
@@ -795,7 +802,10 @@ internal static partial class StandingAgents
     /// off another. From FIX-156 a record the loader left out as unreadable (<see cref="EstateModel.UnreadableLines"/>) counts against the
     /// agent: a line of the goal's agent runs that cannot be read counts as one failed run for each intent it holds (at least one), at the
     /// latest of its records; and a run that an unreadable record names, by its assignment, an attempt or result on it or a record of its
-    /// lineage, counts as its own records decide it when they make it a success or a failure, and otherwise as failed. The outcomes count in
+    /// lineage, counts as its own records decide it when they make it a success or a failure, and otherwise as failed. While any record is
+    /// unread, a record that does not count, whose device, admission, principal or grant may be the unread one, is read as a tied principal's
+    /// (<see cref="ReadAgainst"/>): its intents, revisions, attempts and blocked or abandoned results count toward failures, and it makes no
+    /// success, cancellation, correction or stop. The outcomes count in
     /// the order the runs settled, each at the later of its intent and its first settlement no tied principal wrote. An answered ask of
     /// the pause naming one of the failures cuts every outcome settled before the earlier of the ask and its first answer
     /// (<see cref="Answer"/>); after the cut a success ends the failures before it only while they are fewer than the limit, so once they
@@ -805,9 +815,15 @@ internal static partial class StandingAgents
     {
         bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
         bool Tied(string by) => StandingOutputs.Tied(model, goal, by, before);
+        // From FIX-156, while the estate leaves a record unread, a record that does not count is read as a tied principal's: against the agent only.
+        bool TiedRecord(RecordEnvelope record) => Tied(record.By) || ReadAgainst(model, record);
         static bool Settles(RecordEnvelope revision) => AgentRuns.Settled.Contains(EstateModel.BodyString(revision, "status") ?? string.Empty);
         static bool Terminal(RecordEnvelope revision) => Settles(revision) || EstateModel.BodyString(revision, "status") == "canceled";
         Dictionary<string, List<(RecordEnvelope Record, int Depth)>> lineages = Lineages(model, Counts);
+        IReadOnlyList<string> goals = model.Chain(model.Latest(goal));
+        // A run whose intent does not count is still the goal's run while a record is unread, read against the agent.
+        runs = [.. runs, .. AgainstOnly(model, "operation").Where(o => o.Supersedes is null && EstateModel.BodyString(o, "action") == OperationType.AgentRun
+            && TJson.Text(TJson.Object(o.Body, "target"), "goal") is string named && goals.Contains(named) && (before is null || GoalRules.Before(o, before))).Select(o => new AgentRuns.Run(o, [o]))];
         List<(RecordEnvelope Record, int Depth)> Lineage(AgentRuns.Run run) => lineages.GetValueOrDefault(run.Intent.Id) ?? [(run.Intent, 0)];
         static RecordEnvelope? Shallowest(IEnumerable<(RecordEnvelope Record, int Depth)> line) => line.OrderBy(e => e.Depth).ThenBy(e => e.Record.At, StringComparer.Ordinal)
             .ThenBy(e => e.Record.Id, StringComparer.Ordinal).Select(e => e.Record).FirstOrDefault();
@@ -823,22 +839,24 @@ internal static partial class StandingAgents
             // settlement count, as its failure. From FIX-156 heads that disagree yield the outcome least favorable to the agent, and an untied
             // revision is placed by the untied revisions above it, so no depth, date or padding ranks one over another.
             List<(RecordEnvelope Record, int Depth)> line = Lineage(run);
-            List<(RecordEnvelope Record, int Depth)> untied = [.. line.Where(e => !Tied(e.Record.By))];
+            List<(RecordEnvelope Record, int Depth)> untied = [.. line.Where(e => !TiedRecord(e.Record))];
             bool spoken = untied.Any(e => Terminal(e.Record));
             (List<RecordEnvelope> heads, Dictionary<string, int> above) = Heads(line, untied);
             IEnumerable<RecordEnvelope> Placed(IEnumerable<RecordEnvelope> records) => records.OrderBy(r => above[r.Id]).ThenBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal);
-            RecordEnvelope? admitted = spoken ? null : Shallowest(line.Where(e => Tied(e.Record.By) && EstateModel.BodyString(e.Record, "status") == "known-failure"));
+            RecordEnvelope? admitted = spoken ? null : Shallowest(line.Where(e => TiedRecord(e.Record) && EstateModel.BodyString(e.Record, "status") == "known-failure"));
             RecordEnvelope settlement = (spoken ? Placed(untied.Select(e => e.Record).Where(Settles)).FirstOrDefault() : null) ?? admitted ?? Shallowest(line.Where(e => Settles(e.Record)))!;
-            bool tied = Tied(run.Intent.By);
+            bool tied = TiedRecord(run.Intent);
             RecordEnvelope? carried = run.Assignment is string id && model.ById.TryGetValue(id, out RecordEnvelope? found) ? model.Latest(found) : null;
             IReadOnlyList<string> chain = carried is null ? [] : model.Chain(carried);
             AgentRuns.Run? next = runs.Where(r => r.Assignment is not null && chain.Contains(r.Assignment) && GoalRules.Before(run.Intent, r.Intent) && Counts(r.Intent)
-                    && (!Tied(r.Intent.By) || (tied && Settled(r))))
+                    && (!TiedRecord(r.Intent) || (tied && Settled(r))))
                 .OrderBy(r => r.Intent.At, StringComparer.Ordinal).ThenBy(r => r.Intent.Id, StringComparer.Ordinal).FirstOrDefault();
 
             // Every result of every attempt on the assignment, superseded attempts and results among them, so no revision takes a failure back.
-            List<RecordEnvelope> attempts = [.. chain.SelectMany(a => model.About(a, "attempt")).DistinctBy(a => a.Id)];
-            List<RecordEnvelope> results = [.. attempts.SelectMany(attempt => model.About(attempt.Id, "result")).DistinctBy(r => r.Id)];
+            // From FIX-156, while a record is unread, attempts and results that do not count are read too, as failures only.
+            List<RecordEnvelope> attempts = [.. chain.SelectMany(a => model.About(a, "attempt")).Concat(AgainstOnly(model, "attempt").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id))).DistinctBy(a => a.Id)];
+            HashSet<string> attempted = [.. attempts.Select(a => a.Id)];
+            List<RecordEnvelope> results = [.. attempts.SelectMany(attempt => model.About(attempt.Id, "result")).Concat(AgainstOnly(model, "result").Where(r => r.Subject is not null && attempted.Contains(r.Subject.Id))).DistinctBy(r => r.Id)];
             List<RecordEnvelope> failed = [.. results
                 .Where(r => Counts(r) && GoalRules.Before(run.Intent, r) && (next is null || GoalRules.Before(r, next.Intent)) && EstateModel.BodyString(r, "outcome") is "blocked" or "abandoned")
                 .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)];
@@ -884,7 +902,6 @@ internal static partial class StandingAgents
 
         // From FIX-156 each line of the goal's agent runs the loader left out counts as one failed run for each intent it holds, at least one,
         // at the latest of its records, so that no identifier another record reuses takes a run out of the count.
-        IReadOnlyList<string> goals = model.Chain(model.Latest(goal));
         foreach (IReadOnlyList<RecordEnvelope> unreadable in model.UnreadableLines)
         {
             List<RecordEnvelope> carrying = [.. unreadable.Where(r => r.Type == "operation" && EstateModel.BodyString(r, "action") == OperationType.AgentRun
@@ -956,7 +973,8 @@ internal static partial class StandingAgents
     private static Dictionary<string, List<(RecordEnvelope Record, int Depth)>> Lineages(EstateModel model, Func<RecordEnvelope, bool> counts)
     {
         var operations = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
-        foreach (RecordEnvelope operation in model.OfType("operation").Where(counts))
+        // From FIX-156, while the estate leaves a record unread, operations that do not count join their lineages too, read against the agent.
+        foreach (RecordEnvelope operation in model.OfType("operation").Concat(AgainstOnly(model, "operation")).Where(counts))
         {
             operations.TryAdd(operation.Id, operation);
         }
@@ -1057,6 +1075,7 @@ internal static partial class StandingAgents
         return TJson.Text(TJson.Object(settlement.Body, "observed"), "reference") is string id && model.ById.TryGetValue(id, out RecordEnvelope? result) && result.Type == "result"
             && EstateModel.BodyString(result, "outcome") is "completed" or "partial" && GoalRules.Before(run.Intent, result) && (before is null || GoalRules.Before(result, before))
             && result.Subject is RecordReference attempt && model.ById.TryGetValue(attempt.Id, out RecordEnvelope? closed) && closed.Subject is RecordReference carried && chain.Contains(carried.Id)
+            && !ReadAgainst(model, result) && !ReadAgainst(model, closed)
             ? result : null;
     }
 
@@ -1090,7 +1109,7 @@ internal static partial class StandingAgents
     {
         if (TJson.Text(TJson.Object(settled.Body, "stop"), "requestedBy") is not string by || by == "worker"
             || model.Chain(settled).Select(model.ById.GetValueOrDefault).OfType<RecordEnvelope>().FirstOrDefault(r => TJson.Text(TJson.Object(r.Body, "stop"), "requestedBy") == by) is not RecordEnvelope stopped
-            || StandingOutputs.Tied(model, goal, stopped.By, before))
+            || StandingOutputs.Tied(model, goal, stopped.By, before) || ReadAgainst(model, stopped))
         {
             return false;
         }

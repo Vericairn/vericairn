@@ -338,6 +338,42 @@ public class StandingOutputJourneyTests
         Assert.False(run.Service.WorkNew(new WorkNewRequest(op, Key: "IDX-1") { FromPossibility = raised }).Ok);
     }
 
+    [Fact]
+    public void LeavingTheCarriersDeviceOrAdmissionUnreadFreesNoOpenOutput()
+    {
+        // FIX-156's review, through the worker: the builder records a possibility and a question in its run, signed by its admitted device, and
+        // then leaves its own device or admission unread by hand, in each of four ways, so that both stop counting: goal due reads two open
+        // outputs and the agent held all the same, goal step starts no run and nobody adopts the possibility.
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        (string goal, string assignment) = Carried(run);
+        string raised = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(builder, assignment, "possibility", JsonSerializer.SerializeToElement(Possibility("cache/index", draft: true))))).Id;
+        RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(builder, assignment, "ask", RunEstate.Json("""{"question":"Is the legacy index still read?","recommendation":"Drop it if not.","consequence":"The research goes on."}"""))));
+        JsonElement Due() => run.Service.GoalDue(goal)!.Json;
+        Assert.Equal(2, Due().GetProperty("outputs").GetProperty("open").GetInt32());
+        Assert.Equal(0, run.Service.Check().Errors);
+        foreach (string target in new[] { "device", "admission" })
+        {
+            foreach (string shape in new[] { "earlier", "later", "other-type", "fresh-pair" })
+            {
+                RecordEnvelope original = StandingAgentRoutingTests.BuilderRecord(run, target);
+                IReadOnlyList<RecordEnvelope> written = StandingAgentRoutingTests.LeaveUnread(run, original, shape);
+                EstateModel model = run.Estate.Load();
+                Assert.False(model.Counts(model.ById[raised]), $"{target}, {shape}");
+                Assert.True((2, "held") == (Due().GetProperty("outputs").GetProperty("open").GetInt32(), Due().GetProperty("state").GetString()), $"{target}, {shape}: {Due().GetProperty("outputs").GetProperty("open").GetInt32()}");
+                Assert.Null(StandingAgentRoutingTests.Step(run, goal, $"after-{target}-{shape}").Run);
+                Assert.False(run.Service.WorkNew(new WorkNewRequest(op, Key: "IDX-1") { FromPossibility = raised }).Ok);
+                foreach (RecordEnvelope file in written)
+                {
+                    File.Delete(Path.Combine(run.Estate.Root, file.ExpectedPath.Replace('/', Path.DirectorySeparatorChar)));
+                }
+
+                Assert.Equal(2, Due().GetProperty("outputs").GetProperty("open").GetInt32());
+            }
+        }
+    }
+
     /// <summary>A standing agent whose occurrence goal step routed to the builder, with a second run of it in flight; its goal and assignment.</summary>
     private static (string Goal, string Assignment) Carried(RunEstate run, string[]? holders = null)
     {
