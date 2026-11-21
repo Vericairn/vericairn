@@ -42,7 +42,7 @@ public static class OperatorAnswers
     /// <param name="Ask">The exact ask revision the decision answers.</param>
     /// <param name="Hash">That revision's content hash.</param>
     /// <param name="Recommendation">The SHA-256 of that revision's recommendation.</param>
-    /// <param name="Count">How many asks the act answered.</param>
+    /// <param name="Count">How many asks the act set out to answer: those it showed and the operator chose before its first signature. An act that stops part-way, as a phone's may, writes fewer decisions than its count, never more.</param>
     public sealed record Act(string Id, string Ask, string Hash, string Recommendation, long Count);
 
     /// <summary>The act a decision names, read without validating it; null when it names none or the member is malformed.</summary>
@@ -89,7 +89,7 @@ public static class OperatorAnswers
             ["title"] = Cut("Recommendation taken: " + question, 200),
             ["statement"] = Statement,
             ["summary"] = Cut("The operator took the recommendation: " + recommendation, 4000),
-            ["synthesis"] = Cut($"Context. Ask {ask} asked the operator: {question} Decision. The operator took its recommendation, in one signed act answering {countText} " +
+            ["synthesis"] = Cut($"Context. Ask {ask} asked the operator: {question} Decision. The operator took its recommendation, in one signed act that set out to answer {countText} " +
                 $"{(count == 1 ? "ask" : "asks")} with their recommendations: {recommendation} Consequences and limits. The answer is the recommendation as ask revision {hash} " +
                 "states it, and authorizes nothing it does not state.", 40000),
             ["effects"] = new System.Text.Json.Nodes.JsonArray($"The recommendation of ask {ask} is taken as its answer."),

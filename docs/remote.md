@@ -130,7 +130,9 @@ each signature, as every phone signature does: a phone keeps one presence check 
 runtime, checked against the request and the ask as shown immediately before the presence key asks and again before its
 signature leaves, and written as its own record; the runtime checks the ask and recommendation again when it writes. A change
 during the act stops it before the next signature: the decisions already written stand as answers of the act, the message says
-how many of how many were written, and an ask once answered is never answered again, so nothing is answered twice. The act's
+how many of how many were written, and an ask once answered is never answered again, so nothing is answered twice. Each decision's
+`act.count`, and its synthesis, say how many asks the act set out to answer, the ones you chose before its first signature; after a
+stop, fewer decisions name the act than its count, and those that do are the ones written. The act's
 outcome is shown until the app closes; unlike a single decision's draft it is not kept in app storage, and the asks the act
 answered no longer wait on you. A phone without its presence key signs no act.
 

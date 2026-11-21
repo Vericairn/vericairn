@@ -105,7 +105,10 @@ public sealed class RemoteAnswerActTests(HeadlessFixture fixture)
             await model.SignAnswersCommand.ExecuteAsync();
 
             Assert.Equal(1, connections.SignedWrites);
-            Assert.Single(estate.Load().Current("decision"));
+            RecordEnvelope written = Assert.Single(estate.Load().Current("decision"));
+            // The count is how many asks the act set out to answer, as its synthesis says; fewer decisions name the act after a stop.
+            Assert.Equal(2, OperatorAnswers.Of(written)!.Count);
+            Assert.Contains("in one signed act that set out to answer 2 asks", EstateModel.BodyString(written, "synthesis"), StringComparison.Ordinal);
             Assert.Contains("stopped after 1 of 2 decisions", model.AnswerMessage, StringComparison.Ordinal);
             Assert.Single(model.AnswerReceipts);
             return true;

@@ -309,7 +309,9 @@ inspecting the exact ask and its recommendation.`, its summary and synthesis car
 effect says the recommendation is taken, `notAuthorized` says it authorizes nothing the recommendation does not state, and its
 stake is `--stake` (default `low`); the ask supplies none. `decidedAt` is the act's time, the same for every decision of the act,
 and its `act` member names the act: `id`, the exact ask revision (`ask`, `hash`), the recommendation's SHA-256
-(`recommendation`) and how many asks the act answered (`count`). All decisions are signed before the batch stores any, and stored
+(`recommendation`) and `count`, how many asks the act set out to answer: those it showed and you chose before its first signature.
+An act from the command line, Workbench or the API stores all its decisions or none, so their number is its count; an act on Remote
+that stops part-way writes fewer, never more, and the decisions that name its `id` are the ones it wrote. All decisions are signed before the batch stores any, and stored
 together; an interrupted storage keeps its receipts and journal for reconciliation, as `operator close` does.
 
 Only the operator an ask is put to answers it in an act, and only a person: an agent never performs it, whatever role it holds,
