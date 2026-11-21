@@ -603,6 +603,19 @@ format-3 field. `records describe assignment` and `records describe result`
 include this contract, and the generic record reader advances to
 `vericairn.records/readers/10`.
 
+POLICY-08 adds a rule kind and a policy-exception target within format 3, and no
+field or record type. An `estate-policy` rule of the foundation kind
+`vericairn.estate/concurrent-paths`, version 1, with empty `parameters` and a
+`repository` selection, holds the unresolved pairs of active assignments whose
+effective permitted paths meet within its selectors
+([policies](policies.md#concurrent-paths-094)); a runtime without the kind reports
+the rule unavailable. A `policy-exception` target of kind `pair` carries
+`assignments`, the exact references of two revisions of two different
+assignments, and no `submission`; a concurrent-paths rule takes only pair targets
+and only such a rule takes one (`exception.pair`). A reader of format 3 that
+predates the target refuses an exception carrying it (`body.enum`), so readers
+upgrade before an estate writes one; every other record keeps its reading.
+
 ## What a worker run can reach (0.9.4)
 
 CODE-82 adds one optional field to `harness-qualification` and one to an

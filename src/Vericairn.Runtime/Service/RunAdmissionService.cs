@@ -15,6 +15,7 @@ using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
+using Vericairn.Runtime.Policies;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Workers;
@@ -342,12 +343,20 @@ internal sealed class RunAdmissionService(
                 return Refused(RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded."));
             }
 
-            if (AssignmentOverlaps.WaitRefusal(model, plan.Assignment, "its run", RepositoryView.For(model, Providers, session.Manifest.Estate)) is string waiting)
+            var intentView = RepositoryView.For(model, Providers, session.Manifest.Estate);
+            if (AssignmentOverlaps.WaitRefusal(model, plan.Assignment, "its run", intentView) is string waiting)
             {
                 return Refused(RunProblem(pending, "not-started", "refused", waiting + " Nothing was recorded."));
             }
 
             DateTimeOffset now = WorkerOptions.Clock.GetUtcNow();
+            // From 0.9.4 (POLICY-08): run admission is an assignment start, refused while a refuse-level concurrent-paths policy holds a pair
+            // of its assignment, judged again here against the records as they are now.
+            if (session.Manifest.RecordFormat >= 3 && ConcurrentPaths.Refusal(model, ConcurrentPaths.AtStart(model, model.Latest(plan.Assignment), intentView, now), "its run") is string held)
+            {
+                return Refused(RunProblem(pending, "not-started", "refused", held + " Nothing was recorded."));
+            }
+
             if (goal is not null)
             {
                 IReadOnlyList<(string Device, string Reason)> exposed = CustodyGuard.Exposed(model, CustodyGuard.Guarded(model, goal, plan.Agent), DeviceKeyStores.All(), Environment.UserName);
@@ -765,6 +774,12 @@ internal sealed class RunAdmissionService(
         if (AssignmentOverlaps.WaitRefusal(model, assignment, "its run", view) is string waiting)
         {
             return (null, waiting, null);
+        }
+
+        // From 0.9.4 (POLICY-08): a run admission leaves no pair of its assignment unresolved that a refuse-level concurrent-paths policy holds.
+        if (session.Manifest.RecordFormat >= 3 && ConcurrentPaths.Refusal(model, ConcurrentPaths.AtStart(model, assignment, view, WorkerOptions.Clock.GetUtcNow()), "its run") is string held)
+        {
+            return (null, held, null);
         }
 
         string? clone = model.Chain(resource).Append(request.Repository).Select(id => RepositoryClones.Find(estate, id)).FirstOrDefault(c => c is not null);
