@@ -179,7 +179,7 @@ public sealed partial class EstateService
         {
             EstateModel model = session.Load();
             if (!model.ById.TryGetValue(request.Ask!, out RecordEnvelope? ask) || ask.Type != "ask" || !model.IsCurrent(ask)
-                || EstateModel.BodyString(ask, "state") == "withdrawn" || EstateModel.BodyString(ask, "to") != request.By
+                || StandingOutputs.Withdrawn(model, ask) || EstateModel.BodyString(ask, "to") != request.By
                 || model.Current("decision").Any(d => d.Body.TryGetProperty("answers", out JsonElement answers) && answers.EnumerateArray().Any(a => a.GetString() == ask.Id)))
                 return new(false, Problem: new("refused", "Answer an open current ask addressed to the acting principal; an existing answer cannot be replaced by a prompt use.", []));
             (JsonObject? use, Problem? problem) = PreparePrompt(model, request.By, request.Selection);

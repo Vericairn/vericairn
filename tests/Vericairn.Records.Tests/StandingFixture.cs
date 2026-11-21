@@ -121,9 +121,10 @@ internal sealed class StandingFixture : IDisposable
 
     /// <summary>
     /// A run's settlement: its intent's revision with the status, observed and charged five minutes, and the stop asked of it when one was;
-    /// recorded by the operator, or by the builder (which then needs local-engineering).
+    /// recorded by the operator, or by the builder (which then needs local-engineering). With a result, its observation names it, as the
+    /// worker names the result an agent recorded during its run.
     /// </summary>
-    public RecordEnvelope Settle(RecordEnvelope intent, string status, string? stoppedBy = null, bool builder = false)
+    public RecordEnvelope Settle(RecordEnvelope intent, string status, string? stoppedBy = null, bool builder = false, RecordEnvelope? result = null)
     {
         RecordEnvelope assignment = Estate.Load().ById[intent.Body.GetProperty("target").GetProperty("assignment").GetString()!];
         string principal = intent.Body.GetProperty("target").GetProperty("principal").GetString()!;
@@ -133,6 +134,7 @@ internal sealed class StandingFixture : IDisposable
         JsonObject body = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, status, principal);
         body["dispatchedAt"] = intent.At;
         body["observed"] = new JsonObject { ["summary"] = "The run ended.", ["at"] = RecordParser.FormatTimestamp(Estate.Clock) };
+        if (result is not null) body["observed"]!["reference"] = result.Id;
         body["usage"] = new JsonObject { ["wallMinutes"] = 5, ["unreported"] = new JsonArray() };
         if (stoppedBy is not null)
         {

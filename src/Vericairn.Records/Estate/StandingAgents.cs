@@ -775,9 +775,11 @@ internal static class StandingAgents
     /// read so that no record of an agent tied to the goal ends the pause, whatever its date (§ 10; from 0.9.4, FIX-155). Each settled run
     /// has one outcome. It failed when a blocked or abandoned result was recorded on its assignment after it started and before the next run
     /// of that assignment started, any such result whatever a later one or a correction says, or when it settled as a known failure unless
-    /// who decides for the goal asked it to stop (<see cref="DeciderStopped"/>). It succeeded when it settled as an observed success with no
-    /// such result and no principal tied to the goal recorded its intent or its settlement. Otherwise it counts for nothing. A completed or
-    /// partial result, and the attempt it closes, is a claim another principal reviews and never makes a run succeed. A run no tied
+    /// who decides for the goal asked it to stop (<see cref="DeciderStopped"/>). It succeeded when it settled as an observed success that
+    /// names the completed or partial result its agent recorded during it (<see cref="Seen"/>), with no such failure result, and no principal
+    /// tied to the goal recorded its intent or its settlement. Otherwise it counts for nothing, a clean exit with no result included. A
+    /// completed or partial result, and the attempt it closes, is a claim another principal reviews and never makes a run succeed by
+    /// itself: only the settlement, which no tied principal wrote, names it, and nothing written after it, whatever its date. A run no tied
     /// principal recorded ends at the next run whose intent no tied principal recorded, so no run a tied principal records takes a result
     /// off another. The outcomes count in the order the runs settled, each at the later of its intent and its settlement. An answered ask of
     /// the pause naming one of the failures cuts every outcome settled before the earlier of the ask and its first answer
@@ -811,7 +813,7 @@ internal static class StandingAgents
             {
                 outcomes.Add((at, run.Latest, true, [run.Latest]));
             }
-            else if (run.Status == "observed-success" && !tied)
+            else if (run.Status == "observed-success" && !tied && Seen(model, run, settlement, chain, before) is not null)
             {
                 outcomes.Add((at, run.Latest, false, [run.Latest]));
             }
@@ -859,6 +861,20 @@ internal static class StandingAgents
         }
 
         return (count, latest);
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-155): the result a run's settlement names in observed.reference, as the worker records the completed or partial result
+    /// its agent recorded during the run on an attempt of that run; null unless it names a completed or partial result on an attempt of the
+    /// run's assignment, recorded after the run started (and before the record judged, when one is). A run that exits cleanly with no result
+    /// names none.
+    /// </summary>
+    private static RecordEnvelope? Seen(EstateModel model, AgentRuns.Run run, RecordEnvelope settlement, IReadOnlyList<string> chain, RecordEnvelope? before)
+    {
+        return TJson.Text(TJson.Object(settlement.Body, "observed"), "reference") is string id && model.ById.TryGetValue(id, out RecordEnvelope? result) && result.Type == "result"
+            && EstateModel.BodyString(result, "outcome") is "completed" or "partial" && GoalRules.Before(run.Intent, result) && (before is null || GoalRules.Before(result, before))
+            && result.Subject is RecordReference attempt && model.ById.TryGetValue(attempt.Id, out RecordEnvelope? closed) && closed.Subject is RecordReference carried && chain.Contains(carried.Id)
+            ? result : null;
     }
 
     /// <summary>

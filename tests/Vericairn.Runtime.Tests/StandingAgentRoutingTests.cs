@@ -214,6 +214,50 @@ public class StandingAgentRoutingTests
     }
 
     [Fact]
+    public void ACleanExitWithNoResultEndsNoFailuresAndARunWhoseResultTheWorkerSawEndsThem()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string builder = run.Estate.BuilderId;
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12 });
+        (string, int) Due() => (run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString()!, run.Service.GoalDue(goal)!.Json.GetProperty("failures").GetProperty("consecutive").GetInt32());
+        string? Seen(string id) => TJson.Text(TJson.Object(AgentRuns.Find(run.Estate.Load(), id)!.Latest.Body, "observed"), "reference");
+
+        // Two runs fail; then the builder's harness exits cleanly having recorded no result. The worker names no result in its settlement,
+        // and the run ends neither failure.
+        for (int i = 0; i < 2; i++)
+        {
+            GoalStepResponse failing = Step(run, goal, "fail-" + i, scenario: "claude-fails");
+            Assert.True(failing.Ok, failing.Message);
+            Assert.Equal("known-failure", run.Settled(failing.Run!.Run).Status);
+        }
+
+        GoalStepResponse clean = Step(run, goal, "clean");
+        Assert.True(clean.Ok, clean.Message);
+        Assert.Equal("observed-success", run.Settled(clean.Run!.Run).Status);
+        Assert.Null(Seen(clean.Run.Run));
+        Assert.Equal(("active", 2), Due());
+
+        // In the next run the builder records its attempt and a completed result while the run is in flight; the worker sees that result at
+        // the run's exit and names it in its settlement, and the run ends the failures before it.
+        GoalStepResponse working = Step(run, goal, "working", scenario: "silent-recovery");
+        Assert.True(working.Run is not null, working.Message);
+        run.WaitUntil(() => run.Row(working.Run!.Run).Status == "dispatched", "the run to be dispatched");
+        string carried = AgentRuns.Find(run.Estate.Load(), working.Run!.Run)!.Assignment!;
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(carried, builder, "research repository, a work branch", "Research."))).Id;
+        string result = RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, builder, JsonSerializer.SerializeToElement(new JsonObject
+        {
+            ["outcome"] = "completed", ["summary"] = "Researched.", ["outputs"] = new JsonArray(), ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(),
+            ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(), ["nextStep"] = "Review the findings.",
+        })))).Id;
+        File.WriteAllText(run.Report("working") + ".recover", "release");
+        File.WriteAllText(run.Report("working") + ".finish", "release");
+        Assert.Equal("observed-success", run.Settled(working.Run!.Run).Status);
+        Assert.Equal(result, Seen(working.Run.Run));
+        Assert.Equal(("active", 0), Due());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void ALapsedOrPausedAgentDispatchesNothingAndATimeAheadOfTheClockIsRefused()
     {
         using var run = new RunEstate(recordFormat: 3);

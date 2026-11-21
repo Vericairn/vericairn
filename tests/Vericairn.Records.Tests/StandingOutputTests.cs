@@ -875,28 +875,38 @@ public class StandingOutputTests
         Assert.Equal(2, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
 
         // Written straight to records/, the agent's withdrawal of its ask and its close of its publication request, and another agent's
-        // observation of the request as posted, are errors of the estate and dispose of nothing: the ask still waits on the operator, the
-        // request is not closed, and both stay counted.
-        fixture.Add("ask", Revised(ask, b => b["state"] = "withdrawn"), supersedes: ask.Id, builder: true);
-        fixture.Add("operator-request-close", new JsonObject { ["outcome"] = "dismissed", ["reason"] = "Not now." }, builder: true, subject: closing);
+        // observation of the request as posted, are errors of the estate, each at its own record and no other, and dispose of nothing: the
+        // ask still waits on the operator, the request is not closed, and both stay counted.
+        RecordEnvelope withdrawal = fixture.Add("ask", Revised(ask, b => b["state"] = "withdrawn"), supersedes: ask.Id, builder: true);
+        RecordEnvelope closed = fixture.Add("operator-request-close", new JsonObject { ["outcome"] = "dismissed", ["reason"] = "Not now." }, builder: true, subject: closing);
         JsonObject observed = new()
         {
             ["kind"] = "operator-request", ["asOf"] = RecordParser.FormatTimestamp(fixture.Estate.Clock), ["summary"] = "Posted.", ["limitations"] = new JsonArray(),
             ["facts"] = new JsonObject { ["outcome"] = "done", ["destination"] = "the project's discussion board", ["location"] = "https://example.org/discussions/1", ["evidenceHash"] = FlowFixture.Hash('e') },
         };
-        fixture.Estate.Add("observation", helper, observed.ToJsonString(), closing);
+        RecordEnvelope observation = fixture.Estate.Add("observation", helper, observed.ToJsonString(), closing);
         EstateModel model = fixture.Estate.Load();
-        Assert.Contains(model.Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
-        Assert.Contains(model.Findings, f => f.Code == "standing.publication" && f.Severity == Severity.Error);
+        List<(string Code, string Location)> errors = [.. model.Findings.Where(f => f.Severity == Severity.Error).Select(f => (f.Code, f.Location)).Order()];
+        string[] invalid = [withdrawal.Id, closed.Id, observation.Id];
+        Assert.All(errors, e => Assert.Contains(invalid, id => e.Location.Contains(id, StringComparison.Ordinal)));
+        Assert.Contains(errors, e => e.Code == "standing.own-output" && e.Location.Contains(withdrawal.Id, StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Code == "standing.own-output" && e.Location.Contains(closed.Id, StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Code == "standing.publication" && e.Location.Contains(observation.Id, StringComparison.Ordinal));
         Assert.Equal("open", Asks.State(model, ask).State);
         Assert.Contains(Asks.Deliveries(model, fixture.Estate.OperatorId).SelectMany(d => d.Asks), a => model.Chain(a)[0] == ask.Id);
         Assert.Empty(OperatorRequests.Closures(model, request));
         Assert.Equal(2, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
 
-        // The operator's decision and close dispose of them.
-        fixture.Add("decision", Answer(fixture, ask));
-        fixture.Add("operator-request-close", new JsonObject { ["outcome"] = "dismissed", ["reason"] = "Not now." }, subject: closing);
+        // The operator's decision and close are valid and dispose of both: no error lies at either, every error the estate reports still lies at
+        // one of the agent's three records (which now also close a request the operator closed), and none of the earlier ones is gone.
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "decision", Answer(fixture, ask))));
+        RecordEnvelope decided = fixture.Add("decision", Answer(fixture, ask));
+        RecordEnvelope dismissed = fixture.Add("operator-request-close", new JsonObject { ["outcome"] = "dismissed", ["reason"] = "Not now." }, subject: closing);
         model = fixture.Estate.Load();
+        List<(string Code, string Location)> after = [.. model.Findings.Where(f => f.Severity == Severity.Error).Select(f => (f.Code, f.Location))];
+        Assert.All(after, e => Assert.Contains(invalid, id => e.Location.Contains(id, StringComparison.Ordinal)));
+        Assert.DoesNotContain(after, e => e.Location.Contains(decided.Id, StringComparison.Ordinal) || e.Location.Contains(dismissed.Id, StringComparison.Ordinal));
+        Assert.Subset(after.ToHashSet(), errors.ToHashSet());
         Assert.Equal("answered", Asks.State(model, ask).State);
         Assert.Single(OperatorRequests.Closures(model, request));
         Assert.Equal(0, fixture.Agent(fixture.Estate.Clock).OpenOutputs);

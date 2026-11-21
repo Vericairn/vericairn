@@ -226,6 +226,19 @@ internal static partial class StandingOutputs
     }
 
     /// <summary>
+    /// True when an ask reads withdrawn: its latest revision says so, unless it is a standing agent's ask, which no revision withdraws
+    /// (standing.own-output), so that from 0.9.4 (FIX-155) the person's decision still answers it. Asks.State, the decision rule and the
+    /// prompt-answer route read it.
+    /// </summary>
+    internal static bool Withdrawn(EstateModel model, RecordEnvelope ask)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(ask);
+        RecordEnvelope latest = model.Latest(ask);
+        return EstateModel.BodyString(latest, "state") == "withdrawn" && Of(FirstOf(model, latest)) is null;
+    }
+
+    /// <summary>
     /// True when an agent is tied to a standing agent's goal (<see cref="TieOf"/>); with <paramref name="asOf"/>, only by a record written
     /// before it, as a judgment of the estate as it stood before that record reads ties.
     /// </summary>

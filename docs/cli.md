@@ -1231,22 +1231,28 @@ runs in a row (three when it sets none) `goal step` asks the sponsor once and di
 settled run counts once, in the order the runs settled: it failed when a blocked or abandoned result was recorded on its assignment
 after it started and before the assignment's next run started, whatever a later result or a correction says, or when it settled
 as a known failure, unless its sponsor (when a person) or an operator asked it to stop (`--stop-runs`, `goal stop`, `worker stop`; a
-stop by anyone else, the dispatcher that started it included, counts); it succeeded when it settled as an observed success with no
-such result; any other run counts for nothing. A run's intent is refused at the record, whatever route starts it, for a run on no
-occurrence or on a settled one, past the until time, during the failure pause, past the period's runs or while results awaiting
-review reach their cap, each judged by the records before the intent. A second standing agent of one role over one subject is
-never activated, nor one past its until time.
+stop by anyone else, the dispatcher that started it included, counts); it succeeded when it settled as an observed success whose
+settlement names the completed or partial result its agent recorded during the run, with no such failure result; any other run,
+one whose harness exited cleanly with no result included, counts for nothing. A run's intent is refused at the record, whatever
+route starts it, for a run on no occurrence or on a settled one, past the until time, during the failure pause, past the period's
+runs or while results awaiting review reach their cap, each judged by the records before the intent. A second standing agent of one
+role over one subject is never activated, nor one past its until time.
 
 From 0.9.4 (FIX-155), no agent ends its own failure pause by any record it writes, whatever date the record claims. Two events
 end failures, and only these. A success ends the failures before it while they are fewer than the limit: a run the runtime
 observed succeed, whose intent and settlement a principal not tied to the goal recorded (tied as a question's answer reads it,
-below). Once the failures reach the limit, a success ends nothing, a run already in flight when they did included, and only the
-answer to the pause's ask ends them: a decision of the person it was put to, or one a principal not tied to the goal records for
-that person, after which no run settled before the ask, or before that answer when it came first, counts. A completed or partial
-result, and the attempt it closes, is a claim another principal reviews, and it never makes a run succeed, whether recorded with
-`work result`, `records new` or by hand: after three failed runs the carrying agent's own attempt and completed result leave the
-pause held and the failures at three. A run whose intent or settlement an agent tied to the goal recorded never succeeds, a stop
-such an agent records names no one who decides for the goal, and its runs never take a result off a run another principal recorded.
+below), and whose settlement names the completed or partial result its agent recorded during the run on an attempt of that run, as
+the worker names the one it sees at the run's exit. Once the failures reach the limit, a success ends nothing, a run already in
+flight when they did included, and only the answer to the pause's ask ends them: a decision of the person it was put to, or one a
+principal not tied to the goal records for that person, after which no run settled before the ask, or before that answer when it
+came first, counts. A run whose harness exits cleanly with no result counts for nothing, so it leaves the failures as they were and
+nothing to review. A completed or partial result, and the attempt it closes, is a claim another principal reviews, and it never
+makes a run succeed by itself, whether recorded with `work result`, `records new` or by hand: only a settlement names it, and
+nothing written after the settlement, whatever date it claims, so after three failed runs the carrying agent's own attempt and
+completed result leave the pause held and the failures at three. A run settled from the worker's retained observation, or by hand,
+names no result unless its writer names one. A run whose intent or settlement an agent tied to the goal recorded never succeeds, a
+stop such an agent records names no one who decides for the goal, and its runs never take a result off a run another principal
+recorded.
 
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]

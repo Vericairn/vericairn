@@ -136,8 +136,9 @@ public sealed class DecisionType : IRecordType
             {
                 context.Error("decision.answers", $"Ask {id} was put to another principal; an ask is answered by the principal it was put to.");
             }
-            else if (EstateModel.BodyString(latest, "state") == "withdrawn")
+            else if (StandingOutputs.Withdrawn(context.Model, latest))
             {
+                // From 0.9.4 (FIX-155) a standing agent's ask is never withdrawn, so a withdrawal written anyway leaves it for the person to answer.
                 context.Error("decision.answers", $"Ask {id} was withdrawn before it was answered.");
             }
 

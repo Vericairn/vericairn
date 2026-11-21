@@ -52,7 +52,7 @@ public static class Asks
         ArgumentNullException.ThrowIfNull(ask);
         RecordEnvelope latest = model.Latest(ask);
         string recorded = EstateModel.BodyString(latest, "state") ?? "open";
-        if (recorded == "withdrawn" && StandingOutputs.Of(StandingOutputs.FirstOf(model, latest)) is not null)
+        if (recorded == "withdrawn" && !StandingOutputs.Withdrawn(model, latest))
         {
             // From 0.9.4 (FIX-155), a standing agent's ask is never withdrawn (standing.own-output): a decision of the person asked disposes
             // of it, so a withdrawal reads as the waiting state the chain recorded before it.

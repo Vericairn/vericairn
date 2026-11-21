@@ -465,42 +465,83 @@ public class StandingAgentTests
     }
 
     [Fact]
-    public void ARunTheRuntimeSawSucceedEndsFailuresBelowTheLimitAndOnceTheyReachItOnlyTheAnswerEndsThePause()
+    public void ACleanExitWithNoResultEndsNoFailuresARunNamingItsResultEndsThemBelowTheLimitAndAtTheLimitOnlyTheAnswerDoes()
     {
-        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 40, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 40, ["wallMinutes"] = 800 });
         (string, int, string?) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures, fixture.Agent(fixture.Estate.Clock).FailureTrigger?.Id);
         StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
         RecordEnvelope assignment = fixture.Assign(occurrence);
 
-        // Two failures, then a run the operator records that settles as an observed success with no result: the runtime saw it succeed, so
-        // the failures before it end.
-        fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
-        fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
-        fixture.Settle(fixture.RunIntent(assignment, "run-silent"), "observed-success");
+        // Four rounds of two failed runs and a run that exits cleanly with no result, as the Reviewer probed: a clean exit leaves nothing to
+        // review and ends no failures, so it never lowers the count, and every third failure since the person last answered pauses the agent
+        // until the person's answer.
+        int expected = 0;
+        RecordEnvelope? clean = null;
+        for (int round = 1; round <= 4; round++)
+        {
+            foreach (string name in new[] { "first", "second" })
+            {
+                RecordEnvelope failed = fixture.Settle(fixture.RunIntent(assignment, $"run-{round}-{name}"), "known-failure");
+                if (++expected == 3)
+                {
+                    Assert.Equal(("held", 3, failed.Id), Pause());
+                    Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, $"run-{round}-{name}-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+                    AnswerPause(fixture, failed);
+                    expected = 0;
+                }
+
+                Assert.Equal(("active", expected), (Pause().Item1, Pause().Item2));
+            }
+
+            clean = fixture.RunIntent(assignment, $"run-{round}-clean");
+            fixture.Estate.SetClock(fixture.Estate.Clock.AddMinutes(1));
+            fixture.Settle(clean, "observed-success");
+            Assert.Equal(("active", expected), (Pause().Item1, Pause().Item2));
+        }
+
+        Assert.Equal(2, expected);
+
+        // The carrier writes by hand a completed result dated within the last clean run: that run's settlement names no result, so it still
+        // counts for nothing and the count stays two. The operator's review returns the result, so the occurrence runs again.
+        DateTimeOffset now = fixture.Estate.Clock;
+        fixture.Estate.SetClock(clean!.AtTime.AddSeconds(10));
+        RecordEnvelope backdated = fixture.Result(assignment, "completed");
+        fixture.Estate.SetClock(now);
+        Assert.Equal(("active", 2), (Pause().Item1, Pause().Item2));
+        fixture.Review(backdated, "findings");
+
+        // A run that settles as an observed success naming the completed result its agent recorded during it ends the failures below the limit.
+        RecordEnvelope succeeding = fixture.RunIntent(assignment, "run-succeeds");
+        RecordEnvelope done = fixture.Result(assignment, "completed");
+        fixture.Settle(succeeding, "observed-success", result: done);
         Assert.Equal(("active", 0, null), Pause());
+        fixture.Review(done, "findings");
 
         // A completed result in a run that settles as a known failure is the carrier's claim, and the run failed; so did one whose blocked
-        // result the carrier took back by a completed correction. The operator's review returns each claim, so the occurrence runs again.
+        // result the carrier took back by a completed correction, though its settlement names the correction. The operator's review returns
+        // each claim, so the occurrence runs again.
         RecordEnvelope claimed = fixture.RunIntent(assignment, "run-claimed");
         RecordEnvelope claim = fixture.Result(assignment, "completed");
-        RecordEnvelope failed = fixture.Settle(claimed, "known-failure");
-        Assert.Equal(("active", 1, failed.Id), Pause());
+        RecordEnvelope failedClaim = fixture.Settle(claimed, "known-failure", result: claim);
+        Assert.Equal(("active", 1, failedClaim.Id), Pause());
         fixture.Review(claim, "findings");
         RecordEnvelope corrected = fixture.RunIntent(assignment, "run-corrected");
         RecordEnvelope blocked = fixture.Result(assignment, "blocked");
         JsonObject correction = PolicyFixture.Body(blocked);
         correction["outcome"] = "completed";
         RecordEnvelope taken = fixture.Add("result", correction, builder: true, subject: blocked.Subject, supersedes: blocked.Id);
-        fixture.Settle(corrected, "observed-success");
+        fixture.Settle(corrected, "observed-success", result: taken);
         Assert.Equal(("active", 2, blocked.Id), Pause());
         fixture.Review(taken, "findings");
 
         // A run starts and another beside it; the second fails, so three fail in a row and the pause holds. The first then settles as an
-        // observed success: once the failures reach the limit a success ends nothing, and a run intent is refused until the answer.
+        // observed success naming its result: once the failures reach the limit a success ends nothing, and a run intent is refused until the
+        // person's answer, which ends the pause.
         RecordEnvelope beside = fixture.RunIntent(assignment, "run-beside");
         RecordEnvelope third = fixture.Settle(fixture.RunIntent(assignment, "run-third"), "known-failure");
         Assert.Equal(("held", 3, third.Id), Pause());
-        fixture.Settle(beside, "observed-success");
+        RecordEnvelope besideResult = fixture.Result(assignment, "completed");
+        fixture.Settle(beside, "observed-success", result: besideResult);
         Assert.Equal(("held", 3, third.Id), Pause());
         Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
         AnswerPause(fixture, third);
