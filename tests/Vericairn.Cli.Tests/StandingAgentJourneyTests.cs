@@ -7,6 +7,7 @@ using Vericairn.Mcp;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Tests;
 
 namespace Vericairn.Cli.Tests;
 
@@ -155,6 +156,47 @@ public class StandingAgentJourneyTests
         finally
         {
             CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
+    public void RecordsNewTakesTheOperatorsDecisionOnTheAsksTheSteppingBuilderWrote()
+    {
+        string scratch = CliHarness.TempDirectory("stepped-asks-scratch");
+        try
+        {
+            // The builder took the goal's steps under local-engineering and wrote its renewal and failure-pause asks; a helper carried the runs.
+            using var fixture = new SteppedAsksFixture();
+            string decidedAt = RecordParser.FormatTimestamp(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds()));
+            string Answer(string name, string ask) => CliHarness.WriteJson(scratch, name + ".json", $$"""
+                {"title":"Go on","statement":"Let the researcher go on.","summary":"The operator answers.","synthesis":"The operator answers the runtime's ask.","effects":["the agent goes on"],"affects":[],"decidedBy":"{{fixture.Operator}}","decidedAt":"{{decidedAt}}","stake":"low","notAuthorized":["spending"],"answers":["{{ask}}"]}
+                """);
+            CliHarness.Outcome Records(string by, string body) => CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Root, "--json", "records", "new", "decision", "--by", by, "--body", body);
+            JsonElement Due() => CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Root, "--json", "goal", "due", fixture.Goal).Json;
+
+            // records new refuses the helper's decision on either ask, though it names the operator, and the pause holds.
+            foreach ((string name, string ask) in new[] { ("pause", fixture.Pause), ("renewal", fixture.Renewal) })
+            {
+                CliHarness.Outcome own = Records(fixture.Helper, Answer("helper-" + name, ask));
+                Assert.NotEqual(0, own.Code);
+                Assert.Contains("standing.own-output", own.Err + own.Out, StringComparison.Ordinal);
+            }
+
+            Assert.Equal(3, Due().GetProperty("failures").GetProperty("consecutive").GetInt32());
+
+            // It records the builder's decision on each, as the builder records the operator's answers everywhere: the pause lifts.
+            foreach ((string name, string ask) in new[] { ("pause", fixture.Pause), ("renewal", fixture.Renewal) })
+            {
+                CliHarness.Outcome recorded = Records(fixture.Builder, Answer(name, ask));
+                Assert.True(recorded.Code == 0, recorded.Err + recorded.Out);
+            }
+
+            Assert.Equal(("active", 0), (Due().GetProperty("state").GetString(), Due().GetProperty("failures").GetProperty("consecutive").GetInt32()));
+            Assert.Equal(0, fixture.Service.Check().Errors);
+        }
+        finally
+        {
+            CliHarness.Delete(scratch);
         }
     }
 

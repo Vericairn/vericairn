@@ -804,10 +804,11 @@ internal static class StandingAgents
         }
 
         // A failure an answered ask of the pause names, and every outcome before it, no longer counts: the sponsor's answer lets the agent go on.
-        // From GOAL-08 only the pause's ask goal step recorded counts, never another principal's ask in its words, and only an answer the
-        // standing agent did not record itself (Asks.State leaves those out, StandingOutputs.SelfAnswer).
+        // From GOAL-08 only the pause's ask goal step recorded counts, never another principal's ask in its words, and only an answer no
+        // agent tied to the goal recorded (Asks.State leaves those out, StandingOutputs.SelfAnswer), whatever date it claims; judged before
+        // a record, such as a run's intent, by the ties written before it, so a later tie makes no earlier record wrong.
         List<RecordEnvelope> asks = [.. Routing.AsksOf(model, goal).Where(a => Counts(a) && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(NextEligible.AttentionQuestion, StringComparison.Ordinal)
-            && RuntimeAsk(model, goal, a) && Asks.State(model, a) is { State: "answered" } state && state.Answers.Any(Counts))];
+            && RuntimeAsk(model, goal, a) && Answered(model, a, before))];
         int cut = -1;
         for (int i = 0; i < outcomes.Count; i++)
         {
@@ -820,6 +821,22 @@ internal static class StandingAgents
 
         List<(RecordEnvelope Record, bool Failed)> trailing = [.. outcomes.Skip(cut + 1).Reverse().TakeWhile(o => o.Failed)];
         return (trailing.Count, trailing.Count == 0 ? null : trailing[0].Record);
+    }
+
+    /// <summary>
+    /// True when an ask is answered, as <see cref="Asks.State"/> reads it now; before a record, when an answer recorded before it counted
+    /// then (<see cref="StandingOutputs.Counting"/> as of it) and its asker has not withdrawn it.
+    /// </summary>
+    private static bool Answered(EstateModel model, RecordEnvelope ask, RecordEnvelope? before)
+    {
+        if (before is null)
+        {
+            return Asks.State(model, ask).State == "answered";
+        }
+
+        RecordEnvelope latest = model.Latest(ask);
+        return EstateModel.BodyString(latest, "state") != "withdrawn"
+            && StandingOutputs.Counting(model, latest, model.DecisionsAnswering(model.Chain(latest)), before).Any(d => GoalRules.Before(d, before));
     }
 
     /// <summary>
@@ -955,7 +972,8 @@ internal static class StandingAgents
     /// carries the occurrences and takes no step writes none of them, whatever its words. goal step writes and signs these asks as its
     /// caller, so an agent that carries the occurrences and may itself take the goal's steps (one holding local-engineering) writes one
     /// in their words as it could by calling goal step; telling the runtime's own apart from such an agent's would need a mark no record
-    /// field carries yet. Its answer to one counts for nothing either way (<see cref="StandingOutputs.SelfAnswer"/>).
+    /// field carries yet. Its answer to one counts for nothing either way, since it carries the occurrences (<see cref="StandingOutputs.SelfAnswer"/>);
+    /// the author of one that nothing ties to the goal records the person's decision on it.
     /// </summary>
     public static bool RuntimeAsk(EstateModel model, RecordEnvelope goal, RecordEnvelope ask)
     {

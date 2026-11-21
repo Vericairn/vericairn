@@ -1259,15 +1259,19 @@ its own output.
   ends its hold, and the same holds for a held possibility no standing agent raised.
 - **Proposed work** is a possibility with a `draft` work order. `vericairn work new --from-possibility <id> --by <planner>` adopts it:
   the draft supplies every field the command leaves out, the possibility joins the work order's inputs, and the possibility's revision
-  adopting it as the new work order is stored with it. Its author, whoever raised it, and any agent that carried the standing agent's
-  occurrences, is refused, and a possibility revision recording its author's adoption is refused as well; a held finding is
-  adopted only by an operator who is a person, and its work order carries
-  `disclosure: held`, so the checked push keeps its key and text out of a public repository until its release is published.
+  adopting it as the new work order is stored with it. Its author, whoever raised it, and any agent tied to the standing agent (as
+  a question's answer reads it, below), is refused, and a possibility revision recording its author's adoption is refused as well;
+  a held finding is adopted only by an operator who is a person, and its work order carries `disclosure: held`, so the checked push
+  keeps its key and text out of a public repository until its release is published.
 - **A question** is an ask to a person, who decides for the goal when none is named; a decision of that person answers it. A
-  decision recorded by the agent that asked, by an agent that carried the standing agent's occurrences or by one its role names
-  is refused, whatever `decidedBy` it names, and answers nothing; the same holds for the renewal, period-cap and failure-pause
-  asks goal step puts about the agent, so no agent ends its own failure pause. Another principal, such as the estate's builder,
-  still records the person's decision for them.
+  decision recorded by the agent that asked, or by any agent tied to the standing agent, is refused, whatever `decidedBy` it
+  names, and answers nothing; the same holds for the renewal, period-cap and failure-pause asks goal step puts about the agent,
+  so no agent ends its own failure pause. An agent is tied when any assignment of the goal's work has named it as contributor,
+  or any revision of the goal's role, in the goal's own roles or the roster, has named it, whatever date a record claims and
+  whatever the roster names now. Both only grow, so a roster or assignment change can re-open an answered ask for the person and
+  never closes one: a decision an agent recorded before it was tied stops answering once it is. Any principal nothing ties to the
+  agent, such as the estate's builder, still records the person's decision for them, on the renewal and failure-pause asks its
+  own goal step wrote as well.
 - **Words outside the estate** are a publication request to an operator: the exact text, labeled the agent's draft, pinning the
   agent's work order. It dispatches nothing, and only an operator who is a person closes it, directly: no agent closes it, citing
   the operator's words or not.

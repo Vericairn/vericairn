@@ -7,6 +7,8 @@ using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -164,13 +166,13 @@ public class StandingOutputJourneyTests
         (string goal, string assignment) = Carried(run, [builder, helper]);
         string possibility = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(builder, assignment, "possibility", JsonSerializer.SerializeToElement(Possibility("cache/index"))))).Id;
 
-        // The helper, which the role names and which carried none of the occurrences, does not decline it (standing.output-now).
+        // The helper, which the goal's role names and which carried none of the occurrences, does not decline it (standing.own-output).
         JsonObject declined = JsonNode.Parse(run.Estate.Load().ById[possibility].Body.GetRawText())!.AsObject();
         declined["disposition"] = "declined";
         declined["reason"] = "Not worth it.";
         WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("possibility", helper, JsonSerializer.SerializeToElement(declined), Supersedes: possibility));
         Assert.False(refused.Ok);
-        Assert.Contains(refused.Problem!.Findings, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == "error");
+        Assert.Contains(refused.Problem!.Findings, f => f.Code == "standing.own-output" && f.Severity == "error" && f.Message.Contains(helper, StringComparison.Ordinal));
         Assert.Equal(1, JsonDocument.Parse(run.Service.GoalDue(goal)!.Json.GetRawText()).RootElement.GetProperty("outputs").GetProperty("open").GetInt32());
 
         // The operator, a person, declines it.
@@ -218,6 +220,44 @@ public class StandingOutputJourneyTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void TheBuilderThatStepsTheGoalRecordsTheOperatorsDecisionOnTheAsksItWrote()
+    {
+        using var fixture = new SteppedAsksFixture();
+        RunEstate run = fixture.Run;
+        string op = run.Estate.OperatorId;
+        EstateModel model = run.Estate.Load();
+        Assert.Equal((fixture.Builder, op), (model.ById[fixture.Pause].By, EstateModel.BodyString(model.ById[fixture.Pause], "to")));
+        Assert.Equal((fixture.Builder, op), (model.ById[fixture.Renewal].By, EstateModel.BodyString(model.ById[fixture.Renewal], "to")));
+        (string, int) Due() => (run.Service.GoalDue(fixture.Goal)!.Json.GetProperty("state").GetString()!, run.Service.GoalDue(fixture.Goal)!.Json.GetProperty("failures").GetProperty("consecutive").GetInt32());
+        Assert.Equal(("held", 3), Due());
+        JsonElement Answer(string ask) => JsonSerializer.SerializeToElement(new JsonObject
+        {
+            ["title"] = "Go on", ["statement"] = "Let the researcher go on.", ["summary"] = "The operator answers.", ["synthesis"] = "The operator answers the runtime's ask.",
+            ["effects"] = new JsonArray("the agent goes on"), ["affects"] = new JsonArray(), ["decidedBy"] = op, ["decidedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddMinutes(-1)),
+            ["stake"] = "low", ["notAuthorized"] = new JsonArray("spending"), ["answers"] = new JsonArray(ask),
+        });
+
+        // The helper, which carried the failed runs, answers neither ask, whatever decidedBy names.
+        foreach (string ask in new[] { fixture.Pause, fixture.Renewal })
+        {
+            WriteOutcome own = run.Service.NewRecord(new NewRecordRequest("decision", fixture.Helper, Answer(ask)));
+            Assert.False(own.Ok);
+            Assert.Contains(own.Problem!.Findings, f => f.Code == "standing.own-output" && f.Severity == "error");
+        }
+
+        Assert.Equal(("held", 3), Due());
+
+        // The builder, which wrote both as goal step's caller and is not tied to the agent, records the operator's decision on each: the pause
+        // lifts and the renewal ask is answered.
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", fixture.Builder, Answer(fixture.Pause))));
+        Assert.Equal(("active", 0), Due());
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", fixture.Builder, Answer(fixture.Renewal))));
+        model = run.Estate.Load();
+        Assert.Equal("answered", Asks.State(model, model.ById[fixture.Renewal]).State);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     /// <summary>A standing agent whose occurrence goal step routed to the builder, with a second run of it in flight; its goal and assignment.</summary>
     private static (string Goal, string Assignment) Carried(RunEstate run, string[]? holders = null)
     {
@@ -258,5 +298,100 @@ public class StandingOutputJourneyTests
         }
 
         return body;
+    }
+}
+
+/// <summary>
+/// A standing agent the builder steps and a helper agent carries (from 0.9.4, GOAL-08): the builder holds local-engineering, and the goal's
+/// role names only the helper, which has a device held here and the builder's harness. An hour before the agent's until time the builder's
+/// goal step writes the renewal ask; then three of the helper's runs end with blocked results, and the builder's goal step writes the failure
+/// pause's ask. Both are put to the operator; every harness is the stand-in.
+/// </summary>
+public sealed class SteppedAsksFixture : IDisposable
+{
+    private readonly RunEstate run = new(keepOperatorKey: true, recordFormat: 3);
+
+    public SteppedAsksFixture()
+    {
+        string op = run.Estate.OperatorId;
+        Builder = run.Estate.BuilderId;
+        Helper = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Helper","roles":["contributor"],"agent":{"vendor":"Example","product":"Example Agent"}}""")))).Id;
+        DateTimeOffset until = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddHours(6).ToUnixTimeSeconds());
+        Goal = StandingAgentRoutingTests.Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, until: RecordParser.FormatTimestamp(until), holders: [Helper]);
+
+        // The helper runs under the builder's harness and signs with a device of its own held here, which the operator admits before its
+        // key leaves this machine, as the estate's other keys do.
+        JsonObject helper = JsonNode.Parse(run.Estate.Load().CurrentPrincipal(Builder)!.Body.GetRawText())!.AsObject();
+        helper["name"] = "Helper";
+        helper["roles"] = new JsonArray("contributor");
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, JsonSerializer.SerializeToElement(helper), Supersedes: Helper)));
+        string device = RunEstate.Ok(run.Service.DeviceCreate(new DeviceCreateRequest(Helper, "Helper's device", "file"))).Id;
+        RunEstate.Ok(run.Service.DeviceAdmit(new AdmitRequest(device, op, "The helper signs its attempts and results.")));
+        new FileKeyStore(VericairnHome.Path()).Remove(run.OperatorDevice);
+
+        // The builder takes the goal's steps under local-engineering.
+        string basis = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, RunEstate.Json($$"""{"title":"Local engineering","statement":"The builder dispatches under local-engineering.","summary":"A grant.","synthesis":"A grant of local-engineering.","effects":["local-engineering"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-15T12:00:00Z","stake":"medium","notAuthorized":[]}""")))).Id;
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("authority", op, RunEstate.Json($$"""{"grantee":"{{Builder}}","scope":["local-engineering"],"reserved":[],"conditions":[],"basis":"{{basis}}"}"""))));
+
+        // The runtime's clock an hour before the until time: the builder's goal step asks for the renewal and dispatches nothing.
+        run.Service.FlowClock = new FixedClock(until.AddHours(-1));
+        GoalStepResponse renewal = StandingAgentRoutingTests.StepAs(run, Goal, "renewal", Builder);
+        Assert.True(renewal.Outcome == "ask" && renewal.Run is null, renewal.Message);
+        Renewal = renewal.Ask!.Id;
+        run.Service.FlowClock = TimeProvider.System;
+
+        // Three of the helper's runs exit cleanly with blocked results, which pause the agent; the builder's goal step then asks the operator.
+        string? assignment = null;
+        for (int i = 0; i < 3; i++)
+        {
+            GoalStepResponse step = StandingAgentRoutingTests.StepAs(run, Goal, "blocked-" + i, Builder);
+            Assert.True(step.Run is not null && step.Principal == Helper, step.Message);
+            Assert.Equal("observed-success", run.Settled(step.Run!.Run).Status);
+            assignment ??= step.Assignment!.Id;
+            string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(assignment, Helper, "research repository, a work branch", "Research."))).Id;
+            RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, Helper, JsonSerializer.SerializeToElement(new JsonObject
+            {
+                ["outcome"] = "blocked", ["summary"] = "Blocked on a source.", ["outputs"] = new JsonArray(), ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(),
+                ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(), ["nextStep"] = "Find another source.",
+            }))));
+        }
+
+        GoalStepResponse pause = StandingAgentRoutingTests.StepAs(run, Goal, "pause", Builder);
+        Assert.True(pause.Outcome == "ask", pause.Message);
+        Pause = pause.Ask!.Id;
+    }
+
+    /// <summary>The estate's root.</summary>
+    public string Root => run.Estate.Root;
+
+    /// <summary>The runtime serving it.</summary>
+    public EstateService Service => run.Service;
+
+    /// <summary>The operator, whom both asks are put to.</summary>
+    public string Operator => run.Estate.OperatorId;
+
+    /// <summary>The builder, which took the goal's steps and wrote both asks.</summary>
+    public string Builder { get; }
+
+    /// <summary>The helper agent, which carried the occurrences and the failed runs.</summary>
+    public string Helper { get; }
+
+    /// <summary>The standing agent's goal.</summary>
+    public string Goal { get; }
+
+    /// <summary>The renewal ask the builder's goal step wrote.</summary>
+    public string Renewal { get; }
+
+    /// <summary>The failure pause's ask the builder's goal step wrote.</summary>
+    public string Pause { get; }
+
+    internal RunEstate Run => run;
+
+    public void Dispose() => run.Dispose();
+
+    /// <summary>A fixed clock, the runtime's controlled time.</summary>
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }

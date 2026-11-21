@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Concurrent;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vericairn.Records.Canonical;
@@ -19,8 +21,9 @@ namespace Vericairn.Records.Estate;
 /// the same agent with the same fingerprint is refused, and raising a declined one again names it with new evidence. An occurrence records
 /// at most its plan's possibilities and drafts, extras joining one summary possibility; open outputs past the plan's cap defer dispatch.
 /// No standing agent adopts, declines, parks, answers, withdraws or closes its own output, no standing agent answers the runtime's own asks
-/// about it, its failure pause's among them, and no agent disposes of a held finding; no author adopts its own possibility. Every revision
-/// is judged by the chain it revises, so what its own body leaves out stops no rule from applying.
+/// about it, its failure pause's among them, and no agent disposes of a held finding; no author adopts its own possibility. Who counts as
+/// the standing agent itself is every agent tied to its goal (<see cref="TieOf"/>), read from the records and never from a date. Every
+/// revision is judged by the chain it revises, so what its own body leaves out stops no rule from applying.
 /// </summary>
 internal static partial class StandingOutputs
 {
@@ -157,12 +160,13 @@ internal static partial class StandingOutputs
                 continue;
             }
 
-            // An ask is answered only by a decision the standing agent did not record about its own ask (Counting), as Asks.State reads it.
+            // An ask is answered only by a decision no agent tied to the goal recorded (Counting), as Asks.State reads it; judged before a
+            // record, by the ties written before it, so a later tie makes no earlier record wrong.
             bool counts = standing.Type switch
             {
                 "possibility" => EstateModel.BodyString(standing, "disposition") == "open",
                 "ask" => EstateModel.BodyString(standing, "state") is "open" or "notified"
-                    && !Counting(model, standing, model.DecisionsAnswering(model.Chain(standing))).Any(d => before is null || GoalRules.Before(d, before)),
+                    && !Counting(model, standing, model.DecisionsAnswering(model.Chain(standing)), before).Any(d => before is null || GoalRules.Before(d, before)),
                 "operator-request" => !OperatorRequests.Closures(model, standing).Any(c => before is null || GoalRules.Before(c, before)),
                 _ => false,
             };
@@ -317,8 +321,8 @@ internal static partial class StandingOutputs
     /// Validates what a standing agent's possibility adds to a possibility (§§ 8 and 10): on its first revision it is open, carries a
     /// fingerprint and at least one source, stays within its occurrence's caps, is no second open possibility of the agent with that
     /// fingerprint, and names a declined one it raises again with new evidence. A revision keeps its fingerprint, counts against the caps
-    /// for what it adds, and one that disposes of it is never the agent's own: not its author, no agent that carried one of the standing
-    /// agent's occurrences before it, and no agent the goal's role names. Every possibility's held finding (§§ 8 and 9) is disposed of by a
+    /// for what it adds, and one that disposes of it is never the agent's own: not its author and no agent tied to the goal (<see cref="TieOf"/>,
+    /// reported as <see cref="Judged"/> says). Every possibility's held finding (§§ 8 and 9) is disposed of by a
     /// person only, adopted only by an operator who is one, and its hold ends only by an operator who is a person.
     /// </summary>
     public static void ValidatePossibility(ValidationContext context, RaisedBy? raised, string? disposition)
@@ -426,7 +430,7 @@ internal static partial class StandingOutputs
         }
     }
 
-    /// <summary>A revision of a standing agent's possibility: its fingerprint kept, what it adds within the caps, and a disposition by its own agent refused.</summary>
+    /// <summary>A revision of a standing agent's possibility: its fingerprint kept, what it adds within the caps, and a disposition by its author or a tied agent refused.</summary>
     private static void ValidateRevision(ValidationContext context, RecordEnvelope previous, RecordEnvelope first, RaisedBy raised, bool disposes)
     {
         RecordEnvelope record = context.Record;
@@ -449,46 +453,154 @@ internal static partial class StandingOutputs
             return;
         }
 
-        if (context.Find(raised.Goal) is not { Type: "goal" } goal)
+        if (context.Find(raised.Goal) is not { Type: "goal" } goal || TieOf(context.Model, goal, by) is not Tie tie)
         {
             return;
         }
 
-        switch (OwnAgent(context.Model, goal, by, record))
+        (string code, string message) = Judged(tie, by, raised.Goal, Later(record, previous), "no standing agent adopts, declines or parks its own output, so another principal disposes of it",
+            "the write boundary refuses a new one");
+        if (code == BoundaryCode)
         {
-            case (true, _):
-                context.Error("standing.own-output", $"{by} carried occurrences of standing agent {raised.Goal}: no standing agent disposes of its own outputs, so another principal does.");
-                break;
-            case (false, string role):
-                // Who the goal's role names is read as the roster stands: the write boundary refuses a new disposition by such an agent.
-                context.Findings.Info(BoundaryCode, context.Location, $"{by} is an agent the role {role} of standing agent {raised.Goal} names: no standing agent disposes of its own outputs, so another principal does.");
-                break;
+            context.Findings.Info(code, context.Location, message);
+        }
+        else
+        {
+            context.Error(code, message);
         }
     }
 
     /// <summary>
-    /// How a principal is the standing agent itself, as the rules against disposing of or answering its own outputs read it (§ 8): Carried
-    /// for an agent that carried one of its occurrences, the contributor of an assignment of its work order recorded before the record
-    /// judged; else the role its work step names, for an agent the goal's role names as the roster stands. Null for a person, and for an
-    /// agent that is neither.
+    /// How an agent is tied to a standing agent's goal (§ 8), so that the rules against the agent disposing of or answering its own outputs
+    /// refuse it: Carried when an assignment of the goal's work names it as contributor; else Role, the role of the goal's work step that a
+    /// revision of the goal's own roles, or a revision of the roster it reads, named it for. Records are every record that ties it.
     /// </summary>
-    private static (bool Carried, string? Role)? OwnAgent(EstateModel model, RecordEnvelope goal, string by, RecordEnvelope record)
+    /// <param name="Carried">True when an assignment of the goal's work names the agent as contributor.</param>
+    /// <param name="Role">The role it was named for, when it carried none.</param>
+    /// <param name="Records">Every record that ties it: those assignments, and the goal and roster revisions naming it for the role.</param>
+    public sealed record Tie(bool Carried, string? Role, IReadOnlyList<RecordEnvelope> Records);
+
+    /// <summary>Each loaded model's ties, by the goal's first revision and then the agent: a model is one read of the records.</summary>
+    private static readonly ConditionalWeakTable<EstateModel, ConcurrentDictionary<string, IReadOnlyDictionary<string, Tie>>> TiesRead = [];
+
+    /// <summary>
+    /// How an agent is tied to a standing agent's goal, read from the records themselves and never from a date the writer chooses or the
+    /// roster as it stands: an agent is tied when any recorded assignment of the goal's work, in any revision of the goal and at any time,
+    /// names it as contributor, or when any revision of the goal's role ever named it, in the goal's own roles or in any revision of the
+    /// roster the goal reads when its own roles do not name the role. Both sets only grow: a later record ties an agent and none unties
+    /// one. Null for a person, and for an agent nothing ties.
+    /// </summary>
+    public static Tie? TieOf(EstateModel model, RecordEnvelope goal, string by)
     {
-        RecordEnvelope current = model.Latest(goal);
-        if (GoalRules.IsPerson(model, by) || FlowRuns.Work(model, current) is not RecordEnvelope order)
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(by);
+        if (GoalRules.IsPerson(model, by) || !model.ById.ContainsKey(goal.Id))
         {
             return null;
         }
 
-        IReadOnlyList<string> chain = model.Chain(order);
-        if (model.OfType("assignment").Any(a => a.Subject is not null && chain.Contains(a.Subject.Id) && EstateModel.BodyString(a, "contributor") == by && GoalRules.Before(a, record)))
+        string identity = model.Chain(model.Latest(goal))[0];
+        return TiesRead.GetValue(model, _ => new(StringComparer.Ordinal)).GetOrAdd(identity, _ => Ties(model, goal)).GetValueOrDefault(by);
+    }
+
+    /// <summary>Every agent tied to a standing agent's goal, with the records that tie it (<see cref="TieOf"/>).</summary>
+    private static Dictionary<string, Tie> Ties(EstateModel model, RecordEnvelope goal)
+    {
+        List<RecordEnvelope> revisions = [.. model.Chain(model.Latest(goal)).Select(model.ById.GetValueOrDefault).OfType<RecordEnvelope>().Where(r => r.Type == "goal")];
+        var carried = new Dictionary<string, List<RecordEnvelope>>(StringComparer.Ordinal);
+        var named = new Dictionary<string, List<RecordEnvelope>>(StringComparer.Ordinal);
+        var roles = new Dictionary<string, string>(StringComparer.Ordinal);
+        static void Add(Dictionary<string, List<RecordEnvelope>> ties, string principal, RecordEnvelope record)
         {
-            return (true, null);
+            if (!ties.TryGetValue(principal, out List<RecordEnvelope>? records))
+            {
+                records = [];
+                ties[principal] = records;
+            }
+
+            records.Add(record);
         }
 
-        return StandingAgents.Resolve(model, current).Flow is { } flow && StandingAgents.WorkStep(flow) is { } step && Routing.Principals(model, current, step.Role).Principals.Contains(by)
-            ? (false, step.Role)
-            : null;
+        void Name(IEnumerable<string> principals, string role, RecordEnvelope record)
+        {
+            foreach (string principal in principals)
+            {
+                roles.TryAdd(principal, role);
+                Add(named, principal, record);
+            }
+        }
+
+        var orders = new HashSet<string>(StringComparer.Ordinal);
+        foreach (RecordEnvelope revision in revisions)
+        {
+            if (FlowRuns.Work(model, revision) is RecordEnvelope order)
+            {
+                orders.UnionWith(model.Chain(order));
+            }
+        }
+
+        foreach (RecordEnvelope assignment in model.OfType("assignment"))
+        {
+            if (assignment.Subject is not null && orders.Contains(assignment.Subject.Id) && EstateModel.BodyString(assignment, "contributor") is string contributor)
+            {
+                Add(carried, contributor, assignment);
+            }
+        }
+
+        // As Routing.Principals reads a role: the goal's own roles when they name it, else the roster; here every revision of each, ever written.
+        foreach (string role in revisions.Select(r => StandingAgents.Resolve(model, r).Flow is { } flow && StandingAgents.WorkStep(flow) is { } step ? step.Role : null).OfType<string>().Distinct(StringComparer.Ordinal))
+        {
+            bool roster = false;
+            foreach (RecordEnvelope revision in revisions)
+            {
+                if (Routing.Named(revision.Body, role) is { } own)
+                {
+                    Name(own, role, revision);
+                }
+                else
+                {
+                    roster = true;
+                }
+            }
+
+            if (roster)
+            {
+                foreach (RecordEnvelope record in model.OfType("roster"))
+                {
+                    Name(Routing.Named(record.Body, role) ?? [], role, record);
+                }
+            }
+        }
+
+        var ties = new Dictionary<string, Tie>(StringComparer.Ordinal);
+        foreach (string principal in carried.Keys.Union(named.Keys, StringComparer.Ordinal))
+        {
+            bool carrying = carried.TryGetValue(principal, out List<RecordEnvelope>? assignments);
+            List<RecordEnvelope> records = [.. assignments ?? [], .. named.GetValueOrDefault(principal) ?? []];
+            ties[principal] = new Tie(carrying, carrying ? null : roles[principal], [.. records.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)]);
+        }
+
+        return ties;
+    }
+
+    /// <summary>The later of two records, by time and then identifier: what a record that names or revises the other cannot precede.</summary>
+    private static RecordEnvelope Later(RecordEnvelope a, RecordEnvelope b) => GoalRules.Before(a, b) ? b : a;
+
+    /// <summary>
+    /// How a tied agent's disposal or answer is reported (§ 8): an error (standing.own-output) when a record that ties it was written before
+    /// the later of the record judged and the record it answers or revises, which it cannot precede, so no date its writer chooses lowers
+    /// it; otherwise, where only records written after it tie the agent, a report of the records as they stand now (standing.output-now),
+    /// which the write boundary refuses for a new record, so that a later roster or assignment change turns no earlier record into an error
+    /// and is never refused for one. Either way the agent is tied, whatever its record claims.
+    /// </summary>
+    private static (string Code, string Message) Judged(Tie tie, string by, string goal, RecordEnvelope pivot, string rule, string later)
+    {
+        string how = tie.Carried ? $"{by} carried occurrences of standing agent {goal}" : $"{by} was named for the role {tie.Role} of standing agent {goal}";
+        RecordEnvelope earliest = tie.Records[0];
+        return GoalRules.Before(earliest, pivot)
+            ? ("standing.own-output", $"{how} ({earliest.Type} {earliest.Id}): {rule}.")
+            : (BoundaryCode, $"{how}, as a record written after this one shows ({earliest.Type} {earliest.Id}): {rule}; {later}.");
     }
 
     /// <summary>
@@ -521,12 +633,18 @@ internal static partial class StandingOutputs
 
     /// <summary>
     /// Why a decision that answers an ask a standing agent's goal guards (<see cref="GuardedBy"/>) answers nothing (§ 8: no standing agent
-    /// answers its own output, and none ends its own failure pause), whatever its decidedBy names: it is recorded by the ask's author, unless
-    /// that is the person asked recording its own decision about one of the runtime's asks; by an agent that carried one of the standing
-    /// agent's occurrences before it (standing.own-output); or by an agent the goal's role names as the roster stands, which the write
-    /// boundary refuses (standing.output-now). Null when it answers the ask as any other decision of the person asked does.
+    /// answers its own output, and none ends its own failure pause), whatever its decidedBy names: it is recorded by the agent that raised
+    /// a standing agent's ask (the author of its first revision, which names raisedBy), or by an agent tied to the goal (<see cref="TieOf"/>),
+    /// read from the records themselves and never from the decision's date or the roster as it stands. The author of one of the runtime's
+    /// asks, the principal whose goal step wrote it, is not refused for being its author: when nothing ties it, it records the person's
+    /// decision as it records the person's answers everywhere. Since a tie only grows, a later roster or assignment change can make such a
+    /// decision answer nothing and never makes one answer. The code is standing.own-output when the records show the agent raised the ask
+    /// or was tied before the later of the decision and the ask revision it names, else standing.output-now (<see cref="Judged"/>). With
+    /// <paramref name="asOf"/>, the estate as it stood before that record judges an earlier record, such as a run's intent: only ties
+    /// written before it count, so that a later roster or assignment change makes no record already in the estate wrong. Null when it
+    /// answers the ask as any other decision of the person asked does.
     /// </summary>
-    public static (string Code, string Message)? SelfAnswer(EstateModel model, RecordEnvelope decision, RecordEnvelope ask, RecordEnvelope goal)
+    public static (string Code, string Message)? SelfAnswer(EstateModel model, RecordEnvelope decision, RecordEnvelope ask, RecordEnvelope goal, RecordEnvelope? asOf = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(decision);
@@ -534,36 +652,34 @@ internal static partial class StandingOutputs
         ArgumentNullException.ThrowIfNull(goal);
         RecordEnvelope first = FirstOf(model, ask);
         string by = decision.By;
-        string? to = EstateModel.BodyString(model.Latest(ask), "to");
-        const string Rest = "whatever decidedBy names: the person asked records the decision, or a principal other than the standing agent records it for them.";
-        if (by == first.By && (Of(first) is not null || by != to))
+        const string Rule = "no standing agent answers its own ask or the runtime's asks about it, or ends its own pause, whatever decidedBy names: the person asked records the decision, or a principal nothing ties to the agent records it for them";
+        if (Of(first) is not null && by == first.By)
         {
-            return ("standing.own-output", $"Ask {first.Id} about standing agent {goal.Id} was put by {by}: no standing agent answers its own ask or ends its own pause, {Rest}");
+            return ("standing.own-output", $"Ask {first.Id} was raised by {by} as an output of standing agent {goal.Id}: {Rule}, so it answers nothing.");
         }
 
-        return OwnAgent(model, goal, by, decision) switch
-        {
-            (true, _) => ("standing.own-output", $"{by} carried occurrences of standing agent {goal.Id}: no standing agent answers ask {first.Id} about its own work or ends its own pause, {Rest}"),
-            (false, string role) => (BoundaryCode, $"{by} is an agent the role {role} of standing agent {goal.Id} names: no standing agent answers ask {first.Id} about its own work or ends its own pause, {Rest}"),
-            _ => null,
-        };
+        return TieOf(model, goal, by) is Tie tie && (asOf is null || GoalRules.Before(tie.Records[0], asOf))
+            ? Judged(tie, by, goal.Id, Later(decision, ask), $"{Rule}, so it answers nothing of ask {first.Id}", "the write boundary refuses a new one")
+            : null;
     }
 
     /// <summary>
-    /// The decisions that answer an ask, leaving out those a standing agent recorded about an ask its goal guards (<see cref="SelfAnswer"/>):
-    /// what <see cref="Asks.State"/> and the open outputs read, so a decision the rule refuses neither answers the ask, frees an open output
-    /// nor ends a failure pause, even when it reached the records by hand.
+    /// The decisions that answer an ask, leaving out those <see cref="SelfAnswer"/> finds on an ask a standing agent's goal guards: what
+    /// <see cref="Asks.State"/> and the open outputs read, so such a decision neither answers the ask, frees an open output nor ends a
+    /// failure pause, even when it reached the records by hand with a date its writer chose. A roster or assignment change can only re-open
+    /// an ask for the person this way, never close one. With <paramref name="asOf"/>, as the estate stood before that record.
     /// </summary>
-    internal static List<RecordEnvelope> Counting(EstateModel model, RecordEnvelope ask, IEnumerable<RecordEnvelope> answers)
+    internal static List<RecordEnvelope> Counting(EstateModel model, RecordEnvelope ask, IEnumerable<RecordEnvelope> answers, RecordEnvelope? asOf = null)
     {
         List<RecordEnvelope> all = [.. answers];
-        return all.Count == 0 || GuardedBy(model, ask) is not RecordEnvelope goal ? all : all.FindAll(d => SelfAnswer(model, d, ask, goal) is null);
+        return all.Count == 0 || GuardedBy(model, ask) is not RecordEnvelope goal ? all : all.FindAll(d => SelfAnswer(model, d, ask, goal, asOf) is null);
     }
 
     /// <summary>
-    /// Validates a decision's answer to an ask (§ 8): a standing agent's own answer to an ask its goal guards is refused, whatever decidedBy
-    /// names (standing.own-output); one by an agent the goal's role names is reported as the roster stands, and the write boundary refuses
-    /// it (standing.output-now). Answers to every other ask are judged as before.
+    /// Validates a decision's answer to an ask (§ 8): an answer <see cref="SelfAnswer"/> finds on an ask a standing agent's goal guards is an
+    /// error (standing.own-output) where the records show its author raised the ask or was tied to the goal before it, and otherwise a report
+    /// (standing.output-now) that the write boundary refuses for a new decision, so that a later roster or assignment change turns no
+    /// earlier decision into an error. Answers to every other ask are judged as before.
     /// </summary>
     public static void ValidateAnswer(ValidationContext context, RecordEnvelope ask)
     {

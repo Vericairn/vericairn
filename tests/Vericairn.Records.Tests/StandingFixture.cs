@@ -10,13 +10,13 @@ namespace Vericairn.Records.Tests;
 
 /// <summary>
 /// A standing agent in a disposable format-3 estate (from 0.9.4, GOAL-07): a researcher flow with every trigger kind and one work step, the
-/// standing work order, a roster naming the builder for the researcher role, and a stewardship goal whose plan carries standing, which the
-/// operator sponsors and activates. The estate's clock moves one second with every record, and can be set.
+/// standing work order, a roster naming the builder (or, without builderHolds, the operator) for the researcher role, and a stewardship goal
+/// whose plan carries standing, which the operator sponsors and activates. The estate's clock moves one second with every record, and can be set.
 /// </summary>
 internal sealed class StandingFixture : IDisposable
 {
     public StandingFixture(JsonArray? triggers = null, JsonObject? period = null, JsonObject? budget = null, string until = "2027-06-01T00:00:00Z", bool activate = true, string subject = "the widget", JsonObject? limits = null,
-        TemplateDefinition? flow = null, string role = "researcher", string subjectField = "topic")
+        TemplateDefinition? flow = null, string role = "researcher", string subjectField = "topic", bool builderHolds = true)
     {
         Policies = new PolicyFixture();
         SubjectField = subjectField;
@@ -26,7 +26,7 @@ internal sealed class StandingFixture : IDisposable
             ["key"] = "RES-1", ["kind"] = "ordinary", ["title"] = "Research the widget", ["intent"] = "Keep researching the widget between releases.", ["scope"] = new JsonArray("path:research/"),
             ["exitQuestion"] = "Is each occurrence's research recorded?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("cited findings"),
         });
-        Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role(role, Estate.BuilderId), FlowFixture.Role("decider", Estate.OperatorId)) });
+        Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role(role, builderHolds ? Estate.BuilderId : Estate.OperatorId), FlowFixture.Role("decider", Estate.OperatorId)) });
         Goal = Add("goal", GoalBody(triggers, period, budget, until, subject, limits));
         if (activate)
         {

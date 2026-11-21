@@ -108,6 +108,34 @@ public class StandingOutputTests
         return body;
     }
 
+    /// <summary>The operator's decision answering an ask, decided at the estate's clock, for whichever principal records it.</summary>
+    private static JsonObject Answer(StandingFixture fixture, RecordEnvelope ask)
+    {
+        JsonObject body = fixture.Policies.DecisionBody();
+        body["decidedAt"] = RecordParser.FormatTimestamp(fixture.Estate.Clock);
+        body["answers"] = new JsonArray(ask.Id);
+        return body;
+    }
+
+    /// <summary>The roster naming principals for the researcher role, and the operator for the decider's.</summary>
+    private static JsonObject Roster(StandingFixture fixture, params string[] researchers) =>
+        new() { ["roles"] = new JsonArray(FlowFixture.Role("researcher", researchers), FlowFixture.Role("decider", fixture.Estate.OperatorId)) };
+
+    /// <summary>Three settled runs of an assignment by its contributor that fail; the last one's settlement.</summary>
+    private static RecordEnvelope Failed(StandingFixture fixture, RecordEnvelope assignment, string contributor)
+    {
+        RecordEnvelope? last = null;
+        for (int i = 0; i < 3; i++)
+        {
+            last = fixture.Settle(fixture.RunIntent(assignment, "run-failing-" + i, contributor), "known-failure");
+        }
+
+        return last!;
+    }
+
+    /// <summary>The failure pause's ask about a failed run, put to the operator as goal step writes it for its caller.</summary>
+    private static JsonObject PauseAsk(StandingFixture fixture) => Ask(fixture, null, NextEligible.AttentionQuestion + "Research the widget: three of its runs failed. How does the run go on?");
+
     private static JsonObject Publication(StandingFixture fixture, JsonObject? raised, string to, string askedBy, string kind = "publication")
     {
         const string text = "The widget's index is now cached.";
@@ -536,24 +564,33 @@ public class StandingOutputTests
         RecordEnvelope roster = Assert.Single(fixture.Estate.Load().Current("roster"));
         fixture.Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("researcher", fixture.Estate.BuilderId, helper), FlowFixture.Role("decider", fixture.Estate.OperatorId)) }, supersedes: roster.Id);
 
-        // Its decline is reported as the roster stands, which the write boundary refuses (standing.output-now); records already in the
-        // estate keep their reading, so it is no error of the estate.
+        // Its decline is refused: a roster revision written before it named the helper for the role, whatever the roster names later.
         JsonObject declined = Revised(possibility, b => { b["disposition"] = "declined"; b["reason"] = "Not worth it."; });
         FindingList findings = Validate(fixture, "possibility", declined, supersedes: possibility.Id, by: helper);
-        Assert.Contains(findings, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info && f.Message.Contains(helper, StringComparison.Ordinal));
-        Assert.Equal(string.Empty, Errors(findings));
-        Assert.DoesNotContain(Validate(fixture, "possibility", declined, supersedes: possibility.Id), f => f.Code == StandingOutputs.BoundaryCode);
+        Assert.Contains(findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error && f.Message.Contains(helper, StringComparison.Ordinal));
+        Assert.DoesNotContain(Validate(fixture, "possibility", declined, supersedes: possibility.Id), f => f.Code is "standing.own-output" or StandingOutputs.BoundaryCode);
+
+        // A clerk agent declines it while nothing ties the clerk to the agent; a roster revision naming the clerk afterwards makes that decline
+        // a report (standing.output-now), never an error of the estate, so the revision is written.
+        string clerk = Principal(fixture, "agent", "Clerk", "contributor");
+        fixture.Estate.Add("possibility", clerk, declined.ToJsonString(), supersedes: possibility.Id);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+        RecordEnvelope naming = Assert.Single(fixture.Estate.Load().Current("roster"));
+        fixture.Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("researcher", fixture.Estate.BuilderId, helper, clerk), FlowFixture.Role("decider", fixture.Estate.OperatorId)) }, supersedes: naming.Id);
+        EstateModel model = fixture.Estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info && f.Message.Contains(clerk, StringComparison.Ordinal));
+        Assert.False(model.Findings.HasErrors, Errors(model.Findings));
     }
 
     [Fact]
     public void NoStandingAgentAnswersItsOwnAskOrTheRuntimesAboutItWhateverDecidedByNames()
     {
-        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 });
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 }, builderHolds: false);
         string op = fixture.Estate.OperatorId;
         string builder = fixture.Estate.BuilderId;
 
         // A helper agent the roster names for the researcher role carries the occurrence in its run, and a spare agent is named too; the
-        // builder neither raised the ask, carried an occurrence nor is named by the role.
+        // builder neither raised the ask, carried an occurrence nor was ever named for the role.
         string helper = Principal(fixture, "agent", "Helper", "contributor");
         string spare = Principal(fixture, "agent", "Spare", "contributor");
         RecordEnvelope roster = Assert.Single(fixture.Estate.Load().Current("roster"));
@@ -572,12 +609,10 @@ public class StandingOutputTests
             return body;
         }
 
-        // The helper records the operator's decision on its own ask: refused, though decidedBy names the operator; the spare agent's is
-        // reported as the roster stands, for the write boundary to refuse; the builder records the operator's decision as it always has.
+        // The helper records the operator's decision on its own ask: refused, though decidedBy names the operator; so is the spare agent's,
+        // which a roster revision written before it named for the role; the builder records the operator's decision as it always has.
         Assert.Contains(Validate(fixture, "decision", Answer(ask), by: helper), f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
-        FindingList named = Validate(fixture, "decision", Answer(ask), by: spare);
-        Assert.Contains(named, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info);
-        Assert.Equal(string.Empty, Errors(named));
+        Assert.Contains(Validate(fixture, "decision", Answer(ask), by: spare), f => f.Code == "standing.own-output" && f.Severity == Severity.Error && f.Message.Contains("role researcher", StringComparison.Ordinal));
         FindingList recorded = Validate(fixture, "decision", Answer(ask), builder: true);
         Assert.Equal(string.Empty, Errors(recorded));
         Assert.DoesNotContain(recorded, f => f.Code == StandingOutputs.BoundaryCode);
@@ -649,5 +684,149 @@ public class StandingOutputTests
         Assert.DoesNotContain(Validate(older, "possibility", adopting, supersedes: noted.Id), f => f.Code == StandingOutputs.BoundaryCode);
         older.Add("possibility", adopting, supersedes: noted.Id, builder: true);
         Assert.False(older.Estate.Load().Findings.HasErrors, Errors(older.Estate.Load().Findings));
+    }
+
+    [Fact]
+    public void ATiedAgentsBackdatedAnswerAnswersNothingWhateverTheRosterNowNames()
+    {
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 });
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        string spare = Principal(fixture, "agent", "Spare", "contributor");
+        fixture.Estate.SetClock(fixture.Estate.Clock.AddMinutes(2));
+
+        // The roster names a helper agent and a spare for the researcher role; the helper carries the occurrence and asks the operator in its
+        // run, three more of its runs fail, and the failure pause's ask goes to the operator as goal step records it.
+        RecordEnvelope naming = fixture.Add("roster", Roster(fixture, helper, spare), supersedes: Assert.Single(fixture.Estate.Load().Current("roster")).Id);
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence, helper);
+        RecordEnvelope run = fixture.RunIntent(assignment, "run-helper", helper);
+        RecordEnvelope ask = fixture.Estate.Add("ask", helper, Ask(fixture, RaisedBy(fixture, assignment, run, occurrence.Key)).ToJsonString());
+        fixture.Settle(run, "observed-success");
+        RecordEnvelope pause = fixture.Add("ask", PauseAsk(fixture), subject: Failed(fixture, assignment, helper).Reference);
+        Assert.Equal((3, 1), (fixture.Agent(fixture.Estate.Clock).Failures, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+
+        // The operator takes both off the roster. The helper's decision answering the pause, and the spare's answering the helper's ask, each
+        // naming the operator and dated thirty seconds before the helper's first assignment, are written straight to records/.
+        fixture.Add("roster", Roster(fixture, fixture.Estate.BuilderId), supersedes: naming.Id);
+        DateTimeOffset now = fixture.Estate.Clock;
+        fixture.Estate.SetClock(assignment.AtTime.AddSeconds(-30));
+        fixture.Estate.Add("decision", helper, Answer(fixture, pause).ToJsonString());
+        fixture.Estate.Add("decision", spare, Answer(fixture, ask).ToJsonString());
+        fixture.Estate.SetClock(now);
+
+        // Each is an error of the estate, since what ties its author was written before the ask it answers, and neither answers anything,
+        // whatever the roster names now and whatever date the decision claims: the pause holds, and the ask stays open and counted.
+        EstateModel model = fixture.Estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error && f.Message.Contains(helper, StringComparison.Ordinal));
+        Assert.Contains(model.Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error && f.Message.Contains(spare, StringComparison.Ordinal));
+        Assert.Equal(("open", "open"), (Asks.State(model, pause).State, Asks.State(model, ask).State));
+        Assert.Equal((3, 1), (fixture.Agent(fixture.Estate.Clock).Failures, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+
+        // The operator's own decisions answer both.
+        fixture.Add("decision", Answer(fixture, pause));
+        fixture.Add("decision", Answer(fixture, ask));
+        Assert.Equal((0, 0), (fixture.Agent(fixture.Estate.Clock).Failures, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+    }
+
+    [Fact]
+    public void ARosterOrAssignmentChangeReopensAnAnsweredAskForThePersonAndNeverClosesOne()
+    {
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 });
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        string spare = Principal(fixture, "agent", "Spare", "contributor");
+        string clerk = Principal(fixture, "agent", "Clerk", "contributor");
+        string courier = Principal(fixture, "agent", "Courier", "contributor");
+        RecordEnvelope roster = fixture.Add("roster", Roster(fixture, helper, spare), supersedes: Assert.Single(fixture.Estate.Load().Current("roster")).Id);
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence, helper);
+        RecordEnvelope run = fixture.RunIntent(assignment, "run-helper", helper);
+        RecordEnvelope ask = fixture.Estate.Add("ask", helper, Ask(fixture, RaisedBy(fixture, assignment, run, occurrence.Key)).ToJsonString());
+
+        // The clerk, which neither raised the ask, carried an occurrence nor was ever named for the role, records the operator's decision: it
+        // is valid, and the ask is answered.
+        FindingList valid = Validate(fixture, "decision", Answer(fixture, ask), by: clerk);
+        Assert.Equal(string.Empty, Errors(valid));
+        Assert.DoesNotContain(valid, f => f.Code == StandingOutputs.BoundaryCode);
+        fixture.Estate.Add("decision", clerk, Answer(fixture, ask).ToJsonString());
+        Assert.Equal(("answered", 0), (Asks.State(fixture.Estate.Load(), ask).State, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+
+        // The operator's roster revision names the clerk for the role: the ask reads waiting again and counts, and the clerk's decision is
+        // reported, never an error of the estate, so the revision is written. A later revision dropping the clerk closes nothing.
+        roster = fixture.Add("roster", Roster(fixture, helper, spare, clerk), supersedes: roster.Id);
+        EstateModel model = fixture.Estate.Load();
+        Assert.Equal(("open", 1), (Asks.State(model, ask).State, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+        Assert.Contains(model.Findings, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info && f.Message.Contains(clerk, StringComparison.Ordinal));
+        Assert.False(model.Findings.HasErrors, Errors(model.Findings));
+        roster = fixture.Add("roster", Roster(fixture, helper, spare), supersedes: roster.Id);
+        Assert.Equal(("open", 1), (Asks.State(fixture.Estate.Load(), ask).State, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+
+        // The same for the failure pause and an assignment: the courier records the operator's answer, which lifts the pause, until the
+        // courier carries an occurrence of the agent; then the pause holds again.
+        fixture.Settle(run, "observed-success");
+        RecordEnvelope pause = fixture.Add("ask", PauseAsk(fixture), subject: Failed(fixture, assignment, helper).Reference);
+        fixture.Estate.Add("decision", courier, Answer(fixture, pause).ToJsonString());
+        Assert.Equal(0, fixture.Agent(fixture.Estate.Clock).Failures);
+
+        // A run of the helper starts once the pause is lifted: its intent, judged as the records stood before it, stays valid whatever later
+        // ties the courier, so the courier's assignment below is no write the boundary would refuse.
+        fixture.RunIntent(assignment, "run-after-the-answer", helper);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+        fixture.Estate.SetClock(new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero));
+        StandingAgents.Occurrence next = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences, o => o.Occurrence.Key != occurrence.Key).Occurrence;
+        fixture.Assign(next, courier);
+        model = fixture.Estate.Load();
+        Assert.Equal(("open", 3), (Asks.State(model, pause).State, fixture.Agent(fixture.Estate.Clock).Failures));
+        Assert.False(model.Findings.HasErrors, Errors(model.Findings));
+
+        // The reverse never holds: the spare, which the roster names, writes the operator's decision by hand; it answers nothing while the
+        // roster names the spare, and nothing once the roster drops it.
+        fixture.Estate.Add("decision", spare, Answer(fixture, ask).ToJsonString());
+        Assert.Equal(("open", 1), (Asks.State(fixture.Estate.Load(), ask).State, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+        fixture.Add("roster", Roster(fixture, helper), supersedes: roster.Id);
+        Assert.Equal(("open", 1), (Asks.State(fixture.Estate.Load(), ask).State, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+
+        // The operator's own decision answers it.
+        fixture.Add("decision", Answer(fixture, ask));
+        Assert.Equal(("answered", 0), (Asks.State(fixture.Estate.Load(), ask).State, fixture.Agent(fixture.Estate.Clock).OpenOutputs));
+    }
+
+    [Fact]
+    public void ThePrincipalThatSteppedTheGoalRecordsTheOperatorsDecisionOnTheRuntimesAsksItWrote()
+    {
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 }, builderHolds: false);
+        string builder = fixture.Estate.BuilderId;
+
+        // The builder holds local-engineering, so it takes the goal's steps as goal step's caller; a helper agent the roster names carries the
+        // occurrence, and the builder neither carries one nor was ever named for the role.
+        fixture.Add("authority", new JsonObject { ["grantee"] = builder, ["scope"] = new JsonArray("local-engineering"), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(), ["basis"] = fixture.Policies.Decision.Id });
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        fixture.Add("roster", Roster(fixture, helper), supersedes: Assert.Single(fixture.Estate.Load().Current("roster")).Id);
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence, helper);
+
+        // Three of the helper's runs fail; the builder's goal step writes the failure pause's ask and the renewal ask, each put to the operator.
+        RecordEnvelope pause = fixture.Add("ask", PauseAsk(fixture), builder: true, subject: Failed(fixture, assignment, helper).Reference);
+        RecordEnvelope renewal = fixture.Add("ask", Ask(fixture, null, StandingAgents.RenewalAsk + " Research the widget before its until time 2027-06-01T00:00:00Z?"), builder: true, subject: fixture.Goal.Reference);
+        EstateModel model = fixture.Estate.Load();
+        Assert.Equal((fixture.Goal.Id, fixture.Goal.Id), (StandingOutputs.GuardedBy(model, pause)?.Id, StandingOutputs.GuardedBy(model, renewal)?.Id));
+        Assert.Equal(3, fixture.Agent(fixture.Estate.Clock).Failures);
+
+        // The helper, which carried the occurrence, answers neither, whatever decidedBy names; the builder records the operator's decision on
+        // each ask it wrote, as it records the operator's answers everywhere.
+        foreach (RecordEnvelope asked in new[] { pause, renewal })
+        {
+            Assert.Contains(Validate(fixture, "decision", Answer(fixture, asked), by: helper), f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+            FindingList recorded = Validate(fixture, "decision", Answer(fixture, asked), builder: true);
+            Assert.Equal(string.Empty, Errors(recorded));
+            Assert.DoesNotContain(recorded, f => f.Code == StandingOutputs.BoundaryCode);
+        }
+
+        // Its decisions answer both, and the pause lifts.
+        fixture.Add("decision", Answer(fixture, pause), builder: true);
+        fixture.Add("decision", Answer(fixture, renewal), builder: true);
+        model = fixture.Estate.Load();
+        Assert.Equal(("answered", "answered"), (Asks.State(model, pause).State, Asks.State(model, renewal).State));
+        Assert.Equal(0, fixture.Agent(fixture.Estate.Clock).Failures);
+        Assert.False(model.Findings.HasErrors, Errors(model.Findings));
     }
 }

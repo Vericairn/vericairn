@@ -429,6 +429,10 @@ public class StandingAgentRoutingTests
         return goal;
     }
 
+    /// <summary>One goal step of a standing agent taken by the principal named, its run capped at ten minutes, with the stand-in.</summary>
+    internal static GoalStepResponse StepAs(RunEstate run, string goal, string report, string by) =>
+        run.Service.GoalStep(goal, new GoalStepRequest(by, run.Resource, Command(run, report), WallMinutes: 10));
+
     /// <summary>One goal step of a standing agent, its run capped at ten minutes, with the stand-in in a scenario.</summary>
     internal static GoalStepResponse Step(RunEstate run, string goal, string report, string? occurrence = null, string scenario = "claude", string? branch = null) =>
         run.Service.GoalStep(goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting(scenario, run.Report(report)) }, WallMinutes: 10, Branch: branch)

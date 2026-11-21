@@ -149,7 +149,7 @@ public sealed partial class EstateService
     /// <summary>
     /// work new --from-possibility: the work order from the possibility's draft, the request's own fields winning, with the possibility
     /// among its inputs, and the possibility's revision adopting it as that work order, judged together and stored as one batch. Its author
-    /// is refused, whoever raised it; the possibility's rules refuse an adoption by an agent that carried its standing agent's occurrences,
+    /// is refused, whoever raised it; the possibility's rules refuse an adoption by an agent tied to its standing agent's goal,
     /// and of a held finding by anyone but an operator who is a person; and a held finding's work order is held from disclosure.
     /// </summary>
     private WriteOutcome WorkNewFromPossibility(WorkNewRequest request, JsonObject body)
