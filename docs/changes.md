@@ -91,13 +91,19 @@ record id can spell a key word such as `KEY` just before the hash, which
 gitleaks' generic key rule reads as a key's name and value; before 0.9.4 about
 one checkpoint push in five was refused for it. The allowance passes a line
 only when it has exactly an inventory line's shape, with nothing before or after
-it: a record type, a month, a record id and `.json`, one space, then `sha256:`
-and 64 lower-case hexadecimal digits. It holds only in a file named by 64
-lower-case hexadecimal digits directly in the `objects/` folder at the
-repository's root. The scanner cannot tell from the commits which objects a
-checkpoint names, so it applies the allowance only when every such file that
-the pushed commits add or change, and that holds a line of that shape, holds
-nothing but such lines. If one mixes inventory lines with any other line, or
+it: one of the record types the estate format defines, which `vericairn records
+describe` lists, such as `decision` or `work-order`; a month such as `2026-11`; a
+record id of 26 digits and upper-case letters, the first 0 to 7, and `.json`;
+one space; then `sha256:` and 64 lower-case hexadecimal digits. Only the hash
+position passes a value: the type, month, id and `.json` positions take only
+those fixed names, digits and a record id's characters, in which no rule finds a
+credential, so a credential in any of them breaks the line's shape and is found,
+and a line naming a record type this release does not define is scanned as
+before. The allowance holds only in a file named by 64 lower-case hexadecimal
+digits directly in the `objects/` folder at the repository's root. The scanner
+cannot tell from the commits which objects a checkpoint names, so it applies the
+allowance only when every such file that the pushed commits add or change, and
+that holds a line of that shape, holds nothing but such lines. If one mixes inventory lines with any other line, or
 the scanner cannot read those files, the whole range is scanned without the
 allowance, as before 0.9.4. Every other line and every other path is scanned
 exactly as before, and no repository exception, allow comment or ignore file is
@@ -112,7 +118,17 @@ for example `8.30.1; rules sha256:…`, so each scan identifies the rules it app
 Merge diffs are included; external diff commands and text conversion are disabled.
 Text diffs are requested even for paths marked as binary by repository attributes.
 The range's readability is checked independently before
-and after the scan. The report contains only a finding count. The recorded scan
+and after the scan. From 0.9.4 (FIX-150), the scanner also reads, before
+gitleaks runs, every commit, tree and blob the push carries, checking each
+against its id, and the range's patches exactly as gitleaks reads them, the
+parents' sides included. If either read fails or stops early, at a missing,
+corrupt or truncated object, or gitleaks reports that its own read of the history
+failed, which it does without changing its exit status, the scan is incomplete
+and the push refuses. Before 0.9.4 such an object stopped gitleaks' read with no
+finding, and the scan passed even when an older commit of the range held a
+secret. Every git process of the scan ignores the clone's color, root commit and
+signature display settings and git's trace variables, each of which changes
+what gitleaks reads. The report contains only a finding count. The recorded scan
 contains the tool, version, range, verdict and count, never matched text, findings
 or process output. Findings, an unavailable scanner, a timeout, an unreadable
 range or an incomplete report refuse the push.

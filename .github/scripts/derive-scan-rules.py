@@ -50,8 +50,20 @@ block("Vault service tokens: a value without a digit", ['vault-service-token'], 
 # FIX-150: a history checkpoint's inventory lists each record's path, whose random id can spell a key word, beside its hash. For every
 # rule, a line of exactly that shape in a file named objects/<64 hex digits>; GitleaksScanner applies the configuration with this
 # allowance only when every such file the range adds or changes holds nothing but such lines, and the configuration without it otherwise.
+# Only the hash position passes a value: every other position takes a record type the estate format defines (RecordTypeRegistry's names,
+# which SecretScanConfigurationTests compares with this list; a new record type means deriving this file again), a month, a record id
+# and .json, none of which a rule's secret can lie in.
 inventory_path = r'^objects/[0-9a-f]{64}$'
-inventory_line = r'[a-z][a-z0-9-]{0,63}/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}'
+inventory_types = [
+    'acceptance', 'admission', 'amendment', 'ask', 'assignment', 'attempt', 'authority', 'communication-delegation', 'communication-setting',
+    'credential-reference', 'custody-exception', 'decision', 'device', 'discharge', 'document-review', 'document-revision', 'estate',
+    'estate-policy', 'goal', 'goal-status', 'harness-qualification', 'history-checkpoint', 'living-document', 'migration', 'observation',
+    'operation', 'operator-request', 'operator-request-close', 'policy-exception', 'possibility', 'principal', 'product', 'prompt-preference',
+    'qualification', 'reconciliation', 'release', 'resource', 'result', 'retirement', 'review', 'roster', 'saved-prompt', 'template-defaults',
+    'verification', 'work-order', 'work-progress', 'work-status', 'writing-exception',
+]
+assert inventory_types == sorted(set(inventory_types)) and all(re.fullmatch(r'[a-z][a-z0-9-]{0,63}', t) for t in inventory_types)
+inventory_line = '(' + '|'.join(inventory_types) + r')/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}'
 block("History checkpoint inventories: a record's path and hash alone on a line, in the estate's objects", None,
       [r'\A\n?' + inventory_line + r'\z'], 'line', paths=[inventory_path])
 header = f'''# Vericairn's secret-scanning configuration for `vericairn changes push`.
@@ -64,9 +76,10 @@ header = f'''# Vericairn's secret-scanning configuration for `vericairn changes 
 #
 # The allowances after the rules are the only ones. Each describes a value that is not the credential its rule finds;
 # none exempts a path, and none admits a sample credential such as an AWS key id ending in EXAMPLE. The last, for a
-# history checkpoint inventory's lines, holds only together with its path condition, and the scanner leaves it out of a
-# scan whose objects mix such lines with others. docs/changes.md lists them, and each scan records the SHA-256 of the
-# configuration it applied: this file, or this file without its last allowance.
+# history checkpoint inventory's lines, holds only together with its path condition and passes only a value in a line's
+# hash position: every other position takes only a record type the estate format defines, a month, a record id and
+# .json. The scanner leaves it out of a scan whose objects mix such lines with others. docs/changes.md lists them, and
+# each scan records the SHA-256 of the configuration it applied: this file, or this file without its last allowance.
 
 title = "Vericairn secret scan"
 minVersion = "v8.25.0"

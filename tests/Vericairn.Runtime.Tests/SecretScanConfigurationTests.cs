@@ -68,13 +68,104 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
             GitleaksScanner.ConfigurationWithoutInventoriesHash);
         Assert.NotEqual(GitleaksScanner.ConfigurationHash, GitleaksScanner.ConfigurationWithoutInventoriesHash);
 
-        // The shape is a checkpoint inventory's line as the product writes and reads it.
+        // The shape is a checkpoint inventory's line as the product writes and reads it, its first position one of the record types the
+        // estate format defines and no other value (FIX-150, after the Reviewer's review): a new type means deriving the configuration again.
         var shape = new Regex("^" + GitleaksScanner.InventoryLine + "$", RegexOptions.CultureInvariant);
         foreach (string line in InventoryLines())
         {
             Assert.Matches(shape, line);
             Assert.True(Vericairn.Records.History.HistoryInventory.TryParseLine(line, out _), line);
         }
+
+        Assert.StartsWith("(" + GitleaksScanner.InventoryTypes + ")/", GitleaksScanner.InventoryLine, StringComparison.Ordinal);
+        Assert.Equal(Vericairn.Records.Types.RecordTypeRegistry.All.Select(t => t.Name), GitleaksScanner.InventoryTypes.Split('|'));
+        Assert.DoesNotMatch(shape, "objectives/2026-11/01M7PV6AXW41AVCKTFJP3J9Y09.json sha256:" + new string('0', 64));
+    }
+
+    // FIX-150, after the Reviewer's review: the allowance passes only a value in an inventory line's hash position. A credential in any
+    // other position breaks the line's shape, so it is found: alone in an inventory file, where the configuration with the allowance
+    // applies and does not pass it, and among inventory lines, where the file mixes lines and the allowance does not apply. A record id
+    // cannot hold one and keep its shape, since no rule finds a credential among 26 digits and upper-case letters after a slash.
+    [Theory]
+    [InlineData("type", true)]
+    [InlineData("type", false)]
+    [InlineData("month", true)]
+    [InlineData("month", false)]
+    [InlineData("id", true)]
+    [InlineData("id", false)]
+    [InlineData("extension", true)]
+    [InlineData("extension", false)]
+    [InlineData("algorithm", true)]
+    [InlineData("algorithm", false)]
+    public void ACredentialInAnyPositionButTheHashIsFound(string position, bool alone)
+    {
+        // Assembled at run time, so that this file holds no credential-shaped text of its own: a lower-case GitLab token, which the old
+        // type position's shape admitted, and an AWS key id where the record id stands.
+        string gitlab = "glpat" + "-" + RandomNumberGenerator.GetString("abcdefghijkmnopqrstuvwxyz", 20);
+        string aws = "AKIA" + RandomNumberGenerator.GetString("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", 16);
+        string[] lines = InventoryLines();
+        string line = lines[0];
+        string changed = position switch
+        {
+            "type" => gitlab + line[line.IndexOf('/', StringComparison.Ordinal)..],
+            "month" => line.Replace("/2026-11/", "/" + gitlab + "/", StringComparison.Ordinal),
+            "id" => line.Replace("01M7PV6AXW41AVCKTFJP3J9Y09", aws, StringComparison.Ordinal),
+            "extension" => line.Replace(".json ", "." + gitlab + " ", StringComparison.Ordinal),
+            _ => line.Replace(" sha256:", " " + gitlab + ":", StringComparison.Ordinal),
+        };
+        Assert.NotEqual(line, changed);
+        string content = alone ? changed + "\n" : changed + "\n" + lines[2] + "\n";
+        SecretScan scan = ScanAdditions([(ObjectPath(content), content)]);
+        Assert.Equal("findings", scan.Verdict);
+        Assert.Equal(1, scan.FindingCount);
+        Assert.EndsWith("; rules " + (alone ? GitleaksScanner.ConfigurationHash : GitleaksScanner.ConfigurationWithoutInventoriesHash), scan.Version, StringComparison.Ordinal);
+    }
+
+    // FIX-150, after the Reviewer's review: gitleaks reports no finding when git log -p stops at an unreadable object, and exits 0. A
+    // missing, corrupt or truncated object the push carries, or one of a parent's side that a patch reads, now leaves the scan incomplete,
+    // though the token in the range's older commit is readable; before, the scan passed.
+    [Theory]
+    [InlineData("corrupt")]
+    [InlineData("truncated")]
+    [InlineData("missing")]
+    [InlineData("parent's side")]
+    public void AnUnreadableObjectBehindAReadableTokenLeavesTheScanIncomplete(string damage)
+    {
+        string basis = Start();
+        Commit([("settings.txt", "credential = " + Token() + "\n")]);
+        string head = Commit([damage == "parent's side" ? ("readme.txt", "Changed content.\n") : ("notes.txt", "A plain note.\n")]);
+        string blob = Git("rev-parse", (damage == "parent's side" ? basis : head) + ":" + (damage == "parent's side" ? "readme.txt" : "notes.txt"));
+        string file = Path.Combine(Repository, ".git", "objects", blob[..2], blob[2..]);
+        byte[] stored = File.ReadAllBytes(file);
+        File.SetAttributes(file, FileAttributes.Normal);
+        if (damage == "missing") File.Delete(file);
+        else File.WriteAllBytes(file, damage == "truncated" ? stored[..(stored.Length / 2)] : Encoding.ASCII.GetBytes("not an object"));
+        Assert.Equal("incomplete", Scan(basis, head).Verdict);
+    }
+
+    // A read gitleaks itself cuts short: git writes on its standard error, here a trace the scanner's own environment never passes on,
+    // and gitleaks stops reading the history and exits 0 with no finding. Gitleaks logs that at error level, and the scan is incomplete.
+    [Fact]
+    public void AHistoryReadGitleaksStopsEarlyLeavesTheScanIncomplete()
+    {
+        string basis = Start();
+        Commit([("settings.txt", "credential = " + Token() + "\n")]);
+        string head = Commit([("notes.txt", "A plain note.\n")]);
+        Assert.Equal("findings", Scan(basis, head).Verdict);
+        Assert.Equal("incomplete", Scan(basis, head, info => { if (info.FileName != "git") info.Environment["GIT_TRACE"] = "1"; }).Verdict);
+    }
+
+    // The clone's display settings change nothing the scan reads: color would leave gitleaks nothing to parse.
+    [Theory]
+    [InlineData("color.ui")]
+    [InlineData("color.diff")]
+    public void TheClonesColorSettingsChangeNothingTheScanReads(string setting)
+    {
+        string basis = Start();
+        Commit([("settings.txt", "credential = " + Token() + "\n")]);
+        string head = Commit([("notes.txt", "A plain note.\n")]);
+        Git("config", setting, "always");
+        Assert.Equal("findings", Scan(basis, head).Verdict);
     }
 
     [Fact]
@@ -194,16 +285,23 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
 
     private SecretScan ScanAdditions((string Path, string Content)[] files)
     {
-        string? gitleaks = Environment.GetEnvironmentVariable("VERICAIRN_TEST_GITLEAKS");
-        Assert.SkipWhen(gitleaks is null, "Set VERICAIRN_TEST_GITLEAKS to an installed gitleaks of at least 8.25.0 to scan real commits.");
+        string basis = Start();
+        return Scan(basis, Commit(files));
+    }
+
+    // A new repository with one commit, which the scanned range starts from; skipped without an installed gitleaks.
+    private string Start()
+    {
+        Assert.SkipWhen(Gitleaks is null, "Set VERICAIRN_TEST_GITLEAKS to an installed gitleaks of at least 8.25.0 to scan real commits.");
         TestPrerequisites.RequireGit();
         Directory.CreateDirectory(Repository);
         File.WriteAllText(Path.Combine(root, "gitconfig"), string.Empty);
         Git("init", "--initial-branch=main");
-        File.WriteAllText(Path.Combine(Repository, "readme.txt"), "Initial content.\n");
-        Git("add", "readme.txt");
-        Git("commit", "-m", "Initial content");
-        string basis = Git("rev-parse", "HEAD");
+        return Commit([("readme.txt", "Initial content.\n")]);
+    }
+
+    private string Commit((string Path, string Content)[] files)
+    {
         foreach ((string path, string content) in files)
         {
             string file = Path.Combine(Repository, path.Replace('/', Path.DirectorySeparatorChar));
@@ -213,14 +311,25 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         }
 
         Git("commit", "-m", "Add content");
-        string head = Git("rev-parse", "HEAD");
+        return Git("rev-parse", "HEAD");
+    }
+
+    // Scans base..head with the installed gitleaks; adjust sees each process the scanner starts after the scanner has prepared it.
+    private SecretScan Scan(string basis, string head, Action<ProcessStartInfo>? adjust = null)
+    {
         var scanner = new GitleaksScanner(info =>
         {
-            if (info.FileName == "gitleaks") info.FileName = gitleaks!;
+            if (info.FileName == "gitleaks") info.FileName = Gitleaks!;
+            adjust?.Invoke(info);
             return BoundedProcess.Run(info, TestTiming.HangTimeout);
         });
         return scanner.Scan(Repository, new PushPlan("work/change", "main", head, basis, null, basis));
     }
+
+    private static string? Gitleaks => Environment.GetEnvironmentVariable("VERICAIRN_TEST_GITLEAKS");
+
+    // A GitHub token, assembled at run time, so that this file holds no credential-shaped text of its own.
+    private static string Token() => "ghp" + "_" + RandomNumberGenerator.GetString("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789", 36);
 
     private string Git(params string[] args)
     {

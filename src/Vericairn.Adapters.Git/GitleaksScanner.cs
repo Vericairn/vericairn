@@ -34,10 +34,28 @@ public sealed partial class GitleaksScanner : ISecretScanner
     internal const string InventoryPath = "^objects/[0-9a-f]{64}$";
 
     /// <summary>
-    /// The shape of a history checkpoint inventory's line, without its line feed: a record type, a month, a record id and .json, a space,
-    /// then sha256: and 64 hexadecimal digits (HistoryInventory). It is read both as RE2, by gitleaks, and as POSIX extended, by git grep.
+    /// The record types an inventory line's first position takes: the names the estate format defines (RecordTypeRegistry), and no other
+    /// value, so that a credential there breaks the line's shape and is found.
     /// </summary>
-    internal const string InventoryLine = @"[a-z][a-z0-9-]{0,63}/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}";
+    internal const string InventoryTypes = "acceptance|admission|amendment|ask|assignment|attempt|authority|communication-delegation|communication-setting"
+        + "|credential-reference|custody-exception|decision|device|discharge|document-review|document-revision|estate|estate-policy|goal|goal-status"
+        + "|harness-qualification|history-checkpoint|living-document|migration|observation|operation|operator-request|operator-request-close"
+        + "|policy-exception|possibility|principal|product|prompt-preference|qualification|reconciliation|release|resource|result|retirement|review"
+        + "|roster|saved-prompt|template-defaults|verification|work-order|work-progress|work-status|writing-exception";
+
+    /// <summary>
+    /// The shape of a history checkpoint inventory's line, without its line feed: one of those record types, a month, a record id and .json,
+    /// a space, then sha256: and 64 hexadecimal digits (HistoryInventory). Only the hash position can hold a value a rule finds; every
+    /// other position holds a fixed name, digits or a record id's characters. It is read both as RE2, by gitleaks, and as POSIX extended,
+    /// by git grep.
+    /// </summary>
+    internal const string InventoryLine = "(" + InventoryTypes + @")/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}";
+
+    // The options of gitleaks' history read, git log -p -U0 over the range, which the scanner's own patch read repeats exactly.
+    private static readonly string[] LogOptions = ["--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text"];
+
+    // The patch read's output goes nowhere: it is read to establish that git can read every patch, never retained.
+    private static readonly string NullDevice = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
 
     private const string InventoryAllowance = "\n[[allowlists]]\ndescription = \"History checkpoint inventories";
 
@@ -73,6 +91,12 @@ public sealed partial class GitleaksScanner : ISecretScanner
         number += "; rules " + (inventories ? ConfigurationHash : ConfigurationWithoutInventoriesHash);
         int? commits = Count(directory, plan.Range);
         if (commits is null) return new("gitleaks", number, plan.Range, "incomplete", null);
+        // Gitleaks reports no finding when git log -p stops early, at an unreadable or corrupt object, and still exits 0. Before it runs,
+        // every commit, tree and blob the push carries is read and checked against its id, and the range's patches are read exactly as
+        // gitleaks reads them, parents' sides included; a read that fails or stops early leaves the scan incomplete (FIX-150).
+        if (!Reads(directory, "rev-list", "--objects", "--verify-objects", "--quiet", plan.Range)
+            || !Reads(directory, ["log", "-p", "-U0", plan.Range, .. LogOptions, "--output=" + NullDevice]))
+            return new("gitleaks", number, plan.Range, "incomplete", null);
         string temporary = Path.Combine(Path.GetTempPath(), "vericairn-scan-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
         try
@@ -87,14 +111,17 @@ public sealed partial class GitleaksScanner : ISecretScanner
             // Gitleaks writes only the aggregate count to disk, even for a finding. No JSON findings report is created or read.
             ProcessResult result = Invoke(directory, "git", "--redact=100", "--no-banner", "--log-level=error", "--ignore-gitleaks-allow",
                 "--config=" + configuration, "--gitleaks-ignore-path=" + ignored,
-                "--log-opts=" + plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text",
+                "--log-opts=" + plan.Range + " " + string.Join(' ', LogOptions),
                 "--report-format=template", "--report-template=" + template, "--report-path=" + report, ".");
             if (result.Outcome != ProcessOutcome.Exited || result.ExitCode is not (0 or 1) || !File.Exists(report) || new FileInfo(report).Length > 16
                 || !int.TryParse(File.ReadAllText(report).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int count) || count < 0)
                 return new("gitleaks", number, plan.Range, "incomplete", null);
             if (Count(directory, plan.Range) != commits) return new("gitleaks", number, plan.Range, "incomplete", null);
-            if (result.ExitCode == 0 && count == 0) return new("gitleaks", number, plan.Range, "passed", 0);
-            return new("gitleaks", number, plan.Range, count > 0 ? "findings" : "incomplete", count);
+            if (count > 0) return new("gitleaks", number, plan.Range, "findings", count);
+            // Gitleaks logs at error level, the only level asked for, when its own read of the history fails or stops early: it relays git's
+            // standard error and stops reading, and still exits 0. Such a scan saw only part of the range. Its words never enter the record.
+            if (result.ExitCode != 0 || !string.IsNullOrWhiteSpace(result.StandardError)) return new("gitleaks", number, plan.Range, "incomplete", count);
+            return new("gitleaks", number, plan.Range, "passed", 0);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         { return new("gitleaks", number, plan.Range, "incomplete", null); }
@@ -120,7 +147,12 @@ public sealed partial class GitleaksScanner : ISecretScanner
     // a file that never exists and ignores replace objects and those caches, as the push adapter's reads do (CODE-81).
     private static readonly string NoGrafts = Path.Combine(Path.GetTempPath(), "vericairn-no-grafts-" + Guid.NewGuid().ToString("N"), "grafts");
 
-    private static readonly (string Key, string Value)[] IgnoredCaches = [("core.commitGraph", "false"), ("pack.useBitmaps", "false"), ("core.multiPackIndex", "false")];
+    // A clone's display settings can also change what git log -p shows gitleaks while the push still delivers every object: color makes
+    // gitleaks parse nothing, log.showRoot=false hides a root commit's patch, and a signature check's diagnostics stop gitleaks' read.
+    // Every git process the scan starts reads these values instead, and none inherits git's trace variables, whose output on standard
+    // error would stop gitleaks' read too (FIX-150).
+    private static readonly (string Key, string Value)[] ReadSettings = [("core.commitGraph", "false"), ("pack.useBitmaps", "false"), ("core.multiPackIndex", "false"),
+        ("color.ui", "false"), ("color.diff", "false"), ("log.showRoot", "true"), ("log.showSignature", "false")];
 
     private static void Isolate(ProcessStartInfo info)
     {
@@ -128,12 +160,13 @@ public sealed partial class GitleaksScanner : ISecretScanner
         info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
         info.Environment.Remove("GIT_CONFIG_PARAMETERS");
         foreach (string name in info.Environment.Keys.Where(n => n.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase)
-            || n.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase)).ToArray()) info.Environment.Remove(name);
-        info.Environment["GIT_CONFIG_COUNT"] = IgnoredCaches.Length.ToString(CultureInfo.InvariantCulture);
-        for (int i = 0; i < IgnoredCaches.Length; i++)
+            || n.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase) || n.StartsWith("GIT_TRACE", StringComparison.OrdinalIgnoreCase)).ToArray())
+            info.Environment.Remove(name);
+        info.Environment["GIT_CONFIG_COUNT"] = ReadSettings.Length.ToString(CultureInfo.InvariantCulture);
+        for (int i = 0; i < ReadSettings.Length; i++)
         {
-            info.Environment["GIT_CONFIG_KEY_" + i.ToString(CultureInfo.InvariantCulture)] = IgnoredCaches[i].Key;
-            info.Environment["GIT_CONFIG_VALUE_" + i.ToString(CultureInfo.InvariantCulture)] = IgnoredCaches[i].Value;
+            info.Environment["GIT_CONFIG_KEY_" + i.ToString(CultureInfo.InvariantCulture)] = ReadSettings[i].Key;
+            info.Environment["GIT_CONFIG_VALUE_" + i.ToString(CultureInfo.InvariantCulture)] = ReadSettings[i].Value;
         }
     }
 
@@ -221,6 +254,17 @@ public sealed partial class GitleaksScanner : ISecretScanner
         if (at < 0 || text.LastIndexOf("[[allowlists]]", StringComparison.Ordinal) != at + 1)
             throw new InvalidOperationException("The scan configuration's last allowance is not the inventory allowance.");
         return System.Text.Encoding.UTF8.GetBytes(text[..at]);
+    }
+
+    // Whether a git read of the range completed: it exited 0, having read everything it was asked to. Its output is not retained.
+    private bool Reads(string directory, params string[] arguments)
+    {
+        var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        info.ArgumentList.Add("--no-replace-objects");
+        foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        Isolate(info);
+        ProcessResult result = run(info);
+        return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0;
     }
 
     private int? Count(string directory, string range)
