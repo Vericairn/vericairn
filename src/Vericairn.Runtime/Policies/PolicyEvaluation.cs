@@ -18,7 +18,8 @@ internal sealed record PolicyFinding(
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsReleaseCadence { get; init; }
-    public bool ReleaseHold => !IsReleaseCadence && Enforced && Level == "refuse" && Verdict is "unmet" or "unavailable" && Disposition is not ("excepted" or "ended-unmet");
+    // A concurrent-paths finding holds work starts only (assignment start, run admission and new attempts), never a release submission.
+    public bool ReleaseHold => !IsReleaseCadence && Kind != ConcurrentPaths.Kind && Enforced && Level == "refuse" && Verdict is "unmet" or "unavailable" && Disposition is not ("excepted" or "ended-unmet");
     public Severity Severity => IsReleaseCadence || !Enforced || Verdict == "satisfied" || Disposition is "excepted" or "ended-unmet" || Level == "remind" ? Severity.Info : Severity.Warning;
 }
 

@@ -92,7 +92,9 @@ public class ConcurrentPathsPolicyTests
 
         PolicyResponse evaluation = run.Service.PolicyEvaluate();
         PolicyFindingDto unmet = Assert.Single(evaluation.Findings, f => f.Kind == ConcurrentPaths.Kind);
-        Assert.Equal(("unmet", "none", true), (unmet.Verdict, unmet.Disposition, unmet.ReleaseHold));
+        // It holds work starts, below, but never a release submission.
+        Assert.Equal(("unmet", "none", false), (unmet.Verdict, unmet.Disposition, unmet.ReleaseHold));
+        Assert.Equal(0, evaluation.Holds);
         Assert.Equal(later, unmet.Anchor!.Id);
         Assert.Contains(run.Service.Check().Findings, f => f.Code == "policy.unmet" && f.Message.Contains("concurrent", StringComparison.Ordinal));
 
@@ -173,7 +175,7 @@ public class ConcurrentPathsPolicyTests
         RecordEnvelope policy = Declare(run, "held-widget", ["widget/**"], "refuse");
 
         PolicyFindingDto unavailable = Assert.Single(run.Service.PolicyEvaluate().Findings, f => f.Kind == ConcurrentPaths.Kind);
-        Assert.Equal(("unavailable", true), (unavailable.Verdict, unavailable.ReleaseHold));
+        Assert.Equal(("unavailable", false), (unavailable.Verdict, unavailable.ReleaseHold));
         Assert.Contains($"W-3's assignment {unnamed.Id} names no repository", unavailable.Actual, StringComparison.Ordinal);
         WriteOutcome attempt = run.Service.Attempt(new AttemptRequest(run.Assignment, run.Estate.BuilderId, "widget repository, branch work/w-1", "Start."));
         FindingDto held = Assert.Single(attempt.Problem!.Findings, f => f.Code == "attempt.concurrent-paths");

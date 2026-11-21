@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 16, November 20, 2026. Add the concurrent-paths rule kind, by which an estate holds an unresolved overlap of two assignments' permitted paths at assignment start, and the pair exception for one exact pair of assignment revisions (POLICY-08).
+Revision 16, November 20, 2026. Add the concurrent-paths rule kind, by which an estate holds an unresolved overlap of two assignments' permitted paths at assignment start, and the pair exception for one exact pair of assignment revisions (POLICY-08); its findings hold work starts, never a release submission.
 
 Revision 15, November 12, 2026. Say that from 0.9.2 blocked terms and the text they are matched in are compared after Vericairn's own Unicode NFKC normalization and full case folding, the same in every build (FIX-105).
 
@@ -84,7 +84,7 @@ All authoring commands take `--by`. Revisions, retirement, exception grants and 
 
 `GET /v1/estate-policies/access?principal=<id>` (`PolicyAccess`, MCP `policy_access`) reports currently admitted action names without creating a record. MCP exposes writes only for its connection principal's current authority and checks it again at the call. Exact policy, rule, token and scope bounds remain server checks on the proposed body. The authority response itself grants no permission.
 
-`estate check`, `status` and `progress` evaluate one snapshot per read. Their `policies` and `writingExceptions` sections carry the same basis and findings as the dedicated reads. Check retains built-in findings beside `policy.unmet`, `policy.unavailable` and `policy.excepted`, with policy revision and rule identity. A refuse-level policy finding is a warning in check; it is a release hold at submission. Only reconstructed, excepted `writing.spacing` occurrences leave the warning count, and each remains visible as `writing.excepted`. Other errors and unread sources remain visible.
+`estate check`, `status` and `progress` evaluate one snapshot per read. Their `policies` and `writingExceptions` sections carry the same basis and findings as the dedicated reads. Check retains built-in findings beside `policy.unmet`, `policy.unavailable` and `policy.excepted`, with policy revision and rule identity. A refuse-level policy finding is a warning in check; it is a release hold at submission, except a concurrent-paths finding, which holds only work starts. Only reconstructed, excepted `writing.spacing` occurrences leave the warning count, and each remains visible as `writing.excepted`. Other errors and unread sources remain visible.
 
 Progress and status group unfinished operator-owned duties under **What waits on the operator**, including exact subject, occurrence, deadline, required action and current evidence, even without an ask. An actual ask addressed to an operator can link an occurrence by pinning a result with the exact `duties` binding as its subject. The view groups that ask with the duty, preserving the duty's owner. A builder's linked reserved-action ask therefore does not transfer ownership. Only real asks enter the ask queue; a completed duty does not answer or withdraw an ask. Reads create no asks or other records. These views authorize no effects.
 
@@ -234,7 +234,8 @@ offered only the first two, since an exception cannot pin a revision that does n
 assignment is refused only for a pair its previous revision did not already leave unmet, unavailable or excepted, so a corrective
 revision is never held by a pair it inherited, while that pair still holds the assignment's attempts and runs. Record validation
 never refuses: a pair recorded before the policy, at a lower level, by an older runtime or in another clone is reported and held only
-when work on it starts. At `warn` and `remind` the pairs are findings and hold nothing. `goal step` records the later of a held
+when work on it starts. A concurrent-paths finding never holds a release submission, at any level: its pairs hold only assignment
+start, run admission and new attempts, and the estate check and status report every pair. At `warn` and `remind` the pairs are findings and hold nothing. `goal step` records the later of a held
 overlap with `after` naming the earlier, so its routing satisfies the rule. Every assignment-start refusal, of a new assignment, a
 revision, a run admission or a new attempt, reads this machine's registered clones for what they show of each assignment's release
 (a change's head reachable from the repository's main line, labeled as observed here), as the overlap check's `after` waits do, so a
