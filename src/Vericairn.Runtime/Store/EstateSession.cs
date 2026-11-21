@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -27,6 +29,13 @@ public sealed class EstateSession : IDisposable
     // Taken around each write, so one writer at a time writes the working tree, whatever its home (FIX-99).
     private WorkingTreeLock? writeLock;
     private string home = VericairnHome.Path();
+    // The model a one-shot command's opening judged, kept while the records and the manifest stamp unchanged (FIX-148).
+    private Kept? kept;
+    // Raised by every drop, write and taking of the write lock, and read and compared with kept only under keptSync: a load keeps the
+    // model it judged only while the generation it read before its stamp is unchanged, so a write on another thread while it judged
+    // leaves nothing kept (FIX-148).
+    private long generation;
+    private readonly object keptSync = new();
 
     internal long ParsedFiles => parseCache.ParsedFiles;
     internal bool IsReadOnly => readOnly;
@@ -37,12 +46,57 @@ public sealed class EstateSession : IDisposable
     // The response envelope must come from the very bytes whose model was just judged, not a second full store read/sync.
     internal RecordFile? LoadedFile(string path) => loadedFiles?.ByPath.GetValueOrDefault(path);
 
-    private EstateSession(string root, EstateManifest manifest, LiveStore live, IObjectStore objects)
+    private EstateSession(string root, EstateManifest manifest, LiveStore live, IObjectStore objects, JudgmentContext? judgments)
     {
         Root = root;
         Manifest = manifest;
         Live = live;
-        Objects = objects;
+        Objects = new NotingObjectStore(objects, Drop);
+        Judgments = judgments ?? new JudgmentContext();
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-148): what this runtime has spent judging the estate (judgments, parses, verifications and key imports), counted
+    /// where each happens, and the signature tables its judgments read: the process's, unless a test gave fresh ones.
+    /// </summary>
+    internal JudgmentContext Judgments { get; }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-148; design/performance.md § 3.2): whether <see cref="Load"/> keeps the model it judged for later loads, as a
+    /// one-shot command's runtime does, while the stamp of the records and the manifest (<see cref="Stamp"/>) is unchanged and nothing has
+    /// been written here since. A load while this session holds the working tree's write lock is always judged afresh, whatever its
+    /// caller, and taking the lock, storing or removing a record and storing or removing an object drop the kept model, including one a
+    /// load on another thread was still judging when they happened. Long-lived hosts (the daemon, mcp serve, Workbench, a runtime
+    /// supervising a worker run) leave it off and judge at every load.
+    /// </summary>
+    internal bool KeepsJudgment
+    {
+        get => keepsJudgment;
+        set
+        {
+            keepsJudgment = value;
+            if (!value) Drop();
+        }
+    }
+
+    private bool keepsJudgment;
+
+    /// <summary>
+    /// Forgets the kept model and raises the generation, so the next load judges afresh and no load already judging keeps what it
+    /// judged: anything this runtime writes to the working tree calls it.
+    /// </summary>
+    internal void Drop()
+    {
+        lock (keptSync)
+        {
+            generation++;
+            kept = null;
+        }
+    }
+
+    private long Generation()
+    {
+        lock (keptSync) return generation;
     }
 
     /// <summary>Repository root (repository-synced) or estate directory holding the manifest (local-only).</summary>
@@ -65,11 +119,12 @@ public sealed class EstateSession : IDisposable
     internal void EnableWrites()
     {
         if (!readOnly) return;
-        EstateSession writable = Open(Root, false, home);
+        EstateSession writable = Open(Root, false, home, Judgments);
         Live.Dispose();
         Objects.Dispose();
         Live = writable.Live;
-        Objects = writable.Objects;
+        Objects = new NotingObjectStore(((NotingObjectStore)writable.Objects).Inner, Drop);
+        Drop();
         writers = writable.writers;
         writeLock = writable.writeLock;
         readOnly = false;
@@ -84,7 +139,10 @@ public sealed class EstateSession : IDisposable
     internal static EstateSession Open(string root, bool readOnly) => Open(root, readOnly, VericairnHome.Path());
 
     /// <summary>Opens the estate with its machine-local state under a given Vericairn home.</summary>
-    internal static EstateSession Open(string root, bool readOnly, string home)
+    internal static EstateSession Open(string root, bool readOnly, string home) => Open(root, readOnly, home, null);
+
+    /// <summary>From 0.9.4 (FIX-148): opens the estate counting its judgments in a given context, such as a test's with fresh signature tables.</summary>
+    internal static EstateSession Open(string root, bool readOnly, string home, JudgmentContext? judgments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
@@ -117,7 +175,7 @@ public sealed class EstateSession : IDisposable
             IObjectStore objects = manifest.Profile == "local-only"
                 ? new SqliteObjectStore(Path.Combine(Path.GetDirectoryName(live.Path)!, "objects.db"), readOnly)
                 : new FileObjectStore(Path.Combine(root, EstateLayout.ObjectsDirectory));
-            return new EstateSession(root, manifest, live, objects)
+            return new EstateSession(root, manifest, live, objects, judgments)
             {
                 readOnly = readOnly, writers = writerLock, home = home,
                 writeLock = readOnly ? null : WorkingTreeLock.For(root, manifest.Profile, databasePath, home),
@@ -129,7 +187,7 @@ public sealed class EstateSession : IDisposable
     // Submission checks read the canonical source without refreshing or touching the live cache.
     internal IReadOnlyList<RecordFile> ReadFiles() => Profile == "repository-synced" ? EstateLoader.EnumerateRecordFiles(Root) : Live.Files();
 
-    internal EstateModel Read() => EstateLoader.Load(Root, ReadFiles(), ObjectReader);
+    internal EstateModel Read() => EstateLoader.Load(Root, ReadFiles(), null, objects: ObjectReader, context: Judgments);
 
     /// <summary>
     /// The estate's objects by content hash, for reading history checkpoint inventories: null when an object is absent, unreadable or not
@@ -151,10 +209,10 @@ public sealed class EstateSession : IDisposable
     };
 
     /// <summary>Loads and validates a given set of this estate's record files, with its objects.</summary>
-    internal EstateModel LoadFiles(IReadOnlyList<RecordFile> files) => EstateLoader.Load(Root, files, ObjectReader);
+    internal EstateModel LoadFiles(IReadOnlyList<RecordFile> files) => EstateLoader.Load(Root, files, null, objects: ObjectReader, context: Judgments);
 
     /// <summary>A file set judged with every record's roles and grants read at its own time, for adoption's check alone (design/signed-history.md § 10).</summary>
-    internal EstateModel LoadFilesAtRecordTime(IReadOnlyList<RecordFile> files) => EstateLoader.LoadAtRecordTime(Root, files, ObjectReader);
+    internal EstateModel LoadFilesAtRecordTime(IReadOnlyList<RecordFile> files) => EstateLoader.LoadAtRecordTime(Root, files, ObjectReader, Judgments);
 
     /// <summary>
     /// The estate's records as identities only, with the exact record files they were parsed from, from one snapshot: ids, hashes,
@@ -166,7 +224,7 @@ public sealed class EstateSession : IDisposable
         if (readOnly)
         {
             IReadOnlyList<RecordFile> files = ReadFiles();
-            return (EstateLoader.LoadIdentities(Root, files, null), files.ToDictionary(f => f.Path, StringComparer.Ordinal));
+            return (EstateLoader.LoadIdentities(Root, files, null, Judgments), files.ToDictionary(f => f.Path, StringComparer.Ordinal));
         }
 
         if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
@@ -177,7 +235,7 @@ public sealed class EstateSession : IDisposable
             loadedFiles = snapshot;
         }
 
-        return (EstateLoader.LoadIdentities(Root, snapshot.Files, parseCache), snapshot.ByPath);
+        return (EstateLoader.LoadIdentities(Root, snapshot.Files, parseCache, Judgments), snapshot.ByPath);
     }
 
     /// <summary>
@@ -241,14 +299,57 @@ public sealed class EstateSession : IDisposable
         }
     }
 
-    /// <summary>How many times this session has loaded and judged the estate (<see cref="Load"/>): a deterministic count for cost tests.</summary>
+    /// <summary>
+    /// How many times <see cref="Load"/> has been called on this session; from 0.9.4 a one-shot command's load may return the kept model,
+    /// so the judgments themselves are counted in <see cref="Judgments"/>.
+    /// </summary>
     internal long Loads { get; private set; }
 
-    /// <summary>Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only.</summary>
-    public EstateModel Load()
+    /// <summary>
+    /// Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only. From 0.9.4 (FIX-148) a
+    /// session that keeps its judgment (<see cref="KeepsJudgment"/>) returns the model it kept while the stamp is unchanged, nothing was
+    /// written here since and it does not hold the write lock; under the lock every load is judged afresh. A load keeps what it judged
+    /// only if nothing was written, dropped or locked here between its stamp and its keeping, from any thread.
+    /// </summary>
+    public EstateModel Load() => LoadWithFiles().Model;
+
+    /// <summary>
+    /// From 0.9.4 (FIX-148): the model <see cref="Load"/> gives and the exact record files it was judged from, one snapshot, so a read that
+    /// needs both parses nothing again. The files are not copied and must not be changed.
+    /// </summary>
+    internal (EstateModel Model, IReadOnlyList<RecordFile> Files) LoadWithFiles()
     {
         Loads++;
-        if (readOnly) return Read();
+        if (readOnly) return ReadOnlyJudgment();
+
+        // Read before the lock is asked of: a writer that takes the lock after this raises the generation once it holds it, so either
+        // this load finds the lock held or its keeping finds the generation changed.
+        long started = Generation();
+        // The lock is asked of this session itself, so a load under it is fresh from any caller (design/performance.md § 3.2).
+        bool keeping = keepsJudgment && writeLock?.Entered != true;
+        CanonicalStamp stamp = default;
+        if (keeping)
+        {
+            // Taken before the records are read: a change while they are read gives a stamp no later load matches.
+            stamp = Stamp();
+            Kept? reused = null;
+            lock (keptSync)
+            {
+                if (kept is { } held && held.Stamp == stamp && held.Generation == started) reused = held;
+            }
+
+            if (reused is not null)
+            {
+                loadedFiles = reused.Files;
+                Loaded?.Invoke(reused.Model);
+                return (reused.Model, reused.Files.Files);
+            }
+        }
+
+        lock (keptSync) kept = null;
+        if (writeLock?.Entered == true) LockedJudgments++;
+        // What a client operation stopped at its request limit names as being judged (FIX-152).
+        using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
         if (Profile == "repository-synced")
         {
             Live.SyncFromDirectory(Root);
@@ -260,14 +361,70 @@ public sealed class EstateSession : IDisposable
             parseCache.Retain(files.ByPath);
             loadedFiles = files;
         }
-        EstateModel model = EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader);
+        ClientOperationActivity.Report(JudgingStage(files.Files.Count));
+        EstateModel model = EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments);
         Live.SetMeta("lastLoadedAt", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+        if (keeping)
+        {
+            lock (keptSync)
+            {
+                // Kept only if nothing wrote, dropped or took the lock here since the generation was read: a write by another thread while
+                // this load judged leaves the model unkept, so the next load judges afresh (FIX-148).
+                if (generation == started && writeLock?.Entered != true) kept = new Kept(stamp, started, files, model);
+            }
+        }
+
         Judged?.Invoke(model);
-        return model;
+        Loaded?.Invoke(model);
+        return (model, files.Files);
     }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-152): a judgment of the estate made now, as an unkept <see cref="Load"/> makes it, through the session's parse cache,
+    /// and the exact files it was judged from; it neither returns nor replaces the kept model, so its caller may add to its findings.
+    /// The files are not copied and must not be changed.
+    /// </summary>
+    internal (EstateModel Model, IReadOnlyList<RecordFile> Files) JudgeAfresh()
+    {
+        if (readOnly) return ReadOnlyJudgment();
+        using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
+        if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
+        LiveStore.FileSnapshot files = Live.Snapshot();
+        if (!ReferenceEquals(files, loadedFiles))
+        {
+            parseCache.Retain(files.ByPath);
+            loadedFiles = files;
+            Drop();
+        }
+
+        ClientOperationActivity.Report(JudgingStage(files.Files.Count));
+        return (EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments), files.Files);
+    }
+
+    private (EstateModel Model, IReadOnlyList<RecordFile> Files) ReadOnlyJudgment()
+    {
+        using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
+        IReadOnlyList<RecordFile> read = ReadFiles();
+        ClientOperationActivity.Report(JudgingStage(read.Count));
+        return (EstateLoader.Load(Root, read, null, objects: ObjectReader, context: Judgments), read);
+    }
+
+    // The stages of a judgment as a client operation stopped at its request limit names them (FIX-152).
+    private const string ReadingStage = "judging the estate: reading its record files";
+
+    private static string JudgingStage(int files) =>
+        string.Create(CultureInfo.InvariantCulture, $"judging the estate: verifying and validating its {files:N0} record files");
 
     /// <summary>Told each model <see cref="Load"/> judges, once it is judged: what cost tests count the passes over (FIX-136).</summary>
     internal Action<EstateModel>? Judged { get; set; }
+
+    /// <summary>From 0.9.4 (FIX-148): told each model <see cref="Load"/> returns, judged now or kept.</summary>
+    internal Action<EstateModel>? Loaded { get; set; }
+
+    /// <summary>From 0.9.4 (FIX-148): how many of this session's loads judged afresh while it held the write lock, as every such load does.</summary>
+    internal long LockedJudgments { get; private set; }
+
+    private sealed record Kept(CanonicalStamp Stamp, long Generation, LiveStore.FileSnapshot Files, EstateModel Model);
 
     /// <summary>
     /// The working tree's write lock (FIX-99), held by this session's writes; null for a read-only session. A runtime holds it from
@@ -279,8 +436,16 @@ public sealed class EstateSession : IDisposable
     /// Takes the working tree's write lock, or enters it again on the thread that holds it. Throws an <see cref="IOException"/> naming
     /// the holder when another writer keeps it past the wait.
     /// </summary>
-    internal WorkingTreeLock.Hold HoldWriteLock() =>
-        (writeLock ?? throw new InvalidOperationException("This session is read-only.")).Enter();
+    internal WorkingTreeLock.Hold HoldWriteLock()
+    {
+        WorkingTreeLock held = writeLock ?? throw new InvalidOperationException("This session is read-only.");
+        // A writer's judgment reads the tree afresh, and whatever it writes leaves no kept model behind (FIX-148): the drop once the lock is
+        // held raises the generation after the lock shows as entered, so a load on another thread that found it free keeps nothing.
+        Drop();
+        WorkingTreeLock.Hold hold = held.Enter();
+        Drop();
+        return hold;
+    }
 
     /// <summary>
     /// Stores a new record where the profile keeps records; never overwrites. Returns the record's path. From 0.9.2 it stores under the
@@ -293,6 +458,7 @@ public sealed class EstateSession : IDisposable
         if (readOnly) throw new InvalidOperationException("This session is read-only.");
         using WorkingTreeLock.Hold hold = HoldWriteLock();
         Writes++;
+        Drop();
         if (Profile == "repository-synced")
         {
             RecordAuthor.Write(Root, record);
@@ -327,6 +493,7 @@ public sealed class EstateSession : IDisposable
         if (readOnly) throw new InvalidOperationException("This session is read-only.");
         using WorkingTreeLock.Hold hold = HoldWriteLock();
         Writes++;
+        Drop();
         if (Profile == "repository-synced")
         {
             string full = Path.Combine(Root, record.RelativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -367,5 +534,35 @@ public sealed class EstateSession : IDisposable
         Live.Dispose();
         writeLock?.Dispose();
         writers?.Dispose();
+    }
+
+    /// <summary>The object store as the session hands it out: storing or removing an object drops the kept model (FIX-148).</summary>
+    private sealed class NotingObjectStore(IObjectStore inner, Action wrote) : IObjectStore
+    {
+        internal IObjectStore Inner => inner;
+
+        public string Kind => inner.Kind;
+
+        public string Put(ReadOnlySpan<byte> bytes)
+        {
+            wrote();
+            try { return inner.Put(bytes); }
+            finally { wrote(); }
+        }
+
+        public bool Has(string hash) => inner.Has(hash);
+
+        public byte[]? Read(string hash) => inner.Read(hash);
+
+        public IReadOnlyList<string> List() => inner.List();
+
+        public bool Remove(string hash)
+        {
+            wrote();
+            try { return inner.Remove(hash); }
+            finally { wrote(); }
+        }
+
+        public void Dispose() => inner.Dispose();
     }
 }

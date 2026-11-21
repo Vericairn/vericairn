@@ -42,7 +42,7 @@ public sealed partial class EstateService
             // The root operator and the first authority are read from the manifest, so one that does not read cleanly lists and names nothing.
             if (ManifestRefusal(ReadManifest(), out byte[] manifest) is { } unread) return Refused(unread);
 
-            FirstAuthorityReading reading = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), manifest, session.ObjectReader);
+            FirstAuthorityReading reading = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), manifest, session.ObjectReader, session.Judgments);
             if (!names) return (Response(reading, null, null, applied: false, []), null);
 
             EstateModel model = session.Load();
@@ -68,7 +68,7 @@ public sealed partial class EstateService
             {
                 // Judged again under the working tree's write lock, from the files and the manifest as they are now.
                 if (ManifestRefusal(ReadManifest(), out byte[] current) is { } changed) return Refused(changed);
-                FirstAuthorityReading now = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), current, session.ObjectReader);
+                FirstAuthorityReading now = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), current, session.ObjectReader, session.Judgments);
                 (FirstAuthorityEvidence? again, string? refused) = Target(session.Load(), now, request);
                 if (again is null) return Refused(refused!);
                 if (Refusal(now, again) is { } stopped) return Refused(stopped);
@@ -86,7 +86,7 @@ public sealed partial class EstateService
                 }
 
                 // What remains for the operator: every error about the root of trust, and every error the estate now reports on the admission named.
-                FirstAuthorityReading after = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), written, session.ObjectReader);
+                FirstAuthorityReading after = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), written, session.ObjectReader, session.Judgments);
                 string path = again.Admission.ExpectedPath;
                 List<FindingDto> remaining = [.. session.Load().Findings.Sorted()
                     .Where(f => f.Severity == Severity.Error && (RootOfTrustCodes.Contains(f.Code) || f.Location.StartsWith(path, StringComparison.Ordinal)))

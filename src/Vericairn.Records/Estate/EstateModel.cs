@@ -26,6 +26,7 @@ public sealed class EstateModel
     private Lazy<RecordEnvelope?>? resultAcceptancesBegan;
     private Lazy<RecordEnvelope?>? overlapCheckBegan;
     private Lazy<IReadOnlyList<AssignmentOverlaps.Overlap>>? recordOverlaps;
+    private ILookup<string, RecordEnvelope>? workOrdersByCarrier;
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -75,6 +76,12 @@ public sealed class EstateModel
 
     /// <summary>Reads an object of the estate by content hash, or null when it is not held: what checkpoint inventories are read through.</summary>
     internal Func<string, byte[]?>? ObjectReader { get; set; }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-148): the loader's use of the signature tables while it judged this model, naming the tables and the context its
+    /// verifications are counted in; null for a model judged outside a loader, which reads the process's tables uncounted.
+    /// </summary>
+    internal Signing.SignatureTables.Judgment? Signatures { get; init; }
 
     /// <summary>The repository paths the loader read, for telling an unreadable witnessed file from an absent one.</summary>
     internal IReadOnlySet<string>? FilePaths { get; set; }
@@ -136,6 +143,7 @@ public sealed class EstateModel
         resultAcceptancesBegan = null;
         overlapCheckBegan = null;
         recordOverlaps = null;
+        workOrdersByCarrier = null;
         if (excluded.Count == 0) return;
         notCounting = excluded;
         CountingRecords = Records.Where(r => !excluded.Contains(r.Id)).ToList();
@@ -294,6 +302,28 @@ public sealed class EstateModel
         }
 
         return current;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-149): the current work orders placed in a release carrier, which a placement names by its identity, in path
+    /// order, the carrier itself never among them. Read from one index of the current work orders by their placement's carrier, built once
+    /// for a judged model, so counting each carrier's placements reads the work orders once whatever the number of carriers.
+    /// </summary>
+    internal IEnumerable<RecordEnvelope> PlacedIn(RecordEnvelope carrier)
+    {
+        ArgumentNullException.ThrowIfNull(carrier);
+        ILookup<string, RecordEnvelope> index = LazyInitializer.EnsureInitialized(ref workOrdersByCarrier, () => Current("work-order")
+            .Select(order => (Order: order, Carrier: CarrierOf(order)))
+            .Where(placed => placed.Carrier is not null && placed.Carrier != Chain(placed.Order)[0])
+            .ToLookup(placed => placed.Carrier!, placed => placed.Order, StringComparer.Ordinal));
+        return index[Chain(carrier)[0]];
+
+        string? CarrierOf(RecordEnvelope order) =>
+            order.Body.TryGetProperty("placement", out JsonElement placement) && placement.ValueKind == JsonValueKind.Object
+                && placement.TryGetProperty("kind", out JsonElement kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "release"
+                && placement.TryGetProperty("carrier", out JsonElement named) && named.ValueKind == JsonValueKind.String
+                ? LivingDocuments.ProductIdentity(this, named.GetString()!)
+                : null;
     }
 
     /// <summary>All record ids in this record's supersedes chain, earliest first, ending with the record itself.</summary>
