@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 39, November 21, 2026. Add `observers list`, `declare`, `report` and `withdraw`, which declare the automated observers on this machine with their intervals and graces and keep their reports, and the `Observers (this machine):` lines that end human `status`, in the development build.
+
 Revision 38, November 20, 2026. Say that under a `concurrent-paths` policy at `refuse`, `work assign`, `work attempt`, `records new assignment` and `worker run` refuse work that leaves an unmet or unavailable pair, naming each pair and the remedies that apply to the write, in the development build.
 
 Revision 37, November 17, 2026. Add standing agents: `goal propose --kind stewardship --standing <flow>` with `--trigger`, `--period`, `--until`, `--awaiting-review` and `--runs-on`, `goal due`, which lists a standing agent's occurrences as of an explicit time, `--occurrence` and `--now` on `goal step`, which carries one occurrence per command within the agent's caps and asks once for renewal before its until time, `--standing` and `--stop-runs` on `goal pause`, and a standing agent's `goal stop` asking its runs to stop and retiring its work order, in the development build.
@@ -1345,6 +1347,32 @@ what is raised afterwards. While the agent's open outputs, its possibilities sti
 not closed, reach `open` (ten when omitted), its occurrences defer and no run of it starts. `goal due`, `status` and `progress` show
 its open outputs; an occurrence's brief states its output caps and names the agent's earlier open and declined possibilities among
 its sources.
+
+## `vericairn observers` (0.9.4)
+
+From 0.9.4 (OPS-20), the automated observers declared on this machine, such as CI on the main line, scheduled workflows,
+intake watching and status refresh, each report at a declared interval, and silence past the interval plus a grace is
+attention. See [Automated observers](observers.md).
+
+| Command | What it does |
+|---|---|
+| `observers list` | Each observer declared on this machine: its kind, interval and grace, its latest report and its state now (`awaiting`, `observing`, `failed`, `not-observing` or `silent`). |
+| `observers declare <name> --kind <kind> --interval <duration> [--grace <duration>] [--summary <text>] --by <operator>` | Declares an observer, or declares it again. The kind is `ci`, `scheduled-workflow`, `intake`, `status-refresh` or `other`; durations are ISO 8601, the interval from `PT1M` to `P31D`, the grace up to `P7D` and a quarter of the interval when omitted. The operator's. |
+| `observers report <name> --outcome <passed\|failed\|not-observing> [--reason <reason>] [--at <time>] [--detail <text>] --by <principal>` | Keeps one report. `not-observing` requires `--reason` (`quota-exhausted`, `schedule-disabled` or `unavailable`) and is attention, never a pass; `--at` is when the observation was made, never more than a minute ahead. |
+| `observers withdraw <name> --reason <text> --by <operator>` | Withdraws an observer, so that its silence stops being attention. The operator's. |
+
+Each prints every observer's line and a summary; `--json` prints the runtime's `ObserversResponse` (`ok`, `message`, `asOf`,
+`observers`, each with `name`, `kind`, `intervalSeconds`, `graceSeconds`, `summary`, `declaredAt`, `declaredBy`, `lastReport`,
+`state`, `expectedBy`, `attention` and `why`, and `problem`). Exit 0 means a valid read or a kept change, 1 a refusal and 2 an
+invalid argument. Human `status` ends with `Observers (this machine):` and one line per observer; `status --json` is unchanged.
+A silent, failed or not-observing observer is a `failed check` in the operator's attention. Nothing is recorded: declarations
+and reports are kept beside the clone's live store on this machine.
+
+```sh
+vericairn observers declare ci-main --kind ci --interval PT1H --grace PT15M --by <operator>
+vericairn observers report ci-main --outcome not-observing --reason quota-exhausted --by <principal>
+vericairn status
+```
 
 ## `vericairn estate first-authority` (0.9.3)
 

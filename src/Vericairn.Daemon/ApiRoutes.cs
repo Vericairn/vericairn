@@ -176,6 +176,11 @@ public static class ApiRoutes
         app.MapPost($"{v}/packages/deprecate", (PackagesDeprecateRequest request) => Results.Json(service.PackagesDeprecate(request), ProtocolJson.Options));
         app.MapPost($"{v}/security-reports/poll", async (SecurityReportsPollRequest request, CancellationToken cancellationToken) => Results.Json(await service.SecurityReportsPollAsync(request, cancellationToken).ConfigureAwait(false), ProtocolJson.Options));
         app.MapPost($"{v}/security-reports/triage", (SecurityReportTriageRequest request) => Results.Json(service.SecurityReportsTriage(request), ProtocolJson.Options));
+        // From 0.9.4 (OPS-20): the automated observers declared on the runtime's machine and their reports.
+        app.MapGet($"{v}/observers", () => Results.Json(service.Observers(), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/declare", (ObserverDeclareRequest request) => Results.Json(service.ObserverDeclare(request), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/report", (ObserverReportRequest request) => Results.Json(service.ObserverReport(request), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/withdraw", (ObserverWithdrawRequest request) => Results.Json(service.ObserverWithdraw(request), ProtocolJson.Options));
 
         app.MapPost($"{v}/estate/upgrade", (UpgradeRequest request) =>
         {

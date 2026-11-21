@@ -103,6 +103,14 @@ this machine's observations, so they never appear in status or progress JSON,
 and no other principal's attention shows them. See
 [security reports](operator-guide.md#security-reports-hold-a-release-092).
 
+From 0.9.4 (OPS-20), the operator's attention also carries a `failed check` for each automated observer declared on this
+machine that is silent past its interval plus its grace, whose latest report observed a failure, or whose latest report says
+it could not observe (an exhausted quota, a disabled schedule or another cause): subject type `observer`, the observer's name
+as its subject. Not observing is never a pass; only a recent report that it observed and passed clears the notice, and elapsed
+silence alone never renews it. A declaration file that cannot be read is a `failed check` too. These come from this machine's
+observations, so they never appear in status or progress JSON, and no other principal's attention shows them. See
+[automated observers](observers.md).
+
 `CommunicationAttention` keeps its existing `kind`, `text`, `record` and
 `recordType` fields and adds `hash`, `subject`, `state`, `asOf`, `command` and
 `target`. `subject` and `target` use `AttentionReference` (`type`, `id`, `hash`).

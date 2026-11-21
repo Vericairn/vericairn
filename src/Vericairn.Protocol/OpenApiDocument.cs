@@ -162,6 +162,10 @@ public static class OpenApiDocument
         ("POST", "/v1/packages/deprecate"),
         ("POST", "/v1/security-reports/poll"),
         ("POST", "/v1/security-reports/triage"),
+        ("GET", "/v1/observers"),
+        ("POST", "/v1/observers/declare"),
+        ("POST", "/v1/observers/report"),
+        ("POST", "/v1/observers/withdraw"),
 
         ("POST", "/v1/estate/upgrade"),
         ("POST", "/v1/history/checkpoints"),
@@ -632,6 +636,11 @@ public static class OpenApiDocument
             responses["200"] = new JsonObject { ["description"] = "PackagesResponse: exact registry observations, or the original account-holder intent with its latest outcome and manual step.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/PackagesResponse" } } } };
         }
+        else if (path == "/v1/observers" || path.StartsWith("/v1/observers/", StringComparison.Ordinal))
+        {
+            responses["200"] = new JsonObject { ["description"] = "ObserversResponse: from 0.9.4, the automated observers declared on the runtime's machine, each with its interval, grace, latest report and state (awaiting, observing, failed, not-observing or silent) as of the runtime's clock; a refusal is ok false with its problem. Never records.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/ObserversResponse" } } } };
+        }
         else if (method == "POST" && path.StartsWith("/v1/security-reports/", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = "SecurityReportsResponse: the operator's view of each declared repository's latest read and each observed advisory revision by identifier, state, severity and content hash, never its text; held says whether releases wait. Any other principal receives the same refusal whatever exists.",
@@ -1057,6 +1066,10 @@ public static class OpenApiDocument
             ["PackagesDeprecateRequest"] = Object(("product", "string"), ("version", "string"), ("package", "string"), ("by", "string"), ("reasons", "array"), ("message", "string"), ("alternatePackage", "string"), ("alternateRange", "string"), ("reserved", "boolean")),
             ["SecurityReportsPollRequest"] = Object(("by", "string")),
             ["SecurityReportTriageRequest"] = Object(("by", "string"), ("advisory", "string"), ("repository", "string"), ("expected", "string"), ("disposition", "string"), ("reason", "string")),
+            ["ObserverDeclareRequest"] = Object(("by", "string"), ("name", "string"), ("kind", "string"), ("intervalSeconds", "integer"), ("graceSeconds", "integer"), ("summary", "string")),
+            ["ObserverReportRequest"] = Object(("by", "string"), ("name", "string"), ("outcome", "string"), ("reason", "string"), ("at", "string"), ("detail", "string")),
+            ["ObserverWithdrawRequest"] = Object(("by", "string"), ("name", "string"), ("reason", "string")),
+            ["ObserversResponse"] = Object(("ok", "boolean"), ("message", "string"), ("asOf", "string"), ("observers", "array"), ("problem", "object")),
             ["SecurityReportsResponse"] = Object(("ok", "boolean"), ("message", "string"), ("reads", "array"), ("reports", "array"), ("held", "boolean"), ("triage", "object"), ("problem", "object")),
             ["PackagesResponse"] = Object(("ok", "boolean"), ("status", "string"), ("message", "string"), ("packages", "array"), ("intent", "object"), ("operation", "object"), ("instruction", "string"), ("problem", "object")),
             ["ChangeResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("observation", "object"), ("ask", "object"), ("pullRequest", "string"), ("head", "string"), ("mergeCommit", "string"), ("checkStatus", "string"), ("problem", "object")),
@@ -1218,6 +1231,9 @@ public static class OpenApiDocument
         "/v1/packages/deprecate" => "PackagesDeprecateRequest",
         "/v1/security-reports/poll" => "SecurityReportsPollRequest",
         "/v1/security-reports/triage" => "SecurityReportTriageRequest",
+        "/v1/observers/declare" => "ObserverDeclareRequest",
+        "/v1/observers/report" => "ObserverReportRequest",
+        "/v1/observers/withdraw" => "ObserverWithdrawRequest",
 
         "/v1/estate/upgrade" => "UpgradeRequest",
         "/v1/history/checkpoints" => "HistoryCheckpointRequest",
@@ -1374,6 +1390,10 @@ public static class OpenApiDocument
         ("POST", "/v1/packages/unlist") => "Record unlisting intent and return the exact nuget.org step for the account holder. An identical rerun keeps the original intent; no registry write or API key is used.",
         ("POST", "/v1/security-reports/poll") => "Read every repository a product's security-reports declaration names now, through its reader, as the operator; nothing is recorded or posted. Keeps each advisory's identifier, state, severity and response hash on this machine, never its text.",
         ("POST", "/v1/security-reports/triage") => "Record the operator's triage of one observed advisory revision, named by identifier, repository and content hash, with its disposition and reason. A changed revision needs triage again.",
+        ("GET", "/v1/observers") => "From 0.9.4 (OPS-20): the automated observers declared on the runtime's machine for this estate, each with its kind, interval, grace, latest report and state as of the runtime's clock. Silence past the interval plus the grace, a failed report and a report that it could not observe are each attention for the operator. Reading changes nothing.",
+        ("POST", "/v1/observers/declare") => "From 0.9.4 (OPS-20): the operator declares an automated observer on the runtime's machine, or declares it again, with its kind, the interval it reports at and the grace its silence is allowed. Kept on that machine; nothing is recorded.",
+        ("POST", "/v1/observers/report") => "From 0.9.4 (OPS-20): one report of a declared observer: passed, failed, or not-observing with its reason (quota-exhausted, schedule-disabled or unavailable), which is attention, never a pass. Kept on the runtime's machine; nothing is recorded.",
+        ("POST", "/v1/observers/withdraw") => "From 0.9.4 (OPS-20): the operator withdraws a declared observer with a reason, so that its silence stops being attention. Nothing is recorded.",
         ("POST", "/v1/packages/deprecate") => "Record exact deprecation intent and return the account holder's nuget.org step. Observe the original operation afterwards to record the outcome.",
         ("POST", "/v1/releases/observe") => "Observe a release's run, draft and publication and record what settled (the operation revision, the candidate, the observed publication); or cancel an intent that had no effect.",
         ("POST", "/v1/estate/upgrade") => "Plan or apply an upgrade to a published release.",
