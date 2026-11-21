@@ -99,6 +99,12 @@ public class PolicyGoldenFixtureTests
         JsonObject qualification = JsonNode.Parse(HarnessQualificationTests.Body())!.AsObject();
         qualification["reach"] = new JsonObject { ["file"] = "readable", ["host"] = "reachable" };
         progress.Estate.Add("harness-qualification", progress.Estate.OperatorId, qualification.ToJsonString());
+        // From 0.9.4 (GOAL-11) a person's hand-over cites the lapse ask about the agent's assignment it takes the step over from.
+        RecordEnvelope lapseAsk = progress.Estate.Add("ask", progress.Estate.OperatorId, $$"""{"to":"{{progress.Estate.OperatorId}}","question":"Hand the step to another principal of its role?","recommendation":"Hand it over, citing this ask.","consequence":"The step waits with the lapsed session.","state":"open"}""", progress.Assignment.Reference);
+        JsonObject handover = JsonNode.Parse(progress.Assignment.Body.GetRawText())!.AsObject();
+        handover["contributor"] = progress.Estate.OperatorId;
+        handover["basis"] = lapseAsk.Id;
+        progress.Estate.Add("assignment", progress.Estate.OperatorId, handover.ToJsonString(), progress.Order.Reference);
         EstateModel progressModel = progress.Estate.Load();
         Assert.False(progressModel.Findings.HasErrors, string.Join('\n', progressModel.Findings));
         // History checkpoints have their own golden estate.

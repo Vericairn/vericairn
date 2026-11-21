@@ -33,7 +33,8 @@ public sealed class AssignmentType : IRecordType
         new("note", "string", false, "Free text."),
         new("step", "object", false, "For an assignment of a run's work order, the flow step it carries: key, instance for a step that runs over a list under each, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do. A review before hand-off adds review: the items it reviews (none for a step that declares no items) and the exact subject {type, id, hash} that carries them; its contributor is never an author of the step's work unless every item takes a self review.", 3),
         new("occurrence", "object", false, "From 0.9.4, for an assignment of a standing agent's work order, the occurrence it carries: key (the goal's identity, trigger, revision and item, or for a duty trigger duty/ and the duty occurrence's identity), trigger, revision (the goal revision the trigger's declaration originates from) and item (schedule {interval, dueAt}, event {record {type, id, hash}}, condition {failing, records}, request {at, by} or duty {occurrence, policy, rule, dueAt, deadline, schedule}). Every assignment of a standing agent's work order names one and only those do; a key holds one assignment, whoever records it, unless a person takes its step over. A reader lacking it refuses the assignment, which admits no unknown field.", 3),
-        new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
+        new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step. From 0.9.4, additive in format 3: session, an assignment routing gave an agent's live session, stored alone and holding its step at once; a reader before 0.9.4 refuses it.", 2),
+        new("basis", "ulid", false, "From 0.9.4, additive in format 3: for a hand-over, the lapse ask it answers, an ask about the assignment it takes the step over from. Recorded by a person, never an agent; a reader before 0.9.4 refuses it as an unknown field.", 3),
     ];
 
     /// <summary>The most assignments a brief's after names.</summary>
@@ -121,8 +122,8 @@ public sealed class AssignmentType : IRecordType
             && brief.TryGetProperty("retrieval", out JsonElement retrieval) && retrieval.ValueKind == JsonValueKind.String && retrieval.GetString() == PublicRetrieval;
     }
 
-    /// <summary>The records routing stores an assignment together with.</summary>
-    public static readonly ImmutableArray<string> RoutedWith = ["run", "ask"];
+    /// <summary>The records routing stores an assignment together with; from 0.9.4 (format 3) also session, which it stores alone.</summary>
+    public static readonly ImmutableArray<string> RoutedWith = ["run", "ask", "session"];
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
@@ -221,10 +222,13 @@ public sealed class AssignmentType : IRecordType
         }
 
         BodyReader? occurrence = body.Since(3, "occurrence") ? body.Nested("occurrence", false) : null;
-        if (body.Since(2, "routedWith"))
+        if (body.Since(2, "routedWith") && body.Enum("routedWith", false, RoutedWith) == "session" && context.Format < 3)
         {
-            body.Enum("routedWith", false, RoutedWith);
+            body.Error("body.format", "routedWith", "routedWith session belongs to record format 3, and this record states an earlier format; an estate writes it once it is upgraded to a release that writes format 3.");
         }
+
+        // From 0.9.4 (GOAL-11): a hand-over's basis, the lapse ask it answers.
+        string? basis = body.Since(3, "basis") ? body.Ulid("basis", false) : null;
 
         SavedPrompts.ValidateUse(context);
         ExecutionPolicy.Read(body);
@@ -266,6 +270,27 @@ public sealed class AssignmentType : IRecordType
         if (contributor is not null && context.Principal(contributor) is null)
         {
             context.Error("assignment.contributor", $"Contributor {contributor} has no principal record; contributors are admitted before work is assigned to them.");
+        }
+
+        // From 0.9.4 (GOAL-11): a hand-over citing a lapse ask is a person's act, never an agent's, and takes over the step of the
+        // assignment the ask is about.
+        if (basis is not null && context.RequireReference("basis", basis, "ask") is RecordEnvelope ask)
+        {
+            if (!GoalRules.IsPerson(context.Model, by))
+            {
+                context.Error("assignment.basis", "A hand-over citing a lapse ask is recorded by a person, the one taking the step over, who decides for its goal or an operator, and never by an agent.");
+            }
+            else if (order is not null && !Routing.MayHandOver(context.Model, by, contributor, order, context.Record))
+            {
+                context.Error("assignment.basis", "A hand-over citing a lapse ask is recorded by the person taking the step over, who decides for its goal or an operator.");
+            }
+
+            if (ask.Subject is not { Type: "assignment" } about || context.Find(about.Id) is not RecordEnvelope lapsed
+                || lapsed.Subject is null || order is null || !context.Model.Chain(context.Model.Latest(order)).Contains(lapsed.Subject.Id)
+                || FlowRuns.StepOf(lapsed) != FlowRuns.StepOf(context.Record) || StandingAgents.KeyOf(lapsed) != StandingAgents.KeyOf(context.Record))
+            {
+                context.Error("assignment.basis", $"Ask {basis} is about no assignment of this step; a hand-over's basis is the lapse ask about the assignment it takes the step over from.");
+            }
         }
     }
 }

@@ -39,7 +39,30 @@ public static class Routing
     /// <param name="Holds">Whether a key store of this machine holds a device's key, by the device's identity.</param>
     /// <param name="Custody">The custody guard here for an unattended run of a goal by an agent: one reason per device of an operator or of the goal's sponsor whose key signs here without its owner's presence; empty when none does.</param>
     /// <param name="Now">When availability is judged: the grants and the custody exceptions in force then.</param>
-    public sealed record Machine(IReadOnlyList<(string Launcher, string? Harness)> Launchers, Func<string, bool> Holds, Func<RecordEnvelope, string, IReadOnlyList<string>> Custody, DateTimeOffset Now);
+    public sealed record Machine(IReadOnlyList<(string Launcher, string? Harness)> Launchers, Func<string, bool> Holds, Func<RecordEnvelope, string, IReadOnlyList<string>> Custody, DateTimeOffset Now)
+    {
+        /// <summary>From 0.9.4 (GOAL-11): the agent sessions this runtime registered whose leases are live, for the session route; none when it keeps no presence.</summary>
+        public IReadOnlyList<LiveSession> Sessions { get; init; } = [];
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11; design/events-and-presence.md § 10): an agent session registered with this runtime whose lease is live,
+    /// which routing may give a step of a role it offers while it holds fewer steps than its capacity.
+    /// </summary>
+    /// <param name="Session">The session's public identity.</param>
+    /// <param name="Principal">The principal it acts for, by the id of its first record.</param>
+    /// <param name="Label">Its label.</param>
+    /// <param name="Roles">The roles it offers; empty for every role the roster names its principal for.</param>
+    /// <param name="Capacity">How many steps it takes at once.</param>
+    /// <param name="Holding">How many open steps it holds now.</param>
+    public sealed record LiveSession(string Session, string Principal, string? Label, IReadOnlyList<string> Roles, int Capacity, int Holding)
+    {
+        /// <summary>The open assignments it holds, by the id of each one's first record.</summary>
+        public IReadOnlyList<string> Assignments { get; init; } = [];
+
+        /// <summary>True when it offers a role and has room for another step.</summary>
+        public bool Takes(string role) => Holding < Capacity && (Roles.Count == 0 || Roles.Contains(role, StringComparer.Ordinal));
+    }
 
     /// <summary>Where a role's principals come from.</summary>
     /// <param name="Roster">The roster record at its current revision; null when the goal's own roles name them, or when there is no roster.</param>
@@ -60,6 +83,12 @@ public static class Routing
 
         /// <summary>True for a person: a human principal.</summary>
         public bool IsPerson => Kind == "human";
+
+        /// <summary>From 0.9.4 (GOAL-11): for a person away now, as their communication setting declares, when they are back.</summary>
+        public string? AwayUntil { get; init; }
+
+        /// <summary>From 0.9.4 (GOAL-11): for an agent available through a live session rather than a launcher, the session's identity.</summary>
+        public string? Session { get; init; }
     }
 
     /// <summary>The role a work order is carried in: the role it names, or builder.</summary>
@@ -267,7 +296,24 @@ public static class Routing
     /// principal record, the operator role for the decider role, and for a reserved action to hold it. Whether the goal is active, and
     /// the runs in flight, decide when a run starts, not who carries the step.
     /// </summary>
-    public static Candidate Evaluate(EstateModel model, RecordEnvelope goal, AgentRuns.Ledger ledger, string principal, string role, RecordEnvelope? assignment, Machine machine)
+    public static Candidate Evaluate(EstateModel model, RecordEnvelope goal, AgentRuns.Ledger ledger, string principal, string role, RecordEnvelope? assignment, Machine machine) =>
+        Evaluate(model, goal, ledger, principal, role, assignment, machine, null);
+
+    /// <summary>
+    /// <see cref="Evaluate(EstateModel, RecordEnvelope, AgentRuns.Ledger, string, string, RecordEnvelope?, Machine)"/>, and from 0.9.4
+    /// (GOAL-11): a person away now is unavailable, and an agent without a launcher here is available through a live session that offers
+    /// the role and has room, when the step's exposure reads nothing. <paramref name="sessionExposure"/> says why it reads (empty when it
+    /// reads nothing); null when it is not known, and then no session takes the step (design/holds-reads-sends.md § 7).
+    /// </summary>
+    /// <param name="model">The estate.</param>
+    /// <param name="goal">The goal.</param>
+    /// <param name="ledger">The goal's agent-run ledger.</param>
+    /// <param name="principal">The principal the roster names.</param>
+    /// <param name="role">The step's role.</param>
+    /// <param name="assignment">The assignment that holds the step, when one does.</param>
+    /// <param name="machine">What this machine offers routing.</param>
+    /// <param name="sessionExposure">Why the step's exposure reads, from <see cref="SessionExposure"/>; null when unknown.</param>
+    public static Candidate Evaluate(EstateModel model, RecordEnvelope goal, AgentRuns.Ledger ledger, string principal, string role, RecordEnvelope? assignment, Machine machine, IReadOnlyList<string>? sessionExposure)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
@@ -295,7 +341,14 @@ public static class Routing
                 reasons.Add($"the step is a reserved action, {Describe(action)}, and it holds neither the operator role nor a grant of {action} in force");
             }
 
-            return new Candidate(principal, name, kind, reasons.Count == 0, null, reasons);
+            // From 0.9.4 (GOAL-11): a person declares an absence; routing passes over them while it lasts.
+            string? away = AwayUntil(model, principal, machine.Now);
+            if (away is not null)
+            {
+                reasons.Add($"away until {away}, as their communication setting declares");
+            }
+
+            return new Candidate(principal, name, kind, reasons.Count == 0, null, reasons) { AwayUntil = away };
         }
 
         if (kind != "agent")
@@ -310,10 +363,11 @@ public static class Routing
 
         string? product = record.Body.TryGetProperty("agent", out JsonElement agent) && agent.ValueKind == JsonValueKind.Object && agent.TryGetProperty("product", out JsonElement p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
         string? launcher = machine.Launchers.FirstOrDefault(l => product is not null && (string.Equals(l.Harness, product, StringComparison.OrdinalIgnoreCase) || string.Equals(l.Launcher, product, StringComparison.OrdinalIgnoreCase))).Launcher;
+        var launching = new List<string>();
         if (launcher is null)
         {
             List<string> named = machine.Launchers.Where(l => l.Harness is not null).Select(l => $"{l.Launcher} for {l.Harness}").ToList();
-            reasons.Add($"no launcher for its harness, {product ?? "which its principal record does not name"}, is available on this machine ({(named.Count == 0 ? "none is" : string.Join(", ", named))})");
+            launching.Add($"no launcher for its harness, {product ?? "which its principal record does not name"}, is available on this machine ({(named.Count == 0 ? "none is" : string.Join(", ", named))})");
         }
 
         List<RecordEnvelope> admitted = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == principal && SignatureChecks.IsAdmitted(model, d)).ToList();
@@ -323,11 +377,112 @@ public static class Routing
         }
         else if (!admitted.Any(d => machine.Holds(model.Chain(d)[0])))
         {
-            reasons.Add("no key of its admitted devices is held on this machine, so the MCP server here would list only the read-only tools");
+            launching.Add("no key of its admitted devices is held on this machine, so the MCP server here would list only the read-only tools");
         }
 
+        // From 0.9.4 (GOAL-11): without a launcher here, a live session registered for the role carries the step, unless the step's
+        // exposure reads: the runtime cannot see a session's own facts (design/holds-reads-sends.md § 7).
+        string? session = null;
+        if (launching.Count > 0 && admitted.Count > 0 && machine.Sessions.FirstOrDefault(s => s.Principal == principal && s.Takes(role)) is LiveSession live)
+        {
+            if (sessionExposure is { Count: 0 })
+            {
+                session = live.Session;
+                launching.Clear();
+            }
+            else
+            {
+                launching.Add($"its live session {live.Label ?? live.Session} takes no step whose exposure reads, and this one's does: {(sessionExposure is null ? "its exposure is not known here, which counts as reading" : string.Join("; ", sessionExposure))}");
+            }
+        }
+
+        reasons.AddRange(launching);
         reasons.AddRange(AgentRuns.Exhausted(model, ledger, assignment?.Id));
-        return new Candidate(principal, name, kind, reasons.Count == 0, launcher, reasons);
+        return new Candidate(principal, name, kind, reasons.Count == 0, session is null ? launcher : null, reasons) { Session = session };
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11): when a person is away at a time, as their current own-scope communication setting declares, when they are
+    /// back; null when they are available, declare nothing, or have divergent current revisions, which declare nothing until reconciled.
+    /// </summary>
+    public static string? AwayUntil(EstateModel model, string? person, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        if (model.CurrentPrincipal(person) is not RecordEnvelope who)
+        {
+            return null;
+        }
+
+        string identity = model.Chain(who)[0];
+        List<RecordEnvelope> settings = model.Current("communication-setting")
+            .Where(r => EstateModel.BodyString(r, "scope") == "person" && model.CurrentPrincipal(EstateModel.BodyString(r, "recipient")) is { } recipient && model.Chain(recipient)[0] == identity)
+            .ToList();
+        if (settings.Count != 1 || !settings[0].Body.TryGetProperty("values", out JsonElement values) || values.ValueKind != JsonValueKind.Object
+            || !values.TryGetProperty("availability", out JsonElement availability) || availability.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        string? Text(string name) => availability.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        string? until = Text("until");
+        string? from = Text("from");
+        string now = Model.RecordParser.FormatTimestamp(at);
+        return Text("state") == "away" && until is not null && string.CompareOrdinal(now, until) < 0 && (from is null || string.CompareOrdinal(now, from) >= 0) ? until : null;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11; design/holds-reads-sends.md § 7): why a step's exposure reads, so that no live session takes it, since the
+    /// runtime cannot see a session's own facts; empty when it reads nothing. Until the exposure algorithm is built (RUN-06) this judges
+    /// conservatively from what the records show: a step reads when its goal, its work order, a record the work order names among its
+    /// inputs, or a record the step pins was written by an agent principal (outside-derived, since a session's exposure is unknown), is a
+    /// conversation observation (outside text), or cannot be resolved here (unknown counts as present).
+    /// </summary>
+    public static IReadOnlyList<string> SessionExposure(EstateModel model, RecordEnvelope goal, RecordEnvelope? order, IEnumerable<RecordEnvelope?>? pinned = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        var reasons = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        void Judge(RecordEnvelope? record, string what)
+        {
+            if (record is null)
+            {
+                reasons.Add($"{what} cannot be resolved here, which counts as reading");
+                return;
+            }
+
+            if (!seen.Add(record.Id))
+            {
+                return;
+            }
+
+            if (model.CurrentPrincipal(record.By) is { } author && EstateModel.BodyString(author, "kind") == "agent")
+            {
+                reasons.Add($"{what} ({record.Type} {record.Id}) was written by the agent {NameOf(model, record.By)}, so it is outside-derived");
+            }
+            else if (record.Type == "observation" && EstateModel.BodyString(record, "kind") == "conversation")
+            {
+                reasons.Add($"{what} ({record.Type} {record.Id}) is a conversation observation, outside text");
+            }
+        }
+
+        Judge(model.Latest(goal), "the goal");
+        if (order is not null)
+        {
+            RecordEnvelope current = model.Latest(order);
+            Judge(current, "the work order");
+            foreach (string id in GoalRules.Inputs(current))
+            {
+                Judge(model.ById.TryGetValue(id, out RecordEnvelope? input) ? model.Latest(input) : null, "an input of the work order");
+            }
+        }
+
+        foreach (RecordEnvelope? record in pinned ?? [])
+        {
+            Judge(record, "a record the step pins");
+        }
+
+        return reasons;
     }
 
     /// <summary>
@@ -492,7 +647,8 @@ public static class Routing
     internal static bool Stranded(EstateModel model, RecordEnvelope assignment, IReadOnlyList<string> chain, RecordEnvelope? before)
     {
         string? with = EstateModel.BodyString(assignment, "routedWith");
-        if (with is null)
+        // From 0.9.4 (GOAL-11) an assignment routed to a live session is stored alone, so it holds its step at once.
+        if (with is null or "session")
         {
             return false;
         }

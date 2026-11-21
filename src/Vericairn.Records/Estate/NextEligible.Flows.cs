@@ -156,8 +156,8 @@ public static partial class NextEligible
                 ? $"step {instance.Step.Key}'s decision is a person's{(transition.Undelegable is string act ? $", an act never delegated ({act})" : ", as the flow requires")}, and an agent never decides it"
                 : null;
             Route route = RouteOf(model, current, status, ledger, role, Routing.ReservedAction(role), assignments, asks, runs, machine, candidate => (person || personal is not null) && candidate.IsAgent
-                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, personal ?? $"the flow marks the {role} role a person's, and an agent never holds it"] }
-                : candidate);
+                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, personal ?? $"the flow marks the {role} role a person's, and an agent never holds it"], Session = null }
+                : candidate, sessionExposure: Routing.SessionExposure(model, current, position.Work, instance.Inputs.Select(i => i.Carrier)));
             steps.Add(new FlowStepRoute(instance, route));
         }
 
@@ -387,7 +387,7 @@ public static partial class NextEligible
         Route? route = step.Route;
         RecordEnvelope? assignment = step.Review is null ? step.Step.Assignment : step.Review.Assignments.Count == 0 ? null : step.Review.Assignments[^1];
         string? contributor = assignment is null ? null : EstateModel.BodyString(assignment, "contributor");
-        return new JsonObject
+        var json = new JsonObject
         {
             ["key"] = step.Step.Step.Key,
             ["instance"] = step.Step.Instance,
@@ -425,8 +425,14 @@ public static partial class NextEligible
                     ["refusals"] = Strings(route.Custody),
                     ["exception"] = route.Exception is RecordEnvelope exception ? new JsonObject { ["id"] = exception.Id, ["by"] = exception.By, ["expires"] = EstateModel.BodyString(exception, "expires"), ["reason"] = EstateModel.BodyString(exception, "reason") } : null,
                 } : null,
-                ["candidates"] = new JsonArray(route.Candidates.Select(c => (JsonNode)new JsonObject { ["principal"] = c.Principal, ["name"] = c.Name, ["kind"] = c.Kind, ["available"] = c.Available, ["launcher"] = c.Launcher, ["reasons"] = Strings(c.Reasons) }).ToArray()),
+                ["candidates"] = new JsonArray(route.Candidates.Select(c => (JsonNode)CandidateJson(c)).ToArray()),
             },
         };
+        if (route?.Session is string session && json["route"] is JsonObject routed)
+        {
+            routed["session"] = session;
+        }
+
+        return json;
     }
 }

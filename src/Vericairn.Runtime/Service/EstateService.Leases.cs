@@ -100,6 +100,8 @@ public sealed partial class EstateService
 
             DateTimeOffset now = PresenceClock.GetUtcNow();
             List<PresenceLeaseState> leases = ReadLeases();
+            // What was written before this session registered belongs to the sessions live then, never to this one.
+            AttributeWrites(model, leases);
             ExpireLeases(leases, now);
             if (leases.Count(l => l.Principal == principal && l.Live) >= MaxLeasesPerPrincipal)
             {
@@ -373,6 +375,40 @@ public sealed partial class EstateService
             WriteLeases(leases);
             MarkEventsDirty();
         }
+    }
+
+    /// <summary>From 0.9.4 (GOAL-11): routing's session route gives a step to a live session, which then holds its assignment. Caller holds the gate.</summary>
+    private void HoldForSessionLocked(string sessionId, string assignment)
+    {
+        List<PresenceLeaseState> leases = ReadLeases();
+        if (leases.FirstOrDefault(l => l.Session == sessionId) is { } lease && !lease.Holds.Contains(assignment, StringComparer.Ordinal))
+        {
+            lease.Holds.Add(assignment);
+            WriteLeases(leases);
+            MarkEventsDirty();
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11): the live sessions here, for routing's session route: each one's principal, roles and capacity and how many
+    /// open steps it holds now. None when this runtime keeps no presence. Caller holds the gate.
+    /// </summary>
+    private IReadOnlyList<Routing.LiveSession> LiveSessions(EstateModel model)
+    {
+        if (!PresenceKept || session.IsReadOnly)
+        {
+            return [];
+        }
+
+        long now = PresenceClock.GetUtcNow().ToUnixTimeSeconds();
+        List<PresenceLeaseState> leases = ReadLeases();
+        AttributeWrites(model, leases);
+        return [.. leases.Where(l => l.Live && l.ExpiresAt > now).OrderBy(l => l.RegisteredAt).ThenBy(l => l.Session, StringComparer.Ordinal)
+            .Select(l =>
+            {
+                List<string> open = [.. l.Holds.Where(h => OpenHolding(model, l.Principal, h) is not null)];
+                return new Routing.LiveSession(l.Session, l.Principal, l.Label, l.Roles, l.Capacity, open.Count) { Assignments = open };
+            })];
     }
 
     /// <summary>
