@@ -30,10 +30,13 @@ public sealed class UpgradeReturnTests
         f.Follow(version: "0.9.3");
         f.Publish("0.9.4");
         Git(f.Estate.Root, "init", "-q", "-b", "main");
+        // Git for Windows converts line endings on checkout by default; the clone here does so on every platform.
+        Git(f.Estate.Root, "config", "core.autocrlf", "true");
         Git(f.Estate.Root, "add", "-A");
         Git(f.Estate.Root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "The estate before the upgrade");
         string commit = Git(f.Estate.Root, "rev-parse", "HEAD");
         byte[] manifestBefore = File.ReadAllBytes(f.ManifestPath);
+        string[] filesBefore = Snapshot(f.Estate.Root, exclude: [".git", ".vericairn"]);
 
         string clone;
         UpgradeReturn back;
@@ -77,7 +80,8 @@ public sealed class UpgradeReturnTests
 
             Assert.Contains("runtime stop", back.Steps[0], StringComparison.Ordinal);
             Assert.Contains($"Return the estate's files to commit {commit}", back.Steps[1], StringComparison.Ordinal);
-            Assert.Contains("stash --include-untracked", back.Steps[1], StringComparison.Ordinal);
+            Assert.Contains("-c core.autocrlf=false stash --include-untracked", back.Steps[1], StringComparison.Ordinal);
+            Assert.Contains("-c core.autocrlf=false revert", back.Steps[1], StringComparison.Ordinal);
             Assert.Contains(Path.Combine(point.Directory, "state"), back.Steps[2], StringComparison.Ordinal);
             Assert.Contains("./bootstrap runtime start", back.Steps[3], StringComparison.Ordinal);
             Assert.Contains("release 0.9.3 reads the estate as the upgrade leaves it", back.Steps[4], StringComparison.Ordinal);
@@ -87,8 +91,10 @@ public sealed class UpgradeReturnTests
         }
 
         // The stated way back, step by step: the runtime is stopped (disposed here), the files return to the commit, the state is put back.
-        Git(f.Estate.Root, "stash", "--include-untracked");
+        Git(f.Estate.Root, "-c", "core.autocrlf=false", "stash", "--include-untracked");
         Assert.Equal(manifestBefore, File.ReadAllBytes(f.ManifestPath));
+        // Every file of the estate returns with its exact bytes, though the clone converts line endings on checkout.
+        Assert.Equal(filesBefore, Snapshot(f.Estate.Root, exclude: [".git", ".vericairn"]));
         string state = Path.Combine(back.RestorePoint!.Directory, "state");
         foreach (string leftover in new[] { "live.db-wal", "live.db-shm" }) File.Delete(Path.Combine(clone, leftover));
         foreach (string file in Directory.EnumerateFiles(state)) File.Copy(file, Path.Combine(clone, Path.GetFileName(file)), overwrite: true);
@@ -192,7 +198,9 @@ public sealed class UpgradeReturnTests
     public void AReleaseReadsWhatItsOwnOrALaterReleaseIntroducedAndAPrereleaseDoesNot(string version, string release, int order) =>
         Assert.Equal(order, Math.Sign(UpgradeReturns.Compare(version, release)));
 
-    private static string[] Snapshot(string root) => [.. Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+    // The repository's files, leaving out the directories named (git's own, and the clone's working directory the runtime keeps).
+    private static string[] Snapshot(string root, string[]? exclude = null) => [.. Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+        .Where(file => exclude is null || !exclude.Contains(Path.GetRelativePath(root, file).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0], StringComparer.Ordinal))
         .Select(file => Path.GetRelativePath(root, file) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)))).Order(StringComparer.Ordinal)];
 
     private static string Git(string directory, params string[] arguments)

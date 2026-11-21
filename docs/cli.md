@@ -551,8 +551,9 @@ restore point: the estate repository's checked-out commit (none for a local-only
 the clone, a consistent copy of its live store and the files beside it, under `restore-points/<id>` beside the live store, with an
 inventory of their hashes in `restore-point.json`. The migration record's changes name the restore point's id, commit and inventory
 hash and the verdict, never its directory. The output then states the way back to the previous release, step by step with this
-machine's paths: stop the runtime, return the estate's files to the commit (`git stash --include-untracked` before the upgrade is
-committed, a revert of its commit after), copy the exported state back beside the live store, and run the previous release. With
+machine's paths: stop the runtime, return the estate's files to the commit with their exact bytes (`git -c core.autocrlf=false stash
+--include-untracked` before the upgrade is committed, `git -c core.autocrlf=false revert` of its commit after, so that no line
+ending changes on Windows), copy the exported state back beside the live store, and run the previous release. With
 `--json`, the response adds `return`: `previousPin`, `readability`, `oneWay`, `reasons`, `steps` and, once applied, `restorePoint`
 (`id`, `createdAt`, `commit`, `clean`, `directory`, `stateHash`, `files`). A restore point is removed again when the upgrade is not
 applied.

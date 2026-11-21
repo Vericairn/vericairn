@@ -32,7 +32,9 @@ public sealed partial class EstateService
         {
             steps.Add($"Stop the runtime serving the estate on this machine: vericairn --estate {Quote(root)} runtime stop.");
             if (restore.Commit is { } commit)
-                steps.Add($"Return the estate's files to commit {commit}: before the upgrade is committed, git -C {Quote(root)} stash --include-untracked; once it is committed, git -C {Quote(root)} revert the commit that holds it. Either way {EstateLayout.ManifestPath} pins {plan.FromPin} again."
+                // Git for Windows converts line endings on checkout by default; with conversion off, every file returns with its exact bytes,
+                // whatever the clone's configuration, as the estate's .gitattributes (eol=lf) already keeps them on a clone estate init made.
+                steps.Add($"Return the estate's files to commit {commit}, with their exact bytes: before the upgrade is committed, git -C {Quote(root)} -c core.autocrlf=false stash --include-untracked; once it is committed, git -C {Quote(root)} -c core.autocrlf=false revert the commit that holds it. Either way {EstateLayout.ManifestPath} pins {plan.FromPin} again, and no line ending changes."
                     + (restore.Clean ? string.Empty : " The working tree had uncommitted changes beside that commit; the export holds the live store with them, but the commit does not."));
             else
                 steps.Add(synced

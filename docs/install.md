@@ -230,8 +230,10 @@ this machine's local state for the clone, its live store included, beside the li
 record names the restore point by id, commit and inventory hash. The output ends with the way back to the previous release:
 
 1. Stop the runtime serving the estate on this machine (`vericairn runtime stop`).
-2. Return the estate's files to the restore point's commit: `git stash --include-untracked` before you commit the upgrade, or
-   `git revert` of its commit after. `estate/manifest.json` then pins the previous release again.
+2. Return the estate's files to the restore point's commit: `git -c core.autocrlf=false stash --include-untracked` before you
+   commit the upgrade, or `git -c core.autocrlf=false revert` of its commit after. With line-ending conversion off, every file
+   returns with its exact bytes on Windows too, as the estate's `.gitattributes` (`eol=lf`) keeps them on a checkout.
+   `estate/manifest.json` then pins the previous release again.
 3. With no runtime serving the estate, copy the restore point's exported state back beside the live store, removing the live
    store's `-wal` and `-shm` files first; the output names both directories.
 4. Run the previous release: `./bootstrap runtime start` (`.\bootstrap.ps1 runtime start` on Windows) fetches the release the
