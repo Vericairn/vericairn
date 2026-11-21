@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 39, November 21, 2026. Add `progress target set`, `list`, `remove`, `refresh` and `follow`, which keep the estate's progress at a target such as a pinned GitHub discussion, in the development build.
+
 Revision 38, November 20, 2026. Say that under a `concurrent-paths` policy at `refuse`, `work assign`, `work attempt`, `records new assignment` and `worker run` refuse work that leaves an unmet or unavailable pair, naming each pair and the remedies that apply to the write, in the development build.
 
 Revision 37, November 17, 2026. Add standing agents: `goal propose --kind stewardship --standing <flow>` with `--trigger`, `--period`, `--until`, `--awaiting-review` and `--runs-on`, `goal due`, which lists a standing agent's occurrences as of an explicit time, `--occurrence` and `--now` on `goal step`, which carries one occurrence per command within the agent's caps and asks once for renewal before its until time, `--standing` and `--stop-runs` on `goal pause`, and a standing agent's `goal stop` asking its runs to stop and retiring its work order, in the development build.
@@ -1355,6 +1357,23 @@ what is raised afterwards. While the agent's open outputs, its possibilities sti
 not closed, reach `open` (ten when omitted), its occurrences defer and no run of it starts. `goal due`, `status` and `progress` show
 its open outputs; an occurrence's brief states its output caps and names the agent's earlier open and declined possibilities among
 its sources.
+
+## `vericairn progress target` (0.9.4)
+
+Keeps the estate's progress at a target, such as a pinned GitHub discussion, through the adapter its configuration on this
+machine chooses (`WATCH-06`): `set`, `list` and `remove` configure targets and send nothing; `refresh <name>` brings one equal to
+the estate's progress now, creating its place once and replacing its text only when it differs, and `--dry-run` shows the text
+and sends nothing; `follow <name>` follows the daemon's event journal and refreshes and comments only on the events the target's
+triggers name, until interrupted or after `--count` outcomes. A destination anyone may read always takes the public form, which
+carries nothing a disclosure rule holds. `refresh` exits 0 when the target is equal, 2 when it refused and sent nothing, and 1
+when an effect was stopped or not confirmed; `--json` writes `vericairn.progress-target-outcome/1`, naming every record the text
+carries. See [Progress targets](progress-targets.md).
+
+```sh
+vericairn progress target set status --adapter github-discussions --setting repository=Example/example-estate --form private
+vericairn progress target refresh status --dry-run
+vericairn progress target follow status
+```
 
 ## `vericairn estate first-authority` (0.9.3)
 

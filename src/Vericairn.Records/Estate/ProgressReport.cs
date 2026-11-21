@@ -19,7 +19,7 @@ namespace Vericairn.Records.Estate;
 /// derivation (<see cref="ReleaseContents"/>) and the next eligible work is <see cref="NextEligible"/>, so the report never contradicts
 /// status or the notes and holds no figure the records do not hold: its numbers are counts of records, each beside its denominator.
 /// </summary>
-public static class ProgressReport
+public static partial class ProgressReport
 {
     /// <summary>The machine form's format.</summary>
     public const string Format = "vericairn.progress/1";
@@ -171,6 +171,7 @@ public static class ProgressReport
             sorted, states, model.Current("release").Count(), releases, upcoming, planned, Asked(model), Due(model, orders, assignments))
         {
             Overlaps = AssignmentOverlaps.Overlaps(model),
+            Assignments = assignments,
         };
     }
 
@@ -645,5 +646,8 @@ public static class ProgressReport
     {
         /// <summary>From 0.9.4 (CODE-73), the overlaps among active assignments, from the records alone.</summary>
         public IReadOnlyList<AssignmentOverlaps.Overlap> Overlaps { get; init; } = [];
+
+        /// <summary>From 0.9.4 (WATCH-06), every current assignment with its derived state, which a progress target's in-flight work reads.</summary>
+        public IReadOnlyList<WorkView.AssignmentItem> Assignments { get; init; } = [];
     }
 }
