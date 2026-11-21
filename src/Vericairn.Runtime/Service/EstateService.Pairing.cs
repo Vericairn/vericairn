@@ -29,6 +29,12 @@ public sealed partial class EstateService
                 return (null, denied.Message);
             }
 
+            // From 0.9.4 (FIX-159): no pairing code, whose use signs and admits a device, is issued while the estate leaves records unread.
+            if (ActingRefusal.BeforeSigning(model, "issuing a pairing code") is { } unread)
+            {
+                return (null, unread.Message);
+            }
+
             var draft = new RecordDraft("admission", by, default, new RecordReference("device", Ulid.NewUlid().Value, null));
             _ = ResolveSigner(model, draft, out IRecordSigner? signer);
             string? device = requestDevice.Value is { Closed: false } request ? request.Device : signer?.DeviceId;

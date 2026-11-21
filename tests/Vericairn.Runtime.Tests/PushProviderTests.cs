@@ -387,6 +387,31 @@ public sealed class PushProviderTests
     }
 
     [Fact]
+    public void APushToItsTargetBranchIsRefusedBeforeTheRemoteIsRead()
+    {
+        var scripted = new RecordedGit();
+        var adapter = new GitPushAdapter(scripted.Run);
+        Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(Path.GetTempPath(), "https://example.invalid/widget", "main", "main", Head, []));
+        Assert.DoesNotContain(scripted.Calls, c => c.Contains("ls-remote") || c.Contains("push"));
+    }
+
+    [Fact]
+    public void AnAdapterWrittenBeforeTheRecordsHeadsTakesNoCheckedPush()
+    {
+        IPushAdapter adapter = new OlderAdapter();
+        Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(Path.GetTempPath(), "https://example.invalid/widget", "work/change", "main", Head, []));
+        PushPlan plan = new("work/change", "main", Head, Basis, null, Basis);
+        Assert.Throws<ProviderRefusedException>(() => adapter.Push(Path.GetTempPath(), "https://example.invalid/widget", plan, new("scanner", "1.0.0", plan.Range, "passed", 0), []));
+    }
+
+    private sealed class OlderAdapter : IPushAdapter
+    {
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) => new(branch, target, head, head, head, Basis);
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan) { }
+        public string? Observe(string directory, string remote, string branch) => null;
+    }
+
+    [Fact]
     public void NonFastForwardUpdatesAreRefusedBeforeScanning()
     {
         var scripted = new RecordedGit { Divergent = true };
