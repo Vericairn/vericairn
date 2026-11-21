@@ -254,6 +254,19 @@ this rule. The retry path is unchanged: a retry after a known failure or a cance
 the settings it runs with, as a release retry that repairs its workflow or ref does, while a retry after an uncertain
 outcome names its reconciliation and keeps the intent and target.
 
+## A checked push records its basis (0.9.4)
+
+From 0.9.4 (FIX-154) a `change-push` operation records, from its dispatch on, the target fact `basis`: where its scan began,
+`merge-base` or the id of the observed `change-push` of the same repository, destination, branch and target that it continued,
+whose head is its `base`. The runtime derives from these facts, and from the `remoteHead` and `base` of pushes recorded before
+them, which pushes are complete, and a checked merge takes only a complete push of its exact head
+([coverage](changes.md#coverage-094)). Validation refuses a `basis` on another action, any other value, and a continued push
+of another repository, destination, branch or target, or whose head is not the revision's `base` where it records one, with
+`operation.change-basis` at severity `error`. Like every target fact of a repository change but a retry's `base`,
+`remoteHead` and `targetHead` (`operation.change-target`), a recorded `basis` is kept by every later revision, a retry's
+included, so a reader before 0.9.4 keeps it as one more target fact and ignores it. The field adds no record type and no
+format number; the estate stays at format 3.
+
 ## History checkpoints (0.9.2)
 
 From 0.9.2 an estate can hold signed `history-checkpoint` records, a type within

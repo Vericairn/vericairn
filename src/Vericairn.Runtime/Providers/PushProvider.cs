@@ -38,10 +38,36 @@ public interface IPushAdapter
     const string Contract = "vericairn.adapter.push/1";
 
     /// <summary>Resolves the branch, remote expectation and scan base; refuses non-fast-forward updates or unavailable objects.</summary>
+    /// <remarks>
+    /// From 0.9.4 (FIX-154) the runtime calls the overload that takes the records' heads instead; an implementation of this one alone
+    /// takes no checked push. The git adapter's form without them scans from the merge base with the target's observed head.
+    /// </remarks>
     PushPlan Prepare(string directory, string remote, string branch, string target, string head);
 
     /// <summary>Rechecks the plan and scan, then pushes only the pinned commit under the remote expectation.</summary>
+    /// <remarks>From 0.9.4 (FIX-154) the runtime calls the overload that takes the records' heads instead.</remarks>
     void Push(string directory, string remote, PushPlan plan, SecretScan scan);
+
+    /// <summary>
+    /// Resolves the branch, remote expectation and scan base from the records' heads (FIX-154): <paramref name="recorded"/> holds the
+    /// heads of the branch's complete recorded pushes, newest first, at most sixteen. The base is the first of them that the remote
+    /// branch, as observed now, still contains and the new head descends from, otherwise the merge base of the new head with the target
+    /// branch's observed head, including when a recorded head is missing from the clone or its ancestry cannot be read; never the remote
+    /// branch's head as such. A push to the target branch itself, a non-fast-forward update or unavailable objects refuse.
+    /// </summary>
+    /// <remarks>
+    /// The default refuses, so an adapter written before 0.9.4 takes no checked push rather than choosing a base of its own: a checked
+    /// push covers every commit its target does not hold.
+    /// </remarks>
+    PushPlan Prepare(string directory, string remote, string branch, string target, string head, IReadOnlyList<string> recorded) =>
+        throw new ProviderRefusedException("The push adapter cannot take the scan base the records give, which a checked push needs from 0.9.4; nothing was pushed.");
+
+    /// <summary>
+    /// Rechecks the plan, prepared again from the same <paramref name="recorded"/> heads, and the scan, then pushes only the pinned commit
+    /// under the remote expectation (FIX-154). The default refuses, as <see cref="Prepare(string, string, string, string, string, IReadOnlyList{string})"/> does.
+    /// </summary>
+    void Push(string directory, string remote, PushPlan plan, SecretScan scan, IReadOnlyList<string> recorded) =>
+        throw new ProviderRefusedException("The push adapter cannot take the scan base the records give, which a checked push needs from 0.9.4; nothing was pushed.");
 
     /// <summary>The remote branch's current head, or null when it does not exist.</summary>
     string? Observe(string directory, string remote, string branch);
