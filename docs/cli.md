@@ -13,7 +13,7 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 38, November 20, 2026. Say that under a `concurrent-paths` policy at `refuse`, `work assign`, `work attempt`, `records new assignment` and `worker run` refuse work that leaves an unmet or unavailable pair, naming each pair and both remedies, in the development build.
+Revision 38, November 20, 2026. Say that under a `concurrent-paths` policy at `refuse`, `work assign`, `work attempt`, `records new assignment` and `worker run` refuse work that leaves an unmet or unavailable pair, naming each pair and the remedies that apply to the write, in the development build.
 
 Revision 37, November 17, 2026. Add standing agents: `goal propose --kind stewardship --standing <flow>` with `--trigger`, `--period`, `--until`, `--awaiting-review` and `--runs-on`, `goal due`, which lists a standing agent's occurrences as of an explicit time, `--occurrence` and `--now` on `goal step`, which carries one occurrence per command within the agent's caps and asks once for renewal before its until time, `--standing` and `--stop-runs` on `goal pause`, and a standing agent's `goal stop` asking its runs to stop and retiring its work order, in the development build.
 
@@ -1142,9 +1142,13 @@ work in it.
 From 0.9.4 (POLICY-08), under a [`concurrent-paths` policy](policies.md#concurrent-paths-094) at `refuse`, `work assign`,
 `records new assignment`, `work attempt` and `worker run` refuse work that leaves a pair of active assignments unresolved within
 the policy's selection, `unmet` or `unavailable`, before writing anything: the refusal (`assignment.concurrent-paths`, or
-`attempt.concurrent-paths` for an attempt) names each pair, its policy and rule and both remedies, `after` naming the earlier or
-`excludedChanges` on every brief but the owner's. An exception for the exact pair of assignment revisions lets work on an unmet
-pair start.
+`attempt.concurrent-paths` for an attempt) names each pair, its policy and rule and the remedies that apply to the write.
+A new assignment or a revision is told to name the earlier assignment in `after` or to narrow its paths with `excludedChanges`, so
+that it is recorded resolved. `work attempt` and `worker run`, on assignments already recorded, are told to record the later with
+`after` naming the earlier or to exclude the shared paths from every brief but the owner's, or, for an unmet pair, that the operator
+may grant an exception for the exact pair of assignment revisions, which lets work on it start: an exception pins revisions that
+already exist, so it is offered only for recorded pairs. An unavailable pair is resolved by naming each brief's repository or
+narrowing the patterns, never excepted. A `concurrent-paths` finding never holds a release submission.
 
 `work assign --repository <resource id or estate>` names the repository a brief with a path pattern changes when the brief names
 none; without it, the estate's own repository fills it when the estate names no repository resource, and otherwise the write is

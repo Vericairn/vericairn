@@ -10,9 +10,11 @@ namespace Vericairn.Runtime.Service;
 
 /// <summary>
 /// Assignment start (from 0.9.4, POLICY-08; the estate's design/estate-policies.md §§ 6 to 8): under an active refuse-level
-/// <c>vericairn.estate/concurrent-paths</c> policy in force, the write boundary refuses a new assignment or a new attempt that leaves an
-/// unmet or unavailable pair, before writing, naming each pair and both remedies. Record validation never refuses; records already in the
-/// estate keep their reading, and an overlap among them is held only when work on it starts.
+/// <c>vericairn.estate/concurrent-paths</c> policy in force, the write boundary refuses a new assignment, a revision or a new attempt that
+/// leaves an unmet or unavailable pair, before writing, naming each pair and the remedies that apply to the write: sequencing with after or
+/// narrowing with excludedChanges, and, for an attempt on recorded assignments, an exception for the exact pair of an unmet one. Record
+/// validation never refuses; records already in the estate keep their reading, and an overlap among them is held only when work on it
+/// starts.
 /// </summary>
 public sealed partial class EstateService
 {

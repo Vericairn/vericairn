@@ -19,13 +19,14 @@ namespace Vericairn.Runtime.Tests;
 /// From 0.9.4 (POLICY-08; the estate's design/measured-work.md § 5 and design/estate-policies.md §§ 5.11 and 6 to 8): the
 /// <c>vericairn.estate/concurrent-paths</c> kind evaluates the pairs of active assignments whose effective paths meet within its
 /// repository selection, in the estate check and status; at refuse the write boundary refuses a new assignment, a run admission and a
-/// new attempt that leave an unmet or unavailable pair, naming each pair and both remedies, and honors an exception for the exact pair.
+/// new attempt that leave an unmet or unavailable pair, naming each pair and the remedies that apply to the write (an exception only for an
+/// attempt or a run on recorded assignments), and honors an exception for the exact pair. No finding of the kind holds a release.
 /// </summary>
 [Collection("home")]
 public class ConcurrentPathsPolicyTests
 {
     [Fact]
-    public void ARefuseLevelPolicyRefusesANewAssignmentThatLeavesAnUnmetPairAndNamesBothRemedies()
+    public void ARefuseLevelPolicyRefusesANewAssignmentThatLeavesAnUnmetPairAndNamesTheRemediesThatApplyToIt()
     {
         using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
         Order(run, "W-3");
