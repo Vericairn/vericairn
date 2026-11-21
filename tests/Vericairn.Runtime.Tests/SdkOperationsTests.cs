@@ -208,7 +208,11 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(161, synchronous.Length);
+        Assert.Equal(162, synchronous.Length);
+        // From 0.9.4 (OPS-21) the timed stop drill, with its default and its cancellable counterpart.
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.StopDrill));
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.StopDrill))!.IsAbstract);
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.StopDrillAsync))!.IsAbstract);
         // From 0.9.4 (OPS-20) the observers declared on this machine, with their defaults and cancellable counterparts.
         foreach (string name in new[] { nameof(IEstateApi.Observers), nameof(IEstateApi.ObserverDeclare), nameof(IEstateApi.ObserverReport), nameof(IEstateApi.ObserverWithdraw) })
         {

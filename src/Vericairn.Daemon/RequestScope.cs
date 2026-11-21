@@ -161,7 +161,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false } and not SecurityReportsResponse { Ok: false } and not ObserversResponse { Ok: false };
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false } and not SecurityReportsResponse { Ok: false } and not ObserversResponse { Ok: false } and not StopDrillResponse { Ok: false };
         if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
@@ -308,6 +308,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/runs"] = typeof(RunStartRequest),
         ["POST /v1/runs/prepare"] = typeof(RunStartRequest),
         ["POST /v1/harness-qualifications"] = typeof(HarnessQualifyRequest),
+        ["POST /v1/runs/drill"] = typeof(StopDrillRequest),
         ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
         ["POST /v1/runs/{id}/settle"] = typeof(RunSettleRequest),
         ["POST /v1/work/{key}/move-plan"] = typeof(WorkMovePlanRequest),
@@ -465,6 +466,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
         [typeof(HarnessQualifyRequest)] = (_, r, d) => Acting(((HarnessQualifyRequest)r).By, d),
         [typeof(RunStopRequest)] = (_, r, d) => Acting(((RunStopRequest)r).By, d),
+        // From 0.9.4 (OPS-21): the drill starts a scratch run on the runtime's machine and signs its verification there.
+        [typeof(StopDrillRequest)] = (_, _, _) => "The stop drill starts a scratch run on the runtime's machine and signs its verification with a device held there; run it over the local socket on that machine.",
         [typeof(RunSettleRequest)] = (_, r, d) => Acting(((RunSettleRequest)r).By, d),
         [typeof(PairingIssueRequest)] = (_, r, d) => Acting(((PairingIssueRequest)r).By, d),
 

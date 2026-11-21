@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 40, November 21, 2026. Add `worker drill`, the timed stop drill, which stops a scratch run and records the time from the stop to containment and to the run's last write as a `stop-drill` verification, in the development build.
+
 Revision 39, November 21, 2026. Add `observers list`, `declare`, `report` and `withdraw`, which declare the automated observers on this machine with their intervals and graces and keep their reports, and the `Observers (this machine):` lines that end human `status`, in the development build.
 
 Revision 38, November 20, 2026. Say that under a `concurrent-paths` policy at `refuse`, `work assign`, `work attempt`, `records new assignment` and `worker run` refuse work that leaves an unmet or unavailable pair, naming each pair and the remedies that apply to the write, in the development build.
@@ -1347,6 +1349,35 @@ what is raised afterwards. While the agent's open outputs, its possibilities sti
 not closed, reach `open` (ten when omitted), its occurrences defer and no run of it starts. `goal due`, `status` and `progress` show
 its open outputs; an occurrence's brief states its output caps and names the agent's earlier open and declined possibilities among
 its sources.
+
+## `vericairn worker drill` (0.9.4)
+
+From 0.9.4 (OPS-21), `vericairn worker drill --by <principal> [--grace <seconds>] [--limit <seconds>]` measures how long stopping
+and containing a run takes before the carrier runs work unattended. The worker on the runtime's machine starts a scratch run, the
+vericairn executable with a private argument that appends the time to a file in its own scratch directory every 50 milliseconds
+and ignores the stop it is sent (the stop file and, on Linux and macOS, SIGTERM), as an unresponsive agent would. Once it is
+writing, the drill asks it to stop through its run directory exactly as `worker stop` does, naming the grace (the worker's
+default, ten seconds, when omitted), and the worker transmits the stop at its next heartbeat and escalates it after the grace.
+The drill records a verification of the estate, method `stop-drill`, command `vericairn worker drill`, environment `platform` and
+`device` (the signing device, so each machine's drill stands for that machine), signed by the principal's admitted device held on
+the runtime's machine: its evidence gives the milliseconds from the stop request to the observed containment of the scratch run's
+whole boundary and to its last write, with the stop's transmission and escalation. A scratch run not contained within the limit
+(60 seconds when omitted, 1 to 3600) fails the drill; the drill then escalates the stop itself, waits for containment and records
+the failure, which is required attention until a later drill on the same machine passes. The scratch run is never an agent run
+and records nothing; its directory is removed once it is contained.
+
+The command prints the verification's path, id and hash, the stop's time, grace and limit, both times and whether the drill
+passed; with `--json`, the runtime's `StopDrillResponse` (`ok`, `message`, `passed`, `requestedAt`, `containedAt`,
+`stopToContainedMilliseconds`, `lastWriteAt`, `stopToLastWriteMilliseconds`, `graceSeconds`, `limitSeconds`, `verification` and
+`problem`). Exit 0 means a drill that passed and was recorded, 1 a failed drill or a refusal, and 2 an invalid argument. It is
+refused, before anything starts, without an admitted device of the principal held on the runtime's machine, and over the local
+network: run it on the runtime's machine. A recurring duty whose discharge names a `stop-drill` verification runs it monthly; see
+[who can stop a run](software.md#who-can-stop-a-run-and-the-timed-stop-drill-094).
+
+```sh
+vericairn worker drill --by <principal>
+vericairn worker drill --by <principal> --grace 10 --limit 60 --json
+```
 
 ## `vericairn observers` (0.9.4)
 

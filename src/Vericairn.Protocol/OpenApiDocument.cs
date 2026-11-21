@@ -144,6 +144,7 @@ public static class OpenApiDocument
         ("GET", "/v1/runs"),
         ("POST", "/v1/runs"),
         ("POST", "/v1/runs/prepare"),
+        ("POST", "/v1/runs/drill"),
         ("POST", "/v1/runs/{id}/stop"),
         ("POST", "/v1/runs/{id}/settle"),
         ("POST", "/v1/work/{key}/move-plan"),
@@ -636,6 +637,11 @@ public static class OpenApiDocument
             responses["200"] = new JsonObject { ["description"] = "PackagesResponse: exact registry observations, or the original account-holder intent with its latest outcome and manual step.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/PackagesResponse" } } } };
         }
+        else if (path == "/v1/runs/drill")
+        {
+            responses["200"] = new JsonObject { ["description"] = "StopDrillResponse: from 0.9.4, what the stop drill measured of its scratch run (the stop, the observed containment, the last write and the milliseconds from the stop to each) and the stop-drill verification it recorded; passed is false when containment did not come within the limit. A refusal is ok false with its problem and starts nothing.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/StopDrillResponse" } } } };
+        }
         else if (path == "/v1/observers" || path.StartsWith("/v1/observers/", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = "ObserversResponse: from 0.9.4, the automated observers declared on the runtime's machine, each with its interval, grace, latest report and state (awaiting, observing, failed, not-observing or silent) as of the runtime's clock; a refusal is ok false with its problem. Never records.",
@@ -1066,6 +1072,8 @@ public static class OpenApiDocument
             ["PackagesDeprecateRequest"] = Object(("product", "string"), ("version", "string"), ("package", "string"), ("by", "string"), ("reasons", "array"), ("message", "string"), ("alternatePackage", "string"), ("alternateRange", "string"), ("reserved", "boolean")),
             ["SecurityReportsPollRequest"] = Object(("by", "string")),
             ["SecurityReportTriageRequest"] = Object(("by", "string"), ("advisory", "string"), ("repository", "string"), ("expected", "string"), ("disposition", "string"), ("reason", "string")),
+            ["StopDrillRequest"] = Object(("by", "string"), ("graceSeconds", "integer"), ("limitSeconds", "integer")),
+            ["StopDrillResponse"] = Object(("ok", "boolean"), ("message", "string"), ("passed", "boolean"), ("requestedAt", "string"), ("containedAt", "string"), ("stopToContainedMilliseconds", "integer"), ("lastWriteAt", "string"), ("stopToLastWriteMilliseconds", "integer"), ("graceSeconds", "integer"), ("limitSeconds", "integer"), ("verification", "object"), ("problem", "object")),
             ["ObserverDeclareRequest"] = Object(("by", "string"), ("name", "string"), ("kind", "string"), ("intervalSeconds", "integer"), ("graceSeconds", "integer"), ("summary", "string")),
             ["ObserverReportRequest"] = Object(("by", "string"), ("name", "string"), ("outcome", "string"), ("reason", "string"), ("at", "string"), ("detail", "string")),
             ["ObserverWithdrawRequest"] = Object(("by", "string"), ("name", "string"), ("reason", "string")),
@@ -1231,6 +1239,7 @@ public static class OpenApiDocument
         "/v1/packages/deprecate" => "PackagesDeprecateRequest",
         "/v1/security-reports/poll" => "SecurityReportsPollRequest",
         "/v1/security-reports/triage" => "SecurityReportTriageRequest",
+        "/v1/runs/drill" => "StopDrillRequest",
         "/v1/observers/declare" => "ObserverDeclareRequest",
         "/v1/observers/report" => "ObserverReportRequest",
         "/v1/observers/withdraw" => "ObserverWithdrawRequest",
@@ -1390,6 +1399,7 @@ public static class OpenApiDocument
         ("POST", "/v1/packages/unlist") => "Record unlisting intent and return the exact nuget.org step for the account holder. An identical rerun keeps the original intent; no registry write or API key is used.",
         ("POST", "/v1/security-reports/poll") => "Read every repository a product's security-reports declaration names now, through its reader, as the operator; nothing is recorded or posted. Keeps each advisory's identifier, state, severity and response hash on this machine, never its text.",
         ("POST", "/v1/security-reports/triage") => "Record the operator's triage of one observed advisory revision, named by identifier, repository and content hash, with its disposition and reason. A changed revision needs triage again.",
+        ("POST", "/v1/runs/drill") => "From 0.9.4 (OPS-21): the timed stop drill. The runtime's worker starts a scratch run that ignores the stop it is sent, asks it to stop as POST /v1/runs/{id}/stop does with the grace given, and records the milliseconds from the stop to the observed containment and to the run's last write as a stop-drill verification of the estate, signed by the acting principal's device held on the runtime's machine. Containment not within the limit (60 seconds by default) fails the drill, which is required attention; the drill then escalates the stop itself. Local socket only.",
         ("GET", "/v1/observers") => "From 0.9.4 (OPS-20): the automated observers declared on the runtime's machine for this estate, each with its kind, interval, grace, latest report and state as of the runtime's clock. Silence past the interval plus the grace, a failed report and a report that it could not observe are each attention for the operator. Reading changes nothing.",
         ("POST", "/v1/observers/declare") => "From 0.9.4 (OPS-20): the operator declares an automated observer on the runtime's machine, or declares it again, with its kind, the interval it reports at and the grace its silence is allowed. Kept on that machine; nothing is recorded.",
         ("POST", "/v1/observers/report") => "From 0.9.4 (OPS-20): one report of a declared observer: passed, failed, or not-observing with its reason (quota-exhausted, schedule-disabled or unavailable), which is attention, never a pass. Kept on the runtime's machine; nothing is recorded.",
