@@ -208,4 +208,137 @@ public class EstateLoaderTests
         Assert.Contains(model.Findings, f => f.Code == "record.path");
         Assert.True(model.IsCurrent(model.ById[orphan.Id]));
     }
+
+    /// <summary>
+    /// Leaves a record of a history fixture's estate unread, as FIX-156's review did: a copy of its identifier dated in the month before or after,
+    /// a decision carrying it, or two new files sharing a fresh identifier that both supersede it. Returns the files written, for removal.
+    /// </summary>
+    private static List<RecordEnvelope> LeaveUnread(HistoryFixture f, RecordEnvelope original, string shape)
+    {
+        DateTimeOffset now = f.Estate.Clock;
+        string body = original.Body.GetRawText();
+        try
+        {
+            switch (shape)
+            {
+                case "earlier":
+                case "later":
+                    f.Estate.SetClock(shape == "earlier" ? new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero) : new DateTimeOffset(2026, 12, 15, 12, 0, 0, TimeSpan.Zero));
+                    return [f.Estate.Add(original.Type, f.Estate.BuilderId, body, original.Subject, original.Supersedes, id: original.Id)];
+                case "other-type":
+                    return [f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("COPY-1"), id: original.Id)];
+                default:
+                    string fresh = Records.Identity.Ulid.NewUlid(now).Value;
+                    RecordEnvelope first = f.Estate.Add(original.Type, f.Estate.BuilderId, body, original.Subject, original.Id, id: fresh);
+                    f.Estate.SetClock(new DateTimeOffset(2026, 12, 15, 12, 0, 0, TimeSpan.Zero));
+                    return [first, f.Estate.Add(original.Type, f.Estate.BuilderId, body, original.Subject, original.Id, id: fresh)];
+            }
+        }
+        finally
+        {
+            f.Estate.SetClock(now.AddSeconds(1));
+        }
+    }
+
+    private static readonly string[] Shapes = ["earlier", "later", "other-type", "fresh-pair"];
+
+    [Fact]
+    public void LeavingTheAdoptionUnreadCountsNoUnanchoredUnsignedRecord()
+    {
+        // From 0.9.4 (FIX-159): an adoption refuses unsigned records no anchoring checkpoint lists, whatever their date, while signatures are required.
+        // Left unread, by any of four shapes, it adopted nothing, so an unsigned work order in the operator's name dated before the required revision
+        // counted under the rule before adoption. The reading with the adoption refuses it, so it counts for nothing while the copy stands; removing
+        // the copy reads the estate as before.
+        foreach (string shape in Shapes)
+        {
+            using var f = new HistoryFixture();
+            DateTimeOffset early = f.Estate.Clock;
+            f.Require();
+            RecordEnvelope adoption = f.Adopt();
+            DateTimeOffset now = f.Estate.Clock;
+            f.Estate.SetClock(early);
+            RecordEnvelope forged = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("FORGED-1"));
+            f.Estate.SetClock(now);
+            EstateModel before = f.Load();
+            Assert.False(before.Counts(before.ById[forged.Id]));
+
+            List<RecordEnvelope> written = LeaveUnread(f, adoption, shape);
+            EstateModel model = f.Load();
+            Assert.True(model.IsUnreadable(adoption.Id), shape);
+            Assert.False(model.Counts(model.ById[forged.Id]), $"{shape}: the unanchored unsigned record counts");
+            Assert.DoesNotContain(model.Current("work-order"), r => r.Id == forged.Id);
+            Assert.Contains(model.Findings, x => x.Code == "record.duplicate-refused" && x.Message.Contains(forged.Id, StringComparison.Ordinal));
+
+            foreach (RecordEnvelope file in written) File.Delete(PathOf(f.Estate, file));
+            EstateModel restored = f.Load();
+            Assert.Empty(restored.UnreadableLines);
+            Assert.False(restored.Counts(restored.ById[forged.Id]));
+            Assert.DoesNotContain(restored.Findings, x => x.Code is "record.duplicate-refused" or "record.duplicate-id");
+        }
+    }
+
+    [Fact]
+    public void LeavingACheckpointUnreadCountsNoRecordItWitnessedWithOtherBytes()
+    {
+        // From 0.9.4 (FIX-159): a counting checkpoint refuses a record it witnessed when the bytes present differ (history.altered). Left unread, by
+        // any of four shapes, it witnessed nothing, so the builder's work order rewritten with other bytes and signed again counted. The reading with
+        // the checkpoint refuses it, so it counts for nothing while the copy stands.
+        foreach (string shape in Shapes)
+        {
+            using var f = new HistoryFixture();
+            DateTimeOffset at = f.Estate.Clock;
+            RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("WIT-1"), signer: f.BuilderSigner);
+            RecordEnvelope adoption = f.Adopt();
+            DateTimeOffset now = f.Estate.Clock;
+            f.Estate.SetClock(at);
+            File.Delete(PathOf(f.Estate, order));
+            RecordEnvelope altered = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("WIT-1", "Another title"), id: order.Id, signer: f.BuilderSigner);
+            f.Estate.SetClock(now);
+            Assert.Equal(order.ExpectedPath, altered.ExpectedPath);
+            EstateModel before = f.Load();
+            Assert.False(before.Counts(before.ById[order.Id]));
+            Assert.Contains(before.Findings, x => x.Code == "history.altered");
+
+            List<RecordEnvelope> written = LeaveUnread(f, adoption, shape);
+            EstateModel model = f.Load();
+            Assert.True(model.IsUnreadable(adoption.Id), shape);
+            Assert.False(model.Counts(model.ById[order.Id]), $"{shape}: the record present with other bytes counts");
+
+            foreach (RecordEnvelope file in written) File.Delete(PathOf(f.Estate, file));
+            Assert.False(f.Load().Counts(f.Load().ById[order.Id]));
+        }
+    }
+
+    [Fact]
+    public void MoreReadingsOfTheUnreadRecordsThanTheLoaderJudgesCountNothing()
+    {
+        // From 0.9.4 (FIX-159): three identifiers each carried by two records can be read 27 ways (each copy or none), more than the 16 the loader
+        // judges. Which records a reading would refuse is then not established, so no record counts (record.duplicate-unsettled, an error) until the
+        // copies are removed, and the estate then reads as before.
+        using var estate = new TestEstate(3);
+        var orders = new List<RecordEnvelope>();
+        for (int i = 1; i <= 4; i++) orders.Add(estate.Add("work-order", estate.OperatorId, OrdinaryBody.Replace("W-1", "W-" + i, StringComparison.Ordinal)));
+        DateTimeOffset now = estate.Clock;
+        estate.SetClock(new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero));
+        List<RecordEnvelope> copies = [.. orders.Take(3).Select(o => estate.Add("work-order", estate.BuilderId, OrdinaryBody.Replace("W-1", "COPY", StringComparison.Ordinal), id: o.Id))];
+        estate.SetClock(now);
+
+        EstateModel model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "record.duplicate-unsettled" && f.Severity == Severity.Error);
+        Assert.Empty(model.CountingRecords);
+        Assert.False(model.Counts(model.ById[orders[3].Id]));
+        Assert.Empty(model.Current("work-order"));
+
+        // Two of them can be read nine ways, which the loader judges: the fourth order counts, and nothing is reported as unsettled.
+        File.Delete(PathOf(estate, copies[2]));
+        model = estate.Load();
+        Assert.DoesNotContain(model.Findings, f => f.Code == "record.duplicate-unsettled");
+        Assert.True(model.Counts(model.ById[orders[3].Id]));
+        Assert.True(model.Counts(model.ById[orders[2].Id]));
+
+        foreach (RecordEnvelope copy in copies.Take(2)) File.Delete(PathOf(estate, copy));
+        model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+        Assert.Equal(4, model.Current("work-order").Count());
+    }
 }
