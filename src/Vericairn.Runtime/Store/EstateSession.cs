@@ -31,6 +31,11 @@ public sealed class EstateSession : IDisposable
     private string home = VericairnHome.Path();
     // The model a one-shot command's opening judged, kept while the records and the manifest stamp unchanged (FIX-148).
     private Kept? kept;
+    // Raised by every drop, write and taking of the write lock, and read and compared with kept only under keptSync: a load keeps the
+    // model it judged only while the generation it read before its stamp is unchanged, so a write on another thread while it judged
+    // leaves nothing kept (FIX-148).
+    private long generation;
+    private readonly object keptSync = new();
 
     internal long ParsedFiles => parseCache.ParsedFiles;
     internal bool IsReadOnly => readOnly;
@@ -60,8 +65,9 @@ public sealed class EstateSession : IDisposable
     /// From 0.9.4 (FIX-148; design/performance.md § 3.2): whether <see cref="Load"/> keeps the model it judged for later loads, as a
     /// one-shot command's runtime does, while the stamp of the records and the manifest (<see cref="Stamp"/>) is unchanged and nothing has
     /// been written here since. A load while this session holds the working tree's write lock is always judged afresh, whatever its
-    /// caller, and taking the lock, storing or removing a record and storing or removing an object drop the kept model. Long-lived hosts
-    /// (the daemon, mcp serve, Workbench, a runtime supervising a worker run) leave it off and judge at every load.
+    /// caller, and taking the lock, storing or removing a record and storing or removing an object drop the kept model, including one a
+    /// load on another thread was still judging when they happened. Long-lived hosts (the daemon, mcp serve, Workbench, a runtime
+    /// supervising a worker run) leave it off and judge at every load.
     /// </summary>
     internal bool KeepsJudgment
     {
@@ -69,14 +75,29 @@ public sealed class EstateSession : IDisposable
         set
         {
             keepsJudgment = value;
-            if (!value) kept = null;
+            if (!value) Drop();
         }
     }
 
     private bool keepsJudgment;
 
-    /// <summary>Forgets the kept model, so the next load judges afresh: anything this runtime writes to the working tree calls it.</summary>
-    internal void Drop() => kept = null;
+    /// <summary>
+    /// Forgets the kept model and raises the generation, so the next load judges afresh and no load already judging keeps what it
+    /// judged: anything this runtime writes to the working tree calls it.
+    /// </summary>
+    internal void Drop()
+    {
+        lock (keptSync)
+        {
+            generation++;
+            kept = null;
+        }
+    }
+
+    private long Generation()
+    {
+        lock (keptSync) return generation;
+    }
 
     /// <summary>Repository root (repository-synced) or estate directory holding the manifest (local-only).</summary>
     public string Root { get; }
@@ -103,7 +124,7 @@ public sealed class EstateSession : IDisposable
         Objects.Dispose();
         Live = writable.Live;
         Objects = new NotingObjectStore(((NotingObjectStore)writable.Objects).Inner, Drop);
-        kept = null;
+        Drop();
         writers = writable.writers;
         writeLock = writable.writeLock;
         readOnly = false;
@@ -287,7 +308,8 @@ public sealed class EstateSession : IDisposable
     /// <summary>
     /// Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only. From 0.9.4 (FIX-148) a
     /// session that keeps its judgment (<see cref="KeepsJudgment"/>) returns the model it kept while the stamp is unchanged, nothing was
-    /// written here since and it does not hold the write lock; under the lock every load is judged afresh.
+    /// written here since and it does not hold the write lock; under the lock every load is judged afresh. A load keeps what it judged
+    /// only if nothing was written, dropped or locked here between its stamp and its keeping, from any thread.
     /// </summary>
     public EstateModel Load() => LoadWithFiles().Model;
 
@@ -300,6 +322,9 @@ public sealed class EstateSession : IDisposable
         Loads++;
         if (readOnly) return ReadOnlyJudgment();
 
+        // Read before the lock is asked of: a writer that takes the lock after this raises the generation once it holds it, so either
+        // this load finds the lock held or its keeping finds the generation changed.
+        long started = Generation();
         // The lock is asked of this session itself, so a load under it is fresh from any caller (design/performance.md § 3.2).
         bool keeping = keepsJudgment && writeLock?.Entered != true;
         CanonicalStamp stamp = default;
@@ -307,15 +332,21 @@ public sealed class EstateSession : IDisposable
         {
             // Taken before the records are read: a change while they are read gives a stamp no later load matches.
             stamp = Stamp();
-            if (kept is { } held && held.Stamp == stamp && held.Writes == Writes)
+            Kept? reused = null;
+            lock (keptSync)
             {
-                loadedFiles = held.Files;
-                Loaded?.Invoke(held.Model);
-                return (held.Model, held.Files.Files);
+                if (kept is { } held && held.Stamp == stamp && held.Generation == started) reused = held;
+            }
+
+            if (reused is not null)
+            {
+                loadedFiles = reused.Files;
+                Loaded?.Invoke(reused.Model);
+                return (reused.Model, reused.Files.Files);
             }
         }
 
-        kept = null;
+        lock (keptSync) kept = null;
         if (writeLock?.Entered == true) LockedJudgments++;
         // What a client operation stopped at its request limit names as being judged (FIX-152).
         using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
@@ -333,7 +364,16 @@ public sealed class EstateSession : IDisposable
         ClientOperationActivity.Report(JudgingStage(files.Files.Count));
         EstateModel model = EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments);
         Live.SetMeta("lastLoadedAt", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
-        if (keeping && writeLock?.Entered != true) kept = new Kept(stamp, Writes, files, model);
+        if (keeping)
+        {
+            lock (keptSync)
+            {
+                // Kept only if nothing wrote, dropped or took the lock here since the generation was read: a write by another thread while
+                // this load judged leaves the model unkept, so the next load judges afresh (FIX-148).
+                if (generation == started && writeLock?.Entered != true) kept = new Kept(stamp, started, files, model);
+            }
+        }
+
         Judged?.Invoke(model);
         Loaded?.Invoke(model);
         return (model, files.Files);
@@ -354,7 +394,7 @@ public sealed class EstateSession : IDisposable
         {
             parseCache.Retain(files.ByPath);
             loadedFiles = files;
-            kept = null;
+            Drop();
         }
 
         ClientOperationActivity.Report(JudgingStage(files.Files.Count));
@@ -384,7 +424,7 @@ public sealed class EstateSession : IDisposable
     /// <summary>From 0.9.4 (FIX-148): how many of this session's loads judged afresh while it held the write lock, as every such load does.</summary>
     internal long LockedJudgments { get; private set; }
 
-    private sealed record Kept(CanonicalStamp Stamp, long Writes, LiveStore.FileSnapshot Files, EstateModel Model);
+    private sealed record Kept(CanonicalStamp Stamp, long Generation, LiveStore.FileSnapshot Files, EstateModel Model);
 
     /// <summary>
     /// The working tree's write lock (FIX-99), held by this session's writes; null for a read-only session. A runtime holds it from
@@ -399,9 +439,12 @@ public sealed class EstateSession : IDisposable
     internal WorkingTreeLock.Hold HoldWriteLock()
     {
         WorkingTreeLock held = writeLock ?? throw new InvalidOperationException("This session is read-only.");
-        // A writer's judgment reads the tree afresh, and whatever it writes leaves no kept model behind (FIX-148).
-        kept = null;
-        return held.Enter();
+        // A writer's judgment reads the tree afresh, and whatever it writes leaves no kept model behind (FIX-148): the drop once the lock is
+        // held raises the generation after the lock shows as entered, so a load on another thread that found it free keeps nothing.
+        Drop();
+        WorkingTreeLock.Hold hold = held.Enter();
+        Drop();
+        return hold;
     }
 
     /// <summary>
@@ -415,7 +458,7 @@ public sealed class EstateSession : IDisposable
         if (readOnly) throw new InvalidOperationException("This session is read-only.");
         using WorkingTreeLock.Hold hold = HoldWriteLock();
         Writes++;
-        kept = null;
+        Drop();
         if (Profile == "repository-synced")
         {
             RecordAuthor.Write(Root, record);
@@ -450,7 +493,7 @@ public sealed class EstateSession : IDisposable
         if (readOnly) throw new InvalidOperationException("This session is read-only.");
         using WorkingTreeLock.Hold hold = HoldWriteLock();
         Writes++;
-        kept = null;
+        Drop();
         if (Profile == "repository-synced")
         {
             string full = Path.Combine(Root, record.RelativePath.Replace('/', Path.DirectorySeparatorChar));

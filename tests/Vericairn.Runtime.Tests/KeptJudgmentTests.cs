@@ -18,8 +18,9 @@ namespace Vericairn.Runtime.Tests;
 /// verdicts and keys kept for the process. In one runtime, a revocation, a key rotation, a superseded admission and a record replaced at
 /// the same id change the next judgment exactly as a fresh judgment in a new runtime with empty tables and no parse cache judges them; a
 /// simulated platform refusal of a verification or an import is asked again; and at <see cref="EstateSession.Load"/> itself a load while
-/// the session holds the write lock is fresh from any caller and thread, and another writer's record and a non-record write of the
-/// runtime are seen. Each runtime counts in a context of its own with fresh tables, so the counts are exact.
+/// the session holds the write lock is fresh from any caller and thread, another writer's record and a non-record write of the runtime
+/// are seen, and a load still judging when another thread takes the lock and writes keeps nothing. Each runtime counts in a context of
+/// its own with fresh tables, so the counts are exact.
 /// </summary>
 public sealed class KeptJudgmentTests
 {
@@ -188,6 +189,75 @@ public sealed class KeptJudgmentTests
         Assert.NotSame(seen, afterObject);
         Assert.NotSame(kept, seen);
         Assert.Equal(2, judgments.Judgments - opened);
+    }
+
+    [Fact]
+    public void AnObjectStoredUnderTheLockWhileAnotherThreadJudgesLeavesNothingKept()
+    {
+        using var f = new HistoryFixture();
+        var judgments = new JudgmentContext(new SignatureTables());
+        using EstateService service = OneShot(f.Root, judgments);
+        EstateSession session = service.Session;
+        session.Load();
+
+        // A record the next load must verify, so that load can be held inside its verification, between its stamp and its keeping.
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("KEPT-1"), signer: f.BuilderSigner);
+        string signature = order.Signatures[0].Signature;
+        using var judging = new ManualResetEventSlim();
+        using var resume = new ManualResetEventSlim();
+        judgments.RefuseVerification = s =>
+        {
+            if (s != signature) return false;
+            judging.Set();
+            if (!resume.Wait(TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken)) throw new TimeoutException("The held load was never resumed.");
+            return false;
+        };
+
+        EstateModel? judgedWhileWritten = null;
+        Exception? failed = null;
+        var loading = new Thread(() =>
+        {
+            try { judgedWhileWritten = session.Load(); }
+            catch (Exception exception) { failed = exception; }
+        });
+        loading.Start();
+        try
+        {
+            Assert.True(judging.Wait(TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken), "The load never reached the verification.");
+
+            // While that load judges, another thread takes the write lock, stores an object and releases the lock.
+            Exception? writeFailed = null;
+            var writer = new Thread(() =>
+            {
+                try
+                {
+                    using (session.HoldWriteLock()) session.Objects.Put("stored while another thread judged"u8);
+                }
+                catch (Exception exception) { writeFailed = exception; }
+            });
+            writer.Start();
+            Assert.True(writer.Join(TimeSpan.FromMinutes(2)), "The writer never finished.");
+            Assert.Null(writeFailed);
+            Assert.False(session.WriteLock!.Entered);
+        }
+        finally
+        {
+            resume.Set();
+            Assert.True(loading.Join(TimeSpan.FromMinutes(2)), "The held load never finished.");
+        }
+
+        judgments.RefuseVerification = null;
+        Assert.Null(failed);
+        Assert.NotNull(judgedWhileWritten);
+        Assert.True(judgedWhileWritten.ById.ContainsKey(order.Id));
+
+        // The model judged before the write was not kept: the next load judges afresh, and keeps what it judged.
+        long judged = judgments.Judgments;
+        EstateModel next = session.Load();
+        Assert.NotSame(judgedWhileWritten, next);
+        Assert.Equal(judged + 1, judgments.Judgments);
+        Assert.Same(next, session.Load());
+        Assert.Equal(judged + 1, judgments.Judgments);
     }
 
     [Fact]
