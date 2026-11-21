@@ -195,7 +195,9 @@ public sealed partial class GitleaksScanner : ISecretScanner
     // since a shallow file, another repository or another object store named in the environment would show git a shorter or another
     // history than the push sends; then every configuration variable, keeping only the settings forced here, and git's trace variables
     // (FIX-150); and every other inherited git variable, such as those choosing a diff's context, an external diff, notes or attributes,
-    // and every GITLEAKS_ variable (FIX-160), so that the environment the scan was started in changes nothing it reads.
+    // and every GITLEAKS_ variable (FIX-160), so that the environment the scan was started in changes nothing it reads. No process of the
+    // scan fetches a missing object either, whatever remote the clone's configuration names for one, as none of the push adapter's does:
+    // a read that meets one fails, and the scan is incomplete (FIX-160).
     internal static void Isolate(ProcessStartInfo info)
     {
         GitRouting.Remove(info);
@@ -203,6 +205,7 @@ public sealed partial class GitleaksScanner : ISecretScanner
             || n.StartsWith("GITLEAKS_", StringComparison.OrdinalIgnoreCase)).ToArray())
             info.Environment.Remove(name);
         info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
+        info.Environment["GIT_NO_LAZY_FETCH"] = "1";
         info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
         info.Environment["GIT_CONFIG_COUNT"] = ReadSettings.Length.ToString(CultureInfo.InvariantCulture);
         for (int i = 0; i < ReadSettings.Length; i++)

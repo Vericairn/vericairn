@@ -80,6 +80,7 @@ public sealed class PushProviderTests
         Assert.All(started, info =>
         {
             Assert.Equal("1", info.Environment["GIT_NO_REPLACE_OBJECTS"]);
+            Assert.Equal("1", info.Environment["GIT_NO_LAZY_FETCH"]);
             string grafts = info.Environment["GIT_GRAFT_FILE"]!;
             Assert.True(Path.IsPathFullyQualified(grafts) && !File.Exists(grafts) && !Directory.Exists(Path.GetDirectoryName(grafts)));
             Assert.False(info.Environment.ContainsKey("GIT_CONFIG_PARAMETERS"));
@@ -129,6 +130,20 @@ public sealed class PushProviderTests
             info.Environment[name] = "inherited";
         GitleaksScanner.Isolate(info);
         Assert.DoesNotContain(info.Environment, variable => variable.Value == "inherited");
+    }
+
+    // FIX-160, after the Reviewer's review: no process of the scan fetches a missing object, whatever the caller's environment says,
+    // as no process of the push adapter does.
+    [Fact]
+    public void NoProcessOfTheScanFetchesAMissingObject()
+    {
+        var info = new ProcessStartInfo("git");
+        info.Environment["GIT_NO_LAZY_FETCH"] = "0";
+        GitleaksScanner.Isolate(info);
+        Assert.Equal("1", info.Environment["GIT_NO_LAZY_FETCH"]);
+        var push = new ProcessStartInfo("git");
+        GitPushAdapter.Isolate(push, []);
+        Assert.Equal(push.Environment["GIT_NO_LAZY_FETCH"], info.Environment["GIT_NO_LAZY_FETCH"]);
     }
 
     // FIX-160: every process the scan starts, gitleaks and git alike, runs in one folder the scan creates outside the clone, still empty
