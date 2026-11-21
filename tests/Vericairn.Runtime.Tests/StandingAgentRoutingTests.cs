@@ -142,13 +142,19 @@ public class StandingAgentRoutingTests
         Assert.Equal("none", waiting.Outcome);
         Assert.Contains("paused by its failures", waiting.Message, StringComparison.Ordinal);
 
-        // The sponsor's answer lets it go on.
+        // The agent that carried the failed runs records a decision answering the pause's ask in the sponsor's name: refused, and the pause holds.
         JsonObject answer = new()
         {
             ["title"] = "Go on", ["statement"] = "Let the researcher go on.", ["summary"] = "The failures were the stand-in's.", ["synthesis"] = "The operator answers the pause.",
             ["effects"] = new JsonArray("the agent goes on"), ["affects"] = new JsonArray(), ["decidedBy"] = op, ["decidedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow),
             ["stake"] = "low", ["notAuthorized"] = new JsonArray("spending"), ["answers"] = new JsonArray(asking.Ask!.Id),
         };
+        WriteOutcome own = run.Service.NewRecord(new NewRecordRequest("decision", run.Estate.BuilderId, JsonSerializer.SerializeToElement(answer)));
+        Assert.False(own.Ok);
+        Assert.Contains(own.Problem!.Findings, f => f.Code == "standing.own-output" && f.Severity == "error");
+        Assert.Equal(("held", 3), (run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString(), run.Service.GoalDue(goal)!.Json.GetProperty("failures").GetProperty("consecutive").GetInt32()));
+
+        // The sponsor's answer lets it go on.
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, JsonSerializer.SerializeToElement(answer))));
         Assert.Equal("active", run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString());
         GoalStepResponse resumed = Step(run, goal, "resumed");

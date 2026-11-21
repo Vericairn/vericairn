@@ -116,17 +116,18 @@ internal sealed class StandingFixture : IDisposable
         }, builder: builder, subject: attempt.Reference);
     }
 
-    /// <summary>The intent of an agent run carrying an assignment of the goal, with a cap of ten minutes.</summary>
-    public RecordEnvelope RunIntent(RecordEnvelope assignment, string identity) => Add("operation", RunBody(assignment, identity, "not-started"));
+    /// <summary>The intent of an agent run carrying an assignment of the goal, with a cap of ten minutes, by the builder or the agent named.</summary>
+    public RecordEnvelope RunIntent(RecordEnvelope assignment, string identity, string? principal = null) => Add("operation", RunBody(assignment, identity, "not-started", principal));
 
     /// <summary>A run's settlement: its intent's revision with the status, observed and charged five minutes, and the stop asked of it when one was.</summary>
     public RecordEnvelope Settle(RecordEnvelope intent, string status, string? stoppedBy = null)
     {
         RecordEnvelope assignment = Estate.Load().ById[intent.Body.GetProperty("target").GetProperty("assignment").GetString()!];
-        JsonObject dispatched = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, "dispatched");
+        string principal = intent.Body.GetProperty("target").GetProperty("principal").GetString()!;
+        JsonObject dispatched = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, "dispatched", principal);
         dispatched["dispatchedAt"] = intent.At;
         RecordEnvelope running = Add("operation", dispatched, supersedes: intent.Id);
-        JsonObject body = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, status);
+        JsonObject body = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, status, principal);
         body["dispatchedAt"] = intent.At;
         body["observed"] = new JsonObject { ["summary"] = "The run ended.", ["at"] = RecordParser.FormatTimestamp(Estate.Clock) };
         body["usage"] = new JsonObject { ["wallMinutes"] = 5, ["unreported"] = new JsonArray() };
@@ -138,10 +139,10 @@ internal sealed class StandingFixture : IDisposable
         return Add("operation", body, supersedes: running.Id);
     }
 
-    public JsonObject RunBody(RecordEnvelope assignment, string identity, string status) => new()
+    public JsonObject RunBody(RecordEnvelope assignment, string identity, string status, string? principal = null) => new()
     {
         ["provider"] = "stand-in", ["action"] = "agent-run", ["identity"] = identity, ["intent"] = "Carry the occurrence.",
-        ["target"] = new JsonObject { ["assignment"] = assignment.Id, ["principal"] = Estate.BuilderId, ["workspace"] = "research, branch work/res-1", ["goal"] = Goal.Id },
+        ["target"] = new JsonObject { ["assignment"] = assignment.Id, ["principal"] = principal ?? Estate.BuilderId, ["workspace"] = "research, branch work/res-1", ["goal"] = Goal.Id },
         ["status"] = status, ["evidence"] = new JsonArray(), ["cap"] = new JsonObject { ["wallMinutes"] = 10, ["attemptsPerStep"] = Goal.Body.GetProperty("budget").GetProperty("attemptsPerStep").GetInt32() },
     };
 

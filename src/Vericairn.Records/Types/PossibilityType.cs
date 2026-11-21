@@ -86,6 +86,9 @@ public sealed class PossibilityType : IRecordType
             StandingOutputs.ValidatePossibility(context, raised, disposition);
         }
 
+        // From 0.9.4 (GOAL-08), at every format: a possibility's author does not adopt it, whoever raised it.
+        StandingOutputs.ValidateAdoption(context, disposition);
+
         if (adopted is not null)
         {
             RecordReference? reference = RecordParser.ParseReference(adopted.Element, adopted.Location, context.Findings);

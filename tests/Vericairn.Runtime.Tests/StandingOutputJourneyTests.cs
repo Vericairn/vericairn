@@ -179,6 +179,45 @@ public class StandingOutputJourneyTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void AStandingAgentRecordsNoAnswerToItsOwnAskAndNoAuthorAdoptsItsOwnPossibility()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        (string goal, string assignment) = Carried(run);
+        string ask = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(builder, assignment, "ask", RunEstate.Json("""{"question":"Is the legacy index still read?","recommendation":"Drop it if not.","consequence":"The research goes on."}""")))).Id;
+        int Open() => JsonDocument.Parse(run.Service.GoalDue(goal)!.Json.GetRawText()).RootElement.GetProperty("outputs").GetProperty("open").GetInt32();
+        Assert.Equal(1, Open());
+        JsonElement Answer() => JsonSerializer.SerializeToElement(new JsonObject
+        {
+            ["title"] = "Drop it", ["statement"] = "Drop the legacy index.", ["summary"] = "The legacy index goes.", ["synthesis"] = "The operator answers the agent's ask.",
+            ["effects"] = new JsonArray("the legacy index is dropped"), ["affects"] = new JsonArray(), ["decidedBy"] = op, ["decidedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddMinutes(-1)),
+            ["stake"] = "low", ["notAuthorized"] = new JsonArray("spending"), ["answers"] = new JsonArray(ask),
+        });
+
+        // The agent that raised the ask records a decision naming the operator: the record write refuses it, and the ask stays open.
+        WriteOutcome own = run.Service.NewRecord(new NewRecordRequest("decision", builder, Answer()));
+        Assert.False(own.Ok);
+        Assert.Contains(own.Problem!.Findings, f => f.Code == "standing.own-output" && f.Severity == "error");
+        Assert.Equal(1, Open());
+
+        // The operator's own decision answers it.
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, Answer())));
+        Assert.Equal(0, Open());
+
+        // A plain possibility the builder wrote, with only the fields earlier estates wrote: its adoption by its author is refused at the
+        // record write (standing.output-now), and the operator adopts it.
+        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"IDEA-1","kind":"ordinary","title":"A books pack","intent":"Ship a books pack.","scope":["path:books/"],"exitQuestion":"Is the books pack shipped?","inputs":[],"deliverables":["a books pack"]}""")))).Id;
+        string idea = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("possibility", builder, RunEstate.Json("""{"title":"A books pack","idea":"Ship a books pack.","origin":"The builder's own note.","disposition":"open"}""")))).Id;
+        JsonElement adopting = RunEstate.Json($$$"""{"title":"A books pack","idea":"Ship a books pack.","origin":"The builder's own note.","disposition":"adopted","reason":"Planned.","adoptedAs":{"type":"work-order","id":"{{{order}}}"}}""");
+        WriteOutcome adopted = run.Service.NewRecord(new NewRecordRequest("possibility", builder, adopting, Supersedes: idea));
+        Assert.False(adopted.Ok);
+        Assert.Contains(adopted.Problem!.Findings, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == "error");
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("possibility", op, adopting, Supersedes: idea)));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     /// <summary>A standing agent whose occurrence goal step routed to the builder, with a second run of it in flight; its goal and assignment.</summary>
     private static (string Goal, string Assignment) Carried(RunEstate run, string[]? holders = null)
     {

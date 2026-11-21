@@ -159,6 +159,84 @@ public class StandingAgentJourneyTests
     }
 
     [Fact]
+    public void RecordsNewRefusesAStandingAgentsAnswerToItsOwnAskAndAnAuthorsAdoptionOfItsOwnPossibility()
+    {
+        string root = CliHarness.TempDirectory("standing-answers");
+        string scratch = CliHarness.TempDirectory("standing-answers-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Standing answers.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            Directory.CreateDirectory(Path.Combine(root, "docs", "templates"));
+            File.WriteAllText(Path.Combine(root, "docs", "templates", "example-researcher-1.0.0.json"), StandingFlows.Researcher().ToJsonString());
+            string pat = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "pat.json", """{"kind":"human","name":"Pat","roles":["contributor"]}""")).Id;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json", $$"""{"roles":[{"role":"researcher","principals":["{{pat}}"]}]}"""));
+            string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json",
+                """{"key":"RES-1","kind":"ordinary","title":"Research the widget","intent":"Keep researching the widget.","scope":["path:research/"],"exitQuestion":"Is each occurrence researched?","inputs":[],"deliverables":["findings"]}""")).Id;
+            string goal = CliHarness.Ok("--estate", root, "goal", "propose", "--by", op, "--title", "Research the widget", "--objective", "Keep researching the widget.", "--done", """{"type":"work-order","fields":{"key":"RESEARCHED"}}""",
+                "--work-order", order, "--budget", "wallMinutes=30", "--budget", "attemptsPerStep=2", "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget",
+                "--trigger", """{"key":"asked","kind":"request"}""", "--period", "runs=4", "--period", "wallMinutes=120").Out.Split('\n')[0].Split("  ")[1];
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            string assignment = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op, "--occurrence", "request").Json.GetProperty("step").GetProperty("assignment").GetProperty("id").GetString()!;
+
+            // Pat carries the occurrence as a person and asks the operator, who decides for the goal, through the API the MCP tool calls.
+            string ask;
+            using (EstateService api = EstateService.Open(root))
+            {
+                Vericairn.Protocol.WriteOutcome asked = api.StandingOutput(new Vericairn.Protocol.StandingOutputRequest(pat, assignment, "ask", JsonSerializer.SerializeToElement(new JsonObject
+                {
+                    ["question"] = "Is the legacy index still read?", ["recommendation"] = "Drop it if not.", ["consequence"] = "The research goes on.",
+                })));
+                Assert.True(asked.Ok, asked.Problem?.Message);
+                ask = asked.Written!.Id;
+            }
+
+            string decidedAt = RecordParser.FormatTimestamp(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds()));
+            string answer = CliHarness.WriteJson(scratch, "answer.json", $$"""
+                {"title":"Drop it","statement":"Drop the legacy index.","summary":"The legacy index goes.","synthesis":"The operator answers the standing agent's ask.","effects":["the legacy index is dropped"],"affects":[],"decidedBy":"{{op}}","decidedAt":"{{decidedAt}}","stake":"low","notAuthorized":["spending"],"answers":["{{ask}}"]}
+                """);
+
+            // records new refuses Pat's decision on its own ask, though it names the operator; the ask stays open and counted.
+            CliHarness.Outcome own = CliHarness.Run("--estate", root, "records", "new", "decision", "--by", pat, "--body", answer);
+            Assert.NotEqual(0, own.Code);
+            Assert.Contains("standing.own-output", own.Err + own.Out, StringComparison.Ordinal);
+            Assert.Equal(1, CliHarness.Ok("--estate", root, "--json", "goal", "due", goal).Json.GetProperty("outputs").GetProperty("open").GetInt32());
+
+            // The builder, which neither raised the ask nor carried an occurrence, records the operator's decision as it always has.
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", answer);
+            Assert.Equal(0, CliHarness.Ok("--estate", root, "--json", "goal", "due", goal).Json.GetProperty("outputs").GetProperty("open").GetInt32());
+
+            // A possibility's author does not adopt it by records new, whoever raised it: with a draft, an error of the record; without one, the
+            // write boundary's refusal. The operator adopts each.
+            string idea = CliHarness.Ok("--estate", root, "--json", "work", "new", "--by", op, "--key", "IDEA-1", "--title", "A books pack", "--intent", "Ship a books pack.", "--scope", "path:books/",
+                "--deliverable", "a books pack", "--exit-question", "Is the books pack shipped?").Id;
+            foreach ((string name, string draft, string code) in new[]
+            {
+                ("plain", string.Empty, "standing.output-now"),
+                ("drafted", ""","draft":{"title":"A books pack","intent":"Ship a books pack.","scope":["path:books/"],"deliverables":["a books pack"],"exitQuestion":"Is the books pack shipped?"}""", "standing.own-output"),
+            })
+            {
+                const string Idea = """{"title":"A books pack","idea":"Ship a books pack.","origin":"The builder's own note.",""";
+                string possibility = CliHarness.Ok("--estate", root, "--json", "records", "new", "possibility", "--by", builder, "--body", CliHarness.WriteJson(scratch, name + ".json", Idea + "\"disposition\":\"open\"" + draft + "}")).Id;
+                string adopting = CliHarness.WriteJson(scratch, name + "-adopted.json", Idea + $$"""
+                    "disposition":"adopted","reason":"Planned.","adoptedAs":{"type":"work-order","id":"{{idea}}"}
+                    """ + draft + "}");
+                CliHarness.Outcome adopted = CliHarness.Run("--estate", root, "records", "new", "possibility", "--by", builder, "--supersedes", possibility, "--body", adopting);
+                Assert.NotEqual(0, adopted.Code);
+                Assert.Contains(code, adopted.Err + adopted.Out, StringComparison.Ordinal);
+                CliHarness.Ok("--estate", root, "--json", "records", "new", "possibility", "--by", op, "--supersedes", possibility, "--body", adopting);
+            }
+
+            CliHarness.Outcome check = CliHarness.Run("--estate", root, "estate", "check");
+            Assert.True(check.Code == 0, check.Out);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
     public void EachShippedStandingRoleFillsAStandingAgentWithoutCopyingItsFlow()
     {
         string root = CliHarness.TempDirectory("standing-roles");

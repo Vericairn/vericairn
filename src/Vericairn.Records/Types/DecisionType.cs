@@ -140,6 +140,9 @@ public sealed class DecisionType : IRecordType
             {
                 context.Error("decision.answers", $"Ask {id} was withdrawn before it was answered.");
             }
+
+            // From 0.9.4 (GOAL-08), a standing agent records no answer to its own ask or to the runtime's asks about it, whatever decidedBy names.
+            StandingOutputs.ValidateAnswer(context, ask);
         }
 
         // From format 2 the operator's words are protected: a revision corrects everything around them, and new words are a new decision.

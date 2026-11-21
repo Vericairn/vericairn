@@ -544,4 +544,110 @@ public class StandingOutputTests
         Assert.Equal(string.Empty, Errors(findings));
         Assert.DoesNotContain(Validate(fixture, "possibility", declined, supersedes: possibility.Id), f => f.Code == StandingOutputs.BoundaryCode);
     }
+
+    [Fact]
+    public void NoStandingAgentAnswersItsOwnAskOrTheRuntimesAboutItWhateverDecidedByNames()
+    {
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 });
+        string op = fixture.Estate.OperatorId;
+        string builder = fixture.Estate.BuilderId;
+
+        // A helper agent the roster names for the researcher role carries the occurrence in its run, and a spare agent is named too; the
+        // builder neither raised the ask, carried an occurrence nor is named by the role.
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        string spare = Principal(fixture, "agent", "Spare", "contributor");
+        RecordEnvelope roster = Assert.Single(fixture.Estate.Load().Current("roster"));
+        fixture.Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("researcher", helper, spare), FlowFixture.Role("decider", op)) }, supersedes: roster.Id);
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence, helper);
+        RecordEnvelope run = fixture.RunIntent(assignment, "run-helper", helper);
+        RecordEnvelope ask = fixture.Estate.Add("ask", helper, Ask(fixture, RaisedBy(fixture, assignment, run, occurrence.Key)).ToJsonString());
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+        Assert.Equal(1, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+        JsonObject Answer(RecordEnvelope answered)
+        {
+            JsonObject body = fixture.Policies.DecisionBody();
+            body["decidedAt"] = RecordParser.FormatTimestamp(fixture.Estate.Clock);
+            body["answers"] = new JsonArray(answered.Id);
+            return body;
+        }
+
+        // The helper records the operator's decision on its own ask: refused, though decidedBy names the operator; the spare agent's is
+        // reported as the roster stands, for the write boundary to refuse; the builder records the operator's decision as it always has.
+        Assert.Contains(Validate(fixture, "decision", Answer(ask), by: helper), f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+        FindingList named = Validate(fixture, "decision", Answer(ask), by: spare);
+        Assert.Contains(named, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info);
+        Assert.Equal(string.Empty, Errors(named));
+        FindingList recorded = Validate(fixture, "decision", Answer(ask), builder: true);
+        Assert.Equal(string.Empty, Errors(recorded));
+        Assert.DoesNotContain(recorded, f => f.Code == StandingOutputs.BoundaryCode);
+
+        // Written straight to records/, the helper's decision is an error of the estate and answers nothing: the ask stays open and counted.
+        fixture.Estate.Add("decision", helper, Answer(ask).ToJsonString());
+        Assert.Contains(fixture.Estate.Load().Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+        Assert.Equal("open", Asks.State(fixture.Estate.Load(), ask).State);
+        Assert.Equal(1, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+        RecordEnvelope builders = fixture.Add("decision", Answer(ask), builder: true);
+        (string state, IReadOnlyList<RecordEnvelope> answers) = Asks.State(fixture.Estate.Load(), ask);
+        Assert.Equal(("answered", builders.Id), (state, Assert.Single(answers).Id));
+        Assert.Equal(0, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+
+        // Its run ends; three more of the helper's runs fail, and the failure pause's ask goes to the operator, as goal step records it.
+        fixture.Settle(run, "observed-success");
+        RecordEnvelope? last = null;
+        for (int i = 0; i < 3; i++)
+        {
+            last = fixture.Settle(fixture.RunIntent(assignment, "run-failing-" + i, helper), "known-failure");
+        }
+
+        Assert.Equal(3, fixture.Agent(fixture.Estate.Clock).Failures);
+        RecordEnvelope pause = fixture.Add("ask", Ask(fixture, null, NextEligible.AttentionQuestion + "Research the widget: three of its runs failed. How does the run go on?"), subject: last!.Reference);
+        Assert.Equal(fixture.Goal.Id, StandingOutputs.GuardedBy(fixture.Estate.Load(), pause)?.Id);
+
+        // The helper's decision answering it, naming the operator, is refused and, written by hand, does not lift the pause.
+        Assert.Contains(Validate(fixture, "decision", Answer(pause), by: helper), f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+        fixture.Estate.Add("decision", helper, Answer(pause).ToJsonString());
+        Assert.Equal(3, fixture.Agent(fixture.Estate.Clock).Failures);
+        Assert.Equal("open", Asks.State(fixture.Estate.Load(), pause).State);
+
+        // The builder records the operator's answer, which lets the agent go on.
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "decision", Answer(pause), builder: true)));
+        fixture.Add("decision", Answer(pause), builder: true);
+        Assert.Equal(0, fixture.Agent(fixture.Estate.Clock).Failures);
+    }
+
+    [Fact]
+    public void APossibilitysAuthorNeverAdoptsItWhoeverRaisedIt()
+    {
+        using var fixture = new StandingFixture();
+        var order = new JsonObject { ["type"] = "work-order", ["id"] = fixture.Work.Id, ["hash"] = fixture.Work.ComputedHash };
+        JsonObject Adopted(RecordEnvelope of) => Revised(of, b => { b["disposition"] = "adopted"; b["reason"] = "Worth doing."; b["adoptedAs"] = order.DeepClone(); });
+
+        // A plain possibility the builder wrote with a draft, a field new in 0.9.4: its author's adoption is refused, the operator's is not.
+        JsonObject idea = new() { ["title"] = "Cache the index", ["idea"] = "Read it once.", ["origin"] = "The builder's own note.", ["disposition"] = "open", ["draft"] = Draft() };
+        RecordEnvelope drafted = fixture.Add("possibility", idea, builder: true);
+        Assert.Contains(Validate(fixture, "possibility", Adopted(drafted), supersedes: drafted.Id, builder: true), f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", Adopted(drafted), supersedes: drafted.Id)));
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", Revised(drafted, b => { b["disposition"] = "declined"; b["reason"] = "Mine to drop."; }), supersedes: drafted.Id, builder: true)));
+        fixture.Add("possibility", Adopted(drafted), supersedes: drafted.Id, builder: true);
+        Assert.Contains(fixture.Estate.Load().Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+
+        // One with only the fields earlier estates wrote: its author's adoption is reported as the records stand, which the write boundary
+        // refuses (standing.output-now), at either format, so that an adoption an earlier estate recorded keeps its reading.
+        using var older = new StandingFixture();
+        JsonObject plain = new() { ["title"] = "A books pack", ["idea"] = "Ship a books pack.", ["origin"] = "The builder's own note.", ["disposition"] = "open" };
+        RecordEnvelope noted = older.Add("possibility", plain, builder: true);
+        var olderOrder = new JsonObject { ["type"] = "work-order", ["id"] = older.Work.Id, ["hash"] = older.Work.ComputedHash };
+        JsonObject adopting = Revised(noted, b => { b["disposition"] = "adopted"; b["reason"] = "Worth doing."; b["adoptedAs"] = olderOrder.DeepClone(); });
+        foreach (long format in new long[] { 3, 2 })
+        {
+            FindingList reported = Validate(older, "possibility", adopting, supersedes: noted.Id, builder: true, format: format);
+            Assert.Contains(reported, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info);
+            Assert.Equal(string.Empty, Errors(reported));
+        }
+
+        Assert.DoesNotContain(Validate(older, "possibility", adopting, supersedes: noted.Id), f => f.Code == StandingOutputs.BoundaryCode);
+        older.Add("possibility", adopting, supersedes: noted.Id, builder: true);
+        Assert.False(older.Estate.Load().Findings.HasErrors, Errors(older.Estate.Load().Findings));
+    }
 }

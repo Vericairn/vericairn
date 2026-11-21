@@ -18,8 +18,9 @@ namespace Vericairn.Records.Estate;
 /// that recorded it, and only that assignment's contributor records it. A possibility carries a fingerprint: a second open possibility of
 /// the same agent with the same fingerprint is refused, and raising a declined one again names it with new evidence. An occurrence records
 /// at most its plan's possibilities and drafts, extras joining one summary possibility; open outputs past the plan's cap defer dispatch.
-/// No standing agent adopts, declines, parks, answers, withdraws or closes its own output, and no agent disposes of a held finding. Every
-/// revision is judged by the chain it revises, so what its own body leaves out stops no rule from applying.
+/// No standing agent adopts, declines, parks, answers, withdraws or closes its own output, no standing agent answers the runtime's own asks
+/// about it, its failure pause's among them, and no agent disposes of a held finding; no author adopts its own possibility. Every revision
+/// is judged by the chain it revises, so what its own body leaves out stops no rule from applying.
 /// </summary>
 internal static partial class StandingOutputs
 {
@@ -40,6 +41,12 @@ internal static partial class StandingOutputs
 
     /// <summary>The relations one possibility names another by.</summary>
     public static readonly string[] Relations = ["duplicate-of", "supersedes"];
+
+    /// <summary>The words the runtime's own asks about a goal open with: required attention, the failure pause's among them, renewal and a period cap.</summary>
+    private static readonly string[] RuntimeWords = [NextEligible.AttentionQuestion, StandingAgents.RenewalAsk, StandingAgents.PeriodAsk];
+
+    /// <summary>A possibility's fields new in 0.9.4, which no earlier estate wrote.</summary>
+    private static readonly string[] PossibilityFields = ["raisedBy", "fingerprint", "sources", "evidence", "reviewTriggers", "links", "draft", "disclosure", "extras", "raisesAgain"];
 
     /// <summary>What a standing output names as what raised it.</summary>
     /// <param name="Goal">The standing agent's goal, its first revision.</param>
@@ -150,11 +157,12 @@ internal static partial class StandingOutputs
                 continue;
             }
 
+            // An ask is answered only by a decision the standing agent did not record about its own ask (Counting), as Asks.State reads it.
             bool counts = standing.Type switch
             {
                 "possibility" => EstateModel.BodyString(standing, "disposition") == "open",
                 "ask" => EstateModel.BodyString(standing, "state") is "open" or "notified"
-                    && !model.DecisionsAnswering(model.Chain(standing)).Any(d => before is null || GoalRules.Before(d, before)),
+                    && !Counting(model, standing, model.DecisionsAnswering(model.Chain(standing))).Any(d => before is null || GoalRules.Before(d, before)),
                 "operator-request" => !OperatorRequests.Closures(model, standing).Any(c => before is null || GoalRules.Before(c, before)),
                 _ => false,
             };
@@ -441,19 +449,173 @@ internal static partial class StandingOutputs
             return;
         }
 
-        if (context.Find(raised.Goal) is { Type: "goal" } goal && FlowRuns.Work(context.Model, context.Model.Latest(goal)) is RecordEnvelope order && !GoalRules.IsPerson(context.Model, by))
+        if (context.Find(raised.Goal) is not { Type: "goal" } goal)
         {
-            IReadOnlyList<string> chain = context.Model.Chain(order);
-            if (context.Model.OfType("assignment").Any(a => a.Subject is not null && chain.Contains(a.Subject.Id) && EstateModel.BodyString(a, "contributor") == by && GoalRules.Before(a, record)))
-            {
+            return;
+        }
+
+        switch (OwnAgent(context.Model, goal, by, record))
+        {
+            case (true, _):
                 context.Error("standing.own-output", $"{by} carried occurrences of standing agent {raised.Goal}: no standing agent disposes of its own outputs, so another principal does.");
-            }
-            else if (StandingAgents.Resolve(context.Model, context.Model.Latest(goal)).Flow is { } flow && StandingAgents.WorkStep(flow) is { } step
-                && Routing.Principals(context.Model, context.Model.Latest(goal), step.Role).Principals.Contains(by))
-            {
+                break;
+            case (false, string role):
                 // Who the goal's role names is read as the roster stands: the write boundary refuses a new disposition by such an agent.
-                context.Findings.Info(BoundaryCode, context.Location, $"{by} is an agent the role {step.Role} of standing agent {raised.Goal} names: no standing agent disposes of its own outputs, so another principal does.");
-            }
+                context.Findings.Info(BoundaryCode, context.Location, $"{by} is an agent the role {role} of standing agent {raised.Goal} names: no standing agent disposes of its own outputs, so another principal does.");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// How a principal is the standing agent itself, as the rules against disposing of or answering its own outputs read it (§ 8): Carried
+    /// for an agent that carried one of its occurrences, the contributor of an assignment of its work order recorded before the record
+    /// judged; else the role its work step names, for an agent the goal's role names as the roster stands. Null for a person, and for an
+    /// agent that is neither.
+    /// </summary>
+    private static (bool Carried, string? Role)? OwnAgent(EstateModel model, RecordEnvelope goal, string by, RecordEnvelope record)
+    {
+        RecordEnvelope current = model.Latest(goal);
+        if (GoalRules.IsPerson(model, by) || FlowRuns.Work(model, current) is not RecordEnvelope order)
+        {
+            return null;
+        }
+
+        IReadOnlyList<string> chain = model.Chain(order);
+        if (model.OfType("assignment").Any(a => a.Subject is not null && chain.Contains(a.Subject.Id) && EstateModel.BodyString(a, "contributor") == by && GoalRules.Before(a, record)))
+        {
+            return (true, null);
+        }
+
+        return StandingAgents.Resolve(model, current).Flow is { } flow && StandingAgents.WorkStep(flow) is { } step && Routing.Principals(model, current, step.Role).Principals.Contains(by)
+            ? (false, step.Role)
+            : null;
+    }
+
+    /// <summary>
+    /// The standing agent's goal, by its first revision, that guards an ask against the agent's own answer (§ 8): a standing agent's ask,
+    /// by the raisedBy of its chain, or one of the runtime's own asks about a standing agent's goal (its renewal ask, a period cap's ask or
+    /// its failure pause's ask, by its opening words and <see cref="StandingAgents.RuntimeAsk"/>). Null for every other ask, whose answers
+    /// stay as they were.
+    /// </summary>
+    public static RecordEnvelope? GuardedBy(EstateModel model, RecordEnvelope ask)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(ask);
+        RecordEnvelope first = FirstOf(model, ask);
+        if (Of(first) is RaisedBy raised)
+        {
+            return model.ById.TryGetValue(raised.Goal, out RecordEnvelope? standing) && standing.Type == "goal" ? standing : null;
+        }
+
+        RecordEnvelope latest = model.Latest(ask);
+        string question = EstateModel.BodyString(latest, "question") ?? string.Empty;
+        if (!RuntimeWords.Any(p => question.StartsWith(p, StringComparison.Ordinal)) || EstateModel.BodyString(latest, "goal") is not string named
+            || !model.ById.TryGetValue(named, out RecordEnvelope? goal) || goal.Type != "goal")
+        {
+            return null;
+        }
+
+        RecordEnvelope current = model.Latest(goal);
+        return StandingAgents.IsStanding(current) && StandingAgents.RuntimeAsk(model, current, ask) && model.ById.TryGetValue(model.Chain(current)[0], out RecordEnvelope? identity) ? identity : null;
+    }
+
+    /// <summary>
+    /// Why a decision that answers an ask a standing agent's goal guards (<see cref="GuardedBy"/>) answers nothing (§ 8: no standing agent
+    /// answers its own output, and none ends its own failure pause), whatever its decidedBy names: it is recorded by the ask's author, unless
+    /// that is the person asked recording its own decision about one of the runtime's asks; by an agent that carried one of the standing
+    /// agent's occurrences before it (standing.own-output); or by an agent the goal's role names as the roster stands, which the write
+    /// boundary refuses (standing.output-now). Null when it answers the ask as any other decision of the person asked does.
+    /// </summary>
+    public static (string Code, string Message)? SelfAnswer(EstateModel model, RecordEnvelope decision, RecordEnvelope ask, RecordEnvelope goal)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(decision);
+        ArgumentNullException.ThrowIfNull(ask);
+        ArgumentNullException.ThrowIfNull(goal);
+        RecordEnvelope first = FirstOf(model, ask);
+        string by = decision.By;
+        string? to = EstateModel.BodyString(model.Latest(ask), "to");
+        const string Rest = "whatever decidedBy names: the person asked records the decision, or a principal other than the standing agent records it for them.";
+        if (by == first.By && (Of(first) is not null || by != to))
+        {
+            return ("standing.own-output", $"Ask {first.Id} about standing agent {goal.Id} was put by {by}: no standing agent answers its own ask or ends its own pause, {Rest}");
+        }
+
+        return OwnAgent(model, goal, by, decision) switch
+        {
+            (true, _) => ("standing.own-output", $"{by} carried occurrences of standing agent {goal.Id}: no standing agent answers ask {first.Id} about its own work or ends its own pause, {Rest}"),
+            (false, string role) => (BoundaryCode, $"{by} is an agent the role {role} of standing agent {goal.Id} names: no standing agent answers ask {first.Id} about its own work or ends its own pause, {Rest}"),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// The decisions that answer an ask, leaving out those a standing agent recorded about an ask its goal guards (<see cref="SelfAnswer"/>):
+    /// what <see cref="Asks.State"/> and the open outputs read, so a decision the rule refuses neither answers the ask, frees an open output
+    /// nor ends a failure pause, even when it reached the records by hand.
+    /// </summary>
+    internal static List<RecordEnvelope> Counting(EstateModel model, RecordEnvelope ask, IEnumerable<RecordEnvelope> answers)
+    {
+        List<RecordEnvelope> all = [.. answers];
+        return all.Count == 0 || GuardedBy(model, ask) is not RecordEnvelope goal ? all : all.FindAll(d => SelfAnswer(model, d, ask, goal) is null);
+    }
+
+    /// <summary>
+    /// Validates a decision's answer to an ask (§ 8): a standing agent's own answer to an ask its goal guards is refused, whatever decidedBy
+    /// names (standing.own-output); one by an agent the goal's role names is reported as the roster stands, and the write boundary refuses
+    /// it (standing.output-now). Answers to every other ask are judged as before.
+    /// </summary>
+    public static void ValidateAnswer(ValidationContext context, RecordEnvelope ask)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(ask);
+        if (GuardedBy(context.Model, ask) is not RecordEnvelope goal || SelfAnswer(context.Model, context.Record, ask, goal) is not { } refused)
+        {
+            return;
+        }
+
+        if (refused.Code == BoundaryCode)
+        {
+            context.Findings.Info(BoundaryCode, context.Location, refused.Message);
+        }
+        else
+        {
+            context.Error(refused.Code, refused.Message);
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4: a possibility's author never adopts it, whoever raised it, as work new --from-possibility refuses (§ 8). A standing agent's
+    /// possibility is judged with its revision (<see cref="ValidatePossibility"/>). Any other possibility's revision that adopts it, by the
+    /// author of its first revision, is refused (standing.own-output) when its chain carries a field new in 0.9.4, which no earlier estate
+    /// wrote; otherwise it is reported as the records stand and the write boundary refuses it (standing.output-now), so that an adoption
+    /// an earlier estate recorded keeps its reading.
+    /// </summary>
+    public static void ValidateAdoption(ValidationContext context, string? disposition)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        RecordEnvelope record = context.Record;
+        if (disposition != "adopted" || context.Find(record.Supersedes) is not { Type: "possibility" } previous)
+        {
+            return;
+        }
+
+        RecordEnvelope first = FirstOf(context.Model, previous);
+        bool adopts = EstateModel.BodyString(previous, "disposition") != "adopted" || !Same(TJson.Object(record.Body, "adoptedAs"), TJson.Object(previous.Body, "adoptedAs"));
+        if (!adopts || record.By != first.By || Of(first) is not null)
+        {
+            return;
+        }
+
+        string message = $"Possibility {first.Id} ({EstateModel.BodyString(first, "title")}) was raised by {record.By}: its author does not adopt it, whoever raised it; a principal other than its author adopts it, as work new --from-possibility does.";
+        IEnumerable<RecordEnvelope> chain = context.Model.Chain(previous).Select(context.Model.ById.GetValueOrDefault).OfType<RecordEnvelope>().Append(record);
+        if (chain.Any(r => PossibilityFields.Any(f => Has(r, f))))
+        {
+            context.Error("standing.own-output", message);
+        }
+        else
+        {
+            context.Findings.Info(BoundaryCode, context.Location, message);
         }
     }
 
@@ -523,7 +685,7 @@ internal static partial class StandingOutputs
         }
 
         string question = EstateModel.BodyString(context.Record, "question") ?? string.Empty;
-        if (new[] { NextEligible.AttentionQuestion, StandingAgents.RenewalAsk, StandingAgents.PeriodAsk }.Any(p => question.StartsWith(p, StringComparison.Ordinal)))
+        if (RuntimeWords.Any(p => question.StartsWith(p, StringComparison.Ordinal)))
         {
             context.Error("standing.ask", "A standing agent's ask does not open with the words of the runtime's own asks about its goal.");
         }
