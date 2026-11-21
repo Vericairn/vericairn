@@ -868,7 +868,8 @@ public static class OpenApiDocument
 
         JsonObject actItem = Object(("id", "string"), ("kind", "string"), ("by", "string"), ("title", "string"), ("records", "string"), ("recordType", "string"),
             ("subjectType", "string"), ("subject", "object"), ("basis", "array"), ("self", "boolean"), ("dismissable", "boolean"), ("question", "string"),
-            ("recommendation", "string"), ("recommendationHash", "string"));
+            ("recommendation", "string"), ("recommendationHash", "string"), ("reviews", "array"));
+        actItem["properties"]!["reviews"]!["items"] = SchemaReference("OperatorActReview");
         actItem["required"] = new JsonArray("id", "kind", "by", "title", "records", "recordType", "subjectType", "subject", "basis", "self", "dismissable");
         actItem["properties"]!["kind"]!["enum"] = new JsonArray("close", "answer", "goal-acceptance", "release-acceptance", "milestone-acceptance", "milestone-result-acceptance", "request");
         actItem["properties"]!["subject"] = SchemaReference("OperatorClosePin");
@@ -1123,6 +1124,7 @@ public static class OpenApiDocument
             ["OperatorAnswerCandidatesResponse"] = answerCandidates,
             ["OperatorAnswerResponse"] = answerResponse,
             ["OperatorActItem"] = actItem,
+            ["OperatorActReview"] = Object(("id", "string"), ("hash", "string"), ("by", "string"), ("outcome", "string"), ("independence", "string"), ("subjectHash", "string")),
             ["OperatorActListResponse"] = actList,
             ["OperatorActChoice"] = actChoice,
             ["OperatorActRequest"] = actRequest,

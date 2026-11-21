@@ -57,6 +57,22 @@ public class OperatorActSurfaceTests(HeadlessFixture fixture)
         }
     }
 
+    [Fact]
+    public void AnAcceptanceStartsWaitingUntilTheOperatorSelectsItAndShowsItsReviews()
+    {
+        var review = new OperatorActReview("01M7ZZZZZZZZZZZZZZZZZZZZZ1", "sha256:" + new string('b', 64), "01M7ZZZZZZZZZZZZZZZZZZZZZ2", "pass", "independent-agent", "sha256:" + new string('a', 64));
+        var acceptance = new OperatorActItem("close:STEP-1", "close", "op", "STEP-1 result", "an acceptance", "acceptance", "result",
+            new("01M7ZZZZZZZZZZZZZZZZZZZZZ3", "sha256:" + new string('a', 64)), [new(review.Id, review.Hash)], false, false, Reviews: [review]);
+        var answer = acceptance with { Id = "answer:x", Kind = "answer", RecordType = "decision", Reviews = null };
+        var row = new OperatorActRow(acceptance, () => { });
+
+        Assert.Equal("wait", row.Choice);
+        Assert.Equal("sign", new OperatorActRow(answer, () => { }).Choice);
+        Assert.Contains($"Review {review.Id} at {review.Hash} by {review.By}: pass, independent-agent, of {review.SubjectHash}", row.Label, StringComparison.Ordinal);
+        row.Choice = "sign";
+        Assert.Equal("sign", row.Choice);
+    }
+
     private static string Ask(ShellViewModel shell, string person, string question, string recommendation)
     {
         WriteOutcome written = shell.Api!.NewRecord(new NewRecordRequest("ask", person,

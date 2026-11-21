@@ -99,11 +99,11 @@ public sealed partial class EstateService
             }
 
             // Every record is announced before the first check, and each signature says which it is (FIX-124); one presence session covers up
-            // to 16 by exact hash with one check, a list for each 16, each announced before its own check (ID-16). The vocabulary's operator
-            // close names the session: the act closes ready operator items, and no other action of the closed vocabulary signs these types.
-            using IDisposable counted = SessionAction("operator close",
+            // to 16 by exact hash with one check, a list for each 16, each announced before its own check (ID-16). From decision
+            // 01M8001M0T9XRGF7SKHW3B45KF the vocabulary's operator act names the session, as the dialog and the ledger show it.
+            using IDisposable counted = SessionAction("operator act",
                 NeedsPresence(signer, drafts[0].Draft, model) ? drafts.Select(d => DescribeRecord(d.Draft, model)) : null,
-                ExactSession("operator close", "operator act:" + act + ":" + string.Join(",", acting.Select(c => c.Item + "@" + c.Subject.Hash + "=" + c.Choice)),
+                ExactSession("operator act", "operator act:" + act + ":" + string.Join(",", acting.Select(c => c.Item + "@" + c.Subject.Hash + "=" + c.Choice)),
                     [.. drafts.Select(d => d.Draft)], redatable: true));
             List<AuthoredRecord> records = [];
             foreach ((_, RecordDraft planned) in drafts)
@@ -153,7 +153,10 @@ public sealed partial class EstateService
 
     /// <summary>
     /// Every operator item whose command is ready for one operator, in the order of <see cref="OperatorActs.Kinds"/>, each with what its
-    /// signature records. A run's reserved step and a publication's close are not ready here: their own commands complete them.
+    /// signature records and the reviews it rests on. A run's reserved step and a publication's close are not ready here: their own commands
+    /// complete them. A release candidate's, a milestone's or a milestone result's acceptance is ready only as operator close would accept a
+    /// step: its exact revision has at least one current review and every current review of it passes, and a result is completed; one with
+    /// a failed review or findings, none, or a result that is not completed, waits for the operator's own acceptance command.
     /// </summary>
     private List<OperatorActItem> ReadyItems(EstateModel model, string by)
     {
@@ -165,7 +168,8 @@ public sealed partial class EstateService
             RecordEnvelope result = model.ById[close.Result.Id];
             closing.Add(result.Id);
             items.Add(new("close:" + close.Key, "close", by, close.Key + " result", $"an acceptance of result {close.Result.Id} of {close.Key} at its exact hash, on the basis of {Count(close.Reviews.Count, "passing review")}",
-                "acceptance", "result", close.Result, [.. close.Reviews.Select(r => new OperatorClosePin(r.Id, r.Hash)).OrderBy(r => r.Id, StringComparer.Ordinal)], result.By == by, false));
+                "acceptance", "result", close.Result, [.. close.Reviews.Select(r => new OperatorClosePin(r.Id, r.Hash)).OrderBy(r => r.Id, StringComparer.Ordinal)], result.By == by, false,
+                Reviews: [.. close.Reviews.Select(r => ReviewOf(model.ById[r.Id]))]));
         }
 
         foreach (OperatorAnswerItem ask in AnswerCandidates(model, by))
@@ -182,16 +186,26 @@ public sealed partial class EstateService
                 if (command is null || closing.Contains(id) || !model.ById.TryGetValue(id, out RecordEnvelope? subject)) continue;
                 OperatorClosePin[] basis = [.. command["body"]!["basis"]!.AsArray().Select(b => b!.GetValue<string>()).Where(model.ById.ContainsKey)
                     .Select(b => new OperatorClosePin(b, model.ById[b].ComputedHash)).OrderBy(b => b.Id, StringComparer.Ordinal)];
+                RecordEnvelope[] reviews = [];
+                if (kind != "goal-acceptance")
+                {
+                    // As operator close admits a step: its exact revision reviewed, every current review of it passing, and a result completed.
+                    reviews = [.. model.About(subject.Id, "review").Where(r => model.IsCurrent(r) && r.Subject == subject.Reference).OrderBy(r => r.Id, StringComparer.Ordinal)];
+                    if (reviews.Length == 0 || reviews.Any(r => EstateModel.BodyString(r, "outcome") != "pass")
+                        || subject.Type == "result" && EstateModel.BodyString(subject, "outcome") != "completed") continue;
+                    basis = [.. reviews.Select(r => new OperatorClosePin(r.Id, r.ComputedHash))];
+                }
+
                 string title = item["title"]!.GetValue<string>();
                 string records = kind switch
                 {
                     "goal-acceptance" => $"an acceptance of goal {subject.Id} at its exact hash, relying on {(basis.Length == 0 ? "no evaluation" : "its current evaluation " + basis[0].Id)}",
-                    "release-acceptance" => $"an acceptance of release candidate {subject.Id} at its exact hash ({title}); it publishes nothing",
-                    "milestone-acceptance" => $"an acceptance of milestone {subject.Id} at its exact hash ({title})",
-                    _ => $"an acceptance of result {subject.Id} toward a milestone at its exact hash ({title})",
+                    "release-acceptance" => $"an acceptance of release candidate {subject.Id} at its exact hash ({title}), on the basis of {Count(reviews.Length, "passing review")}; it publishes nothing",
+                    "milestone-acceptance" => $"an acceptance of milestone {subject.Id} at its exact hash ({title}), on the basis of {Count(reviews.Length, "passing review")}",
+                    _ => $"an acceptance of result {subject.Id} toward a milestone at its exact hash ({title}), on the basis of {Count(reviews.Length, "passing review")}",
                 };
                 items.Add(new(kind + ":" + subject.Id, kind, by, title, records, "acceptance", subject.Type, new(subject.Id, subject.ComputedHash), basis,
-                    command["body"]!["self"]?.GetValue<bool>() ?? subject.By == by, false));
+                    command["body"]!["self"]?.GetValue<bool>() ?? subject.By == by, false, Reviews: [.. reviews.Select(ReviewOf)]));
             }
         }
 
@@ -203,5 +217,7 @@ public sealed partial class EstateService
         return items;
 
         static string Count(int count, string what) => count.ToString(CultureInfo.InvariantCulture) + " " + what + (count == 1 ? string.Empty : "s");
+        static OperatorActReview ReviewOf(RecordEnvelope review) => new(review.Id, review.ComputedHash, review.By,
+            EstateModel.BodyString(review, "outcome") ?? "unknown", EstateModel.BodyString(review, "independence") ?? "unknown", review.Subject?.Hash ?? string.Empty);
     }
 }

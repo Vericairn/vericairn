@@ -195,8 +195,9 @@ decisions, the API and SDK counterparts and Remote.
 
 From 0.9.4 (OPS-24), the operator signs every ready item in one reviewed act. With `--ready` alone the command lists every
 operator item whose command is ready for `--by`, or the root operator: acceptances of reviewed results, answers with their
-recommendations, a goal's, a release candidate's, a milestone's and a milestone result's acceptance, and action requests' closes,
-each with what its signature records, its exact subject and basis. It writes nothing.
+recommendations, a goal's acceptance, a release candidate's, a milestone's and a milestone result's acceptance whose exact revision
+has only passing reviews, and action requests' closes, each with what its signature records, its exact subject and basis, and an
+acceptance's reviews. It writes nothing.
 
 | Option | Meaning |
 |---|---|
@@ -207,13 +208,14 @@ each with what its signature records, its exact subject and basis. It writes not
 | `--dismiss <item>=<reason>` | Dismiss that request with your reason; repeatable. Only a request is dismissed. |
 | `--by <operator-id>` | Required to act: the operator, a person, acting on their own admitted device. |
 | `--stake <stake>` | Each answer's decision stake: `low` (the default), `medium`, `high` or `critical`. |
-| `--from <file>` | Use a saved `operator act --ready --json` listing with a choice; `-` reads standard input. |
+| `--from <file>` | The saved `operator act --ready --json` listing you read; `-` reads standard input. Required to act unless you type `yes` in a terminal to the listing shown. |
 | `--json` | Print one typed response. The reviewed act is shown on standard error before signing. |
 | `--estate <root>`, `-e <root>` | Select the estate. |
 
-A chosen item that changed or is no longer ready, a changed list with `--all`, a dismissal of an item that is not a request, an
-agent or anyone but the acting operator refuses the whole act without a record. Where presence sessions are on, the act's records
-sign under one presence check whose announced list names each, up to 16 to a list, a list for each 16
+A chosen item that changed or is no longer ready, a changed list with `--all` since the listing you read, a dismissal of an item that
+is not a request, an act without `--from` and without a terminal, an agent or anyone but the acting operator refuses the whole act
+without a record. Where presence sessions are on, the act's records sign under one presence check, under the session action
+`operator act`, whose announced list names each, up to 16 to a list, a list for each 16
 ([presence sessions on standard error](#presence-sessions-on-standard-error-094)). Exit 0 means every chosen record was stored, 1 a
 refusal, and 2 invalid arguments or a client failure. See the
 [operator actions guide](operator-actions.md#sign-every-ready-item-in-one-reviewed-act-094).

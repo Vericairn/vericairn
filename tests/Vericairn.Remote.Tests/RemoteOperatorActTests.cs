@@ -80,6 +80,19 @@ public sealed class RemoteOperatorActTests(HeadlessFixture fixture)
         });
     }
 
+    [Fact]
+    public void AnAcceptanceStartsWaitingUntilThePersonSelectsItAndShowsItsReviews()
+    {
+        var review = new Protocol.OperatorActReview("01M7ZZZZZZZZZZZZZZZZZZZZZ1", "sha256:" + new string('b', 64), "01M7ZZZZZZZZZZZZZZZZZZZZZ2", "pass", "independent-agent", "sha256:" + new string('a', 64));
+        var acceptance = new Protocol.OperatorActItem("close:STEP-1", "close", "op", "STEP-1 result", "an acceptance", "acceptance", "result",
+            new("01M7ZZZZZZZZZZZZZZZZZZZZZ3", "sha256:" + new string('a', 64)), [new(review.Id, review.Hash)], false, false, Reviews: [review]);
+        var choice = new RemoteActChoice(acceptance);
+
+        Assert.Equal("wait", choice.Choice);
+        Assert.Equal("sign", new RemoteActChoice(acceptance with { Id = "answer:x", Kind = "answer", RecordType = "decision" }).Choice);
+        Assert.Contains($"Review {review.Id} at {review.Hash} by {review.By}: pass, independent-agent, of {review.SubjectHash}", choice.Label, StringComparison.Ordinal);
+    }
+
     private static RecordEnvelope Ask(TestEstate estate, string question, string recommendation) => estate.Add("ask", estate.BuilderId,
         JsonSerializer.Serialize(new { to = estate.OperatorId, question, recommendation, consequence = "The work waits.", state = "open" }));
 

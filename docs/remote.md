@@ -138,8 +138,9 @@ answered no longer wait on you. A phone without its presence key signs no act.
 
 From 0.9.4 (OPS-24), Remote offers the same reviewed list as `vericairn operator act --ready`. In Attention, open **Ready items:
 one reviewed act** and choose **Read my ready items**: every operator item whose command is ready for you is listed with what its
-signature records, its exact subject and basis, and an ask's recommendation by hash. Each starts chosen to sign; choose **wait** to
-leave it waiting, or, for a request, **dismiss** with your reason. Read the act as it will be signed, confirm it, then choose **Sign
+signature records, its exact subject and basis, an acceptance's reviews (who reviewed, the outcome, the independence and the exact
+hash reviewed), and an ask's recommendation by hash. An answer or a request starts chosen to sign; an acceptance starts waiting until
+you choose **sign**; choose **wait** to leave an item waiting, or, for a request, **dismiss** with your reason. Read the act as it will be signed, confirm it, then choose **Sign
 the act**. Reading signs nothing.
 
 Before the first signature Remote reads the list again, and the act refuses whole, signing and sending nothing, if any item changed

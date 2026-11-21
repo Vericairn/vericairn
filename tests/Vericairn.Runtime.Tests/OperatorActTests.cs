@@ -30,24 +30,30 @@ public sealed class OperatorActTests
         RecordEnvelope ask = OperatorAnswerTests.Ask(f, "Ship it?", "Ship it now.");
         RecordEnvelope request = Request(f, "action");
         Request(f, "publication");
-        var milestone = f.Add("MS-1", kind: "milestone", reviewOutcome: "fail");
+        // A milestone result whose only review failed is not ready: operator close leaves it out, and so does the act.
+        f.Add("MS-1", kind: "milestone", reviewOutcome: "fail");
 
         OperatorActListResponse listed = f.Api.OperatorActItems(f.Estate.OperatorId);
 
         Assert.True(listed.Ok, listed.Problem?.Message);
         Assert.Equal(f.Estate.OperatorId, listed.By);
-        Assert.Equal(["close:STEP-1", "answer:" + ask.Id, "milestone-result-acceptance:" + milestone.Result.Id, "request:" + request.Id], listed.Items.Select(i => i.Id));
+        Assert.Equal(["close:STEP-1", "answer:" + ask.Id, "request:" + request.Id], listed.Items.Select(i => i.Id));
         OperatorActItem close = listed.Items[0];
         Assert.Equal(("acceptance", "result", step.Result.Id, step.Result.ComputedHash), (close.RecordType, close.SubjectType, close.Subject.Id, close.Subject.Hash));
         Assert.Equal([step.Review.Id], close.Basis.Select(b => b.Id));
+        Assert.True(close.IsAcceptance);
         Assert.StartsWith($"an acceptance of result {step.Result.Id} of STEP-1 at its exact hash", close.Records, StringComparison.Ordinal);
+        // Each acceptance shows the reviews it rests on: who reviewed, the outcome, the independence and the exact hash reviewed.
+        OperatorActReview review = Assert.Single(close.Reviews!);
+        Assert.Equal((step.Review.Id, step.Review.ComputedHash, step.Review.By, "pass", "operator", step.Result.ComputedHash), (review.Id, review.Hash, review.By, review.Outcome, review.Independence, review.SubjectHash));
         OperatorActItem answer = listed.Items[1];
         Assert.Equal(("decision", "Ship it now.", OperatorAnswers.RecommendationHash(ask)), (answer.RecordType, answer.Recommendation, answer.RecommendationHash));
         Assert.Contains("with its recommendation", answer.Records, StringComparison.Ordinal);
-        OperatorActItem close2 = listed.Items[3];
+        Assert.False(answer.IsAcceptance);
+        OperatorActItem close2 = listed.Items[2];
         Assert.True(close2.Dismissable);
         Assert.Equal("operator-request-close", close2.RecordType);
-        Assert.All(listed.Items.Take(3), i => Assert.False(i.Dismissable));
+        Assert.All(listed.Items.Take(2), i => Assert.False(i.Dismissable));
         // The root operator's when none is named; an agent has no act.
         Assert.Equal(listed.Items.Select(i => i.Id), f.Api.OperatorActItems().Items.Select(i => i.Id));
         Assert.Equal("denied", f.Api.OperatorActItems(f.Estate.BuilderId).Problem?.Code);
@@ -177,7 +183,8 @@ public sealed class OperatorActTests
         PresenceHelperStandIn helper = Assert.Single(helpers);
         Assert.Empty(custody.Reasons);
         PresenceSessionRules terms = PresenceSessionRules.ReadTerms(Assert.Single(helper.Terms));
-        Assert.Equal("operator close", terms.Action);
+        // From decision 01M8001M0T9XRGF7SKHW3B45KF the act's list opens under its own name in the vocabulary.
+        Assert.Equal("operator act", terms.Action);
         EstateModel model = f.Estate.Load();
         // The announced list names exactly the records signed and stored, by exact hash; the item left waiting is not among them.
         Assert.Equal(acted.Written.Select(s => model.ById[s.Record.Id].ComputedHash).Order(StringComparer.Ordinal), terms.Entries.Select(e => e.Hash!).Order(StringComparer.Ordinal));
@@ -204,6 +211,110 @@ public sealed class OperatorActTests
         Assert.Equal(2, PresenceSessionRules.ReadTerms(helpers[1].Terms[0]).ExactCount);
         Assert.Empty(custody.Reasons);
         Assert.Equal(18, helpers.Sum(h => h.SignedHashes.Count));
+    }
+
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("blocked")]
+    [InlineData("findings")]
+    [InlineData("unreviewed")]
+    public void AMilestoneResultOrReleaseCandidateWithoutOnlyPassingReviewsIsNeitherListedNorSigned(string state)
+    {
+        using var f = new OperatorCloseFixture();
+        RecordEnvelope result = MilestoneResult(f, state);
+        RecordEnvelope candidate = Candidate(f, state);
+        Assert.False(f.Estate.Load().Findings.HasErrors, string.Join("\n", f.Estate.Load().Findings.Where(x => x.Severity == Records.Model.Severity.Error).Select(x => x.Message)));
+        // Both wait in operator list for the operator's own acceptance command.
+        JsonArray queue = Records.Estate.OperatorActions.Derive(f.Estate.Load())["items"]!.AsArray();
+        Assert.Contains(queue, i => i!["kind"]!.GetValue<string>() == "release-acceptance");
+
+        OperatorActListResponse listed = f.Api.OperatorActItems(f.Estate.OperatorId);
+
+        Assert.True(listed.Ok, listed.Problem?.Message);
+        Assert.Empty(listed.Items);
+        // A choice crafted for either refuses the whole act, and nothing is accepted.
+        foreach ((string item, RecordEnvelope subject) in new[] { ("milestone-result-acceptance:" + result.Id, result), ("release-acceptance:" + candidate.Id, candidate) })
+        {
+            OperatorActResponse refused = f.Api.OperatorAct(new(f.Estate.OperatorId, [new OperatorActChoice(item, "sign", new(subject.Id, subject.ComputedHash), [])]),
+                TestContext.Current.CancellationToken);
+            Assert.Equal("conflict", refused.Problem?.Code);
+        }
+
+        Assert.Empty(f.Estate.Load().OfType("acceptance"));
+    }
+
+    [Fact]
+    public void AReleaseCandidateWhoseReviewsAllPassIsListedWithThemAndSignsOnThatBasis()
+    {
+        using var f = new OperatorCloseFixture();
+        RecordEnvelope candidate = Candidate(f, "pass");
+        RecordEnvelope review = f.Estate.Load().About(candidate.Id, "review").Single();
+
+        OperatorActItem item = Assert.Single(f.Api.OperatorActItems(f.Estate.OperatorId).Items);
+
+        Assert.Equal(("release-acceptance:" + candidate.Id, "release", candidate.ComputedHash), (item.Id, item.SubjectType, item.Subject.Hash));
+        Assert.True(item.IsAcceptance);
+        Assert.Equal([review.Id], item.Basis.Select(b => b.Id));
+        Assert.Equal(("pass", candidate.ComputedHash), (Assert.Single(item.Reviews!).Outcome, item.Reviews![0].SubjectHash));
+        Assert.Contains("on the basis of 1 passing review; it publishes nothing", item.Records, StringComparison.Ordinal);
+        OperatorActResponse acted = f.Api.OperatorAct(new(f.Estate.OperatorId, [item.Choose()]), TestContext.Current.CancellationToken);
+        Assert.True(acted.Ok, acted.Problem?.Message);
+        RecordEnvelope acceptance = f.Estate.Load().ById[Assert.Single(acted.Written).Record.Id];
+        Assert.Equal(candidate.Reference, acceptance.Subject);
+        Assert.Equal([review.Id], acceptance.Body.GetProperty("basis").EnumerateArray().Select(b => b.GetString()));
+        Assert.Equal(0, f.Api.Validate().Errors);
+    }
+
+    [Fact]
+    public void AReviewArrivingAfterTheListingRefusesAnActOnTheBasisShown()
+    {
+        using var f = new OperatorCloseFixture();
+        RecordEnvelope candidate = Candidate(f, "pass");
+        OperatorActItem item = Assert.Single(f.Api.OperatorActItems(f.Estate.OperatorId).Items);
+        f.Estate.Add("review", f.Estate.BuilderId, JsonSerializer.Serialize(new { independence = "independent-agent", outcome = "fail", summary = "A later look failed it.", findings = Array.Empty<string>() }), candidate.Reference);
+
+        OperatorActResponse refused = f.Api.OperatorAct(new(f.Estate.OperatorId, [item.Choose()]), TestContext.Current.CancellationToken);
+
+        Assert.Equal("conflict", refused.Problem?.Code);
+        Assert.Empty(f.Estate.Load().OfType("acceptance"));
+        Assert.Empty(f.Api.OperatorActItems(f.Estate.OperatorId).Items);
+    }
+
+    // A milestone's result in the state named: its only review failed or found problems, the result blocked with a failed review, or none.
+    private static RecordEnvelope MilestoneResult(OperatorCloseFixture f, string state)
+    {
+        if (state == "unreviewed")
+        {
+            RecordEnvelope order = f.Estate.Add("work-order", f.Estate.OperatorId, JsonSerializer.Serialize(new
+            {
+                key = "MS-1", kind = "milestone", title = "Finish MS-1", intent = "Produce the milestone.", scope = RequestScope,
+                exitQuestion = "Is MS-1 complete?", inputs = Array.Empty<string>(), deliverables = RequestDeliverables,
+            }));
+            RecordEnvelope assignment = f.Estate.Add("assignment", f.Estate.OperatorId, JsonSerializer.Serialize(new
+            {
+                contributor = f.Estate.BuilderId,
+                brief = new
+                {
+                    outcome = "Finish the milestone.", sources = Array.Empty<string>(), permittedChanges = RequestScope, prohibitedEffects = Array.Empty<string>(),
+                    workspace = RequestScope, limits = Array.Empty<string>(), expectedOutputs = RequestDeliverables, reviewCriteria = RequestScope, recovery = "Read the result.",
+                },
+            }), order.Reference);
+            return f.Result(f.Attempt(assignment));
+        }
+
+        return f.Add("MS-1", kind: "milestone", outcome: state == "blocked" ? "blocked" : "completed", reviewOutcome: state == "findings" ? "findings" : "fail").Result;
+    }
+
+    // A release candidate of a product, reviewed by an agent with the outcome named, or not reviewed.
+    private static RecordEnvelope Candidate(OperatorCloseFixture f, string state)
+    {
+        RecordEnvelope product = f.Estate.Add("product", f.Estate.OperatorId, """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
+        RecordEnvelope candidate = f.Estate.Add("release", f.Estate.OperatorId, $$"""{"version":"1.0.0","status":"candidate","repository":"Example/example","commit":"{{new string('1', 40)}}","artifacts":[{"name":"example.zip","hash":"sha256:{{new string('1', 64)}}","bytes":10,"platform":"linux-x64"}],"recordFormat":{"reads":[1,2,3],"writes":3},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}""", product.Reference);
+        if (state is not ("unreviewed" or "blocked"))
+            f.Estate.Add("review", f.Estate.BuilderId, JsonSerializer.Serialize(new { independence = "independent-agent", outcome = state == "failed" ? "fail" : state, summary = "Inspected the exact candidate.", findings = Array.Empty<string>() }), candidate.Reference);
+        if (state == "blocked")
+            f.Estate.Add("review", f.Estate.BuilderId, JsonSerializer.Serialize(new { independence = "independent-agent", outcome = "fail", summary = "The candidate is blocked.", findings = Array.Empty<string>() }), candidate.Reference);
+        return candidate;
     }
 
     private static (List<PresenceHelperStandIn> Helpers, RecordingCustody Custody) Presence(OperatorCloseFixture f)

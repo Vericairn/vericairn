@@ -16,12 +16,15 @@ public sealed class OperatorActRow : Observable
     private string choice = "sign";
     private string reason = string.Empty;
 
-    /// <summary>Creates the row with its item signed until the operator unselects it.</summary>
+    /// <summary>
+    /// Creates the row: an answer or a request starts chosen to sign; an acceptance, a judgment, starts waiting until the operator selects it.
+    /// </summary>
     public OperatorActRow(OperatorActItem item, Action changed)
     {
         Item = item;
         Changed = changed;
         Choices = item.Dismissable ? ["sign", "wait", "dismiss"] : ["sign", "wait"];
+        choice = item.IsAcceptance ? "wait" : "sign";
     }
 
     /// <summary>The item as the runtime listed it, with its exact subject, basis and what its signature records.</summary>
@@ -95,6 +98,8 @@ public sealed class OperatorActDocument(Func<IEstateApi?> api, Func<string?> aut
         ArgumentNullException.ThrowIfNull(item);
         var text = new StringBuilder($"[{item.Kind}] {item.Title}\nSigns: {item.Records}\nSubject: {item.SubjectType} {item.Subject.Id} at {item.Subject.Hash}");
         foreach (OperatorClosePin basis in item.Basis) text.Append("\nBasis: ").Append(basis.Id).Append(" at ").Append(basis.Hash);
+        foreach (OperatorActReview review in item.Reviews ?? [])
+            text.Append("\nReview ").Append(review.Id).Append(" at ").Append(review.Hash).Append(" by ").Append(review.By).Append(": ").Append(review.Outcome).Append(", ").Append(review.Independence).Append(", of ").Append(review.SubjectHash);
         if (item.Recommendation is not null) text.Append("\nRecommendation ").Append(item.RecommendationHash).Append(": ").Append(item.Recommendation);
         return text.ToString();
     }

@@ -10,11 +10,18 @@ namespace Vericairn.Protocol;
 /// </summary>
 public sealed record OperatorActItem(string Id, string Kind, string By, string Title, string Records, string RecordType, string SubjectType,
     OperatorClosePin Subject, IReadOnlyList<OperatorClosePin> Basis, bool Self, bool Dismissable,
-    string? Question = null, string? Recommendation = null, string? RecommendationHash = null)
+    string? Question = null, string? Recommendation = null, string? RecommendationHash = null, IReadOnlyList<OperatorActReview>? Reviews = null)
 {
+    /// <summary>Whether the item's signature records an acceptance: a judgment the operator selects, never one chosen for them by default.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsAcceptance => RecordType == "acceptance";
+
     /// <summary>The operator's choice for this item, pinned to the exact subject, basis and recommendation shown: sign, wait or dismiss.</summary>
     public OperatorActChoice Choose(string choice = "sign", string? reason = null) => new(Id, choice, Subject, Basis, RecommendationHash, reason);
 }
+
+/// <summary>A current review an acceptance rests on: who reviewed, its outcome and independence, and the exact subject hash it reviewed.</summary>
+public sealed record OperatorActReview(string Id, string Hash, string By, string Outcome, string Independence, string SubjectHash);
 
 /// <summary>Every ready operator item of one operator, or the findings that prevent their use. Reading signs nothing.</summary>
 public sealed record OperatorActListResponse(string? By, IReadOnlyList<OperatorActItem> Items, Problem? Problem = null)

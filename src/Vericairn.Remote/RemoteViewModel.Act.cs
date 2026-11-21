@@ -14,7 +14,8 @@ namespace Vericairn.Remote;
 /// <summary>One ready operator item and the person's choice for it: sign it, leave it waiting, or, for a request, dismiss it with a reason.</summary>
 public sealed class RemoteActChoice(OperatorActItem item) : Observable
 {
-    private string choice = "sign";
+    // An answer or a request starts chosen to sign; an acceptance, a judgment, starts waiting until the person selects it.
+    private string choice = item.IsAcceptance ? "wait" : "sign";
     private string reason = string.Empty;
 
     /// <summary>The item as the runtime listed it, with what its signature records and its exact subject and basis.</summary>
@@ -36,6 +37,8 @@ public sealed class RemoteActChoice(OperatorActItem item) : Observable
         {
             var text = new StringBuilder($"[{Item.Kind}] {Item.Title}\nSigns: {Item.Records}\nSubject: {Item.SubjectType} {Item.Subject.Id} at {Item.Subject.Hash}");
             foreach (OperatorClosePin basis in Item.Basis) text.Append("\nBasis: ").Append(basis.Id).Append(" at ").Append(basis.Hash);
+            foreach (OperatorActReview review in Item.Reviews ?? [])
+                text.Append("\nReview ").Append(review.Id).Append(" at ").Append(review.Hash).Append(" by ").Append(review.By).Append(": ").Append(review.Outcome).Append(", ").Append(review.Independence).Append(", of ").Append(review.SubjectHash);
             if (Item.Recommendation is not null) text.Append("\nRecommendation ").Append(Item.RecommendationHash).Append(": ").Append(Item.Recommendation);
             return text.ToString();
         }

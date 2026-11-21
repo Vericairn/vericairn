@@ -25,7 +25,7 @@ internal sealed class OperatorActCommand : Command
         var by = new Option<string?>("--by") { Description = "Operator acting on their own admitted device; required to act. The listing is theirs; without it, the root operator's." };
         var stake = new Option<string>("--stake") { Description = "Each answer's decision stake: low, medium, high or critical.", DefaultValueFactory = _ => "low" };
         stake.AcceptOnlyFromAmong("low", "medium", "high", "critical");
-        var from = new Option<string?>("--from") { Description = "Saved operator act --ready --json listing, or '-' for standard input. Reuses its exact pins." };
+        var from = new Option<string?>("--from") { Description = "The saved operator act --ready --json listing you read, or '-' for standard input; the act signs only its exact pins. Required to act unless you confirm in a terminal." };
         foreach (Option option in new Option[] { ready, all, select, skip, dismiss, by, stake, from }) Options.Add(option);
         SetAction(parse =>
         {
@@ -50,6 +50,11 @@ internal sealed class OperatorActCommand : Command
             if (named.Distinct(StringComparer.Ordinal).Count() != named.Length) return context.Fail("Name each item once, in one of --select, --skip or --dismiss.");
             if (acting && string.IsNullOrWhiteSpace(actor)) return context.Fail("An act requires --by <operator>.");
             if (!acting && parse.GetValue(from) is not null) return context.Fail("Use --from with a choice.");
+            // From the review of OPS-24: an act binds to a listing the operator read, a saved one (--from) or the one shown here and confirmed
+            // in a terminal; never to a listing this command fetches and signs at once.
+            bool confirm = acting && parse.GetValue(from) is null;
+            if (confirm && Console.IsInputRedirected)
+                return context.Fail("An act signs the listing you read: save it with operator act --ready --by <operator> --json > listing.json, read it, and pass --from listing.json; or run the act in a terminal and confirm the listing it shows.");
             return context.WithApi(parse.GetValue(context.EstateOption)!, api =>
             {
                 if (parse.GetValue(from) is string saved)
@@ -95,6 +100,13 @@ internal sealed class OperatorActCommand : Command
                     TextWriter display = parse.GetValue(context.JsonOption) ? context.Error : context.Output;
                     Show(display, listing, choices);
                     display.Flush();
+                    if (confirm)
+                    {
+                        display.Write("Type yes to sign this act exactly as listed: ");
+                        display.Flush();
+                        if (!string.Equals(Console.ReadLine()?.Trim(), "yes", StringComparison.Ordinal))
+                            return Refused(new("refused", "The act was not confirmed; nothing was signed.", []));
+                    }
                     OperatorActResponse response = api.OperatorAct(new(actor!, choices, every, parse.GetValue(stake)!));
                     if (parse.GetValue(context.JsonOption)) WriteJson(response);
                     else
@@ -139,6 +151,7 @@ internal sealed class OperatorActCommand : Command
             output.WriteLine($"  Signs: {item.Records}");
             output.WriteLine($"  Subject: {item.SubjectType} {item.Subject.Id} at {item.Subject.Hash}");
             foreach (OperatorClosePin basis in item.Basis) output.WriteLine($"  Basis: {basis.Id} at {basis.Hash}");
+            foreach (OperatorActReview review in item.Reviews ?? []) output.WriteLine($"  Review {review.Id} at {review.Hash} by {review.By}: {review.Outcome}, {review.Independence}, of {review.SubjectHash}");
             if (item.Recommendation is not null) output.WriteLine($"  Recommendation {item.RecommendationHash}: {item.Recommendation}");
             if (item.Dismissable) output.WriteLine("  May be dismissed with a reason.");
         }
