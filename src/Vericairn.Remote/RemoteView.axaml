@@ -198,6 +198,22 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock FontWeight="SemiBold" IsVisible="{Binding HasPossibleTodos}" Text="Possible todos: optional requests, which hold nothing" />
+              <ListBox ItemsSource="{Binding PossibleTodos}" IsVisible="{Binding HasPossibleTodos}" AutomationProperties.Name="Possible todos, each with its recommendation, guide and commands">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="p:TodoRow">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Heading}" TextWrapping="Wrap" />
+                        <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" TextWrapping="Wrap" />
+                        <Expander Header="Guide" AutomationProperties.Name="The request's guide">
+                          <SelectableTextBlock MinHeight="24" Text="{Binding Guide}" TextWrapping="Wrap" />
+                        </Expander>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
               <TextBlock FontWeight="SemiBold" IsVisible="{Binding HasStanding}" Text="Standing agents: each one's state and next occurrence" />
               <ListBox ItemsSource="{Binding Standing}" IsVisible="{Binding HasStanding}" AutomationProperties.Name="Standing agents, each with its state and next occurrence">
                 <ListBox.ItemTemplate>

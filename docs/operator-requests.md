@@ -57,6 +57,14 @@ The body has these fields:
 | `kind` | `action` or `publication`. |
 | `destination` | The intended destination, named without a machine path. |
 | `content` | At least one item with `kind` and `hash`. A `text` or `command` item includes its exact `text`; its SHA-256 hash covers those UTF-8 bytes. A `file` item includes its `name` and the hash of its bytes. |
+| `optional` | From 0.9.4, `true` marks the request optional: a possible todo ([below](#optional-requests-possible-todos-094)). |
+
+From 0.9.4 (OPS-22), recording a request, or a revision of one, refuses a pinned file the estate's objects do not hold, naming
+each missing file and its hash, so its content is retrievable from any copy of the estate. Store each file first:
+
+```sh
+vericairn objects put post.md
+```
 
 The subject pins the work order or release served by this request. Revisions keep
 the requester, addressed operator, subject and carry-over source. A changed draft
@@ -104,6 +112,38 @@ A publication request is recorded before the effect. After the operator posts it
 the outcome or observation records its actual destination. The software posts
 nothing on their behalf. Evidence remains a claim to inspect, not a grant of
 publication or acceptance authority.
+
+## Optional requests: possible todos (0.9.4)
+
+From 0.9.4 (OPS-22), a request may be marked `optional`: an action you may or may not do, such as a post you might make. An
+optional request is a possible todo. `operator list`, status and Remote's Attention show it in its own section, **Possible
+todos**, apart from what waits on you, each with its recommendation first, what it asks, where it lands, its pinned files and the
+commands that fetch its kit and close it; `operator list --json` carries each under `possibleTodos` with its `guide` and
+`commands`, and the request queue's JSON (`operator requests`, status's `operatorRequests`) under `optional`, with its `guide`. A
+list without one has neither member. An optional request is not among the three delivered requests or the waiting count, raises
+no required attention, and its events are `open` with the category `information`.
+
+An optional request never holds a release's closing or a goal's evaluation: a goal's record predicate over requests counts no
+optional request, and nothing a release closes on waits for one. It stays open until you close it, done or dismissed, whenever
+you choose, on your word, with `operator done` or `operator dismiss` as above. `operator act --ready` does not list it; close it
+on its own. A run's reserved step is never marked optional: its step says whether it is required.
+
+Fetch a request's kit on any machine with a copy of the estate:
+
+```sh
+vericairn operator fetch <request-revision> --to <folder>
+```
+
+The command writes every file the request pins, under its name, read from the estate's objects and checked against its hash,
+and its guide, `guide.md`: what the request asks and why, its recommendation, destination and consequence, each pinned item by
+its hash with its text or command verbatim, and the `done` and `dismiss` commands that finish it. It refuses, writing nothing,
+when an object is missing or does not match its hash, a name is not a plain file name or is the guide's, or a file it would write
+exists already; it never replaces a file. The folder is created when missing. It signs and records nothing. `--json` prints the
+request, the guide's name and each file's name, hash and size.
+
+Marking a request optional is a revision of it by its requester, keeping everything else; a closed request cannot be revised.
+The `optional` field is additive within record format 3: a reader before 0.9.4 refuses a request that carries it, so an estate
+marks requests optional only after every writer upgrades.
 
 ## A run's reserved step (0.9.2)
 

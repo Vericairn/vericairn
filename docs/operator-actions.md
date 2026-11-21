@@ -7,7 +7,10 @@ Durable action requests join this queue in 0.8.4. They show their recommendation
 first, with three delivered at once and every remaining identity queued in order.
 Use `operator done` or `operator dismiss` for one signed outcome. See
 [Operator requests](operator-requests.md) for creation, revision, carry-over and
-agent citations.
+agent citations. From 0.9.4 (OPS-22), an optional request is a possible todo, listed after
+the queue in its own section, **Possible todos** (`possibleTodos` in the JSON), each with its
+guide, recommendation and the commands that fetch its kit and close it; it holds nothing
+([optional requests](operator-requests.md#optional-requests-possible-todos-094)).
 
 ```sh
 vericairn operator list

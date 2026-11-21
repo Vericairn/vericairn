@@ -217,6 +217,12 @@ public static class GoalPredicates
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ToList();
 
+        // From 0.9.4 (OPS-22) an optional request is a possible todo and never holds a goal's evaluation: a predicate over requests counts none.
+        if (type == "operator-request")
+        {
+            candidates.RemoveAll(OperatorRequests.IsOptional);
+        }
+
         // A carrier is never among its own placed work: a work order may place itself in its own release plan, and a predicate over the
         // work orders placed in a carrier leaves the carrier out, by its original identity.
         if (type == "work-order" && fields.FirstOrDefault(f => f.Name == PlacementCarrier).Value is string carrier)

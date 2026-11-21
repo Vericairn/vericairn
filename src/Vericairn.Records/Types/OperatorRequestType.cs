@@ -39,6 +39,7 @@ public sealed class OperatorRequestType : IRecordType
         new("sourceAsk", "ulid", false, "The exact original ask carried over; the ask remains readable and is not answered by this request.", 3),
         new("sourceAskHash", "hash", false, "The exact carried ask's hash; required with sourceAsk.", 3),
         new("flowStep", "object", false, "The reserved step of a run the request waits on: goal (the run's first revision), key and, for a step that runs over a list, instance. Its subject is the run's work order and its content one command item; it is delivered only while the step waits on the operator with that exact command, and it grants nothing.", 3),
+        new("optional", "boolean", false, "From 0.9.4, true marks the request optional: a possible todo the operator may never do, shown in its own section with its guide, recommendation and commands. It never holds a release's closing or a goal's evaluation, and closes, done or dismissed, whenever the operator chooses, on their word. A run's reserved step is never optional here: its step says whether it is required.", 3),
         new("raisedBy", "object", false, "From 0.9.4, a standing agent's words outside the estate: goal (its goal's first revision), occurrence, assignment and, for an agent, run, as a possibility's. A publication request pinning the agent's work order, put to an operator other than its author, its exact text labeled the agent's draft, which the operator approves; it dispatches nothing. Every revision keeps raisedBy as the first revision names it and stays a publication request, and only an operator who is a person closes it, directly: anyone else's close closes nothing.", 3),
     ];
 
@@ -76,6 +77,9 @@ public sealed class OperatorRequestType : IRecordType
         }
 
         StandingOutputs.RaisedBy? raised = StandingOutputs.ValidateRaisedBy(context, body.Nested("raisedBy", false));
+        // From 0.9.4 (OPS-22): an optional request is a possible todo; a run's reserved step is required or not by its step alone.
+        if (body.Flag("optional", false) is true && flowStep is not null)
+            context.Error("operator-request.optional", "A step's request is not marked optional: its step says whether it is required.");
         body.NoOtherKeys();
         StandingOutputs.ValidateOperatorRequest(context, raised);
         context.RequireReference("to", to, "principal");

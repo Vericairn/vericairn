@@ -24,6 +24,9 @@ store, and no real-device qualification is recorded for it.
     them, the operator's next reserved step among them, as canonical status gives them, as of the estate's newest record and
     without its command, which a live read shows. Remote carries none of them out;
     a reserved act stays the operator's ([stops](operator-guide.md#stops-and-their-surfaces-092)).
+    From 0.9.4 (OPS-22), below them, the possible todos: the optional operator requests status shows in their own section, each
+    with its recommendation, destination, guide and the commands that fetch its kit and close it on a machine with the estate; they
+    hold nothing, and Remote closes none of them in this build.
     From 0.9.4, below them, the due times of the runs' timed steps, each step with when it is due and why, its timing, zone,
     deadline and a missed-time rule it took, as canonical status gives them, before the step runs; Remote starts none of them.
     From 0.9.4 (PROC-19), below them, the decisions of the runs' decision steps: who decided each path, a rule, its default, a

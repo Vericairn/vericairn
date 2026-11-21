@@ -245,6 +245,16 @@ public sealed partial class RemoteViewModel : Observable
     /// <summary>True while the last observation has a standing agent to show.</summary>
     public bool HasStanding => Standing.Count > 0;
 
+    /// <summary>
+    /// From 0.9.4 (OPS-22), the optional operator requests from the last observation: possible todos in their own section, each with its
+    /// recommendation, guide and the commands that fetch its kit and close it whenever the operator chooses. They hold nothing.
+    /// </summary>
+    public IReadOnlyList<TodoRow> PossibleTodos { get => possibleTodos; private set { if (Set(ref possibleTodos, value)) Raise(nameof(HasPossibleTodos)); } }
+    private IReadOnlyList<TodoRow> possibleTodos = [];
+
+    /// <summary>True while the last observation has a possible todo to show.</summary>
+    public bool HasPossibleTodos => PossibleTodos.Count > 0;
+
 
     /// <summary>
     /// From 0.9.4 (PROC-18), the due times of the estate's runs from the last observation: each step whose timing gates its start, when it
@@ -429,6 +439,7 @@ public sealed partial class RemoteViewModel : Observable
         Products = observation?.Products ?? [];
         Stops = view?.Stops ?? [];
         Standing = view?.Standing ?? [];
+        PossibleTodos = view?.PossibleTodos ?? [];
         Due = view?.Due ?? [];
         Decisions = view?.Decisions ?? [];
         StopsAsOf = view?.StopsAsOf ?? string.Empty;

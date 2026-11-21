@@ -218,6 +218,15 @@ sign under one presence check whose announced list names each, up to 16 to a lis
 refusal, and 2 invalid arguments or a client failure. See the
 [operator actions guide](operator-actions.md#sign-every-ready-item-in-one-reviewed-act-094).
 
+## `vericairn operator fetch` (0.9.4)
+
+From 0.9.4 (OPS-22), `vericairn operator fetch <request-revision> --to <folder>` writes the current request's pinned files, under
+their names, read from the estate's objects and checked against their hashes, and its guide, `guide.md`, into the folder, created
+when missing. It refuses, writing nothing, when an object is missing or does not match its hash, a name is not a plain file name or
+is the guide's, a file it would write exists already, or the revision is superseded. It signs and records nothing. `--json` prints
+the request, its hash, the guide's name and each file's name, hash and size. Exit 0 means the kit was written, 1 a refusal, and 2
+invalid arguments or a client failure. See [optional requests](operator-requests.md#optional-requests-possible-todos-094).
+
 ## `vericairn decisions new`
 
 From 0.8.4, `decisions new` records a supplied operator answer with its exact design document pins. See the [operator workflow](operator-guide.md#record-an-answered-ask-with-its-design-changes).
