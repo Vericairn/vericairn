@@ -83,8 +83,12 @@ public sealed class PolicyExceptionType : IRecordType
         PolicyRecords.Unique(body, targets.Select(t => CanonicalJson.Serialize(t.Element)), field);
         foreach (BodyReader target in targets)
         {
-            string? kind = target.Enum("kind", true, "record", "publication", "file", "occurrence");
+            string? kind = target.Enum("kind", true, "record", "publication", "file", "occurrence", "pair");
             if (policy is not null && DutyRecords.IsDuty(DutyRecords.Rule(policy, rule)) && kind != "occurrence") target.Error("exception.occurrence", "kind", "A duty exception enumerates exact occurrences.");
+            // From 0.9.4 (POLICY-08) a concurrent-paths rule is excepted only for exact pairs of assignment revisions, and only such a rule takes a pair.
+            bool pairs = policy is not null && PolicyRecords.Text(DutyRecords.Rule(policy, rule), "kind") == AssignmentOverlaps.PolicyKind;
+            if (policy is not null && kind is not null && pairs != (kind == "pair"))
+                target.Error("exception.pair", "kind", pairs ? "A concurrent-paths exception names exact pairs of assignment revisions." : "Only a concurrent-paths rule takes a pair target.");
             switch (kind)
             {
                 case "record": PolicyRecords.Reference(context, target.Nested("record", true)); break;
@@ -96,6 +100,13 @@ public sealed class PolicyExceptionType : IRecordType
                     PolicyRecords.Repository(context, target);
                     target.Text("path", true, 500, Patterns.RelativePath);
                     target.Hash("hash", true);
+                    break;
+                case "pair":
+                    IReadOnlyList<RecordEnvelope> assignments = PolicyRecords.References(context, target, "assignments", true, false, "assignment");
+                    int named = PolicyRecords.Items(PolicyRecords.Property(target.Element, "assignments")).Count();
+                    if (named != 2 || assignments.Count == 2 && PolicyRecords.Identity(context.Model, assignments[0]) == PolicyRecords.Identity(context.Model, assignments[1]))
+                        target.Error("exception.pair", "assignments", "A pair names exactly two revisions of two different assignments.");
+                    if (PolicyRecords.Property(target.Element, "submission").ValueKind != JsonValueKind.Undefined) target.Error("exception.pair", "submission", "A pair is excepted at assignment start, never for a release submission.");
                     break;
                 case "occurrence":
                     RecordEnvelope? origin = PolicyRecords.Reference(context, target.Nested("policy", true), true, "estate-policy");
@@ -121,11 +132,15 @@ public sealed class PolicyExceptionType : IRecordType
         }
     }
 
+    private static readonly string[] ReferenceFields = ["record", "subject", "publication"];
+
     private static bool OwnTarget(ValidationContext context, JsonElement target)
     {
-        foreach (string field in new[] { "record", "subject", "publication" })
+        IEnumerable<string?> named = ReferenceFields.Select(field => PolicyRecords.Text(PolicyRecords.Property(target, field), "id"))
+            .Concat(PolicyRecords.Items(PolicyRecords.Property(target, "assignments")).Select(a => PolicyRecords.Text(a, "id")));
+        foreach (string? id in named)
         {
-            RecordEnvelope? record = context.Find(PolicyRecords.Text(PolicyRecords.Property(target, field), "id"));
+            RecordEnvelope? record = context.Find(id);
             if (record is null) continue;
             if (record.By == context.Record.By || EstateModel.BodyString(record, "contributor") == context.Record.By || EstateModel.BodyString(record, "owner") == context.Record.By || EstateModel.BodyString(record, "principal") == context.Record.By || EstateModel.BodyString(record, "holder") == context.Record.By) return true;
             if (record.Type == "result" && WorkView.OrderOfResult(context.Model, record) is { } order && context.Model.OfType("assignment").Any(a => a.Subject?.Id == order.Id && EstateModel.BodyString(a, "contributor") == context.Record.By)) return true;
