@@ -192,13 +192,30 @@ handed over, and when its work is settled. The daemon sweeps leases every five s
 
 ### One holder acts
 
-Only the current holder of a step counts. Only a person's act moves a step from one principal to another:
-a hand-over a person records, or a person's assignment of the step to another principal (an operator's or a
-sponsor's `work assign`, which needs no basis). A later assignment of the step to the same principal keeps
-that principal the holder. An agent or a service, whatever its scope or grant, never takes a held step for
-another principal or for itself: the runtime refuses such an assignment, and one written by hand takes
-nothing and holds nothing, so a displaced agent never becomes the holder again by assigning the step to
-itself, and no agent displaces a person.
+Only the current holder of a step counts. Who holds a step is decided by who recorded each assignment,
+never by the times records state across kinds of writer:
+
+- Once a person has assigned a step (a hand-over a person records, or an operator's or a sponsor's
+  `work assign`, which needs no basis), the person's assignments hold it, the latest of them, whoever held
+  it before. A person with the authority to assign moves a step again whenever they choose, to anyone,
+  themselves included: take a step over, give it to another agent, take it over again.
+- An agent's or a service's assignment never takes a step a person assigned, whatever time it states. It
+  holds only a step no person has assigned, or goes on holding for the principal a person's latest
+  assignment gave the step to, when it is recorded after that assignment.
+- Among the assignments of a step no person has assigned, the first holds it and a later one to the same
+  principal goes on holding it; one to another principal holds nothing.
+
+So a dispatching agent or service, under `local-engineering` or a dispatch grant, can give a step its first
+assignment and re-assign a step to the principal that already holds it, but it can no longer move a held
+step to another principal, nor take back a step a person took over: the runtime refuses such an
+assignment, and one written by hand takes nothing and holds nothing. A lapse ask does not change this,
+since only a person records a hand-over citing one; moving a lapsed step for a carrier is planned with
+`GOAL-10`. An assignment that holds nothing never makes its author or contributor the holder. Existing
+records are read by the same rule: an earlier reassignment an agent recorded to another agent holds
+nothing now, and if its result is not accepted it reads displaced.
+
+The runtime also refuses a new assignment that states a time before the step's latest assignment, so no
+assignment it writes is backdated.
 
 From 0.9.4 the runtime refuses an attempt on an assignment that does not hold its step, and a progress
 claim or result on an attempt of one, whatever time the record states. The refusal is judged against the
@@ -328,7 +345,11 @@ requires `--basis`; a person taking a step over themselves needs none, as before
 standing lapse ask itself: the ask the sweep recorded about that very assignment, signed by the principal
 that recorded it, still open, neither withdrawn nor answered. An ask anyone else wrote is none, and a
 hand-over record citing one is invalid wherever it was written. `work takeover` also requires the lapse
-to stand when it is recorded: once the session's heartbeat restores its lease, the step stays with it. An agent never records
+to stand when it is recorded: once the session's heartbeat restores its lease, the step stays with it.
+The recorded basis is evidence of a lapse only where the runtime recorded the hand-over: the principal
+that recorded the assignment, often an agent, can word an ask as the sweep does, and a hand-over written
+by hand is judged by the ask alone. Since a person's plain assignment moves a step without a basis, this
+gives no one a step they could not already move. An agent never records
 a hand-over. The displaced assignment's runs are asked to stop, and from then on its attempts, progress
 claims and results are refused. `basis` is additive in record format 3; a release before 0.9.4 refuses it.
 
