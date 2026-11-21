@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 39, November 21, 2026. Add availability and quiet hours to `communication set` (`--availability`, `--away-until`, `--away-from`, `--quiet-hours`) and their state to `communication show`, `--basis` on `work takeover`, which hands a lapsed step to another principal of its role, the session route of `goal step`, presence leases kept by `mcp serve`, and `presence` events in `events watch`, in the development build.
+
 Revision 38, November 20, 2026. Say that under a `concurrent-paths` policy at `refuse`, `work assign`, `work attempt`, `records new assignment` and `worker run` refuse work that leaves an unmet or unavailable pair, naming each pair and the remedies that apply to the write, in the development build.
 
 Revision 37, November 17, 2026. Add standing agents: `goal propose --kind stewardship --standing <flow>` with `--trigger`, `--period`, `--until`, `--awaiting-review` and `--runs-on`, `goal due`, which lists a standing agent's occurrences as of an explicit time, `--occurrence` and `--now` on `goal step`, which carries one occurrence per command within the agent's caps and asks once for renewal before its until time, `--standing` and `--stop-runs` on `goal pause`, and a standing agent's `goal stop` asking its runs to stop and retiring its work order, in the development build.
@@ -578,6 +580,9 @@ vericairn events watch --subject <goal id> --after <cursor>
 
 A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
+
+From 0.9.4 the daemon raises `presence` events: a session holding work lapsed, the runtime asked about it, or the lapse
+is over (see [events and presence](events-and-presence.md)). `due` stays reserved for reminders, which are planned.
 
 ## Network MCP: `runtime configure --mcp` and `mcp serve --connection` (0.9.2)
 
@@ -1345,6 +1350,33 @@ what is raised afterwards. While the agent's open outputs, its possibilities sti
 not closed, reach `open` (ten when omitted), its occurrences defer and no run of it starts. `goal due`, `status` and `progress` show
 its open outputs; an occurrence's brief states its output caps and names the agent's earlier open and declined possibilities among
 its sources.
+
+## Presence, availability and hand-overs (0.9.4)
+
+`vericairn mcp serve --as <principal>` registers its session's presence with the daemon and renews the lease while it
+runs (`ID-11`); see [the MCP server](mcp.md#presence-094). A person declares availability and quiet hours on their own
+communication setting (`GOAL-11`), in an estate at record format 3:
+
+| Option of `communication set` | Meaning |
+|---|---|
+| `--availability available\|away\|inherit` | Declare yourself available, or away; `inherit` removes the declaration. |
+| `--away-until <time>` | With `away`: when you are back, a UTC time such as `2026-12-02T09:00:00Z`. Required for `away`. |
+| `--away-from <time>` | With `away`: when the absence begins; at once when omitted. |
+| `--quiet-hours <file>\|-\|inherit` | A JSON file of quiet hours: `zone`, `windows` (each `days`, `start`, `end` as `HH:MM`) and optional `breakthrough` categories; `-` reads standard input; `inherit` removes them. |
+
+A change keeps the values it does not name. `communication show --recipient <person>` adds the availability and quiet
+hours in force and whether quiet hours hold notifications now. Both belong to a person's own scope only.
+
+```sh
+vericairn communication set --as <person> --availability away --away-until 2026-12-02T09:00:00Z
+vericairn communication set --as <person> --quiet-hours quiet.json
+```
+
+`goal next` and `goal step` pass over an away person, and give a step to an agent's live session when no launcher here
+starts its harness and the step's exposure reads nothing: `goal step` then records the assignment with `routedWith:
+session` and reports the outcome `session`. `work takeover <assignment> --by <person> --contributor <principal>
+--basis <ask>` hands a step an agent holds to any principal the roster names for its role, citing the lapse ask;
+handing it to anyone but a person requires `--basis`. See [events and presence](events-and-presence.md#routing-and-reassignment-094).
 
 ## `vericairn estate first-authority` (0.9.3)
 
