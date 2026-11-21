@@ -162,10 +162,12 @@ public sealed partial class EstateService
                 return NotFound($"No possibility has id {request.FromPossibility}.");
             }
 
+            // From FIX-155 a disposition by the standing agent, or by an agent tied to its goal, disposes of nothing, so it reads open still.
             RecordEnvelope possibility = model.Latest(named);
-            if (EstateModel.BodyString(possibility, "disposition") != "open")
+            string? disposition = StandingOutputs.Disposition(model, possibility);
+            if (disposition != "open")
             {
-                return Refuse($"Possibility {possibility.Id} is {EstateModel.BodyString(possibility, "disposition")}: only an open possibility is adopted.");
+                return Refuse($"Possibility {possibility.Id} is {disposition}: only an open possibility is adopted.");
             }
 
             // Whoever raised it, a standing agent or not, a principal other than its author adopts it (design/standing-agents.md § 8).

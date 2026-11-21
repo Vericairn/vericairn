@@ -791,6 +791,118 @@ public class StandingOutputTests
     }
 
     [Fact]
+    public void ADispositionByAnAgentTiedToTheGoalDisposesOfNothingWhateverItsDate()
+    {
+        using var fixture = new StandingFixture();
+        (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+        JsonObject raised = RaisedBy(fixture, assignment, run, key);
+        RecordEnvelope declinable = fixture.Add("possibility", Possibility(raised, "cache/index"), builder: true);
+        RecordEnvelope parkable = fixture.Add("possibility", Possibility(raised, "drop/legacy"), builder: true);
+        RecordEnvelope adoptable = fixture.Add("possibility", Possibility(raised, "split/index", draft: true), builder: true);
+        RecordEnvelope own = fixture.Add("possibility", Possibility(raised, "own/decline"), builder: true);
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        string courier = Principal(fixture, "agent", "Courier", "contributor");
+        string clerk = Principal(fixture, "agent", "Clerk", "contributor");
+        DateTimeOffset raisedAt = fixture.Estate.Clock;
+        Assert.Equal(4, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+        var order = new JsonObject { ["type"] = "work-order", ["id"] = fixture.Work.Id, ["hash"] = fixture.Work.ComputedHash };
+        JsonObject Disposed(RecordEnvelope of, string disposition) => Revised(of, b =>
+        {
+            b["disposition"] = disposition;
+            b["reason"] = "Not worth it now.";
+            if (disposition == "adopted") b["adoptedAs"] = order.DeepClone();
+        });
+
+        // Later, the roster names the helper for the researcher role, and an assignment names the courier as an occurrence's contributor.
+        fixture.Estate.SetClock(raisedAt.AddMinutes(10));
+        fixture.Add("roster", Roster(fixture, fixture.Estate.BuilderId, helper), supersedes: Assert.Single(fixture.Estate.Load().Current("roster")).Id);
+        fixture.Estate.SetClock(new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero));
+        StandingAgents.Occurrence next = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences, o => o.Occurrence.Key != key).Occurrence;
+        fixture.Assign(next, courier);
+        DateTimeOffset now = fixture.Estate.Clock;
+
+        // Written straight to records/, dated after the possibilities and before the records that tie their authors, the helper declines
+        // one and adopts another and the courier parks a third, as the Reviewer's probe did. Each is reported (standing.output-now), none
+        // is an error, and none disposes of anything: the four outputs stay open and counted, and each reads open.
+        fixture.Estate.SetClock(raisedAt.AddMinutes(1));
+        fixture.Estate.Add("possibility", helper, Disposed(declinable, "declined").ToJsonString(), supersedes: declinable.Id);
+        fixture.Estate.Add("possibility", helper, Disposed(adoptable, "adopted").ToJsonString(), supersedes: adoptable.Id);
+        fixture.Estate.Add("possibility", courier, Disposed(parkable, "parked").ToJsonString(), supersedes: parkable.Id);
+        fixture.Estate.SetClock(now);
+        EstateModel model = fixture.Estate.Load();
+        Assert.False(model.Findings.HasErrors, Errors(model.Findings));
+        Assert.Equal(3, model.Findings.Count(f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info && (f.Message.Contains(helper, StringComparison.Ordinal) || f.Message.Contains(courier, StringComparison.Ordinal))));
+        Assert.Equal(4, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+        Assert.Equal(4, StandingOutputs.OpenAndDeclined(model, fixture.Goal).Count);
+
+        // A second open possibility with the declined one's fingerprint is refused as a duplicate, since that one was never declined.
+        FindingList again = Validate(fixture, "possibility", Possibility(raised, "cache/index"), builder: true);
+        Assert.Contains(again, f => f.Code == "standing.duplicate-output");
+        Assert.DoesNotContain(again, f => f.Code == "standing.raises-again");
+
+        // Written now, such a disposition is an error, the records tying its author having been written before it; and the agent's own
+        // decline, by hand, is an error and disposes of nothing either.
+        Assert.Contains(Validate(fixture, "possibility", Disposed(model.Latest(declinable), "parked"), supersedes: model.Latest(declinable).Id, by: helper),
+            f => f.Code == "standing.own-output" && f.Severity == Severity.Error && f.Message.Contains(helper, StringComparison.Ordinal));
+        fixture.Estate.Add("possibility", fixture.Estate.BuilderId, Disposed(own, "declined").ToJsonString(), supersedes: own.Id);
+        model = fixture.Estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error && f.Message.Contains(own.Id, StringComparison.Ordinal));
+        Assert.Equal(4, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+
+        // A principal nothing ties to the goal disposes of them as before: the clerk, an agent, declines one by hand and the operator parks
+        // another. Each reads as written, the open outputs fall, and the declined one is raised again by naming it.
+        fixture.Estate.Add("possibility", clerk, Disposed(model.Latest(declinable), "declined").ToJsonString(), supersedes: model.Latest(declinable).Id);
+        fixture.Add("possibility", Disposed(model.Latest(parkable), "parked"), supersedes: model.Latest(parkable).Id);
+        model = fixture.Estate.Load();
+        Assert.Equal(2, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+        Assert.Equal([declinable.Id, adoptable.Id, own.Id], StandingOutputs.OpenAndDeclined(model, fixture.Goal).Select(p => model.Chain(p)[0]));
+        JsonObject raisedAgain = Possibility(raised, "cache/index");
+        raisedAgain["raisesAgain"] = declinable.Id;
+        Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", raisedAgain, builder: true)));
+    }
+
+    [Fact]
+    public void NoAgentWithdrawsAStandingAgentsAskOrClosesItsPublicationRequestByAnyRecord()
+    {
+        using var fixture = new StandingFixture();
+        (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+        JsonObject raised = RaisedBy(fixture, assignment, run, key);
+        RecordEnvelope ask = fixture.Add("ask", Ask(fixture, raised), builder: true);
+        var about = new RecordReference("work-order", fixture.Work.Id, fixture.Work.ComputedHash);
+        RecordEnvelope request = fixture.Add("operator-request", Publication(fixture, raised, fixture.Estate.OperatorId, fixture.Estate.BuilderId), builder: true, subject: about);
+        var closing = new RecordReference("operator-request", request.Id, request.ComputedHash);
+        string helper = Principal(fixture, "agent", "Helper", "contributor");
+        Assert.Equal(2, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+
+        // Written straight to records/, the agent's withdrawal of its ask and its close of its publication request, and another agent's
+        // observation of the request as posted, are errors of the estate and dispose of nothing: the ask still waits on the operator, the
+        // request is not closed, and both stay counted.
+        fixture.Add("ask", Revised(ask, b => b["state"] = "withdrawn"), supersedes: ask.Id, builder: true);
+        fixture.Add("operator-request-close", new JsonObject { ["outcome"] = "dismissed", ["reason"] = "Not now." }, builder: true, subject: closing);
+        JsonObject observed = new()
+        {
+            ["kind"] = "operator-request", ["asOf"] = RecordParser.FormatTimestamp(fixture.Estate.Clock), ["summary"] = "Posted.", ["limitations"] = new JsonArray(),
+            ["facts"] = new JsonObject { ["outcome"] = "done", ["destination"] = "the project's discussion board", ["location"] = "https://example.org/discussions/1", ["evidenceHash"] = FlowFixture.Hash('e') },
+        };
+        fixture.Estate.Add("observation", helper, observed.ToJsonString(), closing);
+        EstateModel model = fixture.Estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "standing.own-output" && f.Severity == Severity.Error);
+        Assert.Contains(model.Findings, f => f.Code == "standing.publication" && f.Severity == Severity.Error);
+        Assert.Equal("open", Asks.State(model, ask).State);
+        Assert.Contains(Asks.Deliveries(model, fixture.Estate.OperatorId).SelectMany(d => d.Asks), a => model.Chain(a)[0] == ask.Id);
+        Assert.Empty(OperatorRequests.Closures(model, request));
+        Assert.Equal(2, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+
+        // The operator's decision and close dispose of them.
+        fixture.Add("decision", Answer(fixture, ask));
+        fixture.Add("operator-request-close", new JsonObject { ["outcome"] = "dismissed", ["reason"] = "Not now." }, subject: closing);
+        model = fixture.Estate.Load();
+        Assert.Equal("answered", Asks.State(model, ask).State);
+        Assert.Single(OperatorRequests.Closures(model, request));
+        Assert.Equal(0, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+    }
+
+    [Fact]
     public void ThePrincipalThatSteppedTheGoalRecordsTheOperatorsDecisionOnTheRuntimesAsksItWrote()
     {
         using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 10, ["wallMinutes"] = 200 }, builderHolds: false);

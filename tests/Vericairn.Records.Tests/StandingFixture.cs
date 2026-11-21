@@ -119,14 +119,17 @@ internal sealed class StandingFixture : IDisposable
     /// <summary>The intent of an agent run carrying an assignment of the goal, with a cap of ten minutes, by the builder or the agent named.</summary>
     public RecordEnvelope RunIntent(RecordEnvelope assignment, string identity, string? principal = null) => Add("operation", RunBody(assignment, identity, "not-started", principal));
 
-    /// <summary>A run's settlement: its intent's revision with the status, observed and charged five minutes, and the stop asked of it when one was.</summary>
-    public RecordEnvelope Settle(RecordEnvelope intent, string status, string? stoppedBy = null)
+    /// <summary>
+    /// A run's settlement: its intent's revision with the status, observed and charged five minutes, and the stop asked of it when one was;
+    /// recorded by the operator, or by the builder (which then needs local-engineering).
+    /// </summary>
+    public RecordEnvelope Settle(RecordEnvelope intent, string status, string? stoppedBy = null, bool builder = false)
     {
         RecordEnvelope assignment = Estate.Load().ById[intent.Body.GetProperty("target").GetProperty("assignment").GetString()!];
         string principal = intent.Body.GetProperty("target").GetProperty("principal").GetString()!;
         JsonObject dispatched = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, "dispatched", principal);
         dispatched["dispatchedAt"] = intent.At;
-        RecordEnvelope running = Add("operation", dispatched, supersedes: intent.Id);
+        RecordEnvelope running = Add("operation", dispatched, builder: builder, supersedes: intent.Id);
         JsonObject body = RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, status, principal);
         body["dispatchedAt"] = intent.At;
         body["observed"] = new JsonObject { ["summary"] = "The run ended.", ["at"] = RecordParser.FormatTimestamp(Estate.Clock) };
@@ -136,7 +139,7 @@ internal sealed class StandingFixture : IDisposable
             body["stop"] = new JsonObject { ["requestedAt"] = running.At, ["requestedBy"] = stoppedBy, ["reason"] = "Asked to stop.", ["containedAt"] = RecordParser.FormatTimestamp(Estate.Clock) };
         }
 
-        return Add("operation", body, supersedes: running.Id);
+        return Add("operation", body, builder: builder, supersedes: running.Id);
     }
 
     public JsonObject RunBody(RecordEnvelope assignment, string identity, string status, string? principal = null) => new()

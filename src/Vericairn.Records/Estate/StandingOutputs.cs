@@ -23,7 +23,8 @@ namespace Vericairn.Records.Estate;
 /// No standing agent adopts, declines, parks, answers, withdraws or closes its own output, no standing agent answers the runtime's own asks
 /// about it, its failure pause's among them, and no agent disposes of a held finding; no author adopts its own possibility. Who counts as
 /// the standing agent itself is every agent tied to its goal (<see cref="TieOf"/>), read from the records and never from a date. Every
-/// revision is judged by the chain it revises, so what its own body leaves out stops no rule from applying.
+/// revision is judged by the chain it revises, so what its own body leaves out stops no rule from applying. From FIX-155 what such a record
+/// disposes of is read as its answers are: nothing, whatever its date (<see cref="Disposition"/>, <see cref="Counting"/>).
 /// </summary>
 internal static partial class StandingOutputs
 {
@@ -145,7 +146,10 @@ internal static partial class StandingOutputs
 
     /// <summary>
     /// The open outputs of a standing agent, judged from the records before a record when one is given: its possibilities still open, its
-    /// asks still waiting and its publication requests not closed, each read at its revision as it stood then.
+    /// asks still waiting and its publication requests not closed, each read at its revision as it stood then. From FIX-155 no record of
+    /// the agent, or of an agent tied to its goal, closes one, whatever its date: a possibility reads as <see cref="Disposition"/> says, an
+    /// ask waits until a decision <see cref="Counting"/> keeps answers it (no revision withdraws a standing agent's ask), and a publication
+    /// request stays open until an operator who is a person closes it (<see cref="OperatorRequests.Closures"/>).
     /// </summary>
     public static int OpenCount(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
@@ -160,13 +164,11 @@ internal static partial class StandingOutputs
                 continue;
             }
 
-            // An ask is answered only by a decision no agent tied to the goal recorded (Counting), as Asks.State reads it; judged before a
-            // record, by the ties written before it, so a later tie makes no earlier record wrong.
+            // Judged before a record, by the ties written before it, so a later tie makes no earlier record wrong.
             bool counts = standing.Type switch
             {
-                "possibility" => EstateModel.BodyString(standing, "disposition") == "open",
-                "ask" => EstateModel.BodyString(standing, "state") is "open" or "notified"
-                    && !Counting(model, standing, model.DecisionsAnswering(model.Chain(standing)), before).Any(d => before is null || GoalRules.Before(d, before)),
+                "possibility" => Disposition(model, standing, before) == "open",
+                "ask" => !Counting(model, standing, model.DecisionsAnswering(model.Chain(standing)), before).Any(d => before is null || GoalRules.Before(d, before)),
                 "operator-request" => !OperatorRequests.Closures(model, standing).Any(c => before is null || GoalRules.Before(c, before)),
                 _ => false,
             };
@@ -175,6 +177,60 @@ internal static partial class StandingOutputs
 
         return open;
     }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-155): the disposition a possibility reads as at a revision, read as a decision on a standing agent's ask is
+    /// (<see cref="Counting"/>). Along the chain of a standing agent's possibility, a revision that changes its disposition or adoptedAs from
+    /// what the chain reads before it disposes of nothing when its author raised the possibility or is an agent tied to the goal
+    /// (<see cref="TieOf"/>), whatever date it claims and whatever its severity at load, so the possibility reads as the last revision that
+    /// counts left it, open until another principal disposes of it, and stays among the open outputs. A disposition by a person or by a
+    /// principal nothing ties to the goal reads as written. With <paramref name="asOf"/>, as the estate stood before that record: only ties
+    /// written before it count, so that a later roster or assignment change makes no earlier record wrong. A possibility no standing agent
+    /// raised reads as its revision says.
+    /// </summary>
+    public static string? Disposition(EstateModel model, RecordEnvelope revision, RecordEnvelope? asOf = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(revision);
+        RecordEnvelope first = FirstOf(model, revision);
+        if (first.Id == revision.Id || Of(first) is not RaisedBy raised)
+        {
+            return EstateModel.BodyString(revision, "disposition");
+        }
+
+        RecordEnvelope? goal = model.ById.TryGetValue(raised.Goal, out RecordEnvelope? named) && named.Type == "goal" ? named : null;
+        string? disposition = EstateModel.BodyString(first, "disposition");
+        JsonElement adopted = TJson.Object(first.Body, "adoptedAs");
+        bool after = false;
+        foreach (string id in model.Chain(revision))
+        {
+            if (!after)
+            {
+                after = id == first.Id;
+                continue;
+            }
+
+            RecordEnvelope later = model.ById[id];
+            string? said = EstateModel.BodyString(later, "disposition");
+            JsonElement adopting = TJson.Object(later.Body, "adoptedAs");
+            if ((said == disposition && Same(adopting, adopted)) || later.By == first.By || (goal is not null && Tied(model, goal, later.By, asOf)))
+            {
+                continue;
+            }
+
+            disposition = said;
+            adopted = adopting;
+        }
+
+        return disposition;
+    }
+
+    /// <summary>
+    /// True when an agent is tied to a standing agent's goal (<see cref="TieOf"/>); with <paramref name="asOf"/>, only by a record written
+    /// before it, as a judgment of the estate as it stood before that record reads ties.
+    /// </summary>
+    internal static bool Tied(EstateModel model, RecordEnvelope goal, string by, RecordEnvelope? asOf = null) =>
+        TieOf(model, goal, by) is Tie tie && (asOf is null || GoalRules.Before(tie.Records[0], asOf));
 
     /// <summary>
     /// The first revisions of every output a standing agent raised, oldest first, judged from the records before a record when one is
@@ -189,8 +245,9 @@ internal static partial class StandingOutputs
     }
 
     /// <summary>
-    /// The earlier possibilities a standing agent raised that are open or declined now, at their current revisions, oldest first: what an
-    /// occurrence's brief names so that its agent neither repeats an open one nor raises a declined one again without new evidence.
+    /// The earlier possibilities a standing agent raised that are open or declined now, as <see cref="Disposition"/> reads them, at their
+    /// current revisions, oldest first: what an occurrence's brief names so that its agent neither repeats an open one nor raises a declined
+    /// one again without new evidence.
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> OpenAndDeclined(EstateModel model, RecordEnvelope goal)
     {
@@ -198,7 +255,7 @@ internal static partial class StandingOutputs
         ArgumentNullException.ThrowIfNull(goal);
         string identity = model.Chain(model.Latest(goal))[0];
         return [.. Raised(model, identity).Where(r => r.Type == "possibility").Select(model.Latest)
-            .Where(p => EstateModel.BodyString(p, "disposition") is "open" or "declined")];
+            .Where(p => Disposition(model, p) is "open" or "declined")];
     }
 
     /// <summary>A record's revision as it stood before another record: the latest revision of its chain written before it; null when none was.</summary>
@@ -322,7 +379,7 @@ internal static partial class StandingOutputs
     /// fingerprint and at least one source, stays within its occurrence's caps, is no second open possibility of the agent with that
     /// fingerprint, and names a declined one it raises again with new evidence. A revision keeps its fingerprint, counts against the caps
     /// for what it adds, and one that disposes of it is never the agent's own: not its author and no agent tied to the goal (<see cref="TieOf"/>,
-    /// reported as <see cref="Judged"/> says). Every possibility's held finding (§§ 8 and 9) is disposed of by a
+    /// reported as <see cref="Judged"/> says, and disposing of nothing, <see cref="Disposition"/>). Every possibility's held finding (§§ 8 and 9) is disposed of by a
     /// person only, adopted only by an operator who is one, and its hold ends only by an operator who is a person.
     /// </summary>
     public static void ValidatePossibility(ValidationContext context, RaisedBy? raised, string? disposition)
@@ -369,14 +426,15 @@ internal static partial class StandingOutputs
             return;
         }
 
-        // A second open possibility of the agent with the same fingerprint is refused; a declined one is raised again only by naming it.
+        // A second open possibility of the agent with the same fingerprint is refused; a declined one is raised again only by naming it. Each
+        // reads as Disposition says as the records stood before this one, so a decline by the agent or by an agent tied to it declines nothing.
         List<RecordEnvelope> same = [.. Raised(context.Model, raised.Goal, record).Where(r => r.Type == "possibility" && EstateModel.BodyString(r, "fingerprint") == fingerprint)];
-        if (same.Select(r => AsOf(context.Model, r, record)).FirstOrDefault(r => r is not null && EstateModel.BodyString(r, "disposition") == "open") is RecordEnvelope open)
+        if (same.Select(r => AsOf(context.Model, r, record)).FirstOrDefault(r => r is not null && Disposition(context.Model, r, record) == "open") is RecordEnvelope open)
         {
             context.Error("standing.duplicate-output", $"Possibility {context.Model.Chain(open)[0]} of this standing agent with fingerprint '{fingerprint}' is open: a second open one is refused; add to that one instead, by a revision that keeps its raisedBy and fingerprint.");
         }
 
-        List<RecordEnvelope> declined = [.. same.Where(r => AsOf(context.Model, r, record) is RecordEnvelope standing && EstateModel.BodyString(standing, "disposition") == "declined")];
+        List<RecordEnvelope> declined = [.. same.Where(r => AsOf(context.Model, r, record) is RecordEnvelope standing && Disposition(context.Model, standing, record) == "declined")];
         string? again = EstateModel.BodyString(record, "raisesAgain");
         RecordEnvelope? named = again is null ? null : context.Find(again);
         if (again is not null && (named is null || !declined.Any(d => context.Model.Chain(context.Model.Latest(d)).Contains(named.Id))))
@@ -430,7 +488,10 @@ internal static partial class StandingOutputs
         }
     }
 
-    /// <summary>A revision of a standing agent's possibility: its fingerprint kept, what it adds within the caps, and a disposition by its author or a tied agent refused.</summary>
+    /// <summary>
+    /// A revision of a standing agent's possibility: its fingerprint kept, what it adds within the caps, and a disposition by its author or a
+    /// tied agent refused, which either way disposes of nothing (<see cref="Disposition"/>), whatever its severity here.
+    /// </summary>
     private static void ValidateRevision(ValidationContext context, RecordEnvelope previous, RecordEnvelope first, RaisedBy raised, bool disposes)
     {
         RecordEnvelope record = context.Record;
@@ -449,7 +510,7 @@ internal static partial class StandingOutputs
         string? title = EstateModel.BodyString(first, "title");
         if (by == first.By)
         {
-            context.Error("standing.own-output", $"Possibility {first.Id} ({title}) was raised by {by}: no standing agent adopts, declines or parks its own output; another principal disposes of it.");
+            context.Error("standing.own-output", $"Possibility {first.Id} ({title}) was raised by {by}: no standing agent adopts, declines or parks its own output, so this disposes of nothing; another principal disposes of it.");
             return;
         }
 
@@ -458,7 +519,7 @@ internal static partial class StandingOutputs
             return;
         }
 
-        (string code, string message) = Judged(tie, by, raised.Goal, Later(record, previous), "no standing agent adopts, declines or parks its own output, so another principal disposes of it",
+        (string code, string message) = Judged(tie, by, raised.Goal, Later(record, previous), "no standing agent adopts, declines or parks its own output, so this disposes of nothing and another principal disposes of it",
             "the write boundary refuses a new one");
         if (code == BoundaryCode)
         {
@@ -658,7 +719,7 @@ internal static partial class StandingOutputs
             return ("standing.own-output", $"Ask {first.Id} was raised by {by} as an output of standing agent {goal.Id}: {Rule}, so it answers nothing.");
         }
 
-        return TieOf(model, goal, by) is Tie tie && (asOf is null || GoalRules.Before(tie.Records[0], asOf))
+        return Tied(model, goal, by, asOf) && TieOf(model, goal, by) is Tie tie
             ? Judged(tie, by, goal.Id, Later(decision, ask), $"{Rule}, so it answers nothing of ask {first.Id}", "the write boundary refuses a new one")
             : null;
     }

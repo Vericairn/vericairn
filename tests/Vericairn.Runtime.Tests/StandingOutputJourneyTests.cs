@@ -182,6 +182,51 @@ public class StandingOutputJourneyTests
     }
 
     [Fact]
+    public void AnAgentTiedLaterDisposesOfNothingByABackdatedDeclineAndTheOperatorStillAdoptsThePossibility()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string helper = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Helper","roles":["contributor"],"agent":{"vendor":"Example","product":"Example Agent"}}""")))).Id;
+        (string goal, string assignment) = Carried(run);
+        string possibility = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(builder, assignment, "possibility", JsonSerializer.SerializeToElement(Possibility("cache/index", draft: true))))).Id;
+        int Open() => JsonDocument.Parse(run.Service.GoalDue(goal)!.Json.GetRawText()).RootElement.GetProperty("outputs").GetProperty("open").GetInt32();
+        Assert.Equal(1, Open());
+
+        // Written straight to records/: the helper's decline, a minute after the possibility, then the operator's revision of the goal naming
+        // the helper beside the builder for the researcher role. The decline is reported (standing.output-now), and it disposes of nothing.
+        EstateModel model = run.Estate.Load();
+        RecordEnvelope raised = model.ById[possibility];
+        RecordEnvelope current = model.Latest(model.ById[goal]);
+        JsonObject declined = JsonNode.Parse(raised.Body.GetRawText())!.AsObject();
+        declined["disposition"] = "declined";
+        declined["reason"] = "Not worth it.";
+        JsonObject named = JsonNode.Parse(current.Body.GetRawText())!.AsObject();
+        named["roles"] = new JsonArray(Vericairn.Records.Tests.FlowFixture.Role("researcher", builder, helper));
+        run.Estate.SetClock(raised.AtTime.AddMinutes(1));
+        run.Estate.Add("possibility", helper, declined.ToJsonString(), supersedes: possibility);
+        run.Estate.Add("goal", op, named.ToJsonString(), supersedes: current.Id);
+        model = run.Estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == StandingOutputs.BoundaryCode && f.Severity == Severity.Info && f.Message.Contains(helper, StringComparison.Ordinal));
+        Assert.DoesNotContain(model.Findings, f => f.Code is "standing.own-output" or StandingOutputs.BoundaryCode && f.Severity == Severity.Error);
+        Assert.Equal(1, Open());
+
+        // records new refuses such a disposition by the helper: the write boundary refuses one the records as they stand report.
+        JsonObject parked = declined.DeepClone().AsObject();
+        parked["disposition"] = "parked";
+        WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("possibility", helper, JsonSerializer.SerializeToElement(parked), Supersedes: model.Latest(raised).Id));
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, f => f.Code is "standing.own-output" or StandingOutputs.BoundaryCode && f.Severity == "error" && f.Message.Contains(helper, StringComparison.Ordinal));
+
+        // The possibility reads open, so the operator adopts it by work new --from-possibility, and the open outputs fall.
+        RecordWritten order = RunEstate.Ok(run.Service.WorkNew(new WorkNewRequest(op, Key: "IDX-1") { FromPossibility = possibility }));
+        model = run.Estate.Load();
+        RecordEnvelope adopted = model.Latest(model.ById[possibility]);
+        Assert.Equal(("adopted", order.Id), (EstateModel.BodyString(adopted, "disposition"), adopted.Body.GetProperty("adoptedAs").GetProperty("id").GetString()));
+        Assert.Equal(0, Open());
+    }
+
+    [Fact]
     public void AStandingAgentRecordsNoAnswerToItsOwnAskAndNoAuthorAdoptsItsOwnPossibility()
     {
         using var run = new RunEstate(recordFormat: 3);
@@ -359,6 +404,7 @@ public sealed class SteppedAsksFixture : IDisposable
         GoalStepResponse pause = StandingAgentRoutingTests.StepAs(run, Goal, "pause", Builder);
         Assert.True(pause.Outcome == "ask", pause.Message);
         Pause = pause.Ask!.Id;
+        Assignment = assignment!;
     }
 
     /// <summary>The estate's root.</summary>
@@ -384,6 +430,9 @@ public sealed class SteppedAsksFixture : IDisposable
 
     /// <summary>The failure pause's ask the builder's goal step wrote.</summary>
     public string Pause { get; }
+
+    /// <summary>The assignment that carries the occurrence the helper's failed runs carried.</summary>
+    public string Assignment { get; }
 
     internal RunEstate Run => run;
 

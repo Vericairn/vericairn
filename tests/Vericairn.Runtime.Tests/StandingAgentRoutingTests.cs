@@ -163,6 +163,57 @@ public class StandingAgentRoutingTests
     }
 
     [Fact]
+    public void TheCarriersOwnCompletedResultAfterThreeFailedRunsLeavesThePauseHeldUntilTheSponsorAnswers()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 });
+        string? assignment = null;
+        for (int i = 0; i < 3; i++)
+        {
+            GoalStepResponse failing = Step(run, goal, "fail-" + i, scenario: "claude-fails");
+            Assert.True(failing.Ok, failing.Message);
+            Assert.Equal("known-failure", run.Settled(failing.Run!.Run).Status);
+            assignment ??= failing.Assignment!.Id;
+        }
+
+        (string, int) Due() => (run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString()!, run.Service.GoalDue(goal)!.Json.GetProperty("failures").GetProperty("consecutive").GetInt32());
+        Assert.Equal(("held", 3), Due());
+        JsonElement Completed() => JsonSerializer.SerializeToElement(new JsonObject
+        {
+            ["outcome"] = "completed", ["summary"] = "Researched after all.", ["outputs"] = new JsonArray(), ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(),
+            ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(), ["nextStep"] = "Review the findings.",
+        });
+
+        // The builder, which carried the failed runs, records its own attempt and a completed result through the service: both are written,
+        // as the claim another principal reviews that they are, and the pause holds with its three failures.
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(assignment!, builder, "research repository, a work branch", "Research again."))).Id;
+        RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, builder, Completed())));
+        Assert.Equal(("held", 3), Due());
+
+        // So do an attempt and a result it records through records new.
+        RecordEnvelope carried = run.Estate.Load().ById[assignment!];
+        RecordWritten again = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("attempt", builder, RunEstate.Json($$"""{"startedAt":"{{RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)}}","workspace":"research repository, a work branch","note":"Research once more."}"""),
+            Subject: $"assignment:{carried.Id}:{carried.ComputedHash}")));
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("result", builder, Completed(), Subject: $"attempt:{again.Id}:{again.Hash}")));
+        Assert.Equal(("held", 3), Due());
+
+        // goal step asks the sponsor and dispatches nothing; the sponsor's answer ends the pause.
+        GoalStepResponse asking = Step(run, goal, "ask");
+        Assert.True(asking.Outcome == "ask", asking.Message);
+        JsonObject answer = new()
+        {
+            ["title"] = "Go on", ["statement"] = "Let the researcher go on.", ["summary"] = "The failures were the stand-in's.", ["synthesis"] = "The operator answers the pause.",
+            ["effects"] = new JsonArray("the agent goes on"), ["affects"] = new JsonArray(), ["decidedBy"] = op, ["decidedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow),
+            ["stake"] = "low", ["notAuthorized"] = new JsonArray("spending"), ["answers"] = new JsonArray(asking.Ask!.Id),
+        };
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, JsonSerializer.SerializeToElement(answer))));
+        Assert.Equal(("active", 0), Due());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void ALapsedOrPausedAgentDispatchesNothingAndATimeAheadOfTheClockIsRefused()
     {
         using var run = new RunEstate(recordFormat: 3);
