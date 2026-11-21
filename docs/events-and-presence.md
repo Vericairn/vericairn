@@ -144,8 +144,10 @@ A lease's identity is its holder's alone. Only the principal, and the paired dev
 renews or releases it: a lease registered over the local socket answers only the local socket, and one
 registered by a device answers only that device. A device registers presence only for its own
 principal. The daemon keeps only a digest of the lease identity, and no listing, attention item or
-event names it. A principal holds at most eight live sessions, and a runtime at most 64. The embedded
-runtime keeps no presence, and its MCP servers register nothing.
+event names it. A principal holds at most eight live sessions, and a heartbeat brings a lapsed lease
+back only within those eight; a principal keeps at most sixteen leases in all, its oldest lapsed leases
+that hold nothing making room, and a runtime at most 64. The embedded runtime keeps no presence, and its
+MCP servers register nothing.
 
 Leases are owner-only runtime state in the live store, one runtime's observation as worker heartbeats
 are; no record is written per heartbeat. Presence, worker liveness and progress claims stay separate
@@ -167,9 +169,11 @@ for who decides for the step's goal and for every operator: an `incident` labele
 this runtime, naming the session, the assignment and when the lease lapsed. Still lapsed after
 `limits.watch.reassignAfterSeconds` (600 by default), the runtime records an ask to the goal's
 accountable principal, as the stall rule does, recommending that the step be handed to another principal
-of its role. Without a goal, the estate's root operator is asked. The ask is written by the principal
-that made the assignment, else by the one asked, else by the root operator, whichever this machine can
-sign for; when none can, the attention stays and no ask is recorded.
+of its role. Without a goal, the estate's root operator is asked. The ask is signed only by the
+principal that recorded the assignment, as the stall rule signs with the principal that started the run;
+no other key signs it. When that write is refused, as when this machine holds no key of that principal,
+the attention says so and the sweep tries again after a minute, then after twice as long each time, up to
+an hour.
 
 Set the wait per goal or per roster, from 60 seconds to a day:
 
@@ -188,24 +192,33 @@ handed over, and when its work is settled. The daemon sweeps leases every five s
 
 ### One holder acts
 
-Only the current holder of a step counts. From 0.9.4 the runtime refuses an attempt on an assignment that
-no longer holds its step, and a progress claim or result on an attempt of one, whatever time the record
-states: a hand-over, or any later assignment of the same step to another principal, displaces the earlier
-one. A later assignment of the step to the same principal keeps that principal the holder and displaces
-nothing. The refusal is
-judged against the records as they stand when the write arrives, on every path that writes a record
-(the command line, the API, a device's signed request and network MCP), and for interim progress claims,
-which are not records. A backdated record does not get past it.
+Only the current holder of a step counts. Only a person's act moves a step from one principal to another:
+a hand-over a person records, or a person's assignment of the step to another principal (an operator's or a
+sponsor's `work assign`, which needs no basis). A later assignment of the step to the same principal keeps
+that principal the holder. An agent or a service, whatever its scope or grant, never takes a held step for
+another principal or for itself: the runtime refuses such an assignment, and one written by hand takes
+nothing and holds nothing, so a displaced agent never becomes the holder again by assigning the step to
+itself, and no agent displaces a person.
+
+From 0.9.4 the runtime refuses an attempt on an assignment that does not hold its step, and a progress
+claim or result on an attempt of one, whatever time the record states. The refusal is judged against the
+records as they stand when the write arrives, on every path that writes a record (the command line, the
+API, a device's signed request and network MCP), and for interim progress claims, which are not records.
+A backdated record does not get past it.
 
 ```text
 Assignment 01J... no longer holds its step of W-1: assignment 01K... of Pat holds it now. Only the step's
 current holder records a result, whatever time it states; nothing was written.
 ```
 
-A result another runtime recorded before the hand-over reached it arrives with a pull and cannot be
-refused. It is labeled `displaced` instead: `vericairn status` shows its assignment as displaced rather
-than awaiting review, `work observe` names the assignment that holds the step, no review is asked for it,
-and routing goes on with the step's holder. A hand-over still asks the displaced assignment's runs to stop.
+A record another runtime wrote before the hand-over reached it, or one written by hand, arrives without
+passing this runtime's refusal. Its assignment is labeled `displaced` instead: `vericairn status` shows it
+displaced rather than in progress or awaiting review, `work observe` names the assignment that holds the
+step, no review is asked for its result, and routing goes on with the step's holder. A displaced result
+that names unresolved effects keeps its `uncertain-effect` attention until they are resolved. For a run
+of a flow only decisions under the step's current holder count in the current round; a decision dated
+before a hand-over keeps deciding the earlier round it decided. A hand-over still asks the displaced
+assignment's runs to stop.
 
 ## Availability and quiet hours for people (0.9.4)
 
@@ -288,10 +301,12 @@ ask after `reassignAfterSeconds`.
 
 A live session's own holds, reads and sends are unseen by the runtime, so the session route never takes
 a step whose exposure reads (`design/holds-reads-sends.md` § 7). In this build that is judged
-conservatively from the records: a step is never routed to a session when its goal, its work order, a
-record the work order names among its inputs or a record the step pins (an earlier step's result, for a
-run of a flow) was written by an agent principal, is a conversation observation, or cannot be resolved
-here, since an unknown fact counts as present. The candidate's reasons in `goal next` name each such
+conservatively from the records: a step is never routed to a session when its goal, a record the goal
+names among its inputs, its work order, a record the work order names among its inputs, a record the step
+pins (an earlier step's result, for a run of a flow) or, for a step already held, its assignments, their
+attempts and results and the reviews of those results, was written by any principal that is not a person
+(an agent or a service), is a conversation observation, or cannot be resolved here, since an unknown fact
+counts as present. The candidate's reasons in `goal next` name each such
 record. The full exposure algorithm, under which a reviewed hand-off clears what it reviewed and what a
 session writes is marked outside-derived, is planned for 0.9.5 (`RUN-06`).
 
@@ -309,7 +324,11 @@ vericairn work takeover <assignment> --by <person> --contributor <principal of i
 
 The hand-over is a new assignment of the same step, carrying the agent's brief, naming its assignment
 among its sources and recording `basis`, the ask it answers. Handing a step to anyone but a person
-requires `--basis`; a person taking a step over themselves needs none, as before. An agent never records
+requires `--basis`; a person taking a step over themselves needs none, as before. The basis is the
+standing lapse ask itself: the ask the sweep recorded about that very assignment, signed by the principal
+that recorded it, still open, neither withdrawn nor answered. An ask anyone else wrote is none, and a
+hand-over record citing one is invalid wherever it was written. `work takeover` also requires the lapse
+to stand when it is recorded: once the session's heartbeat restores its lease, the step stays with it. An agent never records
 a hand-over. The displaced assignment's runs are asked to stop, and from then on its attempts, progress
 claims and results are refused. `basis` is additive in record format 3; a release before 0.9.4 refuses it.
 
