@@ -618,20 +618,22 @@ public static partial class Routing
     private static List<RecordEnvelope> Holding(EstateModel model, IEnumerable<RecordEnvelope> ordered)
     {
         var holding = new List<RecordEnvelope>();
-        var steps = new Dictionary<string, (string? Holder, HashSet<string?> Displaced)>(StringComparer.Ordinal);
+        var steps = new Dictionary<string, (RecordEnvelope Holder, string? Principal, HashSet<string?> Displaced)>(StringComparer.Ordinal);
         foreach (RecordEnvelope assignment in ordered)
         {
             string key = HoldingKey(assignment.Body);
             string? contributor = Identity(model, EstateModel.BodyString(assignment, "contributor"));
-            if (!steps.TryGetValue(key, out (string? Holder, HashSet<string?> Displaced) step))
+            // A step whose holder routing had stored without its record when this one was written had no holder then: this one holds it.
+            if (!steps.TryGetValue(key, out (RecordEnvelope Holder, string? Principal, HashSet<string?> Displaced) step) || Stranded(model, step.Holder, assignment))
             {
-                steps[key] = (contributor, []);
+                steps[key] = (assignment, contributor, step.Displaced ?? []);
                 holding.Add(assignment);
                 continue;
             }
 
-            if (contributor == step.Holder)
+            if (contributor == step.Principal)
             {
+                steps[key] = (assignment, contributor, step.Displaced);
                 holding.Add(assignment);
                 continue;
             }
@@ -639,8 +641,8 @@ public static partial class Routing
             string? author = Identity(model, assignment.By);
             if (GoalRules.IsPerson(model, author) && !step.Displaced.Contains(author))
             {
-                step.Displaced.Add(step.Holder);
-                steps[key] = (contributor, step.Displaced);
+                step.Displaced.Add(step.Principal);
+                steps[key] = (assignment, contributor, step.Displaced);
                 holding.Add(assignment);
             }
         }
