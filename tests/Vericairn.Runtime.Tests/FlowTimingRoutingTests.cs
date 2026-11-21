@@ -70,7 +70,7 @@ public class FlowTimingRoutingTests
     }
 
     /// <summary>The song flow with its first step, the draft, taking a timing.</summary>
-    private static JsonObject Song(JsonObject when)
+    internal static JsonObject Song(JsonObject when)
     {
         JsonObject song = FlowFixture.Song();
         song["steps"]![0]!["when"] = when;

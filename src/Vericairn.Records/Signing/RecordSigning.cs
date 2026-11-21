@@ -24,8 +24,19 @@ public interface IRecordSigner
     RecordSignature Sign(ReadOnlySpan<byte> digest);
 }
 
-/// <summary>Signs with a key held in a device key store.</summary>
-public sealed class StoreSigner : IRecordSigner
+/// <summary>
+/// From 0.9.4 (ID-16): a signer that is handed the record it signs, its compact canonical bytes without hash and signatures, beside their
+/// digest, so custody that reads what it signs (the macOS Secure Enclave helper's sign-record and presence sessions) hashes and checks
+/// the record itself. <see cref="Authoring.RecordAuthor"/> hands every such signer the bytes.
+/// </summary>
+public interface IRecordContentSigner : IRecordSigner
+{
+    /// <summary>Signs the record whose canonical bytes are <paramref name="content"/> and whose content hash is <paramref name="digest"/>.</summary>
+    RecordSignature SignRecord(ReadOnlySpan<byte> content, ReadOnlySpan<byte> digest);
+}
+
+/// <summary>Signs with a key held in a device key store; from 0.9.4 a store that reads records is handed the record (ID-16).</summary>
+public sealed class StoreSigner : IRecordContentSigner
 {
     private readonly IDeviceKeyStore store;
     private readonly string keyId;
@@ -63,6 +74,21 @@ public sealed class StoreSigner : IRecordSigner
     /// </summary>
     public RecordSignature Sign(ReadOnlySpan<byte> digest, string reason) =>
         new(RecordSigning.Algorithm, DeviceId, Base64Url.EncodeToString(store.Sign(keyId, digest, PresenceReason.Text(reason))));
+
+    /// <inheritdoc />
+    public RecordSignature SignRecord(ReadOnlySpan<byte> content, ReadOnlySpan<byte> digest) =>
+        new(RecordSigning.Algorithm, DeviceId, Base64Url.EncodeToString(store.SignRecord(keyId, content, digest, null)));
+
+    /// <summary>
+    /// From 0.9.4 (ID-16): signs a record as <see cref="Sign(ReadOnlySpan{byte}, string)"/> does, handing the store the record's canonical
+    /// bytes, so custody that reads records (the Secure Enclave helper's sign-record) hashes them itself and opens its prompt with its own
+    /// label; any other store signs the digest.
+    /// </summary>
+    public RecordSignature SignRecord(ReadOnlySpan<byte> content, ReadOnlySpan<byte> digest, string reason) =>
+        new(RecordSigning.Algorithm, DeviceId, Base64Url.EncodeToString(store.SignRecord(keyId, content, digest, PresenceReason.Text(reason))));
+
+    /// <summary>From 0.9.4: the store holding the key.</summary>
+    internal IDeviceKeyStore Store => store;
 }
 
 /// <summary>The signature scheme of the record formats and its verification; format 2 keeps format 1's.</summary>
@@ -222,10 +248,25 @@ public static class RecordSigning
 
         private ImportedKey(ECDsa? key) => this.key = key;
 
+        /// <summary>From 0.9.4: whether the import succeeded, so that the key can verify; one that did not verifies nothing.</summary>
+        internal bool Usable => key is not null;
+
         /// <summary>Imports an encoded public key; one that is not usable verifies nothing.</summary>
-        internal static ImportedKey Import(string encodedPublicKey)
+        internal static ImportedKey Import(string encodedPublicKey) => Import(encodedPublicKey, null);
+
+        /// <summary>
+        /// From 0.9.4 (FIX-148): imports an encoded public key as <see cref="Import(string)"/> does, counting the platform's import in the
+        /// context, whose seam may stand in for a platform that refuses it.
+        /// </summary>
+        internal static ImportedKey Import(string encodedPublicKey, Estate.JudgmentContext? context)
         {
             if (!IsPublicKey(encodedPublicKey))
+            {
+                return new(null);
+            }
+
+            context?.Imported();
+            if (context?.RefuseImport?.Invoke(encodedPublicKey) == true)
             {
                 return new(null);
             }
@@ -245,9 +286,21 @@ public static class RecordSigning
         }
 
         /// <summary>Verifies a signature over a digest.</summary>
-        internal bool Verify(ReadOnlySpan<byte> digest, string encodedSignature)
+        internal bool Verify(ReadOnlySpan<byte> digest, string encodedSignature) => Verify(digest, encodedSignature, null);
+
+        /// <summary>
+        /// From 0.9.4 (FIX-148): verifies as <see cref="Verify(ReadOnlySpan{byte}, string)"/> does, counting the platform's verification in
+        /// the context, whose seam may stand in for a platform that refuses it.
+        /// </summary>
+        internal bool Verify(ReadOnlySpan<byte> digest, string encodedSignature, Estate.JudgmentContext? context)
         {
             if (key is null || !IsSignature(encodedSignature))
+            {
+                return false;
+            }
+
+            context?.Verified();
+            if (context?.RefuseVerification?.Invoke(encodedSignature) == true)
             {
                 return false;
             }

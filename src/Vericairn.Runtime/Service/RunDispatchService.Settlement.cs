@@ -39,15 +39,21 @@ internal sealed partial class RunDispatchService
 
     // The host calls this after interrupted batches have been judged, before serving requests. It uses the
     // original author's current standing and the ordinary record writer; recovery grants no new authority.
-    internal void RecoverSettlements()
+    // Returns the model it judged when no settlement stored a record, so the opening's next pass reads it instead of judging the whole
+    // estate again (FIX-136); null when something was stored.
+    internal EstateModel? RecoverSettlements()
     {
         lock (gate)
         {
-            foreach (AgentRuns.Run run in AgentRuns.All(session.Load()).Where(r => r.InFlight))
+            long writes = session.Writes;
+            EstateModel model = session.Load();
+            foreach (AgentRuns.Run run in AgentRuns.All(model).Where(r => r.InFlight))
             {
                 RunSettleResponse response = SettleRetained(run, run.Intent.By, recordsChecked: false);
                 if (!response.Ok && response.Problem?.Code is not ("in-flight" or "no-observation")) settlementProblems[run.Id] = response.Message;
             }
+
+            return session.Writes == writes ? model : null;
         }
     }
 

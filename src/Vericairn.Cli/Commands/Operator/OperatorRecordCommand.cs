@@ -47,11 +47,15 @@ internal sealed class OperatorRecordCommand : Command
             if (parse.GetValue(context.JsonOption)) context.Output.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
             else
             {
-                context.Output.WriteLine(response.Message);
+                // From 0.9.4 (CODE-80) a problem the runtime reports is shown as its own words, marked and escaped.
+                bool problem = !response.Ok && !transportFailed;
+                if (problem) CommandContext.WriteRuntime(context.Output, response.Message);
+                else context.Output.WriteLine(response.Message);
                 if (response.Record is RecordWritten record) context.Output.WriteLine($"Record: {record.Id} at {record.Hash}");
                 if (response.Branch is string branch) context.Output.WriteLine($"Branch: {branch}; head: {response.Head ?? "not committed"}");
                 if (response.Change?.PullRequest is string pull) context.Output.WriteLine("Pull request: " + pull);
-                context.Output.WriteLine(response.NextStep);
+                if (problem) CommandContext.WriteRuntime(context.Output, response.NextStep);
+                else context.Output.WriteLine(response.NextStep);
             }
             return transportFailed ? CommandContext.Failed : response.Ok ? CommandContext.Clean : CommandContext.HasErrors;
         })));

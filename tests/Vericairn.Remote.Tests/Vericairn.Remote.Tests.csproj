@@ -22,6 +22,7 @@
     <Compile Include="../Vericairn.Records.Tests/HistoryFixture.cs" Link="Fixtures/HistoryFixture.cs" />
     <Compile Include="../Vericairn.Records.Tests/TemplateFixture.cs" Link="Fixtures/TemplateFixture.cs" />
     <Compile Include="../Vericairn.Records.Tests/FlowFixture.cs" Link="Fixtures/FlowFixture.cs" />
+    <Compile Include="../Vericairn.Records.Tests/StandingFixture.cs" Link="Fixtures/StandingFixture.cs" />
     <Compile Include="../TestSupport/RemotePolicySeed.cs" Link="Fixtures/RemotePolicySeed.cs" />
     <Compile Include="../TestSupport/PresenceKeyStandIn.cs" Link="TestSupport/PresenceKeyStandIn.cs" />
   </ItemGroup>

@@ -21,7 +21,8 @@ namespace Vericairn.Cli.Tests;
 /// DOCS-29: the large private artifacts guide's examples, run as written. The record bodies are read from the guide's named JSON
 /// blocks and every command is matched against the guide's text before it runs, so the guide and this check cannot drift apart.
 /// DOCS-32: every file of the restored copy is classified by the guide's three inventories alone, before and after the copy is
-/// written, and the housekeeping the guide lists is the housekeeping the writers make.
+/// written, and the housekeeping the guide lists is the housekeeping the writers make. FIX-135: the owner's agent instruction file at
+/// the root is a member of the export, restored with the rest.
 /// </summary>
 [Collection("cli")]
 public sealed partial class LargeArtifactGuideTests
@@ -64,7 +65,6 @@ public sealed partial class LargeArtifactGuideTests
         string backup = CliHarness.TempDirectory("docs29-backup");
         string isolated = CliHarness.TempDirectory("docs29-isolated");
         string isolatedHome = CliHarness.TempDirectory("docs29-isolated-home");
-        string capture = CliHarness.TempDirectory("docs32-capture");
         string restored = Path.Combine(isolated, "estate");
         string restoredStore = Path.Combine(isolated, "store");
         string quarantine = Path.Combine(isolated, "quarantine");
@@ -144,12 +144,9 @@ public sealed partial class LargeArtifactGuideTests
             values["<result-id>"] = result.Id;
             values["<result-hash>"] = result.Hash;
 
-            // The owner's agent instruction file at the root, which the export doesn't carry yet: the supplemental capture keeps it,
-            // listed with its hash.
+            // The owner's agent instruction file at the root, which the export carries from 0.9.4 (FIX-135).
             byte[] agents = Encoding.UTF8.GetBytes("# Working in this estate\n\nThese are the owner's instructions for agents working in this estate.\n");
             File.WriteAllBytes(Path.Combine(live, "AGENTS.md"), agents);
-            File.WriteAllBytes(Path.Combine(capture, "AGENTS.md"), agents);
-            var supplemental = new Dictionary<string, string>(StringComparer.Ordinal) { ["AGENTS.md"] = ContentHash.Sha256(agents) };
 
             // The supplemental capture: the store's own backup. Then the estate commit that holds the result, and the export.
             Copy(store, backup);
@@ -164,7 +161,8 @@ public sealed partial class LargeArtifactGuideTests
                 Assert.DoesNotContain(zip.Entries, e => e.Length == size);
             }
 
-            // The inventory the guide lists from the export: no instruction file and no housekeeping, though the live estate holds both.
+            // The inventory the guide lists from the export: the owner's instruction file with its bytes and hash, and no housekeeping,
+            // though the live estate holds both.
             foreach (string listing in new[] { "unzip -p estate-export.zip export/inventory.json", "find <restore-directory> -type f -o -type l",
                 "Expand-Archive estate-export.zip -DestinationPath export-contents", "Get-Content export-contents/export/inventory.json",
                 "Get-ChildItem -Path <restore-directory> -Recurse -Force -File | ForEach-Object FullName" })
@@ -173,7 +171,9 @@ public sealed partial class LargeArtifactGuideTests
             Assert.Equal(values["<estate-id>"], exported.Estate);
             Assert.Equal("repository-synced", exported.Profile);
             Assert.True(File.Exists(Path.Combine(live, ".vericairn", "record-staging", ".gitignore")));
-            Assert.DoesNotContain(exported.Members.Keys, path => EstateLayout.OwnerInstructionFiles.Contains(path) || path.StartsWith(".vericairn/", StringComparison.Ordinal));
+            Assert.Equal(new Member(agents.LongLength, ContentHash.Sha256(agents), "100644"), exported.Members["AGENTS.md"]);
+            Assert.Equal(["AGENTS.md"], exported.Members.Keys.Where(EstateLayout.OwnerInstructionFiles.Contains));
+            Assert.DoesNotContain(exported.Members.Keys, path => path.StartsWith(".vericairn/", StringComparison.Ordinal));
 
             // Cold recovery on another machine: the export and the store's backup, restored in an isolated place.
             Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, isolatedHome);
@@ -186,6 +186,7 @@ public sealed partial class LargeArtifactGuideTests
             var none = new Dictionary<string, string>(StringComparer.Ordinal);
             Assert.All(Classify(restored, exported, none, none), file => Assert.Equal(Exported, file.Value));
             Assert.Equal(exported.Members.Count, Classify(restored, exported, none, none).Count);
+            Assert.Equal(agents, File.ReadAllBytes(Path.Combine(restored, "AGENTS.md")));
             Copy(backup, restoredStore);
 
             // The restored records say which bytes to recover; only bytes read from the restored store recover them. Reading them, as
@@ -215,10 +216,8 @@ public sealed partial class LargeArtifactGuideTests
             Step(guide, values, files, blocks, scratch, live, "vericairn records new verification --by <operator-id> --subject result:<result-id>:<result-hash> --body readback-failed.json");
             Assert.Equal(0, CliHarness.Run("--estate", live, "records", "validate").Code);
 
-            // The restored copy replaces the lost estate: the instruction file comes back from the capture, checked against its list,
-            // then the copy is committed and the readback is recorded there.
-            File.Copy(Path.Combine(capture, "AGENTS.md"), Path.Combine(restored, "AGENTS.md"));
-            Assert.Equal(supplemental["AGENTS.md"], ContentHash.Sha256File(Path.Combine(restored, "AGENTS.md")));
+            // The restored copy replaces the lost estate, its instruction file restored as a member: the copy is committed and the readback
+            // is recorded there.
             foreach (string line in new[] { "git -C <restore-directory> init", "git -C <restore-directory> add -A", "git -C <restore-directory> commit -m \"Restore the estate from its export\"", "git -C <restore-directory> rev-parse HEAD" })
                 Assert.Contains("\n" + line + "\n", guide, StringComparison.Ordinal);
             Git(restored, "init", "-q", "-b", "main");
@@ -235,7 +234,7 @@ public sealed partial class LargeArtifactGuideTests
             string stray = Path.Combine(restored, reference.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(stray)!);
             File.Copy(Path.Combine(backup, reference.Replace('/', Path.DirectorySeparatorChar)), stray);
-            Dictionary<string, string> found = Classify(restored, exported, supplemental, written);
+            Dictionary<string, string> found = Classify(restored, exported, none, written);
             Assert.Equal(new[] { reference }, found.Where(f => f.Value == Unexpected).Select(f => f.Key));
             Assert.Equal(output.GetProperty("hash").GetString(), ContentHash.Sha256File(stray));
             Assert.Equal(output.GetProperty("bytes").GetInt64(), new FileInfo(stray).Length);
@@ -245,19 +244,18 @@ public sealed partial class LargeArtifactGuideTests
             File.Move(stray, quarantined);
             Directory.Delete(Path.GetDirectoryName(stray)!);
             Assert.Equal(hash, ContentHash.Sha256File(quarantined));
-            Assert.DoesNotContain(Classify(restored, exported, supplemental, written), f => f.Value is Unexpected or Missing);
+            Assert.DoesNotContain(Classify(restored, exported, none, written), f => f.Value is Unexpected or Missing);
 
             // The classification is recorded in the restored copy, the estate of record now, as a verification of the charter.
             Assert.Contains("`records show <estate-id>`", guide, StringComparison.Ordinal);
             values["<estate-hash>"] = CliHarness.Ok("--estate", restored, "--json", "records", "show", values["<estate-id>"]).Hash;
             values["<inventory-hash>"] = exported.InventoryHash;
-            values["<agents-sha256-hex>"] = supplemental["AGENTS.md"]["sha256:".Length..];
             CliHarness.Outcome classified = Step(guide, values, files, blocks, scratch, live, "vericairn --estate <restore-directory> records new verification --by <operator-id> --subject estate:<estate-id>:<estate-hash> --body restore-files.json");
             written[classified.Json.GetProperty("path").GetString()!] = classified.Id + " " + classified.Hash;
             values["<restore-files-id>"] = classified.Id;
 
             // Every file is now in exactly one class, and the files beyond the inventory are exactly the guide's listing, class by class.
-            found = Classify(restored, exported, supplemental, written);
+            found = Classify(restored, exported, none, written);
             Assert.DoesNotContain(found, f => f.Value is Unexpected or Missing);
             Assert.True(Directory.Exists(Path.Combine(restored, ".git")));
             AssertListing(guide, found.Where(f => f.Value != Exported).ToDictionary(f => f.Key, f => f.Value, StringComparer.Ordinal), values);
@@ -266,7 +264,7 @@ public sealed partial class LargeArtifactGuideTests
         finally
         {
             Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, previousHome);
-            CliHarness.Delete(live, failed, scratch, store, backup, isolated, isolatedHome, capture);
+            CliHarness.Delete(live, failed, scratch, store, backup, isolated, isolatedHome);
         }
     }
 

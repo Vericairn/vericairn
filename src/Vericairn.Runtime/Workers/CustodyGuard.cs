@@ -76,6 +76,94 @@ public static class CustodyGuard
     }
 
     /// <summary>
+    /// From 0.9.4 (ID-16): whether an agent run this machine's worker started is unsettled under this operating-system user, the agent
+    /// condition of design/presence-sessions.md § 10 (decision 4): while one is, every exact entry of a presence session's list gets its own
+    /// check and only kind entries share one, so an approval the person did not mean gives that run no batch of judgments. The worker runs
+    /// an agent as the user it runs as, and keeps each run's observed state under that user's Vericairn home, so the runs found there are
+    /// this user's: one counts until its settlement is recorded while its harness, or its worker before the harness starts, may still run.
+    /// Anything that cannot be listed or read counts as under way. An agent the runtime did not start is not seen.
+    /// </summary>
+    public static bool UnsettledAgentRuns(string? home = null)
+    {
+        // Every read fails closed: an estates or runs directory, a run directory or a state that cannot be listed or read counts as a run
+        // under way. Only a directory that is absent counts as no run.
+        string estates = Path.Combine(home ?? VericairnHome.Path(), "estates");
+        try
+        {
+            foreach (string estate in Directory.EnumerateDirectories(estates))
+            {
+                IEnumerable<string> runs;
+                try
+                {
+                    runs = Directory.EnumerateDirectories(Path.Combine(estate, "runs")).ToList();
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    continue;
+                }
+
+                foreach (string run in runs)
+                {
+                    if (UnderWay(Path.Combine(run, "state.json"))) return true;
+                }
+            }
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool UnderWay(string path)
+    {
+        RunObservedState? state;
+        try
+        {
+            state = System.Text.Json.JsonSerializer.Deserialize<RunObservedState>(File.ReadAllBytes(path), Protocol.ProtocolJson.Options);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // A run directory whose worker has not yet written its state, or one removed meanwhile: nothing runs from it.
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return true;
+        }
+
+        if (state is null) return true;
+        if (state.Settled is not null) return false;
+        if (state.ProcessId is int harness && DateTimeOffset.TryParse(state.LaunchedAt, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out DateTimeOffset launched))
+            return !RunProcesses.Gone(harness, launched) || Alive(state.Supervisor);
+        return Alive(state.Supervisor);
+    }
+
+    private static bool Alive(int processId)
+    {
+        if (processId <= 0) return false;
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
     /// The principals whose devices the guard checks for a run of a goal: every operator, and the goal's sponsor; never the agent the
     /// run launches, whose own key its MCP server signs with.
     /// </summary>

@@ -48,12 +48,11 @@ public sealed partial class EstateService
             JsonObject body = JsonNode.Parse(candidate.Body.GetRawText())!.AsObject();
             body["status"] = "withdrawn";
             body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = request.Reason, ["hash"] = candidate.ComputedHash });
-            var withdrawing = new RecordDraft("release", request.By, Element(body), candidate.Subject, candidate.Id, at);
-            // Both records are announced before the first presence prompt (FIX-124).
-            using IDisposable counted = presence.Action("release withdraw " + version, SignsWithPresence(model, request.By)
-                ? [DescribeRecord(withdrawing, model), OperationSignature(ReleaseFlow.DeleteDraftAction, "not-started", "release " + version)] : null);
-            (AuthoredRecord? withdrawn, string? refusal) = AuthorLocked(withdrawing, model);
-            if (withdrawn is null) return Failed("refused", refusal!);
+            var withdrawing = Fixed(new RecordDraft("release", request.By, Element(body), candidate.Subject, candidate.Id, at), at);
+            // The withdrawal is authored completely, unsigned, before the first signature, so the draft-deletion intent that names it at its
+            // exact hash is too, and a presence session lists both by exact hash (ID-16).
+            (AuthoredRecord? unsignedWithdrawal, string? refusal) = AuthorUnsignedLocked(withdrawing, model);
+            if (unsignedWithdrawal is null) return Failed("refused", refusal!);
             var intent = new JsonObject
             {
                 ["provider"] = request.Provider, ["action"] = ReleaseFlow.DeleteDraftAction, ["identity"] = identity,
@@ -61,7 +60,15 @@ public sealed partial class EstateService
                 ["target"] = target, ["status"] = "not-started",
                 ["evidence"] = new JsonArray(new JsonObject { ["summary"] = request.Reason, ["hash"] = candidate.ComputedHash }),
             };
-            (AuthoredRecord? operation, refusal) = AuthorLocked(new("operation", request.By, Element(intent), withdrawn.Envelope.Reference, At: at), model);
+            RecordDraft deleting = Fixed(new("operation", request.By, Element(intent), unsignedWithdrawal.Envelope.Reference, At: at), at);
+            // Both records are announced before the first presence prompt (FIX-124).
+            using IDisposable counted = SessionAction("release withdraw " + version, SignsWithPresence(model, request.By)
+                ? [DescribeRecord(withdrawing, model), OperationSignature(ReleaseFlow.DeleteDraftAction, "not-started", "release " + version)] : null,
+                ExactSession("release withdraw", "release withdraw:" + candidate.Id, [withdrawing, deleting], redatable: false));
+            (AuthoredRecord? withdrawn, refusal) = AuthorLocked(SessionDraft(withdrawing), model);
+            if (withdrawn is null) return Failed("refused", refusal!);
+            if (withdrawn.Envelope.ComputedHash != unsignedWithdrawal.Envelope.ComputedHash) return Failed("refused", "The withdrawal changed while it was signed; nothing was written.");
+            (AuthoredRecord? operation, refusal) = AuthorLocked(SessionDraft(deleting), model);
             if (operation is null) return Failed("refused", refusal!);
             var stored = StoreTogetherLocked([withdrawn, operation], "Withdraw a candidate and record its draft-deletion intent.", null);
             RecordWritten? release = stored.Written.FirstOrDefault(r => r.Id == withdrawn.Envelope.Id);

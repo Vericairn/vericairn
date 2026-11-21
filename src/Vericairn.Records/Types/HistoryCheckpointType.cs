@@ -16,7 +16,7 @@ public sealed class HistoryCheckpointType : IRecordType
     internal static readonly ImmutableArray<string> Triggers = ["adoption", "interval", "upgrade", "release", "charter", "closing", "manual"];
 
     /// <summary>The values of <c>closes.kind</c>.</summary>
-    internal static readonly ImmutableArray<string> ClosingKinds = ["device", "key", "grant"];
+    internal static readonly ImmutableArray<string> ClosingKinds = ["device", "key", "grant", "role"];
 
     /// <inheritdoc />
     public string Name => "history-checkpoint";
@@ -41,7 +41,7 @@ public sealed class HistoryCheckpointType : IRecordType
         new("records", "integer", true, "How many records this checkpoint witnesses, through its own inventory and those of the checkpoints it follows, less any acknowledged removals.", 3),
         new("recordSetHash", "hash", true, "The record set hash of what it witnesses, defined as for estate observations: SHA-256 of the canonical JSON array of {hash, id} sorted by id.", 3),
         new("trigger", "adoption|interval|upgrade|release|charter|closing|manual", true, "Why it was written: adoption for an estate's first checkpoint, closing with closes, otherwise the runtime's trigger or manual.", 3),
-        new("closes", "object", false, "For a closing checkpoint, written just before the act: {kind, id}, kind device (before its revocation), key (the device revision whose key a rotation replaces) or grant (the authority revision being narrowed). Signed by one who may perform the act; from it on, what that device or key signs, or what relies on that grant revision, counts only when this checkpoint or one it follows witnesses it.", 3),
+        new("closes", "object", false, "For a closing checkpoint, written just before the act: {kind, id}, kind device (before its revocation), key (the device revision whose key a rotation replaces), grant (the authority revision being narrowed) or, from 0.9.4, role (the principal revision whose role a revision removes). Signed by one who may perform the act; from it on, what that device or key signs, what relies on that grant revision, or what that person writes dated while that principal revision stood, counts only when this checkpoint or one it follows witnesses it.", 3),
         new("anchored", "object[]", false, "{id, hash} of the unsigned records that count under required signatures, and of the signed records a closing refused, only because this checkpoint lists them. Only the root operator or a person holding administer anchors, never an agent, with a device whose own admission rests on signatures.", 3),
         new("removed", "object[]", false, "{id, hash, reason} of witnessed records that had to go, such as a leaked secret: an acknowledgement settles their absence. Only the root operator or a person holding administer acknowledges a removal.", 3),
     ];

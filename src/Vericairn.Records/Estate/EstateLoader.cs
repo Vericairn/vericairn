@@ -85,19 +85,21 @@ public static class EstateLoader
     /// with parse findings alone. No record type, reference, authority, signature or admission is judged, no clock is read, and no
     /// file is read but the record files given and the manifest. A caller that needs any judgment loads the estate with <see cref="Load(string, IReadOnlyList{RecordFile})"/>.
     /// </summary>
-    internal static EstateModel LoadIdentities(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache) => Load(root, files, cache, judge: false);
+    internal static EstateModel LoadIdentities(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, JudgmentContext? context = null) => Load(root, files, cache, judge: false, context: context);
 
     /// <summary>
     /// The records of a file set judged with every record's roles and grants read at the record's own time, as an estate that has adopted
     /// history checkpoints reads the records its adoption does not witness: what adoption's check compares with the reading of today
     /// (design/signed-history.md § 10). Such a model serves that comparison alone.
     /// </summary>
-    internal static EstateModel LoadAtRecordTime(string root, IReadOnlyList<RecordFile> files, Func<string, byte[]?>? objects) =>
-        Load(root, files, null, null, objects, authorityAtRecordTime: true);
+    internal static EstateModel LoadAtRecordTime(string root, IReadOnlyList<RecordFile> files, Func<string, byte[]?>? objects, JudgmentContext? context = null) =>
+        Load(root, files, null, null, objects, authorityAtRecordTime: true, context: context);
 
-    // Only parsing is reusable. References, authority, signatures, manifest and output-file findings are rejudged on every load.
+    // Only parsing and, from 0.9.4 (FIX-148), the arithmetic of signatures that verified are reused. References, authority, admissions,
+    // closings, manifest and output-file findings are rejudged on every load. A judgment and every parse are counted in the context given,
+    // and its verifications read that context's signature tables; without one, the process's tables, uncounted.
     internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, byte[]? manifestBytes = null, Func<string, byte[]?>? objects = null, bool judge = true,
-        bool authorityAtRecordTime = false)
+        bool authorityAtRecordTime = false, JudgmentContext? context = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(files);
@@ -126,7 +128,16 @@ public static class EstateLoader
                 continue;
             }
 
-            RecordEnvelope? record = cache is null ? RecordParser.Parse(file.Bytes, location, findings) : cache.Parse(file, findings);
+            RecordEnvelope? record;
+            if (cache is null)
+            {
+                context?.Parsed();
+                record = RecordParser.Parse(file.Bytes, location, findings);
+            }
+            else
+            {
+                record = cache.Parse(file, findings, context);
+            }
             if (record is null)
             {
                 continue;
@@ -148,11 +159,18 @@ public static class EstateLoader
 
         var supersession = new FindingList();
         Dictionary<string, string> supersededBy = Successors(records, byId, supersession);
+        // A judgment reserves room in the signature tables for every signature it may verify, by every key its device records name,
+        // before it verifies any, so the bound follows the estate (design/performance.md § 3.1); so does an identities load given a
+        // context, whose caller may judge its trust itself.
+        using Signing.SignatureTables.Judgment? signatures = judge || context is not null
+            ? (context?.Tables ?? Signing.SignatureTables.Process).Begin(records.Sum(r => r.Signatures.Count), DistinctKeys(records), context)
+            : null;
         var model = new EstateModel(root, records, byId, supersededBy, findings)
         {
             ObjectReader = objects ?? FileObjects(root),
             FilePaths = files.Select(f => f.Path).ToHashSet(StringComparer.Ordinal),
             AuthorityAtRecordTime = authorityAtRecordTime,
+            Signatures = signatures,
         };
         if (!judge)
         {
@@ -162,6 +180,7 @@ public static class EstateLoader
         }
 
 
+        context?.Judged();
         // The manifest is read before anything is judged, because which unsigned admissions count depends on the estate's record format;
         // its findings keep their place after the signatures'. Signatures, anchors and history checkpoints are judged from every record
         // read, and then the model's lookups keep only the records that count, before any rule reads them (design/signed-history.md § 6).
@@ -193,10 +212,13 @@ public static class EstateLoader
         // Policy records give no role, and the grants among the latter rest on a role already gone, so one pass settles it.
         IReadOnlySet<string> unauthorized = Types.PolicyAuthority.Unauthorized(model);
         IReadOnlyDictionary<string, IReadOnlyList<RecordEnvelope>> removedBeforeHistory = Types.PolicyAuthority.RemovedBeforeHistory(model);
-        if (unauthorized.Count > 0 || removedBeforeHistory.Count > 0)
+        // From 0.9.4 (ID-07) a dispatcher's assignment outside its dispatch grant counts for nothing, and so does any step's work it records.
+        IReadOnlySet<string> dispatched = Types.DispatchAuthority.Withheld(model);
+        if (unauthorized.Count > 0 || removedBeforeHistory.Count > 0 || dispatched.Count > 0)
         {
             var withheld = new HashSet<string>(excluded, StringComparer.Ordinal);
             withheld.UnionWith(unauthorized);
+            withheld.UnionWith(dispatched);
             withheld.UnionWith(removedBeforeHistory.Keys);
             model.ApplyCounting(trust, withheld, Successors(records.Where(r => !withheld.Contains(r.Id)).ToList(), byId, new FindingList(), r => trust.AttachedTo(r)?.Id));
         }
@@ -282,6 +304,10 @@ public static class EstateLoader
 
         return model;
     }
+
+    // The public keys the device records name: every key a signature may be verified with.
+    private static int DistinctKeys(IReadOnlyList<RecordEnvelope> records) =>
+        records.Where(r => r.Type == "device").Select(r => EstateModel.BodyString(r, "publicKey")).Where(k => k is not null).Distinct(StringComparer.Ordinal).Count();
 
     /// <summary>
     /// Which record each superseded record is superseded by, from the records given: divergent successors are a reconcile task unless a

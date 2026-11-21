@@ -41,7 +41,22 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <VersionPrefix>0.9.3</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
+    <!-- From 0.9.4 (ID-16, design/presence-sessions.md § 11): the release build (DIST-21) passes Vericairn's Developer ID team
+         identifier, the release helper's code-signing identifier and the macOS major versions its candidate's signed helper was
+         qualified on, separated by commas (for example 15,26). Without a team identifier, as in every build from source, the build is a
+         development build: it opens no presence session and honors VERICAIRN_ENCLAVE_HELPER. A release build lists no macOS version
+         until a qualification passes on it, and with none it opens no session anywhere. Release builds also start the runtime processes
+         the command line launches with the .NET diagnostics channel off (DOTNET_EnableDiagnostics=0), the only configuration .NET reads
+         it from. -->
+    <VericairnTeamIdentifier Condition="'$(VericairnTeamIdentifier)' == ''"></VericairnTeamIdentifier>
+    <VericairnEnclaveHelperIdentifier Condition="'$(VericairnEnclaveHelperIdentifier)' == ''">vericairn-enclave</VericairnEnclaveHelperIdentifier>
+    <VericairnPresenceSessionMacOS Condition="'$(VericairnPresenceSessionMacOS)' == ''"></VericairnPresenceSessionMacOS>
   </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Vericairn.Records'">
+    <AssemblyMetadata Include="VericairnTeamIdentifier" Value="$(VericairnTeamIdentifier)" />
+    <AssemblyMetadata Include="VericairnEnclaveHelperIdentifier" Value="$(VericairnEnclaveHelperIdentifier)" />
+    <AssemblyMetadata Include="VericairnPresenceSessionMacOS" Value="$(VericairnPresenceSessionMacOS)" />
+  </ItemGroup>
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)docs/nuget-readme.md" Pack="true" PackagePath="/README.md" />
     <None Include="$(MSBuildThisFileDirectory)brand/package-icon.png" Pack="true" PackagePath="/package-icon.png" />

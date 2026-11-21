@@ -33,6 +33,7 @@ public sealed class AttemptType : IRecordType
     public void Validate(ValidationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        DispatchAuthority.RefuseWork(context);
         BodyReader body = context.Body;
         body.Timestamp("startedAt", true);
         body.Text("workspace", true, 500);

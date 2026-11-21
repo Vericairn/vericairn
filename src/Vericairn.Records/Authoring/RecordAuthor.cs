@@ -81,17 +81,20 @@ public static class RecordAuthor
             envelope["supersedes"] = draft.Supersedes;
         }
 
-        string hash;
+        byte[] content;
         using (JsonDocument unhashed = JsonDocument.Parse(envelope.ToJsonString()))
         {
-            hash = ContentHash.Sha256(CanonicalJson.SerializeUtf8(unhashed.RootElement, RecordParser.HashExcludedKeys));
+            content = CanonicalJson.SerializeUtf8(unhashed.RootElement, RecordParser.HashExcludedKeys);
         }
 
+        string hash = ContentHash.Sha256(content);
         envelope["hash"] = hash;
         if (signers.Count > 0)
         {
+            // From 0.9.4 (ID-16) a signer that reads what it signs is handed the record's canonical bytes beside their digest.
             byte[] digest = RecordSigning.Digest(hash);
-            envelope["signatures"] = new JsonArray(signers.Select(s => s.Sign(digest)).Select(s => (JsonNode)new JsonObject { ["algorithm"] = s.Algorithm, ["device"] = s.Device, ["signature"] = s.Signature }).ToArray());
+            envelope["signatures"] = new JsonArray(signers.Select(s => s is IRecordContentSigner reader ? reader.SignRecord(content, digest) : s.Sign(digest))
+                .Select(s => (JsonNode)new JsonObject { ["algorithm"] = s.Algorithm, ["device"] = s.Device, ["signature"] = s.Signature }).ToArray());
         }
 
         byte[] bytes;
@@ -103,6 +106,16 @@ public static class RecordAuthor
         var findings = new FindingList();
         RecordEnvelope parsed = RecordParser.Parse(bytes, "(new record)", findings) ?? throw new InvalidOperationException("The new record is not valid: " + string.Join("; ", findings.Select(f => f.Message)));
         return new AuthoredRecord(parsed.ExpectedPath, bytes, parsed);
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-16): the bytes a record's signatures are over, its compact canonical form without hash and signatures, from its
+    /// file bytes; their SHA-256 is its content hash.
+    /// </summary>
+    public static byte[] ContentBytes(ReadOnlyMemory<byte> bytes)
+    {
+        using JsonDocument document = CanonicalJson.Parse(bytes);
+        return CanonicalJson.SerializeUtf8(document.RootElement, RecordParser.HashExcludedKeys);
     }
 
     /// <summary>Reformats existing record bytes into canonical pretty form without changing content or hash.</summary>

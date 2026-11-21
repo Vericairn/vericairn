@@ -22,7 +22,10 @@ public static partial class FlowContract
     /// <summary>The template kind of a flow.</summary>
     public const string Kind = "flow";
 
-    /// <summary>The step kinds: an assignment, a review, a product command, an outside effect, a phase gate, an outside round trip, another flow's run.</summary>
+    /// <summary>
+    /// The step kinds: an assignment, a review, a product command, an outside effect, a phase gate (from 0.9.4, PROC-19, a decision whose
+    /// transition names its paths), an outside round trip, another flow's run.
+    /// </summary>
     public static readonly ImmutableArray<string> StepKinds = ["work", "review", "operation", "effect", "decision", "exchange", "flow"];
 
     /// <summary>Who may hold a role.</summary>
@@ -121,7 +124,8 @@ public static partial class FlowContract
         var triggers = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader trigger in body.NestedArray("triggers", false, allowEmpty: false) ?? [])
         {
-            string? kind = trigger.Text("kind", true, 100, Patterns.Slug, "a trigger kind");
+            // From 0.9.4 (GOAL-07) a trigger kind is one of the standing agents' (design/standing-agents.md § 6).
+            string? kind = trigger.Enum("kind", true, [.. StandingAgents.TriggerKinds]);
             trigger.Text("summary", true, 2000);
             trigger.NoOtherKeys();
             if (kind is not null && !triggers.Add(kind))
@@ -177,7 +181,11 @@ public static partial class FlowContract
             }
 
             branched.UnionWith(branch.StringArray("steps", true, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key") ?? []);
-            branch.Text("returnTo", false, 100, Patterns.Slug, "a step key");
+            if (branch.Text("returnTo", false, 100, Patterns.Slug, "a step key") is string returnTo
+                && declared.FirstOrDefault(s => s.Key == returnTo) is { } deciding && TJson.Object(deciding.Body.Element, "transition").ValueKind == JsonValueKind.Object)
+            {
+                branch.Error("flow.failure", "returnTo", DecidingTarget(returnTo));
+            }
             branch.NoOtherKeys();
         }
 
@@ -205,10 +213,53 @@ public static partial class FlowContract
             {
                 declared.First(s => s.Key == reserved).Body.Error(UnclosableCode, "done", UnclosableMessage(reserved, waited));
             }
+
+            // From 0.9.4 (PROC-19) each decision transition's paths lead to steps and branches of the flow as their kind requires; an
+            // extension's, placed among its base's, are checked when the flow is resolved.
+            var shapes = new List<FlowTransition.StepShape>();
+            for (int i = 0; i < declared.Count; i++)
+            {
+                if (declared[i].Key is string key)
+                {
+                    shapes.Add(TransitionShape(declared[i].Body.Element, key, i == 0 ? null : declared[i - 1].Key, roles));
+                }
+            }
+
+            Dictionary<string, IReadOnlyList<string>> members = TJson.Array(body.Element, "branches").Where(b => TJson.Text(b, "name") is not null)
+                .GroupBy(b => TJson.Text(b, "name")!, StringComparer.Ordinal).ToDictionary(g => g.Key, g => (IReadOnlyList<string>)TJson.Strings(g.First(), "steps").ToList(), StringComparer.Ordinal);
+            foreach ((string step, string message) in FlowTransition.Structure(shapes, members))
+            {
+                declared.First(s => s.Key == step).Body.Error("flow.transition", "transition", message);
+            }
         }
 
         body.NoOtherKeys();
     }
+
+    /// <summary>
+    /// One declared step of a flow's own content as the transitions' structure reads it (from 0.9.4, PROC-19): what it waits on by after,
+    /// or the step before it, and by its inputs and timing, its transition, whether it is required and the reserved act it is, and whether
+    /// the flow marks its role a person's.
+    /// </summary>
+    internal static FlowTransition.StepShape TransitionShape(JsonElement step, string key, string? previous, IReadOnlyDictionary<string, string> roles)
+    {
+        ArgumentNullException.ThrowIfNull(roles);
+        List<string> after = step.TryGetProperty("after", out JsonElement named) && named.ValueKind == JsonValueKind.Array
+            ? TJson.Strings(step, "after").ToList()
+            : previous is null ? [] : [previous];
+        List<string> also = TJson.Array(step, "inputs").Select(i => TJson.Text(i, "step")).OfType<string>().ToList();
+        if (FlowTiming.WaitedOf(TJson.Object(step, "when")) is string from)
+        {
+            also.Add(from);
+        }
+
+        return new FlowTransition.StepShape(key, TJson.Text(step, "kind"), after, also, TJson.Text(step, "each"), FlowTransition.Read(TJson.Object(step, "transition"), key),
+            !TJson.Flag(step, "optional"), TJson.Text(step, "reserved"), TJson.Text(step, "role") is string role && roles.GetValueOrDefault(role) == "person");
+    }
+
+    /// <summary>From 0.9.4 (PROC-19), why a failure route or a branch never returns the run to a decision step that decides the run's path.</summary>
+    internal static string DecidingTarget(string target) =>
+        $"'{target}' is a decision step that decides the run's path: a failure route or a branch never returns the run to it, since it decides again only through its own rounds, a path back, a hold or what it waits on done again.";
 
     /// <summary>The refusal of a reserved step that could never close: it waits on a step done at no time the records give.</summary>
     public const string UnclosableCode = "flow.reserved-unclosable";
@@ -393,7 +444,9 @@ public static partial class FlowContract
             Predicate(predicate, subject, extension, each is not null, declaredInputs, request: reserved is not null);
         }
 
-        if (kind is not null && Routed.IndexOf(kind) < 0 && done.Count == 0)
+        // From 0.9.4 (PROC-19) a decision step with a transition is done when its decision takes effect, and needs no done predicate.
+        bool decides = kind == "decision" && step.Has("transition");
+        if (kind is not null && Routed.IndexOf(kind) < 0 && done.Count == 0 && !decides)
         {
             step.Error("flow.done", "done", $"A {kind} step is done when its done predicates hold; it declares at least one.");
         }
@@ -524,6 +577,13 @@ public static partial class FlowContract
                 predicate => Predicate(predicate, subject, extension, each is not null, declaredInputs)));
         }
 
+        // From 0.9.4 (PROC-19) a step may end in a decision transition among named paths (design/flow.md § 5).
+        if (step.Nested("transition", false) is BodyReader transition)
+        {
+            FlowTransition.Check(transition, key, kind, reserved, each, !TJson.Flag(step.Element, "optional"), predicate => Predicate(predicate, subject, extension, each is not null, declaredInputs),
+                role => extension || roles.ContainsKey(role));
+        }
+
         BodyReader? flow = step.Nested("flow", kind == "flow");
         if (flow is not null)
         {
@@ -601,6 +661,11 @@ public static partial class FlowContract
         else if (earlier.FirstOrDefault(e => e.Key == target) is { Kind: "effect" or "exchange" } outside)
         {
             failure.Error("flow.failure", "step", $"'{target}' is an {outside.Kind} step: a failure route never repeats an outside effect.");
+        }
+        else if (earlier.FirstOrDefault(e => e.Key == target) is { } deciding && TJson.Object(deciding.Body.Element, "transition").ValueKind == JsonValueKind.Object)
+        {
+            // From 0.9.4 (PROC-19) a decision step decides again only through its own rounds: a failure route never reopens it.
+            failure.Error("flow.failure", "step", DecidingTarget(target!));
         }
 
         return route == "branch" ? branch : null;

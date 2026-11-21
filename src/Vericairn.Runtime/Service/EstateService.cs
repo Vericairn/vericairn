@@ -58,6 +58,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal, searches: searches, principal: agent),
             PreparePrompt);
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
+        recordAccess.Sessions = PresenceSessions;
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
             AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary),
             SecurityReportObjections);
@@ -82,7 +83,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     internal static EstateService Open(string root, WorkerOptions? workerOptions) => Open(root, workerOptions, null);
 
     // A test opens two runtimes with different homes on one working tree in one process; a host uses the process's home.
-    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home)
+    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home) => Open(root, workerOptions, home, oneShot: false, judgments: null);
+
+    /// <summary>
+    /// From 0.9.4 (FIX-148): opens the runtime of one command that runs and ends, as the command line hosts it without a daemon: the model
+    /// its opening judges is kept for the command's later loads while the records and the manifest are unchanged and the runtime has
+    /// written nothing (<see cref="EstateSession.KeepsJudgment"/>), so the command judges the estate once. Long-lived hosts open with
+    /// <see cref="Open(string)"/> and judge at every load.
+    /// </summary>
+    internal static EstateService OpenOneShot(string root) => Open(root, null, null, oneShot: true, judgments: null);
+
+    /// <summary>
+    /// Opens a runtime as <see cref="Open(string, WorkerOptions?, string?)"/> does, one-shot or not, counting its judgments in a given
+    /// context (a test's, with fresh signature tables) or in a new one reading the process's tables.
+    /// </summary>
+    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home, bool oneShot, JudgmentContext? judgments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
@@ -90,13 +105,18 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             throw new InvalidOperationException($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
         }
 
-        var service = new EstateService(home is null ? EstateSession.Open(root) : EstateSession.Open(root, false, home));
+        var service = new EstateService(EstateSession.Open(root, false, home ?? VericairnHome.Path(), judgments));
         try
         {
+            // Chosen before the opening judges, so its judgment is the one the command keeps.
+            service.session.KeepsJudgment = oneShot;
             if (workerOptions is not null) service.WorkerOptions = workerOptions;
             service.JudgeInterruptedBatches();
-            service.runDispatch.RecoverSettlements();
-            service.ReconcileRunAttention();
+            // One judgment of the estate serves both startup passes unless the first stores a settlement (FIX-136).
+            EstateModel? judged = service.runDispatch.RecoverSettlements();
+            long loads = service.session.Loads;
+            service.runDispatch.ReconcileSettledAttention(judged);
+            service.StartupJudgments = 1 + service.session.Loads - loads;
             return service;
         }
         // A failed opening, such as an unusable live store, releases the store and the writer lock before its diagnostic leaves.
@@ -105,6 +125,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     // Kept separate from retained-observation recovery: existing settlements need only their records.
     internal void ReconcileRunAttention() => runDispatch.ReconcileSettledAttention();
+
+    /// <summary>
+    /// How many times the opening's two run passes judged the estate themselves, apart from a settlement's own reads: one when the
+    /// settlement recovery stored nothing and the attention reconciliation read its judgment, two when it stored a settlement.
+    /// </summary>
+    internal long StartupJudgments { get; private set; }
 
     /// <summary>Opens canonical records for a check without cache updates, batch recovery or creating durable state.</summary>
     internal static EstateService OpenReadOnly(string root) => new(EstateSession.Open(root, readOnly: true));
@@ -117,13 +143,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     internal string? ReportedVersion { get; set; }
 
     /// <inheritdoc />
-    public HealthResponse Health()
-    {
-        lock (gate)
-        {
-            return new HealthResponse(ApiVersion.Current, ReportedVersion ?? Version, session.Manifest.Estate, session.Root, session.Profile, session.Manifest.RecordFormat, startedAt, Environment.ProcessId);
-        }
-    }
+    public HealthResponse Health() =>
+        // From 0.9.4 (FIX-152) without the gate: every field is set when the runtime opens, so health answers while another call judges.
+        new(ApiVersion.Current, ReportedVersion ?? Version, session.Manifest.Estate, session.Root, session.Profile, session.Manifest.RecordFormat, startedAt, Environment.ProcessId);
 
     /// <inheritdoc />
     public StatusResponse Status() => Status(null);
@@ -133,8 +155,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     {
         lock (gate)
         {
+            using IDisposable stage = ClientOperationActivity.Stage("deriving status");
             EstateModel model = MeasureStatus("load-and-validate", session.Load, observe);
-            PolicySections sections = ReadPolicySections(model, observe);
+            PolicySections sections = SharedPolicySections(model, observe);
             FindingList checks = MeasureStatus("repository-and-section-checks", () => SectionChecks(model, ChecksWithBatches(model), sections), observe);
             JsonObject json = MeasureStatus("status-json", () =>
             {
@@ -159,6 +182,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private static T MeasureStatus<T>(string phase, Func<T> action, Action<string, TimeSpan>? observe)
     {
+        // From 0.9.4 (FIX-152) each phase is also the stage a client operation stopped at its request limit names, where it has its own.
+        using IDisposable stage = ClientOperationActivity.Stage(StatusStage(phase));
         if (observe is null) return action();
         long start = System.Diagnostics.Stopwatch.GetTimestamp();
         T result = action();
@@ -166,13 +191,25 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return result;
     }
 
+    // The status phases that are stages of their own; the others are named by what they call (the judgment, the repository checks,
+    // the required attention) or by the call around them.
+    private static string? StatusStage(string phase) => phase switch
+    {
+        "policy-snapshot" => "reading the estate's policy basis",
+        "policy-evaluation" => "evaluating the estate's policies",
+        "writing-evaluation" => "evaluating the estate's writing rules and exceptions",
+        "policy-views" => "presenting the policies, writing exceptions and operator duties",
+        "status-json" or "status-text-and-response" => "rendering status",
+        _ => null,
+    };
+
     /// <inheritdoc />
     public ProgressResponse Progress()
     {
         lock (gate)
         {
             EstateModel model = session.Load();
-            ProgressResponse progress = ProgressCore(model, RepositoryChecks(model));
+            ProgressResponse progress = SharedProgress(model);
             JsonObject json = JsonNode.Parse(progress.Json.GetRawText())!.AsObject();
             json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model, () => progress), ProtocolJson.Options);
             return progress with { Json = Element(json), EventsCursor = EventsCursorLocked(model, null, new EventPass { Runs = true }) };
@@ -181,7 +218,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private ProgressResponse ProgressCore(EstateModel model, FindingList checks)
     {
-        PolicySections sections = ReadPolicySections(model);
+        using IDisposable stage = ClientOperationActivity.Stage("deriving progress");
+        PolicySections sections = SharedPolicySections(model);
         checks = SectionChecks(model, checks, sections);
         JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
         AddPolicySections(json, sections);
@@ -211,6 +249,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     // Use the already loaded model for all exact record references in this refresh. No per-item store reloads.
     private IReadOnlyList<CommunicationAttention> RequiredAttention(EstateModel model, Func<ProgressResponse> progress, bool includeLocalObservations = true, string? recipient = null, Func<RunsResponse>? runs = null, DateTimeOffset? requestsAt = null)
     {
+        using IDisposable stage = ClientOperationActivity.Stage(AttentionStage);
         var cache = new Dictionary<string, RecordResponse>(StringComparer.Ordinal);
         RecordResponse Response(RecordEnvelope record)
         {
@@ -400,8 +439,32 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             lock (gate)
             {
-                return NewEvidenceLocked(request, draft, session.Load());
+                WriteOutcome evidence = NewEvidenceLocked(request, draft, session.Load());
+                return request.Type == "result" ? WithResultNotices(evidence) : evidence;
             }
+        }
+
+        // From 0.9.4 (CODE-73), a new assignment's brief names its repository where it can be filled, and its overlaps are reported.
+        if (request.Type == "assignment" && request.Body.ValueKind == JsonValueKind.Object && request.Body.TryGetProperty("brief", out JsonElement assigned))
+        {
+            lock (gate)
+            {
+                EstateModel model = session.Load();
+                RecordEnvelope? assignedOrder = subject is not null && model.ById.TryGetValue(subject.Id, out RecordEnvelope? pinned) && pinned.Type == "work-order" ? pinned : null;
+                if (FillRepository(model, assigned, null, out _, assignedOrder) is JsonElement filled && filled.GetRawText() != assigned.GetRawText())
+                {
+                    JsonObject body = JsonNode.Parse(request.Body.GetRawText())!.AsObject();
+                    body["brief"] = JsonNode.Parse(filled.GetRawText());
+                    draft = draft with { Body = Element(body) };
+                }
+
+                return WithAssignmentNotices(WriteLocked(draft, model));
+            }
+        }
+
+        if (request.Type == "attempt")
+        {
+            return WithAttemptNotices(Write(draft));
         }
 
         if (IsPolicyWrite(draft))
@@ -478,8 +541,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
         {
-            IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = session.LoadFiles(files);
+            // One snapshot's model and the files it was judged from: a one-shot command's kept judgment, never a second one (FIX-148).
+            (EstateModel model, IReadOnlyList<RecordFile> files) = session.LoadWithFiles();
             if (RequestDeviceRefusal(model) is not null)
             {
                 return new BriefResponse(ContextDenied + "\n", Element(new JsonObject { ["completeness"] = ContextDenied }),
@@ -553,8 +616,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 body["note"] = request.Note;
             }
 
+            // From 0.9.4 (CODE-73), a brief with a path pattern names its repository: the brief's, the request's, or the estate's own.
+            if (FillRepository(model, request.Brief, request.Repository, out string? unnamed, order) is not JsonElement filled)
+            {
+                return Refuse(unnamed!);
+            }
+
+            body["brief"] = JsonNode.Parse(filled.GetRawText());
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("assignment", request.By, document.RootElement, order.Reference), model);
+            return WithAssignmentNotices(WriteLocked(new RecordDraft("assignment", request.By, document.RootElement, order.Reference), model));
         }
     }
 
@@ -591,7 +661,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             at ??= DeviceSigningTime();
             var body = new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(at ?? DateTimeOffset.UtcNow), ["workspace"] = request.Workspace, ["note"] = request.Note };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("attempt", request.By, document.RootElement, assignment.Reference, At: at), model);
+            return WithAttemptNotices(WriteLocked(new RecordDraft("attempt", request.By, document.RootElement, assignment.Reference, At: at), model));
         }
     }
 
@@ -613,9 +683,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     body = Element(retained);
                 }
             }
-            return HasDuties(body) || request.Expected is not null
+            return WithResultNotices(HasDuties(body) || request.Expected is not null
                 ? SignedEvidenceAbout("result", "attempt", request.Attempt, request.By, body, request.Expected)
-                : About("result", "attempt", request.Attempt, request.By, body);
+                : About("result", "attempt", request.Attempt, request.By, body));
         }
     }
 
@@ -1558,6 +1628,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("The acting principal must be a ULID.");
         }
 
+        WriteOutcome outcome;
+        List<string> flying = [];
+        var notices = new List<string>();
         lock (gate)
         {
             EstateModel model = session.Load();
@@ -1606,8 +1679,40 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             };
             var body = new JsonObject { ["status"] = next, ["note"] = string.IsNullOrWhiteSpace(request.Note) ? note : request.Note };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("goal-status", request.By, document.RootElement, current.Reference), model);
+            outcome = WriteLocked(new RecordDraft("goal-status", request.By, document.RootElement, current.Reference), model);
+            // From 0.9.4 (GOAL-07; design/standing-agents.md § 5): a pause with stop-runs asks the goal's runs in flight to stop, and a standing
+            // agent's stop asks them always and retires its work order; the stops are asked once the status is recorded.
+            bool standing = StandingAgents.IsStanding(current);
+            if (!outcome.Ok || !((action == "pause" && request.StopRuns) || (action == "stop" && standing)))
+            {
+                return outcome;
+            }
+
+            if (action == "stop" && standing && FlowRuns.Work(model, current) is RecordEnvelope order
+                && EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status is not ("accepted" or "retired"))
+            {
+                var retiring = new JsonObject { ["status"] = "retired", ["note"] = $"Retired with standing agent {current.Id}, which its sponsor stopped: no occurrence of it is carried again." };
+                using JsonDocument retired = JsonDocument.Parse(retiring.ToJsonString());
+                WriteOutcome retirement = WriteLocked(new RecordDraft("work-status", request.By, retired.RootElement, order.Reference), session.Load());
+                notices.Add(retirement.Ok ? $"Work order {EstateModel.BodyString(order, "key") ?? order.Id} is retired (work-status {retirement.Written!.Id})." : $"Work order {EstateModel.BodyString(order, "key") ?? order.Id} was not retired: {retirement.Problem!.Message}");
+            }
+
+            IReadOnlyList<string> goals = model.Chain(current);
+            flying = [.. AgentRuns.All(model).Where(r => r.InFlight && r.Goal is not null && goals.Contains(r.Goal)).Select(r => r.Id)];
         }
+
+        foreach (string run in flying)
+        {
+            RunStopResponse stop = RunStop(run, new RunStopRequest(request.By, action == "stop" ? "its goal was stopped" : "its goal was paused with its runs stopped"));
+            notices.Add(stop.Message);
+        }
+
+        if (flying.Count == 0)
+        {
+            notices.Add("No run of the goal was in flight.");
+        }
+
+        return outcome with { Notices = [.. outcome.Notices ?? [], .. notices] };
     }
 
     /// <summary>
@@ -2040,7 +2145,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return current.Model;
             }
 
-            EstateModel model = EstateLoader.Load(session.Root, session.CanonicalFiles());
+            EstateModel model = EstateLoader.Load(session.Root, session.CanonicalFiles(), null, context: session.Judgments);
             Interlocked.Increment(ref standingLoads);
             // Kept only when nothing changed while the records were read, so a kept model is never older than its stamp says.
             if (session.Stamp() == stamp)
@@ -2916,7 +3021,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     private FindingList ChecksWithBatches(EstateModel model)
     {
-        FindingList checks = RepositoryChecks(model);
+        FindingList checks = SharedRepositoryChecks(model);
         foreach (Finding finding in InterruptedBatches(model))
         {
             checks.Add(finding);
@@ -2930,8 +3035,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return checks;
     }
 
-    private FindingList RepositoryChecks(EstateModel model) =>
-        EstateChecks.Run(model, Providers.Source("git")?.IgnoredEstateEntries(model.Root));
+    // Each pass is counted in the runtime's context (FIX-152), so a test shows how many a command runs.
+    private FindingList RepositoryChecks(EstateModel model)
+    {
+        using IDisposable stage = ClientOperationActivity.Stage("running the repository checks (the working tree walk and the writing scan)");
+        session.Judgments.CheckedRepository();
+        return EstateChecks.Run(model, Providers.Source("git")?.IgnoredEstateEntries(model.Root));
+    }
 
     /// <summary>
     /// The batches this machine began storing and did not finish, each a warning of code batch.incomplete, a reconcile task naming what
@@ -2968,15 +3078,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // without its act closes all the same and keeps the task while it counts, acts and no act follows it: the act written again
             // follows it alone, with a new id, so the task ends once an act follows the closing (OPS-07). A key's closing is followed as
             // well by its device's revocation or a closing of its device, since no rotation of the closed key can be written after them.
-            // Nor does a checkpoint stored without the principal revision it was written before, a role's removal: it witnesses only what
-            // was there, and the revision written again is preceded by a checkpoint of its own.
+            // Nor does a checkpoint stored without the principal revision it was written before, a role's removal in an estate that wrote
+            // a plain checkpoint before it: it witnesses only what was there, and the revision written again is preceded by a checkpoint of
+            // its own. A role closing stored so (ID-14) is a closing like the others above.
             bool checkpointOnly = missing.All(r => r.Type == "history-checkpoint");
             bool adoptionMissing = checkpointOnly && stored.Any(r => r.Type == "admission") && !global::Vericairn.Records.History.SignedHistory.Adopted(model);
             bool anchorsMissing = checkpointOnly && stored.Any(r => r.Type == "estate") && model.Findings.Any(f => f.Code == "history.unanchored");
-            bool closingAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type is "admission" or "device" or "authority");
+            bool closingAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type is "admission" or "device" or "authority" or "principal");
             global::Vericairn.Records.Estate.Closing? unfollowed = closingAlone
                 ? model.Trust.Closings.FirstOrDefault(c => stored.Any(s => s.Id == c.Record.Id) && model.Counts(c.Record) && !model.Trust.Followed(c)) : null;
-            bool removalAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type == "principal");
+            // A role closing stored without its removal (ID-14) closes all the same, and keeps the task as any other closing does.
+            bool removalAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type == "principal") && unfollowed is null;
             bool moot = stored.Count == 0 || missing.Count == 0 || checkpointOnly && !adoptionMissing && !anchorsMissing || closingAlone && unfollowed is null || removalAlone || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
                  || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));
@@ -3052,6 +3164,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             EstateModel proposed = LoadWith(records);
             if (UnclosedActRefusal(proposed, records, () => LoadWith([])) is Problem unclosed) return unclosed;
             FindingList relevant = Invalid(proposed, records);
+            AttemptWaits(proposed, records, relevant);
+            ConcurrentPathsStart(proposed, records, relevant);
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
                 : JudgePolicySources(records, proposed);
@@ -3083,7 +3197,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
     /// themselves, a new admission or revocation that would count for nothing, a decision dated after its own record, an acceptance by a
     /// principal other than the operator on a review that did not pass, a record whose author is no known principal, a result whose output location carries a URL scheme, a result whose
-    /// output no longer has the bytes it claims, and a goal recorded impossible without its evaluator's verdict of impossible. Records not stored yet get the content checks a stored file gets, on their canonical
+    /// output no longer has the bytes it claims, a goal recorded impossible without its evaluator's verdict of impossible, and a flow decision that leaves out a record its rules read or whose rules do not hold with the states they name read now. Records not stored yet get the content checks a stored file gets, on their canonical
     /// bytes, since the checks of stored files cannot see them.
     /// </summary>
     private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
@@ -3154,6 +3268,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             relevant.Add(finding with { Severity = Severity.Error });
         }
 
+        // From 0.9.4 (PROC-19), a new flow decision names every record its rules read, and its rules hold with the derived states they name
+        // read now, when it is written; decisions already in the estate keep their reading, so a later record or a later change of a state
+        // never invalidates one or blocks an unrelated write.
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Info && f.Code is FlowDecisions.ReadCode or FlowDecisions.StateCode
+            && records.Any(r => f.Location.StartsWith(r.RelativePath + "#", StringComparison.Ordinal))))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
         // From 0.9.2, a new record's author is a known principal (FIX-98); records already in the estate keep their reading.
         foreach (Finding finding in model.Findings.Where(f => f.Code == RecordAuthorship.Code && records.Any(r => f.Location == r.RelativePath + "#by")))
         {
@@ -3167,6 +3290,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             relevant.Add(finding with { Severity = Severity.Error });
         }
 
+        // From 0.9.4 (GOAL-07), a new assignment's occurrence is one its trigger makes as the records stand: an event never the agent's own,
+        // and a condition failing over the records it names; assignments already in the estate keep their reading. From GOAL-08, a new
+        // disposition of a standing output, or answer to its ask, is by no agent tied to its goal, even by records written after it.
+        foreach (Finding finding in model.Findings.Where(f => f.Code is StandingAgents.BoundaryCode or StandingOutputs.BoundaryCode && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.4 (CODE-73), a new assignment with a path pattern names its repository, and none is narrowed while its run is in flight.
+        OverlapBoundary(model, records, relevant);
         return relevant;
     }
 

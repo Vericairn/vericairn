@@ -45,7 +45,7 @@ public class FlowHandOffRoutingTests
             && c.GetProperty("reasons").EnumerateArray().Any(r => r.GetString()!.StartsWith("it authored the step's work", StringComparison.Ordinal)));
         Assert.Equal("draft review", next.Json.GetProperty("next").GetString());
 
-        GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(asked.Ok, asked.Message);
         Assert.Equal(("ask", "draft review", "person", op), (asked.Outcome, asked.Step, asked.Route, asked.Principal));
         RecordEnvelope assignment = run.Estate.Load().ById[asked.Assignment!.Id];
@@ -79,7 +79,7 @@ public class FlowHandOffRoutingTests
         });
 
         // The operator writes the lyrics; their review goes to the builder's agent, which did not write them, in a run of its own.
-        GoalStepResponse written = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse written = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal(("ask", "draft", "person"), (written.Outcome, written.Step, written.Route));
         RecordWritten lyrics = FlowStepRoutingTests.Done(run, written.Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), "text/markdown"), by: op);
         GoalStepResponse reviewing = FlowStepRoutingTests.Step(run, goal, "agent-review");
@@ -213,7 +213,7 @@ public class FlowHandOffRoutingTests
         Assert.Equal((1, 2, 2), (draft.GetProperty("attempts").GetArrayLength(), draft.GetProperty("attemptsUsed").GetInt32(), draft.GetProperty("attemptsAllowed").GetInt32()));
 
         // goal step asks the sponsor about it once; nothing is dispatched for it, and it is asked no more while the ask waits.
-        GoalStepResponse exhausted = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse exhausted = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(exhausted.Ok, exhausted.Message);
         Assert.Equal(("ask", "draft", "attention", op), (exhausted.Outcome, exhausted.Step, exhausted.Route, exhausted.Principal));
         Assert.Null(exhausted.Assignment);
@@ -222,7 +222,7 @@ public class FlowHandOffRoutingTests
         Assert.Equal(goal, EstateModel.BodyString(ask, "goal"));
         Assert.StartsWith("Required attention in goal Release the song, step draft: its retry budget is spent", EstateModel.BodyString(ask, "question"), StringComparison.Ordinal);
         Assert.Equal("asked", Route(run, goal, "draft").GetProperty("state").GetString());
-        GoalStepResponse nothing = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse nothing = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.Equal("none", nothing.Outcome);
         Assert.DoesNotContain(run.Estate.Load().OfType("ask"), a => a.Id != ask.Id && a.Subject?.Id == findings);
 

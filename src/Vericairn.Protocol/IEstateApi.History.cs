@@ -61,6 +61,14 @@ public sealed record HistoryCheckpointResponse(string Trigger, bool Applied, boo
     /// it signs, so the adoption's list can differ from its check's.
     /// </summary>
     public IReadOnlyList<HistoryRecordItem> AuthorityChanges { get; init; } = [];
+
+    /// <summary>
+    /// From 0.9.4 (ID-14), for adoption: the records by a person whose principal record no longer gives the operator role it gave at the
+    /// record's time, each with a note naming the roles removed since. Such a removal, written before adoption, has no role closing;
+    /// adoption keeps for each record it witnesses the reading it has at adoption, and from then on a removal of the operator role is
+    /// written after the person's role closing. Advisory, like <see cref="AuthorityChanges"/>: <see cref="PlanHash"/> does not cover it.
+    /// </summary>
+    public IReadOnlyList<HistoryRecordItem> ByRemovedRoles { get; init; } = [];
 }
 
 /// <summary>A history checkpoint named by id and hash.</summary>

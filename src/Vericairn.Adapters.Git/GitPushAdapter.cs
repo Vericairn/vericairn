@@ -20,21 +20,37 @@ public sealed class GitPushAdapter : IPushAdapter
     // Canonical names, as git config --get-regexp matches them: section and variable names in lower case.
     private const string Carried = @"^credential\.|^http\.(sslbackend|sslcainfo|sslcapath|schannelcheckrevoke|schannelusesslcainfo)$";
 
-    // Inherited routing must not redirect a read or a push to another repository, object store or configuration.
-    private static readonly string[] Routing = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_INDEX_FILE", "GIT_NAMESPACE", "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
-
     // Derived object data a clone can write for itself: the commit-graph, reachability bitmaps and the multi-pack-index. A checked
     // push establishes its range and fast-forward check from the real objects alone, so every git process the adapter runs ignores
     // these caches; a clone that misreports ancestry in them cannot change where a push goes or what it carries.
     private static readonly string[] IgnoreDerived = ["-c", "core.commitGraph=false", "-c", "pack.useBitmaps=false", "-c", "core.multiPackIndex=false"];
 
+    // A clone's info/grafts rewrites parents as replace objects do, and turning replace objects off does not disable it: every git
+    // process the adapter runs reads grafts from a file that never exists instead, so its range, fast-forward check and message read
+    // follow the real objects alone.
+    private static readonly string NoGrafts = Path.Combine(Path.GetTempPath(), "vericairn-no-grafts-" + Guid.NewGuid().ToString("N"), "grafts");
+
+    // The disclosure hold reads every commit's patch, which for a release's documentation set runs to several MiB (0.9.3's set added
+    // about 4 MiB in one commit): those reads, and the text they add up to, have a bound of their own, 64 MiB; every other read keeps
+    // the default bound.
+    internal const int DefaultTextLimit = 64 * 1024 * 1024;
+
     private readonly Func<ProcessStartInfo, ProcessResult> run;
+    private readonly Func<ProcessStartInfo, ProcessResult> textRun;
+    private readonly int textLimit;
 
     /// <summary>Each git process has bounded output and a two-minute deadline.</summary>
-    public GitPushAdapter() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(2))) { }
+    public GitPushAdapter() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(2)),
+        info => BoundedProcess.Run(info, TimeSpan.FromMinutes(2), DefaultTextLimit), DefaultTextLimit) { }
 
-    internal GitPushAdapter(Func<ProcessStartInfo, ProcessResult> run) => this.run = run;
+    internal GitPushAdapter(Func<ProcessStartInfo, ProcessResult> run) : this(run, run, DefaultTextLimit) { }
+
+    internal GitPushAdapter(Func<ProcessStartInfo, ProcessResult> run, Func<ProcessStartInfo, ProcessResult> textRun, int textLimit)
+    {
+        this.run = run;
+        this.textRun = textRun;
+        this.textLimit = textLimit;
+    }
 
     /// <inheritdoc />
     public PushPlan Prepare(string directory, string remote, string branch, string target, string head)
@@ -81,20 +97,194 @@ public sealed class GitPushAdapter : IPushAdapter
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Every added line and every message of every commit the push carries that its target branch does not already hold is read,
+    /// whatever the clone's settings and attributes, or the read returns null (FIX-137):
+    /// <list type="bullet">
+    /// <item>the messages in UTF-8 whatever the clone's output encoding, NUL-separated, with no signature verification, notes or mailmap;</item>
+    /// <item>each commit's own patch by plumbing (<c>diff-tree</c>), which reads none of the log or diff display settings, a root commit's
+    /// against the empty tree; for a merge, its dense combined diff, whose lines added against every parent are the merge's own text,
+    /// while a line one parent already holds was added by a commit of that parent, read on its own or already in the repository;</item>
+    /// <item>every file as text, so neither a NUL byte, a <c>-diff</c> or binary attribute, committed or the clone's own, nor a low
+    /// <c>core.bigFileThreshold</c> turns its added lines into "Binary files differ", with no rename or copy detection, external diff,
+    /// text conversion or ignored submodule;</item>
+    /// <item>a diff line is a file header only before the first hunk of its file, so an added line whose own text begins with "++" is read;</item>
+    /// <item>each added line holding NUL characters, as a UTF-16 or UTF-32 file's lines do, read a second time with them removed, after the
+    /// rest, so that held text stored in such a file reads as its letters;</item>
+    /// <item>and a patch is complete: a commit other than a merge whose tree differs from its parent's, or a root commit whose tree is not
+    /// empty, must show at least one file, judged from the trees, not from the output; the patches and the text they add up to stay
+    /// within the hold's own bound.</item>
+    /// </list>
+    /// </remarks>
     public string? PublishedText(string directory, PushPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head)) return null;
-        // No external diff, text conversion or signature verification runs; the clone's diff drivers cannot execute anything.
-        ProcessResult messages = Invoke(directory, ["log", "--no-show-signature", "--format=%B", plan.Range]);
-        ProcessResult diff = Invoke(directory, ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--unified=0", plan.Base, plan.Head]);
-        if (messages is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } || diff is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
-        var text = new System.Text.StringBuilder(messages.StandardOutput);
-        foreach (string line in diff.StandardOutput.Split('\n'))
+        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head) || !Patterns.Commit.IsMatch(plan.TargetHead)) return null;
+        ProcessResult messages = Invoke(directory, ["-c", "i18n.logOutputEncoding=UTF-8", "log", "--no-show-signature", "--no-mailmap", "--no-notes", "-z",
+            "--format=%H%n%B", plan.Head, "^" + plan.Base, "^" + plan.TargetHead]);
+        IReadOnlyList<RangeCommit>? commits = RangeCommits(directory, plan);
+        if (messages is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } || commits is null) return null;
+        var text = new System.Text.StringBuilder();
+        var read = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string entry in messages.StandardOutput.Split('\0'))
         {
-            if (line.StartsWith('+') && !line.StartsWith("+++", StringComparison.Ordinal)) text.Append('\n').Append(line, 1, line.Length - 1);
+            if (entry.Length == 0) continue;
+            int split = entry.IndexOf('\n', StringComparison.Ordinal);
+            string id = split < 0 ? entry : entry[..split];
+            if (!Patterns.Commit.IsMatch(id) || !read.Add(id)) return null;
+            text.Append(split < 0 ? string.Empty : entry[(split + 1)..]).Append('\n');
         }
-        return text.ToString();
+        if (!read.SetEquals(commits.Select(c => c.Id))) return null;
+        var stripped = new System.Text.StringBuilder();
+        long total = 0;
+        foreach (RangeCommit commit in commits)
+        {
+            ProcessResult patch = Invoke(directory, ["-c", "core.bigFileThreshold=" + TextThreshold, "diff-tree", "--no-commit-id", "-p", "--root", "--cc", "--text",
+                "--no-renames", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "--unified=0", "--no-color", commit.Id], textRun);
+            if (patch is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } || (total += patch.StandardOutput.Length) > textLimit) return null;
+            // Outside a hunk the columns are zero: a file's header runs from its diff line to its first hunk. A hunk header's at signs give
+            // the columns, one for each parent: a line is added when every column is a plus, and its text follows them.
+            int columns = 0, files = 0;
+            foreach (string line in patch.StandardOutput.Split('\n'))
+            {
+                if (line.StartsWith("diff --git ", StringComparison.Ordinal) || line.StartsWith("diff --cc ", StringComparison.Ordinal)
+                    || line.StartsWith("diff --combined ", StringComparison.Ordinal))
+                {
+                    columns = 0;
+                    files++;
+                }
+                else if (line.StartsWith("@@", StringComparison.Ordinal))
+                {
+                    columns = line.TakeWhile(c => c == '@').Count() - 1;
+                    if (columns < 1 || files == 0) return null;
+                }
+                else if (columns == 0)
+                {
+                    if (line.StartsWith("Binary files ", StringComparison.Ordinal)) return null;
+                }
+                else if (line.Length >= columns && line.Take(columns).All(c => c == '+'))
+                {
+                    string added = line[columns..];
+                    text.Append('\n').Append(added);
+                    if (added.Contains('\0', StringComparison.Ordinal)) stripped.Append('\n').Append(added.Replace("\0", string.Empty, StringComparison.Ordinal));
+                }
+            }
+            if (commit.Changed && files == 0) return null;
+        }
+        return text.Append('\n').Append(stripped).ToString();
+    }
+
+    // One commit of a push's range, the commits its target branch does not already hold: whether it changes anything, judged from the
+    // trees. A merge's dense combined diff may rightly show nothing, so only a commit with at most one parent is judged: it changes
+    // something when its tree differs from its parent's tree, or, for a root commit, from the empty tree.
+    private sealed record RangeCommit(string Id, bool Changed);
+
+    private const string EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    // The range's commits, newest first, by plumbing: their trees and parents from rev-list, and the trees of parents outside the range
+    // from rev-parse. Null when any of it cannot be read.
+    private List<RangeCommit>? RangeCommits(string directory, PushPlan plan)
+    {
+        // A pretty format is written in the clone's log output encoding, so it is pinned to UTF-8, as for the messages.
+        ProcessResult listed = Invoke(directory, ["-c", "i18n.logOutputEncoding=UTF-8", "rev-list", "--format=%T %P", plan.Head, "^" + plan.Base, "^" + plan.TargetHead]);
+        if (listed is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
+        string[] lines = listed.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length % 2 != 0) return null;
+        var commits = new List<(string Id, string Tree, string[] Parents)>();
+        for (int i = 0; i < lines.Length; i += 2)
+        {
+            string[] fields = lines[i + 1].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (!lines[i].StartsWith("commit ", StringComparison.Ordinal) || !Patterns.Commit.IsMatch(lines[i][7..]) || fields.Length < 1
+                || fields.Any(f => !Patterns.Commit.IsMatch(f))) return null;
+            commits.Add((lines[i][7..], fields[0], fields[1..]));
+        }
+        Dictionary<string, string> trees = commits.ToDictionary(c => c.Id, c => c.Tree, StringComparer.Ordinal);
+        string[] outside = [.. commits.Where(c => c.Parents.Length == 1 && !trees.ContainsKey(c.Parents[0])).Select(c => c.Parents[0]).Distinct(StringComparer.Ordinal)];
+        if (outside.Length > 0)
+        {
+            ProcessResult parsed = Invoke(directory, ["rev-parse", .. outside.Select(p => p + "^{tree}")]);
+            string[] found = parsed.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (parsed is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } || found.Length != outside.Length || found.Any(t => !Patterns.Commit.IsMatch(t))) return null;
+            for (int i = 0; i < outside.Length; i++) trees[outside[i]] = found[i];
+        }
+        return [.. commits.Select(c => new RangeCommit(c.Id, c.Parents.Length switch
+        {
+            0 => c.Tree != EmptyTree,
+            1 => c.Tree != trees[c.Parents[0]],
+            _ => false,
+        }))];
+    }
+
+    // The size up to which a diff reads a file as text, git's default; a larger file's diff exceeds the bounded output and is unreadable.
+    private const string TextThreshold = "512m";
+
+    /// <inheritdoc />
+    public IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head) || !Patterns.Commit.IsMatch(plan.TargetHead)) return null;
+        // Every commit of the range the target's head does not hold, merges included, NUL-separated: its id, a line break and its raw
+        // message, in UTF-8 whatever the clone's own output encoding, with no signature verification, mailmap or notes.
+        ProcessResult log = Invoke(directory, ["-c", "i18n.logOutputEncoding=UTF-8", "log", "--no-show-signature", "--no-mailmap", "--no-notes", "-z",
+            "--format=%H%n%B", plan.Head, "^" + plan.Base, "^" + plan.TargetHead]);
+        if (log is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
+        var commits = new List<PushedCommit>();
+        foreach (string entry in log.StandardOutput.Split('\0'))
+        {
+            if (entry.Length == 0) continue;
+            int split = entry.IndexOf('\n', StringComparison.Ordinal);
+            string id = split < 0 ? entry : entry[..split];
+            if (!Patterns.Commit.IsMatch(id)) return null;
+            commits.Add(new(id, split < 0 ? string.Empty : entry[(split + 1)..]));
+        }
+        return commits;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, IReadOnlyList<string>>? ChangedPaths(string directory, PushPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head) || !Patterns.Commit.IsMatch(plan.TargetHead)) return null;
+        IReadOnlyList<RangeCommit>? commits = RangeCommits(directory, plan);
+        if (commits is null) return null;
+        // Each commit's paths by plumbing, NUL-separated and unquoted, exactly as git names them: a root commit's against the empty tree,
+        // a merge's those that differ from every one of its parents, as a combined diff does, without renames or ignored submodules. A
+        // commit other than a merge that changes its tree must name at least one path, judged from the trees.
+        var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (RangeCommit commit in commits)
+        {
+            ProcessResult names = Invoke(directory, ["diff-tree", "--no-commit-id", "-r", "--root", "--cc", "--name-only", "-z", "--no-renames",
+                "--ignore-submodules=none", commit.Id]);
+            if (names is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
+            string[] changed = names.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+            if (commit.Changed && changed.Length == 0) return null;
+            paths[commit.Id] = changed;
+        }
+        return paths;
+    }
+
+    /// <inheritdoc />
+    public string? FileText(string directory, PushPlan plan, string commit, string path)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(path);
+        if (!Patterns.Commit.IsMatch(commit) || commit != plan.Head && commit != plan.TargetHead)
+            throw new ProviderRefusedException("A push reads files only at its head or its target branch's head.");
+        if (!Patterns.RelativePath.IsMatch(path)) throw new ProviderRefusedException("A push reads a file by its normalized repository-relative path.");
+        // The tree entry first, so that a missing path reads as absent and a failed read refuses. Only the object's own bytes are read:
+        // no filter, text conversion or attribute of the clone applies.
+        ProcessResult listed = Invoke(directory, ["ls-tree", "-z", "--full-tree", commit, "--", path]);
+        if (listed is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) throw new ProviderRefusedException("git could not read the push's files.");
+        string entry = listed.StandardOutput.TrimEnd('\0');
+        if (entry.Length == 0) return null;
+        int tab = entry.IndexOf('\t', StringComparison.Ordinal);
+        string[] fields = tab < 0 ? [] : entry[..tab].Split(' ');
+        if (fields.Length != 3 || entry[(tab + 1)..] != path || entry.Contains('\0', StringComparison.Ordinal))
+            throw new ProviderRefusedException("git could not read the push's files.");
+        if (fields[1] != "blob") return null;
+        ProcessResult blob = Invoke(directory, ["cat-file", "blob", fields[2]]);
+        if (blob is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) throw new ProviderRefusedException("git could not read the push's files.");
+        return blob.StandardOutput;
     }
 
     /// <inheritdoc />
@@ -136,11 +326,11 @@ public sealed class GitPushAdapter : IPushAdapter
     }
 
     // Local reads in the clone: no system or global configuration, no hooks, and no transport for lazily fetched objects.
-    private ProcessResult Invoke(string directory, string[] arguments)
+    private ProcessResult Invoke(string directory, string[] arguments, Func<ProcessStartInfo, ProcessResult>? runner = null)
     {
         ProcessStartInfo info = Start(directory, ["-c", "protocol.allow=never", .. arguments]);
         Isolate(info, []);
-        return run(info);
+        return (runner ?? run)(info);
     }
 
     // Remote access from a private bare repository with only the declared remote's protocol. It loads none of the clone's
@@ -181,8 +371,7 @@ public sealed class GitPushAdapter : IPushAdapter
     private List<KeyValuePair<string, string>> Settings(string control)
     {
         ProcessStartInfo info = Start(control, ["--git-dir=" + control, "config", "--show-scope", "-z", "--get-regexp", Carried]);
-        foreach (string name in Routing) info.Environment.Remove(name);
-        foreach (string name in info.Environment.Keys.Where(Indexed).ToArray()) info.Environment.Remove(name);
+        GitRouting.Remove(info);
         ProcessResult result = run(info);
         if (result is { Outcome: ProcessOutcome.Exited, ExitCode: 1 } && result.StandardOutput.Length == 0) return [];
         if (result.Outcome != ProcessOutcome.Exited || result.ExitCode != 0)
@@ -208,12 +397,14 @@ public sealed class GitPushAdapter : IPushAdapter
         return info;
     }
 
-    private static void Isolate(ProcessStartInfo info, List<KeyValuePair<string, string>> settings)
+    // Inherited routing must not redirect a read or a push to another repository, object store, history or configuration: the names come
+    // from the list the secret scan's processes drop too (GitRouting), so the scan reads the history the push carries.
+    internal static void Isolate(ProcessStartInfo info, List<KeyValuePair<string, string>> settings)
     {
-        foreach (string name in Routing) info.Environment.Remove(name);
-        foreach (string name in info.Environment.Keys.Where(Indexed).ToArray()) info.Environment.Remove(name);
+        GitRouting.Remove(info);
         info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
         info.Environment["GIT_CONFIG_GLOBAL"] = string.Empty;
+        info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
         info.Environment["GIT_ATTR_NOSYSTEM"] = "1";
         info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
         info.Environment["GIT_NO_LAZY_FETCH"] = "1";
@@ -227,7 +418,4 @@ public sealed class GitPushAdapter : IPushAdapter
             info.Environment["GIT_CONFIG_VALUE_" + i.ToString(System.Globalization.CultureInfo.InvariantCulture)] = settings[i].Value;
         }
     }
-
-    private static bool Indexed(string name) =>
-        name.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase);
 }

@@ -38,6 +38,7 @@ public sealed class WorkProgressType : IRecordType
     public void Validate(ValidationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        DispatchAuthority.RefuseWork(context);
         string? phase = context.Body.Text("phase", true, 100, Patterns.Slug, "a stable lower-case phase name");
         context.Body.Text("note", true, 2000);
         context.Body.Timestamp("completedAt", true);

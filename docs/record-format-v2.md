@@ -211,7 +211,7 @@ and `harness-qualification` ([exact installed harness admission](#harness-qualif
 | `verification` | `evidenceClass` | `observation`, `report`, `attestation` or `inference`, optional | How the evidence was obtained: `vericairn check run` records an observation, `vericairn check observe` a host's report |
 | `verification` | `observer` | `person`, `agent`, `automation` or `provider`, optional | What kind of observer made the claim |
 | `verification` | `expires` | timestamp, optional | When the claim stops counting as current and needs observing again; it is later than the record |
-| `device` | `presence` | `required` or `none`, required | Whether each signature needs the owner's presence; `required` only where the custody enforces it (`macos-secure-enclave`), and never for an agent's or a service's device |
+| `device` | `presence` | `required` or `none`, required | Whether each signature needs the owner's presence; `required` only where the custody enforces it (`macos-secure-enclave`), and never for an agent's or a service's device. From 0.9.4 `required` means that each signature with the key is covered by a presence check at its machine: its own, or a presence session's whose announced list, shown before the check, names it by exact hash or by kind (see below) |
 | `device` | `purpose` | `signing` or `recovery`, required | Ordinary signing, or the operator's offline recovery device; a recovery device belongs to an operator |
 | `device` | `custody` | gains `macos-secure-enclave` and `offline` | A key generated inside the Secure Enclave and kept as its enclave-wrapped blob, which signs nothing on any other Mac; or a recovery device's key, exported once and kept off every machine |
 | `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
@@ -382,7 +382,8 @@ optionally `--independence self|independent-agent|operator`, for a document of a
 which the runtime, not the reviewer, states the content's hash, the covered paths' identity and the triggers answered,
 records the reviewer's independence (below), and runs the declared checks:
 `names-version` (the document names the version of each release the review answers), `links-resolve` (every relative
-link resolves within the repository) and `matches-generator` (generated content equals a fresh generation). A failed
+link resolves within the repository; from 0.9.4, a link inside a fenced or indented code block or an inline code span is
+an example and is not checked) and `matches-generator` (generated content equals a fresh generation). A failed
 check refuses the clearance; a check no installed pack provides is recorded as not performed. A declared estate document
 that is not in the working tree is a `document.absent` warning. Like a `release` trigger, the releases generator takes
 any revision of a product's record as the product.
@@ -714,6 +715,16 @@ give a device a new key than to record a new device.
   revision with a new public key, is signed by the previous key, which proves continuity, and by the new key, which
   proves possession (`device.rotation`, `signature.rotation`). Custody and presence change only with the key, by a
   rotation (`device.custody`). A device first recorded in format 1 reads as presence `none` and purpose `signing`.
+- **Presence, restated (0.9.4).** `presence` keeps its two values and its bytes, and no signature changes: `signatures[]` keeps
+  `algorithm`, `device` and `signature`, and a signature made under a presence session cannot be told from one made after its own
+  check, as no signature shows whether a prompt was asked. What `required` promises is restated: each signature with the device's
+  key is covered by a presence check at the key's machine, its own or a presence session's whose announced list, shown before the
+  check, names it by exact hash or by kind. Records a person judges are named by exact hash, at most 16 to a check; acts on the root
+  of trust and on policy keep their own check; per-signature presence stays available, through the charter's `policies.presence`
+  ([record-format-v1.md](record-format-v1.md#signatures-devices-and-admission)) and the device owner's setting. Nothing binds the key
+  to Vericairn's helper: code running as the device's owner can use the key after one approval of a dialog it wrote, as it could
+  before 0.9.4, and refusing a dialog the owner did not expect is the control against it
+  ([operator's guide](operator-guide.md#3-principals-devices-and-admission)).
 - An admission names a device by any of its records and stays in force across its renames and rotations, without
   being reported as referring to an earlier revision. A self-signed admission is recognized by identity, so no
   revision hides one: the estate's first authority stays the only self-admission accepted.

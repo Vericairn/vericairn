@@ -61,7 +61,8 @@ public class SoftwareFlowExtensionTests
     {
         using var estate = new TestEstate(3);
         Assert.DoesNotContain(TemplateCatalog.All(estate.Load()), d => d.Id == "vericairn.first-party/release");
-        Assert.Equal([SoftwareFlows.Release, SoftwareFlows.Upgrade], TemplateCatalog.All(estate.Load()).Where(d => d.IsFlow).Select(d => d.Id).Order(StringComparer.Ordinal).ToArray());
+        // From 0.9.4 (PROC-08) the pack's standing roles are flows too.
+        Assert.Equal([StandingRoleFlows.DutyCarrier, StandingRoleFlows.BugHunter, SoftwareFlows.Release, StandingRoleFlows.Researcher, SoftwareFlows.Upgrade], TemplateCatalog.All(estate.Load()).Where(d => d.IsFlow).Select(d => d.Id).Order(StringComparer.Ordinal).ToArray());
     }
 
     [Theory]

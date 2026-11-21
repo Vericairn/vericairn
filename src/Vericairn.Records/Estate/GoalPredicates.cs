@@ -89,7 +89,33 @@ public static class GoalPredicates
         return Count(model, predicate, admit).Matches;
     }
 
-    private static (Verdict Verdict, IReadOnlyList<RecordEnvelope> Matches) Count(EstateModel model, JsonElement predicate, Func<RecordEnvelope, bool>? admit)
+    /// <summary>
+    /// Evaluates a record predicate over the current records made at or before a time (from 0.9.4, PROC-19): a decision transition's rule
+    /// reads the records as they stood when its step was ready, so a record made later never changes a decision already taken. A state
+    /// the predicate names is read as status derives it now.
+    /// </summary>
+    internal static Verdict EvaluatePredicate(EstateModel model, JsonElement predicate, DateTimeOffset asOf) => Count(model, predicate, null, asOf).Verdict;
+
+    /// <summary>
+    /// Evaluates a record predicate as of a time over only the records given, each read at the content it has (from 0.9.4, PROC-19): a
+    /// recorded rule decision is evaluated again over the records it names, so a record made later, or left out of them, never changes
+    /// what it shows. A state the predicate names is read as status derives it now.
+    /// </summary>
+    internal static Verdict EvaluatePredicate(EstateModel model, JsonElement predicate, DateTimeOffset asOf, IReadOnlyCollection<RecordEnvelope> within) =>
+        Count(model, predicate, null, asOf, within).Verdict;
+
+    /// <summary>
+    /// The records a predicate counts among as of a time, before any state is read (from 0.9.4, PROC-19): the current records of its type
+    /// made at or before it that match its subject, product and fields, which a recorded rule decision names among the records it read.
+    /// </summary>
+    internal static IReadOnlyList<RecordEnvelope> Candidates(EstateModel model, JsonElement predicate, DateTimeOffset asOf)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return Text(predicate, "type") is string type && RecordTypeRegistry.Find(type) is not null ? Select(model, predicate, type, asOf, null) : [];
+    }
+
+    private static (Verdict Verdict, IReadOnlyList<RecordEnvelope> Matches) Count(EstateModel model, JsonElement predicate, Func<RecordEnvelope, bool>? admit, DateTimeOffset? asOf = null,
+        IReadOnlyCollection<RecordEnvelope>? within = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         string? type = Text(predicate, "type");
@@ -98,27 +124,9 @@ public static class GoalPredicates
             return (new Verdict("unknown", $"The predicate names no record type this build reads ({type ?? "none"}).", []), []);
         }
 
-        string? subject = Text(predicate, "subject");
-        string? product = Text(predicate, "product");
         string? state = Text(predicate, "state");
-        List<(string Name, string Value)> fields = Fields(predicate);
         (long min, long? max) = Bounds(predicate);
-        // A subject is followed across its revisions, as a product is: by the first record of its chain.
-        string? subjectIdentity = subject is null ? null : LivingDocuments.ProductIdentity(model, subject);
-        List<RecordEnvelope> candidates = model.Current(type)
-            .Where(r => subjectIdentity is null || (r.Subject is not null && LivingDocuments.ProductIdentity(model, r.Subject.Id) == subjectIdentity))
-            .Where(r => product is null || (type == "living-document" && LivingDocuments.NamesProduct(model, r, product)))
-            .Where(r => fields.All(f => FieldString(r, f.Name) == f.Value))
-            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
-            .ToList();
-
-        // A carrier is never among its own placed work: a work order may place itself in its own release plan, and a predicate over the
-        // work orders placed in a carrier leaves the carrier out, by its original identity.
-        if (type == "work-order" && fields.FirstOrDefault(f => f.Name == PlacementCarrier).Value is string carrier)
-        {
-            string identity = LivingDocuments.ProductIdentity(model, carrier);
-            candidates.RemoveAll(r => model.Chain(r)[0] == identity);
-        }
+        List<RecordEnvelope> candidates = Select(model, predicate, type, asOf, within);
 
         // A rule's admission judges the record of an act itself; a derived state rests on other records, the act's or not, so a
         // predicate that names one never holds under a rule (a reserved step's done predicates name no state: FlowContract).
@@ -187,6 +195,37 @@ public static class GoalPredicates
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .Select(r => r.Reference).ToList();
         return (new Verdict(value, reason.ToString(), references), admitted);
+    }
+
+    /// <summary>
+    /// The records of a type a predicate counts among, oldest first: the current ones, or only those given, about its subject (any revision
+    /// of it), of its product, with its fields, made at or before a time when one is given, and never a release carrier among its own work.
+    /// </summary>
+    private static List<RecordEnvelope> Select(EstateModel model, JsonElement predicate, string type, DateTimeOffset? asOf, IReadOnlyCollection<RecordEnvelope>? within)
+    {
+        string? subject = Text(predicate, "subject");
+        string? product = Text(predicate, "product");
+        List<(string Name, string Value)> fields = Fields(predicate);
+        // A subject is followed across its revisions, as a product is: by the first record of its chain.
+        string? subjectIdentity = subject is null ? null : LivingDocuments.ProductIdentity(model, subject);
+        List<RecordEnvelope> candidates = (within is null ? model.Current(type) : within.Where(r => r.Type == type))
+            .Where(r => subjectIdentity is null || (r.Subject is not null && LivingDocuments.ProductIdentity(model, r.Subject.Id) == subjectIdentity))
+            .Where(r => product is null || (type == "living-document" && LivingDocuments.NamesProduct(model, r, product)))
+            .Where(r => fields.All(f => FieldString(r, f.Name) == f.Value))
+            .Where(r => asOf is null || r.AtTime <= asOf)
+            .DistinctBy(r => r.Id)
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
+            .ToList();
+
+        // A carrier is never among its own placed work: a work order may place itself in its own release plan, and a predicate over the
+        // work orders placed in a carrier leaves the carrier out, by its original identity.
+        if (type == "work-order" && fields.FirstOrDefault(f => f.Name == PlacementCarrier).Value is string carrier)
+        {
+            string identity = LivingDocuments.ProductIdentity(model, carrier);
+            candidates.RemoveAll(r => model.Chain(r)[0] == identity);
+        }
+
+        return candidates;
     }
 
     /// <summary>

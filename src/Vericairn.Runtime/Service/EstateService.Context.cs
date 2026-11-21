@@ -24,8 +24,8 @@ public sealed partial class EstateService
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
         {
-            IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = session.LoadFiles(files);
+            // The judged model and the files it was judged from, parsed once through the session's cache (FIX-152).
+            (EstateModel model, IReadOnlyList<RecordFile> files) = session.LoadWithFiles();
             if (RequestDeviceRefusal(model) is not null)
             {
                 return ContextRefusal("denied", ContextDenied);
@@ -151,8 +151,7 @@ public sealed partial class EstateService
             try
             {
                 // The pin is an identity, never a capability. Check access before decoding it.
-                IReadOnlyList<RecordFile> files = session.Files();
-                EstateModel model = session.LoadFiles(files);
+                (EstateModel model, IReadOnlyList<RecordFile> files) = session.LoadWithFiles();
                 if (RequestDeviceRefusal(model) is not null)
                 {
                     return new ContextReadResponse(null, null, new Problem("denied", ContextDenied, []));

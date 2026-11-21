@@ -41,10 +41,11 @@ internal sealed class WorkMovePlanCommand : Command
                 {
                     foreach (RecordWritten record in response.Written) context.Output.WriteLine($"{record.Path}  {record.Id}  {record.Hash}");
                     if (response.Problem is { } problem)
-                        foreach (FindingDto finding in problem.Findings) context.Output.WriteLine($"{finding.Severity.ToUpperInvariant()} {finding.Code} {finding.Location}: {finding.Message}");
+                        foreach (FindingDto finding in problem.Findings) CommandContext.WriteRuntime(context.Output, $"{finding.Severity.ToUpperInvariant()} {finding.Code} {finding.Location}: {finding.Message}");
                     else context.Output.WriteLine($"Planned work moved; {response.Written.Count} revisions recorded.");
                 }
-                if (response.Problem is { } failed) context.Error.WriteLine("error: " + failed.Message);
+                // From 0.9.4 (CODE-80) the runtime's problem is shown as its own words, marked and escaped.
+                if (response.Problem is { } failed) CommandContext.WriteRuntime(context.Error, failed.Message);
                 return response.Problem is { Code: "rejected" } ? HasErrors : response.Ok ? Clean : Failed;
             });
         }));

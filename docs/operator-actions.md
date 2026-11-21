@@ -196,7 +196,8 @@ vericairn operator close --all --by <operator-id>
 
 Without a selection, the command is read-only. It lists every current work order whose latest
 result is `completed`, has at least one current `pass` review of that exact result, and has no
-acceptance of that result. Each entry shows its key, work-order id and hash, exit question, result
+acceptance of that result; from 0.9.4, nor an acceptance of the work order's current revision
+that accepts it (below). Each entry shows its key, work-order id and hash, exit question, result
 id, hash, outcome and summary, and every passing review's id, hash, independence and summary.
 Both ordinary work and milestones can appear. A partial or blocked latest result, an old review
 of a superseded result, or a superseded passing review cannot qualify a step.
@@ -219,6 +220,22 @@ revision)`, as an acceptance of an earlier work-order revision does. A work orde
 its current revision accepts reads as it did, and a milestone is still accepted only by your
 acceptance of the milestone itself.
 
+From 0.9.4 (FIX-141), an acceptance of a work order's current revision, or of one that differs
+from it only in placement, accepts the work order's current result too when it was recorded after
+that result and before acceptances named a result's exact hash, the form acceptances took until
+then. The records date that change at the estate's first acceptance of a result by an operator,
+which `operator close` records; no acceptance of a work order made after it, a milestone's among
+them, accepts a result. The acceptance must still stand, not superseded, and its author must have
+been able to accept that result directly: you always, another principal its own result under
+`self-accept-ordinary-work` and someone else's under `accept-work`. `operator close` no longer lists
+such a result, so `--all` never signs a second acceptance of work you already accepted, and status,
+the progress report, goal views, Workbench's result inbox and Remote read it as `accepted` rather
+than awaiting review. A result recorded after that acceptance, such as one from a later attempt,
+still needs its own acceptance and stays listed, and an acceptance of an earlier revision of the
+work order accepts no result. No record changes and nothing is signed again: work accepted that way
+leaves the listing. From 0.9.4 status also reads only acceptances that stand: one superseded by
+another, which may name another subject, no longer makes a work order read accepted.
+
 To preserve a listing while inspecting it, save its JSON and supply it with the selection:
 
 ```sh
@@ -240,7 +257,12 @@ even in an estate that permits unsigned records. The installed custody interface
 at a time, so a device that requires presence checks it once per acceptance. From 0.9.3 every
 selected acceptance is announced before the first prompt, and each prompt says which signature of
 how many it is and what it signs, as the [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
-describes; a declined prompt stops the selection, and the last line says how many were signed. All selected records
+describes; a declined prompt stops the selection, and the last line says how many were signed. From 0.9.4 the command
+authors every acceptance it will sign before the first, so where presence sessions are on, up to 16 of them are listed by
+exact hash and signed under one presence check, a list for each 16, each announced just before its own check; while an agent
+run this machine's worker started is unsettled under your user, each acceptance asks its own check, and a declined or
+unanswered check signs nothing and stops the selection, never falling back to one check per signature
+([presence sessions](operator-guide.md#presence-prompts-announced-and-counted-093)). All selected records
 are signed and validated before the batch starts storing them; an evidence or authority refusal
 writes no acceptance. An interrupted storage operation retains its receipts and journal for
 reconciliation, using the existing batch recovery mechanism. Inspect those receipts before retrying.
@@ -275,7 +297,11 @@ uses the existing record authoring and device signing path, including the device
 where required. Every operation it records is signed by the same device, so a device that needs
 presence asks for each: from 0.9.3 the command announces them before the first prompt, 22 for a new
 action, and an observation it repeats while checks run before that observation asks, as the
-[operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093) lists. It requires a signature even when the estate otherwise permits unsigned records.
+[operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093) lists. From 0.9.4, where presence sessions are
+on, one check covers the record by exact hash and its branch's push, opening, observations and merge by kind; the action renews,
+with one more check and the remaining list announced first, when its waits for checks outlast the session or an observation repeats
+beyond what the list allows, so one check for the whole action is the best case and a real run usually asks two or three (inferred from its default
+120-second wait for each check phase, not measured) ([presence sessions](operator-guide.md#presence-prompts-announced-and-counted-093)). It requires a signature even when the estate otherwise permits unsigned records.
 It cannot borrow another principal's authority or device, and it never receives or retains a key.
 
 The estate must use repository-synced storage at record format 3. Its repository must be registered

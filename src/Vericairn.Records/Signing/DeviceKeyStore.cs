@@ -32,6 +32,14 @@ public interface IDeviceKeyStore
     /// </summary>
     byte[] Sign(string deviceId, ReadOnlySpan<byte> digest, string reason) => Sign(deviceId, digest);
 
+    /// <summary>
+    /// From 0.9.4 (ID-16): signs a record whose compact canonical bytes are <paramref name="content"/> and whose content hash is
+    /// <paramref name="digest"/>. A store that reads what it signs, as the Secure Enclave helper's sign-record does, hashes the record itself;
+    /// every other store signs the digest as <see cref="Sign(string, ReadOnlySpan{byte}, string)"/> does, or without a reason as
+    /// <see cref="Sign(string, ReadOnlySpan{byte})"/> does when none is given.
+    /// </summary>
+    byte[] SignRecord(string deviceId, ReadOnlySpan<byte> content, ReadOnlySpan<byte> digest, string? reason) => reason is null ? Sign(deviceId, digest) : Sign(deviceId, digest, reason);
+
     /// <summary>Removes the key; the device record stays and is revoked separately.</summary>
     void Remove(string deviceId);
 

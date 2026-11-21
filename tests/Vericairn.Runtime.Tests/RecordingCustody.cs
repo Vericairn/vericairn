@@ -27,6 +27,12 @@ public sealed class RecordingCustody(string home, string kind = SecureEnclaveCus
     /// <summary>The signature, counted from 1, that is declined as a person declining the prompt; 0 declines none.</summary>
     public int DeclineAt { get; set; }
 
+    /// <summary>
+    /// Every signature fails at once, before any prompt and without being counted, with the vericairn-enclave helper's words for a
+    /// process that cannot reach the Secure Enclave, as a sandboxed process's does (DOCS-45).
+    /// </summary>
+    public bool Unavailable { get; set; }
+
     /// <summary>Runs just before each signature, with its number counted from 1.</summary>
     public Action<int>? BeforeSigning { get; set; }
 
@@ -56,6 +62,7 @@ public sealed class RecordingCustody(string home, string kind = SecureEnclaveCus
 
     private byte[] Signed(string deviceId, ReadOnlySpan<byte> digest, string? reason)
     {
+        if (Unavailable) throw new InvalidOperationException("This Mac has no Secure Enclave available to this process.");
         int number;
         lock (reasons)
         {

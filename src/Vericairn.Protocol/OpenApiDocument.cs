@@ -85,6 +85,7 @@ public static class OpenApiDocument
         ("POST", "/v1/work/review"),
         ("GET", "/v1/release-bases/{hash}"),
         ("POST", "/v1/work/amend"),
+        ("POST", "/v1/standing/outputs"),
         ("POST", "/v1/work/takeover"),
         ("GET", "/v1/devices"),
         ("POST", "/v1/devices"),
@@ -125,6 +126,9 @@ public static class OpenApiDocument
         ("POST", "/v1/goals"),
         ("GET", "/v1/goals/{id}"),
         ("GET", "/v1/goals/{id}/next"),
+        ("GET", "/v1/goals/{id}/due"),
+        ("GET", "/v1/overlaps"),
+        ("POST", "/v1/overlaps/preview"),
         ("POST", "/v1/goals/{id}/step"),
         ("POST", "/v1/goals/{id}/activate"),
         ("POST", "/v1/goals/{id}/pause"),
@@ -133,6 +137,7 @@ public static class OpenApiDocument
         ("POST", "/v1/goals/{id}/evaluate"),
         ("POST", "/v1/goals/{id}/accept"),
         ("POST", "/v1/goals/{id}/close"),
+        ("POST", "/v1/goals/{id}/decide"),
         ("GET", "/v1/providers"),
         ("GET", "/v1/launchers"),
         ("POST", "/v1/harness-qualifications"),
@@ -234,6 +239,16 @@ public static class OpenApiDocument
                     ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" },
                     ["description"] = name == "asOf" ? "Explicit canonical UTC preview time. Never authorizes submission." : "Exact release record id selecting its product, version and commit.",
                 }).ToArray());
+            }
+
+            if (method == "GET" && path == "/v1/goals/{id}/due")
+            {
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "asOf", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The explicit UTC time the standing agent's triggers are evaluated at; the runtime's clock when omitted." });
+            }
+
+            if (method == "GET" && path == "/v1/overlaps")
+            {
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "repository", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A repository resource's id or estate; every repository when omitted." });
             }
 
             if (method == "GET" && path == "/v1/records")
@@ -820,8 +835,10 @@ public static class OpenApiDocument
         requestClose["properties"]!["evidence"]!["items"]!["required"] = new JsonArray("summary");
 
         JsonObject workNewRequest = Object(("by", "string"), ("key", "string"), ("title", "string"), ("intent", "string"),
-            ("scope", "array"), ("exitQuestion", "string"), ("deliverables", "array"), ("kind", "string"), ("after", "array"), ("inputs", "array"));
-        workNewRequest["required"] = new JsonArray("by", "key", "title", "intent", "scope", "exitQuestion", "deliverables");
+            ("scope", "array"), ("exitQuestion", "string"), ("deliverables", "array"), ("kind", "string"), ("after", "array"), ("inputs", "array"), ("fromPossibility", "string"));
+        // From 0.9.4 (GOAL-08), a possibility's draft supplies what the request leaves out, so only the author is required of every request.
+        workNewRequest["required"] = new JsonArray("by");
+        workNewRequest["properties"]!["fromPossibility"]!["description"] = "From 0.9.4: an open possibility to adopt; its draft work order supplies the fields left out, and its adopting revision is stored with the work order. Without it, key, title, intent, scope, exitQuestion and deliverables are required.";
         workNewRequest["properties"]!["kind"]!["default"] = "ordinary";
         foreach (string field in new[] { "scope", "deliverables", "after", "inputs" })
             workNewRequest["properties"]![field]!["items"] = new JsonObject { ["type"] = "string" };
@@ -881,6 +898,8 @@ public static class OpenApiDocument
             ["PresencePromptsResponse"] = PresencePromptsResponseSchema(),
             ["PresenceNotice"] = PresenceNoticeSchema(),
             ["PresenceSignature"] = Required(Object(("type", "string"), ("key", "string"), ("purpose", "string")), "type", "key", "purpose"),
+            ["PresenceSessionNotice"] = PresenceSessionNoticeSchema(),
+            ["PresenceEntryDescription"] = PresenceEntryDescriptionSchema(),
             ["AttentionAcknowledgeResponse"] = acknowledgment,
             ["AttentionNotice"] = attentionNotice,
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -915,7 +934,10 @@ public static class OpenApiDocument
             ["SignedRecordRequest"] = Object(("plan", "string"), ("signature", "string"), ("device", "string")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
             ["WorkNewRequest"] = workNewRequest,
-            ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object")),
+            ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object"), ("repository", "string")),
+            ["OverlapPreviewRequest"] = Object(("brief", "object"), ("repository", "string")),
+            ["OverlapResponse"] = Object(("text", "string"), ("json", "object")),
+            ["GoalDueResponse"] = Object(("text", "string"), ("json", "object")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["WorkProgressRequest"] = progressRequest,
             ["WorkProgressClaim"] = progressClaim,
@@ -924,6 +946,7 @@ public static class OpenApiDocument
             ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
             ["ResultReviewRequest"] = Object(("result", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
             ["AmendRequest"] = Object(("assignment", "string"), ("by", "string"), ("body", "object")),
+            ["StandingOutputRequest"] = Object(("by", "string"), ("assignment", "string"), ("kind", "string"), ("body", "object")),
             ["DeviceCreateRequest"] = Object(("principal", "string"), ("name", "string"), ("custody", "string"), ("profiles", "array"), ("presence", "boolean")),
             ["AdmitRequest"] = Object(("device", "string"), ("by", "string"), ("note", "string"), ("recovery", "string"), ("passphrase", "string")),
             ["DeviceRenameRequest"] = Object(("device", "string"), ("name", "string")),
@@ -996,14 +1019,15 @@ public static class OpenApiDocument
                 },
             },
             ["GoalProposeRequest"] = Object(("by", "string"), ("body", "object"), ("supersedes", "string")),
-            ["GoalActionRequest"] = Object(("by", "string"), ("note", "string")),
+            ["GoalActionRequest"] = Object(("by", "string"), ("note", "string"), ("stopRuns", "boolean")),
             ["GoalEvaluateRequest"] = Object(("by", "string"), ("summary", "string"), ("verdicts", "array")),
             ["GoalVerdict"] = Object(("condition", "integer"), ("verdict", "string"), ("reason", "string"), ("read", "array")),
             ["GoalAcceptRequest"] = Object(("by", "string"), ("statement", "string"), ("reason", "string"), ("stepReasons", "array")),
             ["GoalCloseRequest"] = Object(("by", "string"), ("reason", "string"), ("stepReasons", "array")),
+            ["GoalDecideRequest"] = Object(("by", "string"), ("step", "string"), ("paths", "array"), ("reasons", "string"), ("evidence", "array")),
             ["GoalStepReason"] = Object(("step", "string"), ("reason", "string")),
-            ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"))),
-            ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object")),
+            ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("occurrence", "string"), ("now", "string"))),
+            ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object"), ("decision", "object"), ("notices", "array")),
             ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string")),
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
@@ -1063,7 +1087,7 @@ public static class OpenApiDocument
             ["RunSettleRequest"] = Object(("by", "string"), ("recordsChecked", "boolean")),
             ["RunSettleResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("problem", "object")),
             ["HarnessQualifyRequest"] = Object(("launcher", "string"), ("by", "string"), ("settings", "object")),
-            ["RunResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("cap", "object"), ("workspace", "string"), ("problem", "object")),
+            ["RunResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("cap", "object"), ("workspace", "string"), ("problem", "object"), ("notices", "array")),
             ["RunStopResponse"] = Object(("run", "string"), ("state", "string"), ("message", "string"), ("ok", "boolean"), ("stop", "object"), ("problem", "object")),
             ["RunRow"] = Object(("run", "string"), ("identity", "string"), ("launcher", "string"), ("agent", "string"), ("assignment", "string"), ("goal", "string"), ("workspace", "string"), ("status", "string"), ("cap", "object"), ("usage", "object"), ("charged", "object"), ("stop", "object"), ("heartbeat", "string"), ("observed", "boolean"), ("generic", "boolean"), ("liveness", "object"), ("scope", "object"), ("signals", "array"), ("execution", "object"), ("executionObserved", "object"), ("requestedProgress", "object")),
             ["RunsResponse"] = Object(("runs", "array"), ("goals", "array")),
@@ -1077,11 +1101,11 @@ public static class OpenApiDocument
             ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string"), ("presenceDevice", "object"), ("presenceSignature", "string")),
             ["CertificateRotateRequest"] = Object(("compromised", "boolean"), ("reason", "string"), ("identity", "boolean")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
-            ["WriteOutcome"] = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"))),
+            ["WriteOutcome"] = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"), ("notices", "array"))),
             ["TriggeredCheckpoint"] = Required(Object(("trigger", "string"), ("written", "object"), ("skipped", "string")), "trigger"),
             ["HistoryCheckpointRequest"] = Object(("by", "string"), ("adopt", "boolean"), ("check", "boolean"), ("expectPlan", "string")),
             ["HistoryCheckpointResponse"] = Required(Object(("trigger", "string"), ("applied", "boolean"), ("adopted", "boolean"), ("witnessed", "integer"), ("listed", "integer"), ("heads", "array"),
-                ("anchored", "array"), ("notCounting", "array"), ("byRevokedDevices", "array"), ("deletedInHistory", "array"), ("unavailable", "string"), ("written", "object"), ("planHash", "string"), ("uncommitted", "array"), ("authorityChanges", "array")),
+                ("anchored", "array"), ("notCounting", "array"), ("byRevokedDevices", "array"), ("deletedInHistory", "array"), ("unavailable", "string"), ("written", "object"), ("planHash", "string"), ("uncommitted", "array"), ("authorityChanges", "array"), ("byRemovedRoles", "array")),
                 "trigger", "applied", "adopted", "witnessed", "listed", "heads", "anchored", "notCounting", "byRevokedDevices", "deletedInHistory"),
             ["FirstAuthorityRequest"] = Object(("by", "string"), ("device", "string"), ("admission", "string"), ("check", "boolean"), ("expectPlan", "string")),
             ["FirstAuthorityCandidate"] = Required(Object(("admission", "string"), ("hash", "string"), ("at", "string"), ("path", "string"), ("device", "string"), ("name", "string"),
@@ -1145,6 +1169,7 @@ public static class OpenApiDocument
         "/v1/work/result" => "ResultRequest",
         "/v1/work/review" => "ResultReviewRequest",
         "/v1/work/amend" => "AmendRequest",
+        "/v1/standing/outputs" => "StandingOutputRequest",
         "/v1/work/takeover" => "TakeoverRequest",
         "/v1/goals/{id}/step" => "GoalStepRequest",
         "/v1/devices" => "DeviceCreateRequest",
@@ -1164,6 +1189,8 @@ public static class OpenApiDocument
         "/v1/goals/{id}/evaluate" => "GoalEvaluateRequest",
         "/v1/goals/{id}/accept" => "GoalAcceptRequest",
         "/v1/goals/{id}/close" => "GoalCloseRequest",
+        "/v1/goals/{id}/decide" => "GoalDecideRequest",
+        "/v1/overlaps/preview" => "OverlapPreviewRequest",
         "/v1/devices/revoke" => "RevokeRequest",
         "/v1/runs" => "RunStartRequest",
         "/v1/runs/prepare" => "RunStartRequest",
@@ -1282,6 +1309,7 @@ public static class OpenApiDocument
         ("GET", "/v1/release-bases/{hash}") => "Read retained exact release-admission inputs and findings; historical evidence grants no new authority.",
         ("POST", "/v1/work/review") => "Review the expected exact result revision with its evidence read, signed as the acting principal; no acceptance is recorded.",
         ("POST", "/v1/work/amend") => "Request an amendment; it authorizes nothing.",
+        ("POST", "/v1/standing/outputs") => "From 0.9.4: record one output of a standing agent's occurrence, a possibility, an ask or a publication request, by the contributor of the assignment that carries it; the runtime names what raised it, and another principal disposes of it.",
         ("POST", "/v1/work/takeover") => "Hand a step an agent holds over to a person: a new assignment of the step to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop, each stop's facts reported as observed. Recorded by a person only, the one taking the step over, the sponsor of its goal or an operator, never by an agent.",
         ("GET", "/v1/devices") => "Devices known to the estate and whether this machine holds their keys.",
         ("POST", "/v1/devices") => "Create a device on the runtime's machine.",
@@ -1308,10 +1336,13 @@ public static class OpenApiDocument
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",
         ("GET", "/v1/operator/actions") => "Every open operator ask, pending operator acceptance and recorded waiting reserved action, with reasons, dependencies, exact record-authoring commands and required JSON input (vericairn.operator-actions/1). Text follows communication settings, defaulting to the estate's root operator; JSON always contains the complete queue. Record errors suppress authoring commands. This read neither signs nor records, inspects keys or calls providers. Not exposed through MCP.",
         ("GET", "/v1/operator/close") => "Read every current work order whose latest result is completed, has current passing reviews and has no acceptance of that exact result. Includes the exit question, result summary, review summaries and independence, and exact record hashes. Reads sign and write nothing. Not exposed through MCP.",
-        ("POST", "/v1/operator/close") => "Close the exact displayed selections with the operator's admitted signing device. Each acceptance pins its result and names every displayed passing review as its basis. All also pins complete candidate membership. Changed evidence, missing passing reviews and non-operators refuse the whole action without writes. Custody currently checks presence per signature. Not exposed through MCP.",
+        ("POST", "/v1/operator/close") => "Close the exact displayed selections with the operator's admitted signing device. Each acceptance pins its result and names every displayed passing review as its basis. All also pins complete candidate membership. Changed evidence, missing passing reviews and non-operators refuse the whole action without writes. Custody checks presence per signature, or from 0.9.4 once for an announced list of up to 16 acceptances under a presence session where the release helper and the macOS version allow it and neither the charter nor the device's owner asks per signature. Not exposed through MCP.",
         ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it. The body's limits.deadline is validated and recorded but not yet enforced; goal next and goal step hold a run of a flow at limits.consecutiveFailures, which is otherwise validated and recorded but not enforced, and a direct worker start is not held by it.",
         ("GET", "/v1/goals/{id}") => "A goal by the id of any of its revisions: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its acceptance.",
+        ("GET", "/v1/overlaps") => "From 0.9.4: the overlap check's view (vericairn.overlaps/1): the active assignments by repository, each with its effective permitted paths (its interpretable patterns less its exclusions, and in the estate's own repository less records/ and objects/) and why it is active, and every overlap of two of them with its patterns, witnesses (up to 20 tracked paths at the registered clone's main line, else the shortest valid path either could create), resolution and the concurrent-paths policies whose selection it meets. Read-only; the clone's answers are this machine's, labeled so.",
+        ("POST", "/v1/overlaps/preview") => "From 0.9.4: a draft brief's overlaps with the active assignments before it is recorded, as the overlap check's view shows them. Records nothing.",
         ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
+        ("GET", "/v1/goals/{id}/due") => "From 0.9.4: a standing agent's occurrences as of an explicit UTC time, asOf or the runtime's clock (vericairn.due/1): its state, its triggers and when each is next due, its period's caps and spend, its concurrency and failure pause, and each occurrence with its key and state (due, deferred with its reason, running, assigned, settled, disposed or held). Read-only; the same on every machine for the same records and time.",
         ("POST", "/v1/goals/{id}/step") => "Take an active goal's next step, one at a time, as an operator, the goal's sponsor when a person, or a principal holding local-engineering: its first eligible step whose route acts, routed from the runtime's machine. An agent's step goes on with the assignment that holds it, or is assigned to the agent together with its run's intent after the worker's whole preflight, and its run starts through the worker; every refusal before the intent, custody, the budget, the repository, the launcher or the workspace, records nothing, the assignment included. A person's step is assigned to the person and asked of them, the recommendation first, the two recorded together; a step no principal is available for is asked of the sponsor, never given to a contributor the roster does not name. It activates, funds, accepts and answers nothing.",
         ("POST", "/v1/goals/{id}/activate") => "Activate a proposed goal, which grants its budget: by its sponsor, a person who holds the operator role or a grant of the spending scope, or by an operator when an agent sponsors it; an agent never activates a goal.",
         ("POST", "/v1/goals/{id}/pause") => "Pause an active goal; its sponsor's, or an operator's for a goal an agent sponsors. Prevents new runs but does not stop runs already in flight; request each run's stop separately.",
@@ -1319,6 +1350,7 @@ public static class OpenApiDocument
         ("POST", "/v1/goals/{id}/stop") => "Stop a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned and prevents new runs. Runs already in flight are not stopped; request each run's stop separately.",
         ("POST", "/v1/goals/{id}/evaluate") => "Record a goal's evaluation, condition by condition: the runtime's verdict for each record predicate and the evaluator's for each evidence statement, with the records each read, by a principal other than any step's author.",
         ("POST", "/v1/goals/{id}/accept") => "Accept a goal at its current revision: by its sponsor when the sponsor is a person, or the principal the sponsor delegated an ordinary goal's acceptance to, and by an operator, only an operator, when an agent sponsors it; never by its evaluator or a step's author, and only once its current evaluation finds every condition met and every record predicate holds. From 0.9.4 a reason, or reasons for single steps, also close the goal's run with its unsettled steps, as close does.",
+        ("POST", "/v1/goals/{id}/decide") => "From 0.9.4: record the decision of a run's decision step: the principal holding the step's assignment, the person or the agent its role reached, records the path or paths its transition takes, the reasons and the evidence by hash, as the result of that assignment, signed by its own device. Choosing a path performs nothing reserved; it only makes the steps the path leads to eligible, which goal step takes. A decision the flow requires of a person, or one never delegated, is refused for an agent.",
         ("POST", "/v1/goals/{id}/close") => "From 0.9.4: close a goal's run that will not complete, recording each step it has not settled, neither done nor off, with its reason in a goal-status of closed; none of them counts as done. By who decides for the goal, a person; an agent's close is refused. Neither accepts nor stops the goal.",
         ("GET", "/v1/providers") => "The provider and adapter implementations available to the runtime on its machine, with their declared settings, destinations and served locations: release providers, source adapters, coding-agent launchers and workspace providers.",
         ("GET", "/v1/launchers") => "The coding-agent launchers available to the runtime on its machine, providers of vericairn.launcher.agent/1, with their settings and limitations; a generic launcher is labeled as not complete agent support.",
@@ -1330,7 +1362,7 @@ public static class OpenApiDocument
         ("POST", "/v1/runs/{id}/settle") => "Settle an exited run from the worker's retained local observation, by whoever may stop it. Records observed usage and releases the branch. In-flight and already-settled runs are refused; missing, unreadable or insufficient observations remain unresolved with a reason.",
         ("POST", "/v1/releases/check") => "Evaluate every submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and requires no presence. A check grants no submission authority.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
-        ("POST", "/v1/presence/prompts") => "From 0.9.3 (FIX-124): read the presence notices of operator actions on this machine after a position, waiting up to 25 seconds for one: each action's announcement of every record it will sign, \"Signature k of n\" with what each prompt signs, any signatures it adds and how many it signed. Local socket only; writes nothing. Not exposed through MCP.",
+        ("POST", "/v1/presence/prompts") => "From 0.9.3 (FIX-124): read the presence notices of operator actions on this machine after a position, waiting up to 25 seconds for one: each action's announcement of every record it will sign, \"Signature k of n\" with what each prompt signs, any signatures it adds and how many it signed. From 0.9.4 an action's presence session announces its terms before the check, then its nonce, each signature under it, any renewal and its end. Local socket only; writes nothing. Not exposed through MCP.",
         ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",
         ("GET", "/v1/operator/unfinished") => "Read this clone's unfinished operator action from its local checkpoint and its records: the signed record's id, type and subject, branch, head, pull request and stage, the recorded merge and latest target-run observation, whether its records alone can finish it, and what finishing it needs. Reading signs, observes and writes nothing. Not exposed through MCP.",
         ("POST", "/v1/operator/unfinished") => "Finish this clone's unfinished operator action from its own records: once its merge is recorded, a passing target run at the merge commit, already recorded or observed now under the merge's original identity, completes it and clears the clone's unfinished mark. Nothing is signed, branched, committed, pushed, opened or merged; any other action is refused with what finishing it needs. waitSeconds bounds the wait for pending target checks from 0 to 240 (default 120). Not exposed through MCP.",
@@ -1562,14 +1594,47 @@ public static class OpenApiDocument
 
     private static JsonObject PresenceNoticeSchema()
     {
-        JsonObject notice = Required(Object(("sequence", "integer"), ("kind", "string"), ("action", "string"), ("count", "integer"), ("made", "integer"), ("signatures", "array"), ("text", "string"), ("index", "integer")),
+        JsonObject notice = Required(Object(("sequence", "integer"), ("kind", "string"), ("action", "string"), ("count", "integer"), ("made", "integer"), ("signatures", "array"), ("text", "string"), ("index", "integer"),
+            ("session", "object"), ("shortHash", "string")),
             "sequence", "kind", "action", "count", "made", "signatures", "text");
         notice["properties"]!["kind"]!["enum"] = new JsonArray(PresenceNoticeVocabulary.Kinds.Select(k => (JsonNode)k).ToArray());
         notice["properties"]!["signatures"]!["items"] = SchemaReference("PresenceSignature");
         notice["properties"]!["index"]!["nullable"] = true;
-        notice["properties"]!["index"]!["description"] = "For a prompt, which signature it is, from 1.";
-        notice["description"] = "announced lists every record before the first prompt; added lists those added before their prompts; prompt names the signature being asked for; finished says how many were signed.";
+        notice["properties"]!["index"]!["description"] = "For a prompt, which signature it is, from 1; from 0.9.4 also for a signature under a presence session.";
+        // From 0.9.4: the presence session the notice is about, for announced and renewed of a session's list, session, signed and ended;
+        // null on every other notice.
+        notice["properties"]!["session"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["allOf"] = new JsonArray(SchemaReference("PresenceSessionNotice")) };
+        notice["properties"]!["shortHash"]!["nullable"] = true;
+        notice["properties"]!["shortHash"]!["description"] = "From 0.9.4: for signed and a prompt of a record, the first twelve hexadecimal digits of the signed record's content hash.";
+        notice["description"] = "announced lists every record before the first prompt; added lists those added before their prompts; prompt names the signature being asked for; finished says how many were signed. "
+            + "From 0.9.4 an action that signs under a presence session raises announced with the session's terms before its check, session with the nonce once the check is asked, "
+            + "signed for each signature under it, renewed with new terms and the reason for a renewal, and ended with why the session ended. A client computes the fingerprint the "
+            + "system dialog shows from the nonce and terms it received before it, and warns instead for terms it receives with the nonce or after it.";
         return notice;
+    }
+
+    private static JsonObject PresenceEntryDescriptionSchema()
+    {
+        JsonObject description = Required(Object(("entry", "integer"), ("type", "string"), ("key", "string"), ("purpose", "string"), ("changes", "string"), ("flagged", "boolean")),
+            "entry", "type", "key", "purpose");
+        description["properties"]!["changes"]!["nullable"] = true;
+        description["description"] = "From 0.9.4: the runtime's description of one entry of a session's list, which the terms do not cover; a client shows it as the runtime's.";
+        return description;
+    }
+
+    private static JsonObject PresenceSessionNoticeSchema()
+    {
+        JsonObject session = Required(Object(("id", "string"), ("limitSeconds", "integer"), ("terms", "string"), ("descriptions", "array"), ("nonce", "string"), ("secondsLeft", "integer"), ("reason", "string")),
+            "id", "limitSeconds");
+        session["properties"]!["limitSeconds"]!["minimum"] = 60;
+        session["properties"]!["limitSeconds"]!["maximum"] = 300;
+        foreach (string name in new[] { "terms", "descriptions", "nonce", "secondsLeft", "reason" }) session["properties"]![name]!["nullable"] = true;
+        session["properties"]!["terms"]!["description"] = "For announced and renewed: the terms' exact compact canonical text (vericairn.presence-session/1), types, hashes, counts and fixed values, never a record's bytes.";
+        session["properties"]!["descriptions"]!["items"] = SchemaReference("PresenceEntryDescription");
+        session["properties"]!["nonce"]!["description"] = "For session: the helper's 16-byte nonce in base64url without padding.";
+        session["properties"]!["reason"]!["description"] = "For renewed: why, in words. For ended: " + string.Join(", ", PresenceNoticeVocabulary.EndReasons) + ".";
+        session["description"] = "From 0.9.4: a presence session as a notice names it. The descriptions are the runtime's own words, which the terms do not cover.";
+        return session;
     }
 
     private static JsonObject EventSelectResponseSchema()

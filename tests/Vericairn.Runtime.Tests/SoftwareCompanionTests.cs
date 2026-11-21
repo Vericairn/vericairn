@@ -112,7 +112,7 @@ public class SoftwareCompanionTests
     {
         DocumentRendition output = Render("checksums", "SHA256SUMS", File("SHA256SUMS", new string('b', 64) + "  fixture.zip\n"));
         Assert.Equal(DocumentGenerationStatus.Success, output.Status);
-        Assert.Equal("sha256:faed0f90e8557af8f8be3b5e0b254ead9d99f71d127db4b7e91ed1a18f47ac36", output.ContentHash);
+        Assert.Equal("sha256:4dbf23423d327964c2c5f1699f565944ed246cad0a7d8f477b00531dacdafbd4", output.ContentHash);
     }
 
     [Fact]

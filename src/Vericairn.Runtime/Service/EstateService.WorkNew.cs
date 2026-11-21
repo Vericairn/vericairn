@@ -4,6 +4,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
+using Vericairn.Records.Identity;
+using static Vericairn.Runtime.Service.EstateServiceValues;
 
 namespace Vericairn.Runtime.Service;
 
@@ -40,6 +42,10 @@ public sealed partial class EstateService
             if (value is not null) body[name] = value;
         }
         if (request.After is not null) body["after"] = JsonSerializer.SerializeToNode(request.After);
+        if (request.FromPossibility is not null)
+        {
+            return Ulid.IsValid(request.By) ? WorkNewFromPossibility(request, body) : Refuse("The authoring principal must be a ULID.");
+        }
 
         return NewRecord(new NewRecordRequest("work-order", request.By, JsonSerializer.SerializeToElement(body)));
     }

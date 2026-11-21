@@ -87,6 +87,15 @@ public class CompanionImplementationTests
             JsonObject reviewing = JsonNode.Parse(model.OfType("assignment").First().Body.GetRawText())!.AsObject();
             reviewing["step"] = JsonNode.Parse("""{"key":"draft","review":{"items":["lyrics"],"subject":{"type":"result","id":"01M57TPYRE2FCVBP9F6DS0EAGX","hash":"sha256:23d78316cf2eea2ddc96fb0a0c110d021ee1bcd816c0f8359e5b797347464959"}}}""");
             cases.Add("assignment-review-before-hand-off.md", RecordCompanionTests.Render([RecordCompanionTests.Source("assignment", reviewing)]));
+            // From 0.9.4 (CODE-73): a brief's repository, exclusions and after, and a result's change.
+            JsonObject sequenced = JsonNode.Parse(model.OfType("assignment").First().Body.GetRawText())!.AsObject();
+            sequenced["brief"]!["repository"] = model.FirstEstate!.Id;
+            sequenced["brief"]!["excludedChanges"] = new JsonArray("path:docs/operator-guide.md");
+            sequenced["brief"]!["after"] = new JsonArray(model.OfType("assignment").First().Id);
+            cases.Add("assignment-overlap-fields.md", RecordCompanionTests.Render([RecordCompanionTests.Source("assignment", sequenced)]));
+            JsonObject integrated = JsonNode.Parse(model.OfType("result").First().Body.GetRawText())!.AsObject();
+            integrated["change"] = new JsonObject { ["repository"] = model.FirstEstate!.Id, ["base"] = new string('a', 40), ["head"] = new string('b', 40), ["target"] = "main" };
+            cases.Add("result-change.md", RecordCompanionTests.Render([RecordCompanionTests.Source("result", integrated)]));
             JsonObject product = ReleaseLineFixture.ProductBody();
             product["lines"] = new JsonArray(new JsonObject { ["name"] = "current", ["channel"] = "stable" },
                 new JsonObject { ["name"] = "1.x", ["channel"] = "lts", ["endOfSupport"] = "2028-01-01T00:00:00Z" });

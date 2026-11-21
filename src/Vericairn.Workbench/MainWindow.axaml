@@ -3,6 +3,7 @@
         xmlns:local="using:Vericairn.Workbench"
         xmlns:pres="using:Vericairn.Presentation"
         xmlns:proto="using:Vericairn.Protocol"
+        xmlns:sys="using:System"
         x:Class="Vericairn.Workbench.MainWindow"
         x:DataType="local:ShellViewModel"
         Title="Vericairn Workbench" Width="1200" Height="800" MinWidth="720" MinHeight="480"
@@ -77,7 +78,15 @@
         <Button Name="CancelRequestButton" Content="Cancel request" Command="{Binding CancelCommand}" MinHeight="28" AutomationProperties.Name="Cancel current request" />
         <Button Content="Refresh" Command="{Binding RefreshCommand}" MinHeight="28" />
       </StackPanel>
-      <TextBlock Name="StatusBar" Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="Status" />
+      <!-- From 0.9.4 (CODE-80) a status taken from the runtime's own words is shown in the runtime's style, apart from what Workbench derived. -->
+      <TextBlock Name="StatusBar" Text="{Binding Status}" Classes.runtime="{Binding Status, Converter={x:Static local:PresenceLineStyle.Runtime}}" TextWrapping="Wrap" AutomationProperties.Name="Status">
+        <TextBlock.Styles>
+          <Style Selector="TextBlock.runtime">
+            <Setter Property="FontStyle" Value="Italic" />
+            <Setter Property="Opacity" Value="0.7" />
+          </Style>
+        </TextBlock.Styles>
+      </TextBlock>
       <SelectableTextBlock Text="{Binding UncertaintyNotice}" IsVisible="{Binding HasUncertainOutcomes}" TextWrapping="Wrap" AutomationProperties.Name="Effects needing reconciliation" />
     </StackPanel>
 
@@ -155,10 +164,32 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock Text="Standing agents: each one's state and next occurrence, from the records" FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="{Binding HasStanding}" />
+              <ListBox Name="StandingList" Focusable="True" ItemsSource="{Binding Standing}" MaxHeight="240" IsVisible="{Binding HasStanding}" AutomationProperties.Name="Standing agents">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="pres:StandingRow">
+                    <StackPanel MinHeight="32">
+                      <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
               <TextBlock Text="Due times of runs: when each timed step is due, from the records" FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="{Binding HasDue}" />
               <ListBox Name="DueList" Focusable="True" ItemsSource="{Binding Due}" MaxHeight="240" IsVisible="{Binding HasDue}" AutomationProperties.Name="Due times of runs">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="pres:DueRow">
+                    <StackPanel MinHeight="32">
+                      <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <TextBlock Text="Decisions of runs: who decided what and why, from the records" FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="{Binding HasDecisions}" />
+              <ListBox Name="DecisionList" Focusable="True" ItemsSource="{Binding Decisions}" MaxHeight="240" IsVisible="{Binding HasDecisions}" AutomationProperties.Name="Decisions of runs">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="pres:DecisionRow">
                     <StackPanel MinHeight="32">
                       <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
                       <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
@@ -664,6 +695,28 @@
                       </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock Text="{Binding Next}" TextWrapping="Wrap" />
+                    <TextBlock Text="Decisions: who decided what and why" FontWeight="SemiBold" IsVisible="{Binding HasDecisions}" />
+                    <ListBox ItemsSource="{Binding Decisions}" Focusable="True" MaxHeight="240" IsVisible="{Binding HasDecisions}" AutomationProperties.Name="Decisions">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="pres:DecisionRow">
+                          <StackPanel MinHeight="32">
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Text="Standing agent: its state and next occurrence; vericairn goal due lists each occurrence" FontWeight="SemiBold" IsVisible="{Binding HasStanding}" />
+                    <ListBox ItemsSource="{Binding Standing}" Focusable="True" MaxHeight="120" IsVisible="{Binding HasStanding}" AutomationProperties.Name="Standing agent">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="pres:StandingRow">
+                          <StackPanel MinHeight="32">
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
                     <TextBlock Text="Due times: when each timed step is due, before it runs" FontWeight="SemiBold" IsVisible="{Binding HasDue}" />
                     <ListBox ItemsSource="{Binding Due}" Focusable="True" MaxHeight="240" IsVisible="{Binding HasDue}" AutomationProperties.Name="Due times">
                       <ListBox.ItemTemplate>
@@ -774,7 +827,20 @@
 
       <GridSplitter Name="BottomSplitter" Grid.Column="2" Grid.Row="1" Height="4" IsVisible="{Binding BottomVisible}" />
       <Border Name="BottomPanel" Grid.Column="2" Grid.Row="2" IsVisible="{Binding BottomVisible}" AutomationProperties.Name="Activity">
-        <ListBox Name="ActivityList" Focusable="True" ItemsSource="{Binding Activity}" FontFamily="{DynamicResource BrandMonoFont}" FontSize="11" AutomationProperties.Name="Activity log" />
+        <ListBox Name="ActivityList" Focusable="True" ItemsSource="{Binding Activity}" FontFamily="{DynamicResource BrandMonoFont}" FontSize="11" AutomationProperties.Name="Activity log">
+          <!-- From 0.9.4 (CODE-80) a line taken from the runtime's own words, which begins with its mark, is shown in the runtime's style. -->
+          <ListBox.Styles>
+            <Style Selector="TextBlock.runtime">
+              <Setter Property="FontStyle" Value="Italic" />
+              <Setter Property="Opacity" Value="0.7" />
+            </Style>
+          </ListBox.Styles>
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="sys:String">
+              <TextBlock Text="{Binding}" Classes.runtime="{Binding Converter={x:Static local:PresenceLineStyle.Runtime}}" />
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
       </Border>
     </Grid>
   </DockPanel>

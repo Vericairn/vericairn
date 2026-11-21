@@ -85,19 +85,28 @@ public static class WorkView
         return model.About(attempt.Id, "result").Where(model.IsCurrent).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
-    /// <summary>The acceptance state of a result: accepted, accepted (earlier revision), or awaiting review.</summary>
+    /// <summary>
+    /// The acceptance state of a result: accepted, accepted (earlier revision), or awaiting review. From 0.9.4 (FIX-141) a work order's
+    /// current result is also accepted when an acceptance of the work order's current revision was recorded after it
+    /// (<see cref="EstateStatus.RevisionAcceptance"/>).
+    /// </summary>
     public static string ResultState(EstateModel model, RecordEnvelope result)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(result);
         IReadOnlyList<string> chain = model.Chain(result);
         RecordEnvelope? acceptance = chain.SelectMany(id => model.About(id, "acceptance")).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
-        if (acceptance is null)
+        if (acceptance is not null && acceptance.Subject?.Id == result.Id && acceptance.Subject.Hash == result.ComputedHash)
         {
-            return "awaiting review";
+            return "accepted";
         }
 
-        return acceptance.Subject?.Id == result.Id && acceptance.Subject.Hash == result.ComputedHash ? "accepted" : "accepted (earlier revision)";
+        if (EstateStatus.RevisionAcceptance(model, result) is not null)
+        {
+            return "accepted";
+        }
+
+        return acceptance is null ? "awaiting review" : "accepted (earlier revision)";
     }
 
     /// <summary>Every current assignment with its derived state, ordered by work-order key then assignment id.</summary>

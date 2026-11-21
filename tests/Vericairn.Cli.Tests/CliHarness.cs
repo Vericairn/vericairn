@@ -96,6 +96,12 @@ internal static class CliHarness
         }
     }
 
+    /// <summary>
+    /// From 0.9.4 (CODE-80): what the runtime wrote, rejoined where the command line folded it to its 80 columns, each row marked as the
+    /// runtime's: a fold breaks at a space and each row after the first begins with the mark, so a row's mark becomes that space again.
+    /// </summary>
+    internal static string Unfold(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\nruntime: ", " ", StringComparison.Ordinal);
+
     /// <summary>Runs a command that must succeed and prints JSON.</summary>
     public static Outcome Ok(params string[] args)
     {

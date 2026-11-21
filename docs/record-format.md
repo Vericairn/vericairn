@@ -33,7 +33,9 @@ that the manifest names (`firstAuthority`), or the only one when it names none, 
 (`estate.multiple`, `signature.self-admission`) and never takes its place, whatever its id or date, and one that comes with
 history checkpoints of its own at most leaves the copy unsettled ([below](#history-checkpoints-092)); several self-admissions
 with none named are reported (`manifest.first-authority`, listing each with its device) and none is the first authority until
-the manifest names one. A reader without a manifest takes the first charter by id. Policy and writing changes and duty
+the manifest names one. From 0.9.4 (FIX-134) a self-admission whose signature does not verify under its device's key at its
+stated time is never the first authority, named or the only one: the estate reads `manifest.first-authority` naming it, and
+nothing signed under it counts, until the manifest names one that verifies. A reader without a manifest takes the first charter by id. Policy and writing changes and duty
 results/reviews have additional signature and exact-approval requirements.
 
 After the target's accepted publication is recorded, an upgrade from 0.7.3
@@ -58,6 +60,56 @@ is refused with `body.timestamp`, naming the field and that form, before its
 length is considered, and a missing required timestamp is refused with
 `body.missing` and the same form. Nothing is written, and no value is converted
 to the required form on the caller's behalf.
+
+## Writing an assignment brief (0.9.4)
+
+From 0.9.4 (DOCS-46), `records describe assignment` and the generated `record-reference.md` list every member of an
+assignment's `brief` with its kind, whether it is required, whether an array may be empty, its limits and the record format
+that introduced it, from the same rules the validator reads the brief by: the reference's `assignment.brief` table, then a
+table for each member of fixed members of its own, such as `assignment.brief.sources` and
+`assignment.brief.progressRequest`. Every required member is present, a required array that may be empty is written `[]`,
+an item of an array is never an empty string, and the brief admits no member the table does not list. A path pattern in
+`permittedChanges`, such as `path:NOTES.md`, also needs `repository` on a new format-3 assignment, which `work assign` fills
+in ([record format 3](record-format-v3.md)).
+
+A minimal complete brief, assigned with `work assign`:
+
+```sh
+vericairn work assign W-1 --contributor <contributor-id> --by <operator-id> --brief brief.json
+```
+
+with `brief.json`:
+
+```json
+{"outcome": "NOTES.md holds a one-line greeting.", "sources": [], "permittedChanges": ["NOTES.md, one line"],
+ "prohibitedEffects": [], "workspace": ["the estate's repository, main branch"], "limits": [],
+ "expectedOutputs": ["NOTES.md"], "reviewCriteria": ["Does NOTES.md hold a greeting?"],
+ "recovery": "Read this brief and NOTES.md."}
+```
+
+`work assign` takes the brief alone and builds the record: its subject, the work order pinned to its current revision, and
+its body, the contributor and the brief. `records new assignment` takes the whole body and the subject as you write them,
+with the work order's id and its current hash, which `vericairn work brief W-1` shows as `work order <id> at <hash>`:
+
+```sh
+vericairn records new assignment --by <operator-id> --subject work-order:<work-order-id>:<work-order-hash> --body assignment.json
+```
+
+with `assignment.json`:
+
+```json
+{"contributor": "<contributor-id>",
+ "brief": {"outcome": "NOTES.md holds a one-line greeting.", "sources": [], "permittedChanges": ["NOTES.md, one line"],
+  "prohibitedEffects": [], "workspace": ["the estate's repository, main branch"], "limits": [],
+  "expectedOutputs": ["NOTES.md"], "reviewCriteria": ["Does NOTES.md hold a greeting?"],
+  "recovery": "Read this brief and NOTES.md."}}
+```
+
+There is no dry-run command. `records new` and `work assign` validate the estate together with the proposed record and write
+nothing when the estate would be invalid with it: they refuse with `Not written: the estate would be invalid with this record`,
+the number of errors and every finding at once, such as `body.missing` for a required member left out, and exit with code 1.
+A proposed record that is valid is written at once. `records validate` checks the estate as it stands, not a
+proposed body.
 
 ## Release lines and channels (0.9.0)
 
@@ -338,8 +390,13 @@ runtime writes a checkpoint before it writes a revision that takes a role away; 
 not, it refuses such a revision when any record would fail with it. In every
 read, a grant or principal revision counts for nothing when it is dated before the nearest
 record below it in its line that counts; a record below that does not count is skipped, and a
-revision on top of one follows the line there. A role has no closing; role closings are planned. Close and revoke a person's devices when removing their operator
-role or `administer` grant. Status and policy evaluation take their recorded time from the
+revision on top of one follows the line there. From 0.9.4 (ID-14), in an estate that has adopted checkpoints, removing the
+operator role from a person's principal record writes a role closing (`closes.kind` `role`) for that person in the same batch,
+signed by the root operator or another standing operator, and a removal without it is refused; from it on, anything the person
+writes, whatever its date, counts only when the closing witnesses it (`history.after-closing` otherwise), and what they gave as
+operator before it, closings included, keeps counting for the strongest acts. Removing any other role writes no closing: that
+role is read at each record's time, as before (decision `01M7JSJSHTTX86F10007GDQ238`). In an estate that has not adopted, close and revoke a person's
+devices when removing their operator role or `administer` grant. Status and policy evaluation take their recorded time from the
 records that count.
 
 A signed record dated more than five minutes after a checkpoint that witnesses it is the
@@ -381,7 +438,7 @@ adopted history checkpoints.
   the unwitnessed tail may state a time before the newest checkpoint, and is read at that time
   unless a closing refuses it. A revocation, rotation or narrowing stated more than five minutes
   before the newest record its closing would witness, or before the head checkpoint, is refused.
-  A role has no closing; role closings are planned.
+  From 0.9.4 a removal of a person's operator role in an adopted estate follows the person's role closing (ID-14).
 
 ## Published Vericairn dependency observations (0.8.3)
 

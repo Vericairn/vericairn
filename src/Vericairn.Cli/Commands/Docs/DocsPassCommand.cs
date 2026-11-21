@@ -67,7 +67,7 @@ internal sealed class DocsPassCommand : Command
                 if (!pass.Ok)
                 {
                     if (json) context.Output.WriteLine(JsonSerializer.Serialize(pass, ProtocolJson.Options));
-                    else context.Error.WriteLine(pass.Problem!.Message);
+                    else CommandContext.WriteRuntime(context.Error, pass.Problem!.Message);
                     return Failed;
                 }
                 var selected = new List<DocumentPassItem>();
@@ -111,7 +111,7 @@ internal sealed class DocsPassCommand : Command
                     {
                         if (assignment.Ok) context.Output.WriteLine($"Assigned {selected.Count} documents to {to}: {workKey}.");
                         foreach (RecordWritten written in assignment.Written) context.Output.WriteLine($"recorded {written.Id} at {written.Hash}");
-                        if (assignment.Problem is not null) context.Error.WriteLine(assignment.Problem.Message);
+                        if (assignment.Problem is not null) CommandContext.WriteRuntime(context.Error, assignment.Problem.Message);
                     }
                 }
                 return assignment is null || assignment.Ok ? Clean : Failed;

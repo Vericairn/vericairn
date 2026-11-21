@@ -84,6 +84,13 @@ public static class Routing
 
         if (FlowRuns.StepOf(assignment) is not FlowRuns.StepRef step)
         {
+            // From 0.9.4 (GOAL-07) an occurrence of a standing agent is carried in the role of its flow's work step; null when that flow
+            // does not resolve here, which nothing runs.
+            if (StandingAgents.KeyOf(assignment) is not null && StandingAgents.StandingOf(model, order) is RecordEnvelope standing)
+            {
+                return StandingAgents.Resolve(model, standing).Flow is Templates.FlowDefinition flow && StandingAgents.WorkStep(flow) is Templates.FlowStep work ? work.Role : null;
+            }
+
             return RoleOf(model.Latest(order));
         }
 
@@ -193,7 +200,8 @@ public static class Routing
 
     /// <summary>
     /// When an assignment is a hand-over (design/goals.md § 6, step 4), the assignment it takes the step over from: the latest assignment
-    /// of the same work order, by any revision, and of the same flow step for a run's, recorded before it, when that one's contributor is
+    /// of the same work order, by any revision, and of the same flow step for a run's, or from 0.9.4 of the same occurrence for a standing
+    /// agent's, recorded before it, when that one's contributor is
     /// an agent or a service and this one's is a person. Null for any other assignment.
     /// </summary>
     public static RecordEnvelope? TakesOverFrom(EstateModel model, RecordEnvelope assignment)
@@ -207,7 +215,7 @@ public static class Routing
 
         IReadOnlyList<string> orders = model.Chain(model.Latest(order));
         RecordEnvelope? previous = model.OfType("assignment")
-            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && FlowRuns.StepOf(a) == FlowRuns.StepOf(assignment) && GoalRules.Before(a, assignment) && !Stranded(model, a, assignment))
+            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && FlowRuns.StepOf(a) == FlowRuns.StepOf(assignment) && StandingAgents.KeyOf(a) == StandingAgents.KeyOf(assignment) && GoalRules.Before(a, assignment) && !Stranded(model, a, assignment))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
             .LastOrDefault();
         string kind = previous is not null && model.CurrentPrincipal(EstateModel.BodyString(previous, "contributor")) is RecordEnvelope holder ? EstateModel.BodyString(holder, "kind") ?? "?" : "?";
@@ -228,8 +236,10 @@ public static class Routing
 
     /// <summary>
     /// Whether a principal may take a step of a goal: an operator; the goal's sponsor when the sponsor is a person, under the goal's
-    /// activation; or a principal holding the 'local-engineering' scope at the time, which is how the builder dispatches agents under the
-    /// operator's authority. An agent that sponsors a goal takes its steps only as such a principal, since an operator decides for that goal.
+    /// activation; a principal holding the 'local-engineering' scope at the time, which is how the builder dispatches agents under the
+    /// operator's authority; or, from 0.9.4 (ID-07), a dispatcher whose dispatch grant in force names the goal, whose every assignment is
+    /// judged against that grant. An agent that sponsors a goal takes its steps only as such a principal, since an operator decides for
+    /// that goal.
     /// </summary>
     public static bool MayTakeStep(EstateModel model, RecordEnvelope goal, string? principal, DateTimeOffset at) => MayTakeStep(model, goal, principal, at, null);
 
@@ -244,9 +254,10 @@ public static class Routing
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         return principal is not null && model.CurrentPrincipal(principal) is not null
-            && (record is null
+            && ((record is null
                 ? model.HasRole(principal, Roles.Operator) || GoalRules.AccepterOf(model, goal).Decides(model, principal) || model.HasScope(principal, Scopes.LocalEngineering, at)
-                : model.HasRoleAt(principal, Roles.Operator, record) || GoalRules.AccepterOf(model, goal).Decides(model, principal, record) || model.HasScopeAt(principal, Scopes.LocalEngineering, record));
+                : model.HasRoleAt(principal, Roles.Operator, record) || GoalRules.AccepterOf(model, goal).Decides(model, principal, record) || model.HasScopeAt(principal, Scopes.LocalEngineering, record))
+              || DispatchAuthority.CoversGoal(model, principal, goal, record?.At ?? Model.RecordParser.FormatTimestamp(at), record?.AtTime ?? at));
     }
 
     /// <summary>
@@ -359,7 +370,7 @@ public static class Routing
 
     /// <summary>
     /// The current assignments of a work order that hold its step, any revision of it, oldest first; the last one holds the step. An
-    /// assignment routing stored without the record it was routed with holds nothing (<see cref="Stranded"/>).
+    /// assignment routing stored without the record it was routed with holds nothing (<see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/>).
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order)
     {
@@ -391,13 +402,21 @@ public static class Routing
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(assignment);
+        return Stranded(model, assignment, model.Chain(model.Latest(assignment)), before);
+    }
+
+    /// <summary>
+    /// <see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/> over an explicit chain of the assignment's revisions: a
+    /// reconciliation judges each assignment it names on its own chain, not on the kept one's that a withdrawal folds it into.
+    /// </summary>
+    internal static bool Stranded(EstateModel model, RecordEnvelope assignment, IReadOnlyList<string> chain, RecordEnvelope? before)
+    {
         string? with = EstateModel.BodyString(assignment, "routedWith");
         if (with is null)
         {
             return false;
         }
 
-        IReadOnlyList<string> chain = model.Chain(model.Latest(assignment));
         bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
         return with switch
         {
@@ -444,7 +463,8 @@ public static class Routing
         return model.CurrentPrincipal(principal) is RecordEnvelope record ? EstateModel.BodyString(record, "name") ?? principal ?? "?" : principal ?? "?";
     }
 
-    private static List<string>? Named(JsonElement body, string role)
+    /// <summary>The principals a body's roles name for a role, in order, once each; null when they do not name it.</summary>
+    internal static List<string>? Named(JsonElement body, string role)
     {
         if (!body.TryGetProperty("roles", out JsonElement roles) || roles.ValueKind != JsonValueKind.Array)
         {

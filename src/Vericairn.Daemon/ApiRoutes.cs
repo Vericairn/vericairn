@@ -104,6 +104,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/release-bases/{{hash}}", (string hash) => service.ReleaseBasis(hash) is { } basis ? Results.Json(basis, ProtocolJson.Options) : Results.NotFound());
         app.MapPost($"{v}/work/review", (ResultReviewRequest request) => Outcome(service.ReviewResult(request)));
         app.MapPost($"{v}/work/amend", (AmendRequest request) => Outcome(service.Amend(request)));
+        app.MapPost($"{v}/standing/outputs", (StandingOutputRequest request) => Outcome(service.StandingOutput(request)));
         app.MapPost($"{v}/work/takeover", (TakeoverRequest request) => Results.Json(service.WorkTakeover(request), ProtocolJson.Options));
         app.MapGet($"{v}/devices", () => Results.Json(service.Devices(), ProtocolJson.Options));
         app.MapPost($"{v}/devices", (DeviceCreateRequest request) => Outcome(service.DeviceCreate(request)));
@@ -139,6 +140,9 @@ public static class ApiRoutes
         app.MapPost($"{v}/goals", (GoalProposeRequest request) => Outcome(service.GoalPropose(request)));
         app.MapGet($"{v}/goals/{{id}}", (string id) => service.Goal(id) is GoalResponse goal ? Results.Json(goal, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/goals/{{id}}/next", (string id) => service.GoalNext(id) is NextResponse next ? Results.Json(next, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/goals/{{id}}/due", (string id, string? asOf) => service.GoalDue(id, string.IsNullOrWhiteSpace(asOf) ? null : asOf) is GoalDueResponse due ? Results.Json(due, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/overlaps", (string? repository) => Results.Json(service.WorkOverlap(string.IsNullOrWhiteSpace(repository) ? null : repository), ProtocolJson.Options));
+        app.MapPost($"{v}/overlaps/preview", (OverlapPreviewRequest request) => Results.Json(service.WorkOverlapPreview(request), ProtocolJson.Options));
         app.MapPost($"{v}/goals/{{id}}/step", (string id, GoalStepRequest request) => Results.Json(service.GoalStep(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/goals/{{id}}/activate", (string id, GoalActionRequest request) => Outcome(service.GoalActivate(id, request)));
         app.MapPost($"{v}/goals/{{id}}/pause", (string id, GoalActionRequest request) => Outcome(service.GoalPause(id, request)));
@@ -147,6 +151,7 @@ public static class ApiRoutes
         app.MapPost($"{v}/goals/{{id}}/evaluate", (string id, GoalEvaluateRequest request) => Outcome(service.GoalEvaluate(id, request)));
         app.MapPost($"{v}/goals/{{id}}/accept", (string id, GoalAcceptRequest request) => Outcome(service.GoalAccept(id, request)));
         app.MapPost($"{v}/goals/{{id}}/close", (string id, GoalCloseRequest request) => Outcome(service.GoalClose(id, request)));
+        app.MapPost($"{v}/goals/{{id}}/decide", (string id, GoalDecideRequest request) => Outcome(service.GoalDecide(id, request)));
         app.MapGet($"{v}/providers", () => Results.Json(service.Providers(), ProtocolJson.Options));
         app.MapGet($"{v}/launchers", () => Results.Json(service.Launchers(), ProtocolJson.Options));
         app.MapPost($"{v}/harness-qualifications", (HarnessQualifyRequest request) => Outcome(service.QualifyHarness(request)));

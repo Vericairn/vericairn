@@ -277,6 +277,22 @@ public partial interface IEstateApi
     Task<NextResponse?> GoalNextAsync(string goal, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(GoalNext), () => GoalNext(goal), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable counterpart of <see cref="WorkOverlap"/>; a stopped observation does not undo an effect.</summary>
+    Task<OverlapResponse> WorkOverlapAsync(string? repository = null, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WorkOverlap), () => WorkOverlap(repository), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="WorkOverlapPreview"/>; a stopped observation does not undo an effect.</summary>
+    Task<OverlapResponse> WorkOverlapPreviewAsync(OverlapPreviewRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WorkOverlapPreview), () => WorkOverlapPreview(request), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="GoalDue"/>; a stopped observation does not undo an effect.</summary>
+    Task<GoalDueResponse?> GoalDueAsync(string goal, string? asOf = null, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(GoalDue), () => GoalDue(goal, asOf), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="StandingOutput"/>; a stopped observation does not undo an effect.</summary>
+    Task<WriteOutcome> StandingOutputAsync(StandingOutputRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(StandingOutput), () => StandingOutput(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="GoalStep"/>; a stopped observation does not undo an effect.</summary>
     Task<GoalStepResponse> GoalStepAsync(string goal, GoalStepRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(GoalStep), () => GoalStep(goal, request), true, this as IClientOperationLifetime, cancellationToken);
@@ -316,6 +332,10 @@ public partial interface IEstateApi
     /// <summary>The cancellable counterpart of <see cref="GoalClose"/>; a stopped observation does not undo an effect.</summary>
     Task<WriteOutcome> GoalCloseAsync(string goal, GoalCloseRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(GoalClose), () => GoalClose(goal, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="GoalDecide"/>; a stopped observation does not undo an effect.</summary>
+    Task<WriteOutcome> GoalDecideAsync(string goal, GoalDecideRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(GoalDecide), () => GoalDecide(goal, request), true, this as IClientOperationLifetime, cancellationToken);
 
     /// <summary>The cancellable counterpart of <see cref="Providers"/>; a stopped observation does not undo an effect.</summary>
     Task<IReadOnlyList<ProviderRow>> ProvidersAsync(CancellationToken cancellationToken = default) =>

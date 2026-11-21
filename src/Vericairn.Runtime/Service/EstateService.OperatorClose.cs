@@ -53,6 +53,9 @@ public sealed partial class EstateService
             if (refusal is not null || signer is null)
                 return new([], new("refused", "The operator needs their own admitted signing device on this machine. No unsigned acceptance is allowed.", []));
 
+            // Each acceptance is authored completely, its id and time fixed, before the first signature, so a presence session can list it by
+            // exact hash (ID-16).
+            DateTimeOffset at = SessionNow();
             RecordDraft[] drafts = [.. selection.Select(item =>
             {
                 RecordEnvelope result = model.ById[item.Result.Id];
@@ -62,17 +65,20 @@ public sealed partial class EstateService
                     basis = item.Reviews.Select(r => r.Id).Order(StringComparer.Ordinal).ToArray(),
                     self = result.By == request.By,
                 });
-                return new RecordDraft("acceptance", request.By, body, result.Reference);
+                return Fixed(new RecordDraft("acceptance", request.By, body, result.Reference), at);
             })];
 
-            // Custody signs one record per presence check; it offers no batch presence session. Every acceptance is announced before
-            // the first prompt, and each prompt says which of them it signs (FIX-124).
-            using IDisposable counted = presence.Action("operator close",
-                NeedsPresence(signer, drafts[0], model) ? drafts.Select(d => DescribeRecord(d, model)) : null);
+            // Every acceptance is announced before the first prompt, and each prompt says which of them it signs (FIX-124). From 0.9.4 a
+            // presence session covers at most 16 of them by exact hash with one check, a list for each 16, each announced before its own
+            // check; while an agent run this machine's worker started is unsettled, each keeps its own (ID-16).
+            using IDisposable counted = SessionAction("operator close",
+                NeedsPresence(signer, drafts[0], model) ? drafts.Select(d => DescribeRecord(d, model)) : null,
+                ExactSession("operator close", "operator close:" + string.Join(",", selection.Select(s => s.Key + "@" + s.Result.Hash)), drafts, redatable: true));
             List<AuthoredRecord> records = [];
-            foreach (RecordDraft draft in drafts)
+            foreach (RecordDraft planned in drafts)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                RecordDraft draft = SessionDraft(planned);
                 (AuthoredRecord? record, refusal) = AuthorLocked(draft, model, [signer]);
                 if (record is null) return new([], new("refused", refusal!, []));
                 records.Add(record);
@@ -122,8 +128,10 @@ public sealed partial class EstateService
         List<OperatorCloseItem> items = [];
         foreach (RecordEnvelope order in model.Current("work-order").OrderBy(o => EstateModel.BodyString(o, "key"), StringComparer.Ordinal))
         {
+            // From 0.9.4 (FIX-141) an acceptance of the work order's current revision recorded after its current result accepts that result
+            // too, as acceptances were given before they named a result's exact hash, so it is not offered for signing again.
             if (!results.TryGetValue(order.Id, out RecordEnvelope? result) || EstateModel.BodyString(result, "outcome") != "completed"
-                || model.OfType("acceptance").Any(a => a.Subject == result.Reference)) continue;
+                || model.OfType("acceptance").Any(a => a.Subject == result.Reference) || EstateStatus.RevisionAcceptance(model, result) is not null) continue;
             OperatorCloseReview[] reviews = [.. model.About(result.Id, "review").Where(r => model.IsCurrent(r)
                     && r.Subject == result.Reference && EstateModel.BodyString(r, "outcome") == "pass")
                 .OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => new OperatorCloseReview(r.Id, r.ComputedHash,

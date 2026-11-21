@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class DevicesCommand : Command
 {
     public DevicesCommand(CommandContext context)
-        : base("devices", "Device keys: create a device for a principal on this machine, pair one on another machine, list, admit, revoke, rename and rotate, and the operator's recovery device.")
+        : base("devices", "Device keys: create a device for a principal on this machine, pair one on another machine, list, admit, revoke, rename and rotate, and the operator's recovery device; from 0.9.4 a device owner's presence setting and the presence session ledger.")
     {
         Subcommands.Add(new DevicesCreateCommand(context));
         Subcommands.Add(new DevicesListCommand(context));
@@ -17,6 +17,8 @@ internal sealed class DevicesCommand : Command
         Subcommands.Add(new DevicesRecoveryCommand(context));
         Subcommands.Add(new DevicesPairCommand(context));
         Subcommands.Add(new DevicesWritesCommand(context));
+        Subcommands.Add(new DevicesPresenceCommand(context));
+        Subcommands.Add(new DevicesSessionsCommand(context));
         Subcommands.Add(new DevicesRenameCommand(context));
         Subcommands.Add(new DevicesRotateCommand(context));
     }

@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Adapters.Git;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
@@ -210,6 +211,26 @@ public sealed class OperatorRecordGitTests : IDisposable
         Assert.Throws<ProviderRefusedException>(() => adapter.Commit(root, "operator/example", basis.Head, RecordFiles, NoReceipts));
     }
 
+    // FIX-137: a graft cannot make a commit whose real parent is an extra commit pass as the record's commit on its pinned base: the
+    // extra commit adds a file the record's commit removes, so only the parent check could tell, and it reads the real parents.
+    [Fact]
+    public void AGraftCannotHideAnExtraCommitFromTheRecoveredCommitCheck()
+    {
+        adapter.Branch(root, basis, "operator/example", RecordFiles);
+        Write("other.txt", "Additional content.\n");
+        Git("add", "other.txt");
+        Git("commit", "-m", "Another change");
+        Git("rm", "-q", "other.txt");
+        WriteRecord();
+        Git("add", "--", RecordPath);
+        Git("commit", "-m", "The record");
+        string head = Git("rev-parse", "HEAD");
+        Assert.Equal(RecordPath, Git("diff-tree", "--no-commit-id", "--name-only", "-r", basis.Head, head));
+        File.WriteAllText(Path.Combine(root, ".git", "info", "grafts"), head + " " + basis.Head + "\n");
+        Assert.Equal(basis.Head, Git("rev-parse", head + "^"));
+        Assert.Throws<ProviderRefusedException>(() => adapter.Verify(root, head, basis.Head, RecordFiles));
+    }
+
     [Fact]
     public void ABranchThatMovedOrHasExtraCommitsCannotResume()
     {
@@ -358,6 +379,61 @@ public sealed class OperatorRecordGitTests : IDisposable
         Assert.Equal(device, Assert.Single(service.Session.Load().ById[first.Record.Id].Signatures).Device);
         Assert.All(Git("status", "--porcelain=v1", "--untracked-files=all").Split('\n'), line => Assert.StartsWith("?? records/operation/", line, StringComparison.Ordinal));
         Assert.Equal(0, service.Validate().Errors);
+    }
+
+    // CODE-81: operator record's commit ends with the trailer lines the estate requires on every pushed commit, so its checked push finds
+    // them, and its push meets the same blocked-term matcher as every checked change.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnOperatorActionsCommitCarriesTheRequiredTrailerAndMeetsTheSameMatcher(bool blocked)
+    {
+        const string trailer = "Signed-off-by: Estate Operator <operator@example.invalid>";
+        using var estate = new TestEstate(3);
+        RecordEnvelope repository = estate.Add("resource", estate.OperatorId, """{"kind":"repository","name":"Estate","role":"Estate","location":{"github":"Example/estate"},"visibility":"private"}""");
+        estate.Add("product", estate.OperatorId, $$"""
+            {"name":"Estate","slug":"estate","summary":"Test estate.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],
+             "changes":{"provider":"memory-pull-requests","repository":"{{repository.Id}}","target":"main","requiredChecks":["tests"]} }
+            """);
+        RecordEnvelope milestone = estate.Add("work-order", estate.OperatorId, """{"key":"M-1","kind":"milestone","title":"Milestone","intent":"Finish.","scope":["work"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}""");
+        estate.Add("work-status", estate.OperatorId, """{"status":"submitted","note":"Ready."}""", milestone.Reference);
+        using var signing = new CommitMessageTests.Signing(estate);
+        CommitMessageTests.Declare(estate, signing, "commit-messages", CommitMessageTests.Rule("trailer", CommitMessages.Kind, new JsonObject { ["trailer"] = trailer }));
+        // The commit's own words, "Record operator action", carry this term.
+        if (blocked) CommitMessageTests.Declare(estate, signing, "terms", CommitMessageTests.Rule("terms", BlockedTerms.Kind, new JsonObject { ["terms"] = new JsonArray("Record") }));
+        foreach (string file in Directory.EnumerateFiles(estate.Root, "*", SearchOption.AllDirectories))
+            Write(Path.GetRelativePath(estate.Root, file), File.ReadAllText(file));
+        RepositoryClones.Register(estate.Estate.Id, repository.Id, root);
+        using EstateService service = EstateService.Open(root);
+        string device = service.DeviceCreate(new(estate.OperatorId, "Operator device", "file")).Written!.Id;
+        // The policies' signing device, already admitted, admits the device this runtime signs with.
+        estate.SetClock(service.Session.Load().ById[device].AtTime.AddSeconds(-1));
+        RecordEnvelope admission = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Admit the operator's runtime device."}""",
+            subject: service.Session.Load().ById[device].Reference, signer: signing.Signer);
+        Write(admission.ExpectedPath, File.ReadAllText(Path.Combine(estate.Root, admission.ExpectedPath.Replace('/', Path.DirectorySeparatorChar))));
+        Assert.Equal(0, service.Validate().Errors);
+        Git("add", ".");
+        Git("commit", "-m", "Prepare the test estate");
+        string prepared = Git("rev-parse", "HEAD");
+        var remote = new RecordedRemote(prepared) { ScanPasses = true };
+        service.Providers = new() { RecordCommitAdapter = adapter, PushAdapter = remote, SecretScanner = remote };
+        service.Providers.Register(remote.Memory);
+        var request = new OperatorRecordRequest("acceptance", estate.OperatorId,
+            JsonSerializer.SerializeToElement(new { statement = "I accept this milestone.", basis = Array.Empty<string>(), self = true }),
+            $"work-order:{milestone.Id}:{milestone.ComputedHash}", WaitSeconds: 0);
+        OperatorRecordResponse response = service.OperatorRecord(request, TestContext.Current.CancellationToken);
+        Assert.True(response.Head is not null && response.Head != prepared, response.Status + ": " + response.Message + " " + string.Join(" | ", response.Problem?.Findings.Select(f => f.ToString()) ?? []));
+        string message = Git("log", "-1", "--format=%B", response.Head!);
+        Assert.EndsWith("\n\n" + trailer, message, StringComparison.Ordinal);
+        Assert.StartsWith("Record operator action ", message, StringComparison.Ordinal);
+        Assert.Equal(blocked ? 0 : 1, remote.Pushes);
+        Assert.Equal(!blocked, response.Ok);
+        if (blocked)
+        {
+            Assert.Equal("known-failure", response.Change!.Status);
+            Assert.Contains(response.Head!, response.Message, StringComparison.Ordinal);
+            Assert.Contains("carries a term of the estate's blocked terms", response.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -745,6 +821,8 @@ public sealed class OperatorRecordGitTests : IDisposable
         public SecretScan Scan(string directory, PushPlan plan) => new("scanner", "1.0.0", plan.Range, ScanPasses ? "passed" : "unavailable", ScanPasses ? 0 : null);
         public void Push(string directory, string remote, PushPlan plan, SecretScan scan) { Assert.True(scan.Passed(plan)); pushed = plan.Head; Pushes++; }
         public string? Observe(string directory, string remote, string branch) => pushed;
+        // The commits' messages as git reads them from the clone, so the check reads what the record commit adapter wrote.
+        public IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan) => new GitPushAdapter().CommitMessages(directory, plan);
     }
 
     private void WriteRecord() => Write(RecordPath, RecordText);

@@ -73,6 +73,62 @@ internal sealed partial class ReleaseCoordinationService(
         return plan;
     }
 
+    /// <summary>
+    /// A submission's presence session (design/presence-sessions.md § 5): the release gate's history checkpoint in an estate that has
+    /// adopted, and the release build's intent, dispatch and outcome under its provider, destination, version, product, commit and the
+    /// workflow its settings name; the current operation of its identity, which a retry supersedes, as a reference.
+    /// </summary>
+    private PresenceSessionAction SubmitSession(ReleaseSubmitRequest request, string provider, string destination, string identity, string? commit,
+        IReadOnlyDictionary<string, string> settings) => new(_ =>
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            var kinds = new List<PresencePlannedKind>();
+            if (global::Vericairn.Records.History.SignedHistory.Adopted(model)) kinds.Add(EstateService.ReleaseCheckpointEntry());
+            if (EstateService.ReleaseBuildEntry(provider, destination, request.Version, request.Product, commit, settings, 3) is { } build) kinds.Add(build);
+            RecordEnvelope? current = model.Current("operation").FirstOrDefault(r => EstateModel.BodyString(r, "identity") == identity);
+            return new PresenceSessionPlan
+            {
+                Action = "release submit", Identity = $"release submit:{request.Product}:{request.Version}:{commit}", Kinds = kinds, References = current is null ? [] : [current.Id],
+            };
+        }
+    });
+
+    /// <summary>
+    /// An observation's presence session: the release build's revisions under the identity it observes, and the release record, a candidate
+    /// or the publication of the candidate it supersedes; the operation and the release recorded for the version as references.
+    /// </summary>
+    private PresenceSessionAction ObserveSession(ReleaseObserveRequest request) => new(context =>
+    {
+        lock (gate)
+        {
+            RecordEnvelope? current = FindReleaseOperation(request).Operation;
+            if (current is null || !current.Body.TryGetProperty("target", out JsonElement target)) return null;
+            string? provider = EstateModel.BodyString(current, "provider"), destination = Text(target, "repository") ?? Text(target, "destination"),
+                product = Text(target, "product"), commit = Text(target, "commit") ?? Text(target, "ref");
+            if (provider is null || destination is null || product is null) return null;
+            var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (Text(target, "ref") is string stated) settings["ref"] = stated;
+            if (Text(target, "commit") is string named) settings["commit"] = named;
+            // The workflow the observed build's dispatch names, which its revisions keep (decision 01M7J7J6MRZPDMYDRGK0MDEZR7).
+            if (Text(target, "workflow") is string workflow) settings["workflow"] = workflow;
+            // From where the observation stands: the build's revisions while its outcome is unconfirmed, then the candidate, or the
+            // publication of the candidate recorded; a path of one signature keeps its own check.
+            EstateModel model = session.Load();
+            RecordEnvelope[] recorded = [.. model.Current("release").Where(r => EstateModel.BodyString(r, "version") == request.Version && r.Subject?.Id == product)];
+            var kinds = new List<PresencePlannedKind>();
+            if (EstateModel.BodyString(current, "status") is not ("observed-success" or "known-failure" or "canceled")
+                && EstateService.ReleaseBuildEntry(provider, destination, request.Version, product, commit, settings, 2) is { } build) kinds.Add(build);
+            string[] statuses = recorded.Any(r => EstateModel.BodyString(r, "status") == "candidate") ? ["published"] : ["candidate"];
+            if (EstateService.ReleaseRecordEntry(product, request.Version, destination, commit, statuses, 1) is { } release) kinds.Add(release);
+            List<string> references = [current.Id, .. recorded.Select(r => r.Id)];
+            return new PresenceSessionPlan { Action = "release observe", Identity = $"release observe:{product}:{request.Version}", Kinds = kinds, References = references };
+        }
+
+        static string? Text(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    });
+
     private (ReleasePolicyAssessment Assessment, List<FindingDto> Objections, List<string> Compared, long BasisBytes) Admission(EstateModel model,
         ReleaseSubmitRequest request, string? commit, ProviderDescriptor provider, string destination, JsonObject body, string? previous, bool probe = true, IReadOnlyList<RecordReference>? excluded = null)
     {
@@ -309,7 +365,10 @@ internal sealed partial class ReleaseCoordinationService(
         ReleasePolicyAssessment admitted;
         // Every record the submission signs with presence is announced before the first prompt (FIX-124).
         bool withPresence = !checkOnly && recordAccess.SignsWithPresence(prepared, request.By);
-        using IDisposable? counted = checkOnly ? null : Presence.Action("release submit " + request.Version, withPresence ? SubmitPresence(prepared, request.Version) : null);
+        // From 0.9.4 (ID-16) the same submission composes its presence session's list: the release gate's checkpoint and the release build's
+        // records, by kind. A submission whose ref is no commit lists no release build, and its signatures keep one check each.
+        using IDisposable? counted = checkOnly ? null : Presence.Action("release submit " + request.Version, withPresence ? SubmitPresence(prepared, request.Version) : null,
+            SubmitSession(request, providerId, destination, identity, releaseCommit, settings));
         // All gates run before the durable claim. Resolving a provider ref is not part of admission.
         lock (gate)
         {
@@ -367,6 +426,8 @@ internal sealed partial class ReleaseCoordinationService(
             Retain(first.Assessment, first.Compared, claimBody, excluded, basisEvidence);
             if (!first.Assessment.HasSameInputsAndFindings(admitted)) Retain(admitted, fresh.Compared, claimBody, excluded, basisEvidence);
             AddDocuments(claimBody, fresh.Compared);
+            // The intent is the last record signed before the dispatch, which runs within its two-minute bound: the session must outlast it.
+            recordAccess.Sessions?.EffectAhead(PresenceSessionService.EffectDeadline);
             WriteOutcome claim = recordAccess.WriteLocked(new("operation", request.By, Element(claimBody), new("product", request.Product, null), current?.Id, now()), session.Load());
             if (!claim.Ok) return ReleaseProblem(identity, status ?? "not-started", claim.Problem!) with { Policies = admitted.View, BasisEvidence = basisEvidence };
             previousId = claim.Written!.Id;
@@ -431,6 +492,7 @@ internal sealed partial class ReleaseCoordinationService(
                     if (withPresence)
                         Presence.Revise([ReleaseOperation(request.Version, "uncertain"), ReleaseOperation(request.Version, "dispatched")],
                             "the admission basis changed before dispatch, so the reserved intent is recorded again first");
+                    recordAccess.Sessions?.EffectAhead(PresenceSessionService.EffectDeadline);
                     WriteOutcome checkedClaim = recordAccess.WriteLocked(new("operation", request.By, Element(checkedBody), new("product", request.Product, null), previousId, now()), currentModel);
                     if (!checkedClaim.Ok) return ReleaseProblem(identity, "not-started", checkedClaim.Problem!) with { Policies = admitted.View, BasisEvidence = basisEvidence };
                     previousId = checkedClaim.Written!.Id;
@@ -500,8 +562,9 @@ internal sealed partial class ReleaseCoordinationService(
         JsonElement target;
         string product;
         RecordWritten? recovered = null;
-        // Every record the observation signs with presence is announced before the first prompt, once the path is known (FIX-124).
-        using IDisposable counted = Presence.Action("release observe " + request.Version);
+        // Every record the observation signs with presence is announced before the first prompt, once the path is known (FIX-124). From
+        // 0.9.4 (ID-16) it composes its presence session's list: the release build's revisions and the release record, by kind.
+        using IDisposable counted = Presence.Action("release observe " + request.Version, null, request.Withdrawal is null && request.Cancel is null ? ObserveSession(request) : null);
         bool withPresence;
         lock (gate)
         {

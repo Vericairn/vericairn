@@ -49,6 +49,8 @@ public sealed class LostSupervisorSettlementTests
         {
             Write(lost, live.Supervisor, live.Harness, live.Heartbeat, tokens: 1200);
             string? message = Act(run, lost, path);
+            // A startup that stores no settlement judges the estate once for both of its passes (FIX-136).
+            if (path == "startup") Assert.Equal((1, 1), (run.Service.Session.Loads, run.Service.StartupJudgments));
             Assert.True(run.Row(lost.Run).Status == "dispatched", live.Case);
             Assert.Equal(2, Revisions(run, lost.Run));
             if (message is not null)
@@ -58,6 +60,8 @@ public sealed class LostSupervisorSettlementTests
 
         Write(lost, lost.Supervisor, harness, TimeSpan.FromMinutes(3), tokens: 1200);
         string? settledMessage = Act(run, lost, path);
+        // One that stores a settlement judges the estate again for its attention pass, which so reads what the settlement wrote.
+        if (path == "startup") Assert.Equal(2, run.Service.StartupJudgments);
         if (settledMessage is not null) Assert.Contains("exited without observation", settledMessage, StringComparison.Ordinal);
 
         RunRow row = run.Row(lost.Run);

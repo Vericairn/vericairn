@@ -22,5 +22,6 @@ internal sealed class WorkCommand : Command
         Subcommands.Add(new WorkAmendCommand(context));
         Subcommands.Add(new WorkTakeoverCommand(context));
         Subcommands.Add(new WorkObserveCommand(context));
+        Subcommands.Add(new WorkOverlapCommand(context));
     }
 }

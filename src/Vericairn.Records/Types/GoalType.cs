@@ -49,8 +49,8 @@ public sealed class GoalType : IRecordType
         new("roster", "ulid", false, "The roster record whose roles it uses; the estate's current roster otherwise.", 2),
         new("roles", "object[]", false, "Role overrides for this goal: role, principals in order of preference, optional note.", 2),
         new("budget", "object", true, "Caps by unit, granted by the sponsor's activation; wallMinutes and attemptsPerStep are required. Units: " + Caps.Units + ".", 2),
-        new("plan", "object", true, "policy (proposed-by-planner|given), approval (sponsor-approves|self-approves-ordinary), and workOrders (ulid[]) for a given plan. From format 3, a run's plan adds flow: pin {id, version, hash} of a template of kind flow, subject (each field the flow's subject declares: a record {type, id, hash?}, a text, or a list of item names), optional options (flow options and step.<key> on|off for optional steps, the goal's own configuration, narrower than template-defaults) and optional until (the step the run ends at); a run's plan is given, with exactly one ordinary work order, and each step is an assignment of it naming the step.", 2),
-        new("limits", "object", false, "consecutiveFailures (a positive integer): for a run of a flow, goal next and goal step hold the run for its sponsor's answer after that many failed steps in a row; otherwise, like deadline (a timestamp), validated and recorded but not yet enforced. stallSeconds (event-stream silence limit, 1–86400 seconds) and watch (bounded rate and loop thresholds) override the roster and launcher defaults, enforced by the worker.", 2),
+        new("plan", "object", true, "policy (proposed-by-planner|given), approval (sponsor-approves|self-approves-ordinary), and workOrders (ulid[]) for a given plan. From format 3, a run's plan adds flow: pin {id, version, hash} of a template of kind flow, subject (each field the flow's subject declares: a record {type, id, hash?}, a text, or a list of item names), optional options (flow options and step.<key> on|off for optional steps, the goal's own configuration, narrower than template-defaults) and optional until (the step the run ends at); a run's plan is given, with exactly one ordinary work order, and each step is an assignment of it naming the step. From 0.9.4, a stewardship goal's plan may instead carry standing, a standing agent: pin {id, version, hash} of a flow that declares its trigger kinds and one routed work step, subject (as a run's), triggers (each with its own key and kind: schedule {unit days|months, every, firstAt}, duty {policy, rule}, event {recordType, fields?, roles?}, condition {record: a record predicate}, or request), period (UTC-anchored caps: unit days|months, every?, runs, wallMinutes, and tokens and currency where the budget caps them; the budget is then each run's caps), until (when it returns to its sponsor), optional awaitingReview (the results awaiting review that defer its dispatch, three when absent) and optional runsOn (the dispatching runtime's identity public-key hash); each occurrence is an assignment of its one ordinary work order naming the occurrence. A reader lacking standing shows the goal and dispatches none of it.", 2),
+        new("limits", "object", false, "consecutiveFailures (a positive integer): for a run of a flow, goal next and goal step hold the run for its sponsor's answer after that many failed steps in a row; from 0.9.4, a standing agent pauses with an ask after that many failed runs in a row, three when it sets none; otherwise, like deadline (a timestamp), validated and recorded but not yet enforced. stallSeconds (event-stream silence limit, 1–86400 seconds) and watch (bounded rate and loop thresholds) override the roster and launcher defaults, enforced by the worker.", 2),
         new("inputs", "reference[]", true, "Decisions, work orders and designs it builds on: {type, id, hash?}; may be empty.", 2),
         new("progressRequest", "object", false, "Requested progress for every step: types, statusText and cadence. Replaces the estate and roster-entry request; an assignment brief may replace it.", 3),
     ];
@@ -64,7 +64,7 @@ public sealed class GoalType : IRecordType
         body.Text("objective", true, 8000);
         IReadOnlyList<BodyReader>? completion = body.NestedArray("completion", true, allowEmpty: false);
         body.StringArray("constraints", true, allowEmpty: true, maxItemLength: 2000);
-        body.Enum("kind", true, Kinds);
+        string? kind = body.Enum("kind", true, Kinds);
         string? sponsor = body.Ulid("sponsor", true);
         string? delegated = body.Ulid("delegate", false);
         string? roster = body.Ulid("roster", false);
@@ -104,6 +104,7 @@ public sealed class GoalType : IRecordType
             plan.Enum("approval", true, Approvals);
             IReadOnlyList<string>? orders = plan.StringArray("workOrders", policy == "given", allowEmpty: policy != "given", maxItemLength: Identity.Ulid.Length);
             BodyReader? flow = plan.Since(3, "flow") ? plan.Nested("flow", false) : null;
+            BodyReader? standing = plan.Since(3, "standing") ? plan.Nested("standing", false) : null;
             plan.NoOtherKeys();
             foreach (string id in orders ?? [])
             {
@@ -114,6 +115,13 @@ public sealed class GoalType : IRecordType
             if (flow is not null)
             {
                 FlowRuns.Validate(context, flow, policy, orders);
+            }
+
+            // From 0.9.4 (GOAL-07; design/standing-agents.md § 11), additive in format 3: a reader lacking standing shows the goal and
+            // dispatches none of it.
+            if (standing is not null)
+            {
+                StandingAgents.Validate(context, standing, kind, policy, orders, flow is not null);
             }
         }
 
@@ -195,7 +203,7 @@ public sealed class GoalType : IRecordType
     }
 
     /// <summary>A record predicate (the estate's design/goals.md § 5): type, subject, product, field equalities, derived state, and bounds.</summary>
-    private static void Predicate(ValidationContext context, BodyReader predicate)
+    internal static void Predicate(ValidationContext context, BodyReader predicate)
     {
         string? type = predicate.Text("type", true, 100, Patterns.Slug, "a record type");
         if (type is not null && RecordTypeRegistry.Find(type) is null)

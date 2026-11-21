@@ -51,12 +51,15 @@ public sealed class ResultType : IRecordType
         new("provenance", "object", false, ProducedBy.Description, 3),
         new("progressClaim", "object", false, "The last agent claim retained as context: phase, note, at, optional typed progress and statusText. Never evidence of completion or acceptance.", 3),
         new("duties", "object[]", false, "Exact originating policy, rule, tagged occurrence, examined subject, scope, coverage and supporting proof bindings. This is a signed claim, not acceptance.", 3),
+        new("change", "object", false, "From 0.9.4, the change the result names: repository (the identity of the estate or of a repository resource), base and head (40-hex commits) and target (the branch it integrates into). The runtime derives its changed paths from the registered clone, without rename detection; a missing commit makes them unavailable, never empty. Its assignment is released once the change is integrated. A reader lacking the field refuses the result.", 3),
+        new("decision", "object", false, "From 0.9.4, the decision of a run's decision step, recorded by the principal holding its assignment: paths (the path or paths of the step's transition it takes), reasons, and evidence, each {type, id, hash} of an exact record. Only a completed result of an assignment of a decision step whose role decides its transition carries it; a decision the flow requires of a person, or one never delegated, is a person's. Distinct from the estate's decision records, and it performs nothing reserved. A reader lacking the field shows the record and reads the step undecided.", 3),
     ];
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        DispatchAuthority.RefuseWork(context);
         BodyReader body = context.Body;
         DutyRecords.Results(context);
         string? outcome = body.Enum("outcome", true, Outcomes);
@@ -112,6 +115,8 @@ public sealed class ResultType : IRecordType
             claim.NoOtherKeys();
         }
         ProducedBy.Read(context, body);
+        Change(context, body);
+        FlowDecisions.Validate(context, body, outcome);
         body.NoOtherKeys();
         if (outcome == "completed" && failedCheck)
         {
@@ -150,6 +155,37 @@ public sealed class ResultType : IRecordType
         {
             context.Error("result.duplicate", "Another current result exists for the same attempt; a corrected result supersedes the earlier one instead of standing beside it.");
         }
+    }
+
+    /// <summary>The longest target branch name a change names.</summary>
+    internal const int MaxTargetLength = 200;
+
+    /// <summary>
+    /// From 0.9.4 (CODE-73; the estate's design/measured-work.md §§ 5 and 6), the optional change a result names, additive in format 3:
+    /// the repository by its identity, the base and head commits and the target branch.
+    /// </summary>
+    private static void Change(ValidationContext context, BodyReader body)
+    {
+        if (!body.Since(3, "change") || body.Nested("change", false) is not BodyReader change)
+        {
+            return;
+        }
+
+        string? repository = change.Ulid("repository", true);
+        if (repository is not null && !AssignmentOverlaps.IsRepository(context.Model, repository))
+        {
+            change.Error("result.change", "repository", "The repository is the identity of the estate or of a repository resource: the first record of its lineage.");
+        }
+
+        change.Text("base", true, 40, Patterns.Commit, "a 40-character lower-case hex commit id");
+        change.Text("head", true, 40, Patterns.Commit, "a 40-character lower-case hex commit id");
+        string? target = change.Text("target", true, MaxTargetLength);
+        if (target is not null && !AssignmentOverlaps.IsBranch(target))
+        {
+            change.Error("result.change", "target", "The target is a branch name: no whitespace, control character, '..', '~', '^', ':', '?', '*', '[', '\\' or leading '-', and no leading, trailing or doubled slash.");
+        }
+
+        change.NoOtherKeys();
     }
 
     /// <summary>

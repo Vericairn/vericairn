@@ -50,6 +50,7 @@ internal static class RecordDescriptions
         {
             string since = field.SinceFormat > RecordFormats.First ? $"[format {field.SinceFormat}] " : string.Empty;
             context.Output.WriteLine($"  {field.Name,-18} {field.Kind,-28} {(field.Required ? "required" : "optional"),-9} {since}{field.Description}");
+            Members(context, field, "    ");
         }
 
         if (found.Fields.Any(f => f.Kind == FieldKinds.Timestamp))
@@ -87,8 +88,34 @@ internal static class RecordDescriptions
             subjectType = found.SubjectType,
             subjectHashRequired = found.SubjectHashRequired,
             sinceFormat = found.SinceFormat,
-            fields = found.Fields.Select(f => new { name = f.Name, kind = f.Kind, required = f.Required, sinceFormat = f.SinceFormat, description = f.Description }),
+            fields = found.Fields.Select(Described),
         }, ProtocolJson.Options));
         return Clean;
+    }
+
+    // From 0.9.4 (DOCS-46), a field of fixed members lists each under it, indented, with its empty-array rule and limits.
+    private static void Members(CommandContext context, FieldDescription field, string indent)
+    {
+        foreach (FieldDescription member in field.Members)
+        {
+            string since = member.SinceFormat > RecordFormats.First ? $"[format {member.SinceFormat}] " : string.Empty;
+            string rules = string.Join("; ", new[] { member.EmptyAllowed switch { true => "may be empty", false => "never empty", null => null }, member.Limits }.OfType<string>());
+            string label = field.Name + "." + member.Name;
+            context.Output.WriteLine($"{indent}{label,-24} {member.Kind,-22} {(member.Required ? "required" : "optional"),-9} {since}{member.Description}{(rules.Length == 0 ? string.Empty : " (" + rules + ")")}");
+            Members(context, member with { Name = field.Name + "." + member.Name }, indent + "  ");
+        }
+    }
+
+    // A field under stable names; from 0.9.4 (DOCS-46) a field of fixed members adds members, each with emptyAllowed and limits when they apply.
+    private static Dictionary<string, object?> Described(FieldDescription field)
+    {
+        var described = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["name"] = field.Name, ["kind"] = field.Kind, ["required"] = field.Required, ["sinceFormat"] = field.SinceFormat, ["description"] = field.Description,
+        };
+        if (field.EmptyAllowed is bool empty) described["emptyAllowed"] = empty;
+        if (field.Limits is not null) described["limits"] = field.Limits;
+        if (field.Members.Count > 0) described["members"] = field.Members.Select(Described).ToList();
+        return described;
     }
 }

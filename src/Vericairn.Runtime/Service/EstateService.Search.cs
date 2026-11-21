@@ -57,8 +57,8 @@ public sealed partial class EstateService
     {
         lock (gate)
         {
-            IReadOnlyList<RecordFile> files = session.Files();
-            return SearchSources(session.LoadFiles(files), files, [], searches, null).Selections;
+            (EstateModel model, IReadOnlyList<RecordFile> files) = session.LoadWithFiles();
+            return SearchSources(model, files, [], searches, null).Selections;
         }
     }
 
@@ -545,7 +545,7 @@ public sealed partial class EstateService
             string key = "copy:" + ContentHash.Sha256(Encoding.UTF8.GetBytes(string.Join('\n', earlier.Select(f => f.Path))));
             if (!rebuilt.TryGetValue(key, out var copyBasis))
             {
-                EstateModel earlierModel = EstateLoader.Load(session.Root, earlier);
+                EstateModel earlierModel = EstateLoader.Load(session.Root, earlier, null, context: session.Judgments);
                 ISourceAdapter? history = Providers.Source("git");
                 var earlierSnapshot = new SearchSnapshot(earlierModel, earlier.ToDictionary(f => f.Path, StringComparer.Ordinal), SearchSnapshot.CurrentPins(earlierModel),
                     pin => ContextSelection.LocalOriginal(session.Root, pin.Path, pin.ByteHash, history, pin.HashMode));
@@ -569,7 +569,7 @@ public sealed partial class EstateService
                 var recordFiles = tree.Where(f => f.Path.StartsWith("records/", StringComparison.Ordinal) && f.Path.EndsWith(".json", StringComparison.Ordinal))
                     .Select(f => new RecordFile(f.Path, f.Bytes)).ToList();
                 var documents = tree.Where(f => !f.Path.StartsWith("records/", StringComparison.Ordinal)).ToDictionary(f => f.Path, f => f.Bytes, StringComparer.Ordinal);
-                EstateModel then = EstateLoader.Load(session.Root, recordFiles);
+                EstateModel then = EstateLoader.Load(session.Root, recordFiles, null, context: session.Judgments);
                 var thenSnapshot = new SearchSnapshot(then, recordFiles.ToDictionary(f => f.Path, StringComparer.Ordinal), SearchSnapshot.CurrentPins(then), pin => CommittedOriginal(documents, pin));
                 KeywordIndex past = KeywordIndex.Open(null);
                 commitBasis = (past, thenSnapshot);

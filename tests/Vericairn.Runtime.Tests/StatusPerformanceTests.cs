@@ -63,22 +63,67 @@ public sealed class StatusPerformanceTests(ITestOutputHelper output)
 }
 
 // History, not repeated copies of one status: parallel work, multiple attempts, exact reviews/acceptances,
-// revised orders and documents, answered and waiting asks, and policies that inspect that history.
+// revised orders and documents, answered and waiting asks, and policies that inspect that history. From 0.9.4 it can also hold goals
+// whose work names them, an external operation for each work order and living documents declared over its documents (FIX-136).
 internal sealed class GeneratedStatusEstate : IDisposable
 {
     private readonly PolicyFixture fixture = new();
     internal string Root => fixture.Estate.Root;
 
-    internal GeneratedStatusEstate(int orders)
+    internal GeneratedStatusEstate(int orders, int goals = 0, bool operations = false, bool livingDocuments = false, int carriers = 0)
     {
         var documents = new RecordEnvelope?[32];
+        // From 0.9.4 (FIX-149): release carriers shaped like the first-party estate's, each with work placed in it and no input work orders.
+        RecordEnvelope? product = carriers == 0 ? null : fixture.Add("product", new()
+        {
+            ["name"] = "Generated", ["slug"] = "generated", ["summary"] = "A generated product.",
+            ["editions"] = new JsonArray(new JsonObject { ["name"] = "Community", ["slug"] = "community", ["summary"] = "Free." }),
+            ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "Command line." }),
+        });
+        RecordEnvelope[] releases = [.. Enumerable.Range(0, carriers).Select(c => fixture.Add("work-order", new()
+        {
+            ["key"] = "REL-" + c.ToString("D3", CultureInfo.InvariantCulture), ["kind"] = "ordinary", ["title"] = "Generated release",
+            ["intent"] = "Release the generated work.", ["scope"] = new JsonArray("test fixtures"), ["exitQuestion"] = "Is it released?",
+            ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("a release"),
+        }))];
+        RecordEnvelope[] planned = [.. Enumerable.Range(0, goals).Select(g => fixture.Add("goal", new()
+        {
+            ["title"] = "Generated goal " + g.ToString(CultureInfo.InvariantCulture), ["objective"] = "Finish the generated work.",
+            ["completion"] = new JsonArray(new JsonObject { ["evidence"] = "The work is accepted.", ["check"] = "Read the acceptances." }),
+            ["constraints"] = new JsonArray(), ["kind"] = "finite", ["sponsor"] = fixture.Estate.OperatorId,
+            ["budget"] = new JsonObject { ["wallMinutes"] = 600, ["attemptsPerStep"] = 5, ["concurrency"] = 5 },
+            ["plan"] = new JsonObject { ["policy"] = "proposed-by-planner", ["approval"] = "sponsor-approves" }, ["inputs"] = new JsonArray(),
+        }))];
+        if (livingDocuments)
+        {
+            for (int slot = 0; slot < documents.Length; slot++)
+            {
+                fixture.Add("living-document", new()
+                {
+                    ["path"] = "docs/history-" + slot.ToString(CultureInfo.InvariantCulture) + ".md", ["title"] = "Generated history", ["kind"] = "authored",
+                    ["source"] = "estate-file", ["triggers"] = new JsonArray(new JsonObject { ["on"] = "decision", ["level"] = "remind" }), ["summary"] = "Follows the decisions.",
+                });
+            }
+        }
+
         for (int i = 0; i < orders; i++)
         {
-            RecordEnvelope order = fixture.Add("work-order", new()
+            var body = new JsonObject
             {
                 ["key"] = "TASK-" + i.ToString("D5", CultureInfo.InvariantCulture), ["kind"] = "ordinary", ["title"] = "Generated work",
                 ["intent"] = "Exercise a growing history.", ["scope"] = new JsonArray("test fixtures"), ["exitQuestion"] = "Is the result ready?",
-                ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("checked result"),
+                ["inputs"] = planned.Length == 0 ? new JsonArray() : new JsonArray(new JsonObject { ["type"] = "goal", ["id"] = planned[i % planned.Length].Id }),
+                ["deliverables"] = new JsonArray("checked result"),
+            };
+            if (releases.Length > 0) body["placement"] = new JsonObject
+            {
+                ["kind"] = "release", ["carrier"] = releases[i % releases.Length].Id, ["product"] = product!.Id, ["version"] = "1.0." + (i % releases.Length).ToString(CultureInfo.InvariantCulture),
+            };
+            RecordEnvelope order = fixture.Add("work-order", body);
+            if (operations) fixture.Add("operation", new()
+            {
+                ["provider"] = "example", ["action"] = "dispatch-build", ["identity"] = "example:build-" + i.ToString(CultureInfo.InvariantCulture), ["intent"] = "Build the work.",
+                ["target"] = new JsonObject { ["repository"] = "Example/example" }, ["status"] = "not-started", ["evidence"] = new JsonArray(),
             });
             if (i % 5 == 0) order = fixture.Add("work-order", PolicyFixture.Body(order), supersedes: order.Id);
             fixture.Add("work-status", new() { ["status"] = i % 4 == 0 ? "planned" : "active", ["note"] = "Recorded work state." }, subject: order.Reference);
@@ -105,10 +150,11 @@ internal sealed class GeneratedStatusEstate : IDisposable
             }, builder: true, subject: order.Reference);
             JsonObject decision = fixture.DecisionBody();
             if (i % 20 != 0) decision["answers"] = new JsonArray(ask.Id);
-            fixture.Add("decision", decision);
-
             int slot = i % documents.Length;
             string path = "docs/history-" + slot.ToString(CultureInfo.InvariantCulture) + ".md";
+            if (livingDocuments && i % 7 == 0) decision["documents"] = new JsonArray(path);
+            fixture.Add("decision", decision);
+
             string prose = "# Generated history\n\nRecorded change " + i.ToString(CultureInfo.InvariantCulture) + ".\n";
             fixture.Estate.WriteFile(path, prose);
             documents[slot] = fixture.Add("document-revision", new()

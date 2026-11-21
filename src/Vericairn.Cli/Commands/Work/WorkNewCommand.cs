@@ -9,7 +9,7 @@ namespace Vericairn.Cli;
 internal sealed class WorkNewCommand : Command
 {
     public WorkNewCommand(CommandContext context)
-        : base("new", "Create a work order from flags, validate the estate with it, and sign as the author.")
+        : base("new", "Create a work order from flags, or from 0.9.4 from a possibility's draft, validate the estate with it, and sign as the author.")
     {
         var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
         // Body requirements belong to the work-order validator, so refusals match records new work-order.
@@ -22,6 +22,7 @@ internal sealed class WorkNewCommand : Command
         var kindOption = new Option<string?>("--kind") { Description = "ordinary or milestone.", DefaultValueFactory = _ => "ordinary" };
         var afterOption = new Option<string[]>("--after") { Description = "Work-order record id this work starts after; repeat for each dependency." };
         var inputOption = new Option<string[]>("--input") { Description = "Input reference as type:id; repeat for each input." };
+        var possibilityOption = new Option<string?>("--from-possibility") { Description = "From 0.9.4: adopt an open possibility, by any revision's id: its draft work order supplies every field left out, it joins the inputs, and its revision adopting it as the new work order is stored with it. A principal other than its author adopts it, whoever raised it, and no agent tied to its standing agent (named by an assignment of its work or by a revision of its role); a held finding's work order is held from disclosure too." };
         Options.Add(byOption);
         Options.Add(keyOption);
         Options.Add(titleOption);
@@ -32,6 +33,7 @@ internal sealed class WorkNewCommand : Command
         Options.Add(kindOption);
         Options.Add(afterOption);
         Options.Add(inputOption);
+        Options.Add(possibilityOption);
         SetAction(parseResult => context.WithApi(parseResult.GetValue(context.EstateOption)!, api =>
             context.ReportOutcome(api.WorkNew(new WorkNewRequest(
                 parseResult.GetValue(byOption)!,
@@ -43,6 +45,7 @@ internal sealed class WorkNewCommand : Command
                 parseResult.GetValue(deliverableOption),
                 parseResult.GetValue(kindOption),
                 parseResult.GetValue(afterOption) is { Length: > 0 } after ? after : null,
-                parseResult.GetValue(inputOption))), parseResult.GetValue(context.JsonOption))));
+                parseResult.GetValue(inputOption))
+            { FromPossibility = parseResult.GetValue(possibilityOption) }), parseResult.GetValue(context.JsonOption))));
     }
 }

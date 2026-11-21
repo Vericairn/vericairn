@@ -80,14 +80,73 @@ allowances are its own, each for a value that is not the credential its rule fin
 - for Kubernetes secrets, template or empty values, and kind and data in separate
   documents;
 - for NuGet configuration passwords, environment variable references;
-- for Vault service tokens, a value without a digit.
+- for Vault service tokens, a value without a digit;
+- from 0.9.4, for every rule, a line of a history checkpoint's inventory in the
+  estate's objects, as the next paragraph describes.
+
+From 0.9.4 (FIX-150, decision 01M7N48B8CGR54YTJZMAMJTYGH), the scan passes a
+history checkpoint's inventory whatever its record ids contain. An inventory
+lists each record by its path under `records/` beside its hash, and a random
+record id can spell a key word such as `KEY` just before the hash, which
+gitleaks' generic key rule reads as a key's name and value; before 0.9.4 about
+one checkpoint push in five was refused for it. The allowance passes a line
+only when it has exactly an inventory line's shape, with nothing before or after
+it: one of the record types the estate format defines, which `vericairn records
+describe` lists, such as `decision` or `work-order`; a month such as `2026-11`; a
+record id of 26 digits and upper-case letters, the first 0 to 7, and `.json`;
+one space; then `sha256:` and 64 lower-case hexadecimal digits. Only the hash
+position passes a value: the type, month, id and `.json` positions take only
+those fixed names, digits and a record id's characters, in which no rule finds a
+credential, so a credential in any of them breaks the line's shape and is found,
+and a line naming a record type this release does not define is scanned as
+before. The allowance holds only in a file named by 64 lower-case hexadecimal
+digits directly in the `objects/` folder at the repository's root. The scanner
+cannot tell from the commits which objects a checkpoint names, so it applies the
+allowance only when every such file that the pushed commits add or change, and
+that holds a line of that shape, holds nothing but such lines. If one mixes inventory lines with any other line, or
+the scanner cannot read those files, the whole range is scanned without the
+allowance, as before 0.9.4. Every other line and every other path is scanned
+exactly as before, and no repository exception, allow comment or ignore file is
+honored. A value in an inventory line's hash position passes, whatever it is:
+the allowance trusts the shape, not the checkpoint's signature, which the
+estate's checks verify. The recorded scan's version names the configuration the
+scan applied, the configuration with this allowance or the same configuration
+without it, each by its own SHA-256.
 
 The recorded scan's version names gitleaks' version and the configuration's SHA-256,
 for example `8.30.1; rules sha256:…`, so each scan identifies the rules it applied.
-Merge diffs are included; external diff commands and text conversion are disabled.
+Each merge commit of the range is read as its patch against its first parent,
+which holds every line the merge adds: its own, written by hand or in resolving a
+conflict, and those it brings in from its other parents, even from one outside
+the range, such as the target branch merged into the pushed branch. Each commit
+of another parent that the range holds is read with its own patch. From 0.9.4
+(FIX-150), every git process of the scan reads merges that way whatever the
+clone's `log.diffMerges` setting. Before 0.9.4 that setting chose the form: by
+default a merge was read against each of its parents, `off` and `none` hid its
+lines from the scan, gitleaks found nothing in the `combined` and
+`dense-combined` forms, which it cannot parse, and `remerge` skips a merge of
+more than two parents. External diff commands and text conversion are disabled.
 Text diffs are requested even for paths marked as binary by repository attributes.
 The range's readability is checked independently before
-and after the scan. The report contains only a finding count. The recorded scan
+and after the scan. From 0.9.4 (FIX-150), the scanner also reads, before
+gitleaks runs, every commit, tree and blob the push carries, checking each
+against its id, and the range's patches exactly as gitleaks reads them, the
+parents' sides included. If either read fails or stops early, at a missing,
+corrupt or truncated object, or gitleaks reports that its own read of the history
+failed, which it does without changing its exit status, the scan is incomplete
+and the push refuses. Before 0.9.4 such an object stopped gitleaks' read with no
+finding, and the scan passed even when an older commit of the range held a
+secret. Every git process of the scan ignores the clone's color, root commit,
+signature and merge display settings and git's trace variables, each of which
+changes what gitleaks reads. It also drops every git variable that the push's
+own git processes drop, taken from the same list: those naming another
+repository, work tree, index, object store, shallow file, grafts file or
+replacement references, those limiting where git looks for a repository, and on
+Windows those redirecting git's standard streams; and every configuration
+variable, keeping only the settings the scan forces. Before 0.9.4 a shallow file
+or another repository named in the pushing process's environment could show git
+a shorter history than the push carries, so that a commit of the push went
+unscanned. The report contains only a finding count. The recorded scan
 contains the tool, version, range, verdict and count, never matched text, findings
 or process output. Findings, an unavailable scanner, a timeout, an unreadable
 range or an incomplete report refuse the push.
@@ -117,6 +176,19 @@ gh uses the user's own configuration and login. The runtime has no token
 parameter, does not request a token, and does not retain authentication
 output.
 
+From 0.9.4 (CODE-81), every git process of a checked push, the adapter's reads
+and pushes and the secret scan's reads, gitleaks' own git included, reads
+grafts from a file that never exists, so a clone's `info/grafts` cannot
+misreport a commit's parents. The scan's reads also ignore replace objects, the
+commit-graph, reachability bitmaps and the multi-pack-index, as the adapter's
+reads already did. Before 0.9.4 a graft in the clone could make the
+fast-forward check accept a remote head that was not an ancestor, so the leased
+push overwrote the remote branch, and could hide a commit of the range from the
+scan, the message check and the disclosure hold while the push, which reads the
+real objects, delivered it. A clone used with `changes push` before 0.9.4 can be
+checked for an `info/grafts` file, and each pushed branch compared with the head
+Vericairn recorded.
+
 ### Disclosure holds (0.9.0)
 
 A work order can carry `"disclosure": "held"`, for example a security fix whose nature must not be public before its release.
@@ -128,9 +200,108 @@ after Unicode NFKC normalization and full case folding computed by Vericairn its
 on every platform and build. A phrase shorter than 24 characters, or one another current work order also uses, such as a standard closing step,
 is not matched on its own. The check applies whoever authored the commits.
 
-The hold ends when the release that carries the work order (its placement) is recorded as published with its documentation
-set; what that release discloses stays the operator's choice. A push to a private repository is not held. If a hold is in
-force and the push adapter cannot read the push's text, the push is refused.
+From 0.9.4 (FIX-137, decision 01M7PNCMA3V2ZQG2ZK9V7NBEJK), the git adapter reads every message and every added line of every
+commit the push carries that its target branch does not already hold, whatever the clone's settings and attributes, or reads
+nothing and the push is refused. Each commit's own diff against its parent is read, so text one commit adds and a later one
+removes, which the push still publishes in its history, is read. The diffs are read by git's plumbing, which no log or diff
+display setting of the clone changes: a root commit, such as one an unrelated history brings in by a merge, is read against
+the empty tree whatever `log.showRoot` says, and a commit other than a merge whose tree differs from its parent's, or a root
+whose tree is not empty, must show at least one file, judged from the trees, or the read refuses. The patches have a bound of
+their own, 64 MiB for them all together, several times a release's documentation set; a push beyond it is refused while a
+hold is in force. A merge commit's own lines are read from its dense combined diff: a line added against every one of its
+parents is the merge's own text, read even when a later commit removes it, while a line one parent already holds was added by
+a commit of that parent, read on its own or already in the repository. Messages are read in UTF-8 whatever the clone's
+`i18n.logOutputEncoding`, without notes or mailmap. Every file is read as text: neither a NUL byte, a `-diff` or binary
+attribute, committed or the clone's own, nor a `core.bigFileThreshold` below the file's size turns its added lines into
+"Binary files differ"; renames and copies are not detected, so a moved file's lines read as added. A diff line is a file
+header only before the first hunk of its file, so an added line whose own text begins with `++` is read. An added line
+holding NUL characters, as each line of a UTF-16 or UTF-32 file does when read as UTF-8, is read again with them removed, so
+held text stored in such a file is matched by its letters; text without NUL characters reads only as itself, so this second
+reading adds nothing for an ordinary file. Before 0.9.4 each of those let held text through: text a later commit of the push
+removed, the added lines of a file git called binary, an added line beginning with `++`, held text in a UTF-16 or UTF-32
+file, and every message under a clone that set its log output encoding to UTF-16.
+
+The hold ends when the release that carries the work order (its placement) is recorded as published; what that release
+discloses stays the operator's choice. A push to a private repository is not held. If a hold is in force and the push adapter
+cannot read the push's text, the push is refused.
+
+From 0.9.4 (FIX-137), one push may carry the held text before then: the carrying release's documentation set, with the held
+fixes it carries, once the operator has approved that release's Security section for the held work order, as the release
+procedure merges the set just before the candidate's submission. Every other push that would add the held text stays refused
+until the release is published, including one made after that approval and one that carries the set beside other changes.
+Before 0.9.4 the hold ended only at publication, so a checked push refused the release's own documentation set when it carried
+a held fix's guide text.
+
+- **The set, unmerged.** The push must be a checked push of the product the release belongs to. Its head holds
+  `docs/releases/<version>/manifest.json`, a `vericairn.docs/1` manifest of the carrying release's version, and its target
+  branch's head holds none, as while the set's pull request is open.
+- **Nothing but the set and its held fixes.** Every commit the push carries that its target branch does not already hold is
+  either a held fix of that release, whose subject line begins with the key of a work order held and placed in that release and
+  a colon, exactly as the estate's commits are titled (`FIX-90: ...`), or changes documentation only. A held fix may change any
+  path; a mention of the key elsewhere, in another case or joined to more characters (`fix-90:`, `FIX-90_followup:`) is not a
+  held fix. Documentation is a Markdown, JSON or plain-text file under `docs/` outside any hidden directory, other than a
+  `global.json`, and the root's `README.md` and `llms.txt`, none of which can bring code into the build; and the root's
+  `Directory.Build.props`, which the release flow changes to set the new version, only when the head's file differs from the
+  target branch's file in nothing but the value of its one `<VersionPrefix>` line. A merge commit counts only for the paths
+  that differ from every one of its parents, so taking in the target adds nothing. A push that carries the manifest beside any
+  other change is not the set, whatever its branch; a version change with other build settings rides in a held fix or a
+  separate push.
+- **The approval.** The operator approves the Security section for each held work order in the forms the release practice
+  writes. The ask's subject is the release's carrier work order and its question begins exactly with
+  `Approve the Security section of <version>`, the version ending there (what follows cannot continue a version, so a question
+  about `9.9.90` or `9.9.9-rc.1` does not ask about `9.9.9`), for example
+  `Approve the Security section of 9.9.9 as drafted, covering FIX-90?`. The operator's decision answering it records, among
+  its effects, exactly `The Security section of <version> is approved for <key>.` for each held work order it covers, such
+  as `The Security section of 9.9.9 is approved for FIX-90.`, and names those work orders among the work orders it affects.
+  The decision must be decided and recorded after the held work order's current revision, and no ask about the carrier may
+  still wait, open or notified. An answer to any other question about the carrier, such as one that mentions the Security
+  section in passing, approves nothing; neither does a decision without that effect for the work order, such as one that
+  declines the section, nor one that does not name it, nor one made before the work order was last revised, such as before
+  it was placed in the release or marked held: ask the operator again. The forms are read, not the section's bytes, which
+  `insert --expected-hash` checks when the set is prepared.
+- **The reads.** The push adapter reads the manifest and `Directory.Build.props` at the head and the target head only,
+  without the clone's filters, and the carried commits' messages and paths separately, each within its own bound
+  (`IPushAdapter.FileText`, `CommitMessages` and `ChangedPaths`); paths are read only while an approval could let a set pass,
+  and exactly as git names them. An adapter that reads any of them not at all never lets a set pass, and a read that fails
+  refuses the push. A refusal of a push while such an approval stands says that only the push carrying the set, with nothing
+  but documentation and the release's held fixes, may carry the held text, and why this push is not it: no set or a merged
+  one, an unreadable read, a commit by its id that is not a held fix and changes more than documentation, or a build file
+  that changes more than the version.
+
+### Commit messages (0.9.4)
+
+From 0.9.4 (CODE-81), a checked push reads the message of every commit it carries that its target branch does not already
+hold, merge commits and trailers included, before anything is pushed, and matches it against the estate's [blocked
+terms](policies.md#blocked-terms-090), the same list and the same whole-term matching that records and generated documents
+meet. A match refuses the push, to any repository, public or not. Where an estate policy sets the level to `warn` ([commit
+messages](policies.md#commit-messages-094)), the push goes ahead, and its response and recorded evidence say which commits
+carried a term. A term only in a file's content is not this check's concern; the secret scan and the disclosure hold read the
+pushed lines. A commit the target branch already holds, as the remote reported its head when the push was prepared, is in the
+repository already: a branch that takes in a newer target, with its merge commits that carry no required trailer, is checked
+only for its own commits.
+
+An estate policy may also require an exact trailer line, such as a `Signed-off-by:` line, on every pushed commit. A commit
+whose closing paragraph lacks that exact line is refused, as is one whose closing paragraph carries the line's token with other
+text, an altered form of it; trailing whitespace and carriage returns do not count. The trailer is required whatever the level.
+The exact required line is exempt from the blocked terms, since the estate requires its text.
+
+The refusal names the commit and the estate policy whose list or trailer it concerns, by the policy's identity, and never the
+matched text or the trailer, so the operation that records the refusal never repeats a term. The push's operation records, as
+evidence, how many of its commits were checked and, at the `warn` level, the commits that carried a term and the policies
+that set the level. The push adapter reads the messages (`IPushAdapter.CommitMessages`); while the estate declares a blocked
+term or a required trailer, a push whose messages cannot be read, as with an adapter that does not implement it, is refused.
+With neither declared, no message is read.
+
+`changes merge` matches the message of the merge commit it would create against the same terms at the same level, before
+anything is merged: `Merge pull request #<number> from <owner>/<branch>`, then the pull request's title as the host reports
+it. While the estate declares a blocked term, the merge creates its merge commit with exactly that message, so the
+repository's default message, which may add the pull request's description, never replaces the message checked. A merge
+through a required merge queue cannot set the message, and the queue's merge commit may carry the pull request's description
+where the repository's setting adds it: the check then reads that message with the description, as the host reports both when
+the merge observes the pull request, and a pull request whose title or description cannot be observed is refused. A title or
+description edited after that observation, before the queue builds its merge commit, is not checked. The required trailer
+applies to the commits a push carries, not to the merge commit the host creates. `operator record` pushes and merges through
+the same checks, and its commit ends with the estate's required trailer lines, so its push meets the requirement.
 
 ## Merge and observe
 
