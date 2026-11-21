@@ -98,7 +98,8 @@ public sealed partial class EstateService
                     return new("denied", "Only an operator can close finished steps.", []);
                 if (requestDevice.Value is { Closed: false } device && Standing(current, device.Device)?.Principal != request.By)
                     return new("denied", "An operator command can act only for the requesting device's own principal.", []);
-                if (CloseModelProblem(current) is Problem invalid) return invalid;
+                // From 0.9.4 (FIX-159): the shared acting refusal names the estate's error before anything is signed or stored.
+                if (ActingRefusal.BeforeActing(current, "closing the selected steps") is Problem invalid) return invalid;
                 List<OperatorCloseItem> candidates = CloseCandidates(current);
                 if (request.All && candidates.Count != selection.Length) return CloseConflict();
                 foreach (OperatorCloseSelection expected in selection)

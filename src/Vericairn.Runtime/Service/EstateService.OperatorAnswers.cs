@@ -108,7 +108,7 @@ public sealed partial class EstateService
                 if (ActorRefusal(current, request.By) is Problem actor) return actor;
                 if (requestDevice.Value is { Closed: false } device && Standing(current, device.Device)?.Principal != request.By)
                     return new("denied", "An operator command can act only for the requesting device's own principal.", []);
-                if (CloseModelProblem(current) is Problem invalid) return invalid;
+                if (ActingRefusal.BeforeActing(current, "answering the selected asks") is Problem invalid) return invalid;
                 List<OperatorAnswerItem> candidates = AnswerCandidates(current, request.By);
                 if (request.All && candidates.Count != selection.Length) return AnswerConflict();
                 foreach (OperatorAnswerSelection expected in selection)

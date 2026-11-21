@@ -51,6 +51,23 @@ public sealed class OperatorRecordTests
         Assert.Equal(2, f.Remote.Memory.Effects);
     }
 
+    [Fact]
+    public void AnEstateReportingAnErrorRefusesTheActionNamingTheFindingBeforeAnyEffect()
+    {
+        using var f = new Fixture();
+        // An invalid record in the estate: from 0.9.4 (FIX-159) the shared acting refusal names it before anything is signed or pushed.
+        f.Estate.Add("work-order", f.Estate.OperatorId, "{}");
+        int before = f.Service.Session.Load().Records.Count;
+
+        OperatorRecordResponse result = f.Service.OperatorRecord(f.Request, TestContext.Current.CancellationToken);
+
+        Assert.False(result.Ok);
+        Assert.Contains("Refused before recording and merging the operator's record: the estate reports", result.Message, StringComparison.Ordinal);
+        Assert.Equal(before, f.Service.Session.Load().Records.Count);
+        Assert.Empty(f.Events);
+        Assert.Null(result.Record);
+    }
+
     [Theory]
     [InlineData("dirty")]
     [InlineData("checks")]

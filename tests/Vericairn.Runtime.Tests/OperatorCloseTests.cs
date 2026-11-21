@@ -340,4 +340,20 @@ public sealed class OperatorCloseTests
         Assert.Equal("conflict", refused.Problem?.Code);
         Assert.Empty(f.Estate.Load().OfType("acceptance"));
     }
+
+    [Fact]
+    public void AnEstateReportingAnErrorRefusesTheClosingNamingTheFinding()
+    {
+        using var f = new OperatorCloseFixture();
+        f.Add("STEP-1");
+        OperatorCloseRequest request = f.Request();
+        f.Estate.Add("work-order", f.Estate.OperatorId, "{}");
+
+        OperatorCloseResponse refused = f.Api.OperatorClose(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal("refused", refused.Problem?.Code);
+        Assert.StartsWith("Refused before closing the selected steps: the estate reports", refused.Problem!.Message, StringComparison.Ordinal);
+        Assert.NotEmpty(refused.Problem.Findings);
+        Assert.Empty(f.Estate.Load().OfType("acceptance"));
+    }
 }
