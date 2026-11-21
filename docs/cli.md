@@ -143,7 +143,8 @@ exit questions, result summaries, passing-review summaries and independence, and
 From 0.9.4 (FIX-141), a result an acceptance of its work order's current revision was recorded
 after, before the estate's first acceptance of a result by an operator, counts as accepted and is
 not listed, so `--all` never signs that work again; a result recorded after such an acceptance is
-listed ([details](operator-actions.md#close-finished-steps-in-one-action)).
+listed ([details](operator-actions.md#close-finished-steps-in-one-action)). From 0.9.4 (OPS-24), a result is listed only when
+every current review of it passes; one with a failed review or findings beside a passing review is not.
 
 | Option | Meaning |
 |---|---|

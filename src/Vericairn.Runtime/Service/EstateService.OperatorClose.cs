@@ -132,11 +132,13 @@ public sealed partial class EstateService
             // too, as acceptances were given before they named a result's exact hash, so it is not offered for signing again.
             if (!results.TryGetValue(order.Id, out RecordEnvelope? result) || EstateModel.BodyString(result, "outcome") != "completed"
                 || model.OfType("acceptance").Any(a => a.Subject == result.Reference) || EstateStatus.RevisionAcceptance(model, result) is not null) continue;
-            OperatorCloseReview[] reviews = [.. model.About(result.Id, "review").Where(r => model.IsCurrent(r)
-                    && r.Subject == result.Reference && EstateModel.BodyString(r, "outcome") == "pass")
-                .OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => new OperatorCloseReview(r.Id, r.ComputedHash,
-                    EstateModel.BodyString(r, "independence")!, EstateModel.BodyString(r, "summary")!))];
-            if (reviews.Length == 0) continue;
+            // From 0.9.4 (OPS-24, the Reviewer's re-check): a step is offered only when every current review of its exact result passes, at
+            // least one; a passing review beside a failed one, or one with findings, such as a passing self-review beside a failed
+            // independent review, leaves the step out, for operator close and operator act alike.
+            RecordEnvelope[] current = [.. model.About(result.Id, "review").Where(r => model.IsCurrent(r) && r.Subject == result.Reference).OrderBy(r => r.Id, StringComparer.Ordinal)];
+            if (current.Length == 0 || current.Any(r => EstateModel.BodyString(r, "outcome") != "pass")) continue;
+            OperatorCloseReview[] reviews = [.. current.Select(r => new OperatorCloseReview(r.Id, r.ComputedHash,
+                EstateModel.BodyString(r, "independence")!, EstateModel.BodyString(r, "summary")!))];
             items.Add(new(EstateModel.BodyString(order, "key")!, new(order.Id, order.ComputedHash), EstateModel.BodyString(order, "exitQuestion")!,
                 new(result.Id, result.ComputedHash), EstateModel.BodyString(result, "outcome")!, EstateModel.BodyString(result, "summary")!, reviews));
         }

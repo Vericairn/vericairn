@@ -321,4 +321,23 @@ public sealed class OperatorCloseTests
         Assert.Equal(before, f.Estate.Load().Records.Select(r => r.ComputedHash).Order(StringComparer.Ordinal));
         Assert.Empty(BatchJournal.All(f.Api.Session).Journals);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AStepWithAFailedCurrentReviewBesideAPassingOneIsNotOfferedOrClosed(bool selfPass)
+    {
+        // From 0.9.4 (OPS-24, the Reviewer's re-check): every current review of the exact result must pass. A passing review, or a passing
+        // self-review, beside a failed independent review leaves the step out.
+        using var f = new OperatorCloseFixture();
+        var step = selfPass ? f.Add("STEP-1", reviewOutcome: "fail") : f.Add("STEP-1");
+        RecordEnvelope other = selfPass ? f.Review(step.Result, self: true) : f.Review(step.Result, "fail");
+        RecordEnvelope passing = selfPass ? other : step.Review;
+
+        Assert.Empty(f.Api.OperatorCloseCandidates().Items);
+        var crafted = new OperatorCloseSelection("STEP-1", new(step.Order.Id, step.Order.ComputedHash), new(step.Result.Id, step.Result.ComputedHash), [new(passing.Id, passing.ComputedHash)]);
+        OperatorCloseResponse refused = f.Api.OperatorClose(new(f.Estate.OperatorId, [crafted]), TestContext.Current.CancellationToken);
+        Assert.Equal("conflict", refused.Problem?.Code);
+        Assert.Empty(f.Estate.Load().OfType("acceptance"));
+    }
 }

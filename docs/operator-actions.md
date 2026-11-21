@@ -203,7 +203,10 @@ acceptance of that result; from 0.9.4, nor an acceptance of the work order's cur
 that accepts it (below). Each entry shows its key, work-order id and hash, exit question, result
 id, hash, outcome and summary, and every passing review's id, hash, independence and summary.
 Both ordinary work and milestones can appear. A partial or blocked latest result, an old review
-of a superseded result, or a superseded passing review cannot qualify a step.
+of a superseded result, or a superseded passing review cannot qualify a step. From 0.9.4 (OPS-24), every current review of the
+exact result must pass: a step whose result has a current review with findings or a failed one beside a passing one, such as a
+passing self-review beside a failed independent review, is no longer listed, and a selection of it is refused; before 0.9.4 one
+passing review was enough and the others were not shown. Each listed step shows every current review of its result.
 
 `--select` is repeatable. `--all` selects the complete eligible list across the estate; inspect it
 before using it when several releases have finished work. The selected evidence is displayed
@@ -346,7 +349,7 @@ and the exact hash reviewed:
 
 | Kind | Ready when | What its signature records |
 | --- | --- | --- |
-| `close` | `operator close` lists the step: a completed latest result with current passing reviews and no acceptance | An acceptance of that exact result, on the basis of every passing review shown |
+| `close` | `operator close` lists the step: a completed latest result with no acceptance, at least one current review, and every current review of it passing | An acceptance of that exact result, on the basis of every review shown, all passing |
 | `answer` | An ask waits on you, as `operator answer` lists it | A decision answering it with its recommendation, as [one act](#answer-open-asks-with-their-recommendations-in-one-act-094) records it |
 | `goal-acceptance` | `operator list` offers you its acceptance command: activated, every predicate holding, evaluated, and you neither its evaluator nor a step's author | An acceptance of the goal relying on its current evaluation |
 | `release-acceptance`, `milestone-acceptance`, `milestone-result-acceptance` | `operator list` offers you its acceptance command, and, as `operator close` admits a step, its exact revision has at least one current review and every current review of it passes; a result must be completed | An acceptance of that exact candidate, milestone or result on the basis of those reviews; it publishes nothing |

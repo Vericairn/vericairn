@@ -280,6 +280,40 @@ public sealed class OperatorActTests
         Assert.Empty(f.Api.OperatorActItems(f.Estate.OperatorId).Items);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AResultWithAFailedCurrentReviewBesideAPassingOneIsNeitherListedNorSigned(bool selfPass)
+    {
+        // The Reviewer's re-check probe: one current passing review and one current failed review of the same exact result; and a passing
+        // self-review beside a failed independent review. Neither the act nor operator close offers or signs the step.
+        using var f = new OperatorCloseFixture();
+        var step = selfPass ? f.Add("STEP-1", reviewOutcome: "fail") : f.Add("STEP-1");
+        RecordEnvelope other = selfPass ? f.Review(step.Result, self: true) : f.Review(step.Result, "fail");
+        RecordEnvelope passing = selfPass ? other : step.Review;
+
+        Assert.Empty(f.Api.OperatorActItems(f.Estate.OperatorId).Items);
+        OperatorActResponse refused = f.Api.OperatorAct(new(f.Estate.OperatorId,
+            [new OperatorActChoice("close:STEP-1", "sign", new(step.Result.Id, step.Result.ComputedHash), [new(passing.Id, passing.ComputedHash)])]), TestContext.Current.CancellationToken);
+        Assert.Equal("conflict", refused.Problem?.Code);
+        Assert.Empty(f.Api.OperatorCloseCandidates().Items);
+        Assert.Empty(f.Estate.Load().OfType("acceptance"));
+    }
+
+    [Fact]
+    public void ACloseItemShowsEveryCurrentReviewOfItsResult()
+    {
+        using var f = new OperatorCloseFixture();
+        var step = f.Add("STEP-1");
+        RecordEnvelope self = f.Review(step.Result, self: true);
+
+        OperatorActItem item = Assert.Single(f.Api.OperatorActItems(f.Estate.OperatorId).Items);
+
+        Assert.Equal(new[] { step.Review.Id, self.Id }.Order(StringComparer.Ordinal), item.Reviews!.Select(r => r.Id).Order(StringComparer.Ordinal));
+        Assert.Equal(["operator", "self"], item.Reviews!.Select(r => r.Independence).Order(StringComparer.Ordinal));
+        Assert.Contains("on the basis of 2 passing reviews", item.Records, StringComparison.Ordinal);
+    }
+
     // A milestone's result in the state named: its only review failed or found problems, the result blocked with a failed review, or none.
     private static RecordEnvelope MilestoneResult(OperatorCloseFixture f, string state)
     {
