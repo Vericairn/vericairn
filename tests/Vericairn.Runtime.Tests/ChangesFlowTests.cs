@@ -794,14 +794,15 @@ public sealed class ChangesFlowTests
         internal ChangesOpenRequest Open => new(Product, "work/change", Head, "A checked change", "Review this change.", Estate.OperatorId);
         internal ChangesMergeRequest Merge => new(Product, "1", Head, Estate.OperatorId);
 
-        internal Fixture(IReadOnlyList<string>? required = null, string visibility = "private")
+        // A clone, when given, is registered for the declared repository in place of the estate's own folder.
+        internal Fixture(IReadOnlyList<string>? required = null, string visibility = "private", string? clone = null)
         {
             RecordEnvelope repository = Estate.Add("resource", Estate.OperatorId, $$"""{"kind":"repository","name":"Widget","role":"Source","location":{"github":"Example/widget"},"visibility":"{{visibility}}"}""");
             Product = Estate.Add("product", Estate.OperatorId, $$"""
                 {"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],
                  "changes":{"provider":"memory-pull-requests","repository":"{{repository.Id}}","target":"main","requiredChecks":{{JsonSerializer.Serialize(required ?? Required)}} } }
                 """).Id;
-            RepositoryClones.Register(Estate.Estate.Id, repository.Id, Estate.Root);
+            RepositoryClones.Register(Estate.Estate.Id, repository.Id, clone ?? Estate.Root);
             Service = OpenService();
             Provider.Memory.Checks = Checks(Head);
             Provider.Memory.SetTarget("Example/widget", new("main", Merged, Checks(Merged)));
@@ -888,7 +889,9 @@ public sealed class ChangesFlowTests
         internal string? ObservedTarget { get; private set; }
         public string Provider => Memory.Provider;
         public ProviderDescriptor Descriptor => Memory.Descriptor;
-        public string PushRemote(string destination) => Memory.PushRemote(destination);
+        // A remote, when set, takes the place of the memory provider's address, such as a bare repository on this machine.
+        internal string? Remote { get; set; }
+        public string PushRemote(string destination) => Remote ?? Memory.PushRemote(destination);
         public ChangeReceipt Open(string destination, string branch, string target, string head, string title, string body)
         { Effect("change-open"); return Memory.Open(destination, branch, target, head, title, body); }
         public PullRequestObservation? Observe(string destination, string numberOrBranch)

@@ -28,6 +28,7 @@ public sealed class PushProviderTests
     {
         var scanner = new GitleaksScanner(info =>
         {
+            if (AsksForTheGitDirectory(info)) return Success(GitDirectory + "\n");
             if (info.FileName == "git") return Success("2");
             if (info.ArgumentList[0] == "version") return Success("8.30.1");
             Assert.Contains("--redact=100", info.ArgumentList);
@@ -64,6 +65,7 @@ public sealed class PushProviderTests
         var scanner = new GitleaksScanner(info =>
         {
             started.Add(info);
+            if (AsksForTheGitDirectory(info)) return Success(GitDirectory + "\n");
             if (info.FileName == "git") return Success("2");
             if (info.ArgumentList[0] == "version") return Success("8.30.1");
             string report = info.ArgumentList.Single(a => a.StartsWith("--report-path=", StringComparison.Ordinal)).Split('=', 2)[1];
@@ -118,6 +120,77 @@ public sealed class PushProviderTests
         Assert.False(scan.Environment.ContainsKey("GIT_CONFIG_KEY_12"));
     }
 
+    // FIX-160: no variable gitleaks reads its configuration from and no other inherited git variable reaches a process of the scan.
+    [Fact]
+    public void TheScanDropsEveryGitleaksVariableAndEveryOtherInheritedGitVariable()
+    {
+        var info = new ProcessStartInfo("gitleaks");
+        foreach (string name in new[] { "GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML", "GIT_DIFF_OPTS", "GIT_EXTERNAL_DIFF", "GIT_NOTES_REF", "GIT_ATTR_SOURCE", "GIT_LITERAL_PATHSPECS" })
+            info.Environment[name] = "inherited";
+        GitleaksScanner.Isolate(info);
+        Assert.DoesNotContain(info.Environment, variable => variable.Value == "inherited");
+    }
+
+    // FIX-160: every process the scan starts, gitleaks and git alike, runs in one folder the scan creates outside the clone, still empty
+    // when each starts, which is gitleaks' source. The first asks gitleaks its version and the second asks git, from the clone, for the
+    // clone's git directory; every later process reads that directory through GIT_DIR alone, with the empty folder as its work tree. The
+    // rules and the empty ignore file lie beside that folder, no GITLEAKS_ or other inherited git variable of the caller's reaches any
+    // process, and the folder is gone once the scan returns.
+    [Fact]
+    public void EveryProcessOfTheScanRunsInAnEmptyFolderOfItsOwnAndReadsTheClonesGitDirectoryByName()
+    {
+        // Variables of the caller's own, each name this test's alone.
+        string[] inherited = ["GITLEAKS_VERICAIRN_SCAN_TEST", "GIT_VERICAIRN_SCAN_TEST"];
+        string clone = Path.Combine(Path.GetTempPath(), "vericairn-scan-clone-" + Guid.NewGuid().ToString("N"));
+        string gitDirectory = Path.Combine(clone, ".git");
+        Directory.CreateDirectory(gitDirectory);
+        var started = new List<(ProcessStartInfo Info, bool Empty)>();
+        var scanner = new GitleaksScanner(info =>
+        {
+            started.Add((info, Directory.Exists(info.WorkingDirectory) && !Directory.EnumerateFileSystemEntries(info.WorkingDirectory).Any()));
+            if (AsksForTheGitDirectory(info)) return Success(gitDirectory + "\n");
+            if (info.FileName == "git") return Success("2");
+            if (info.ArgumentList[0] == "version") return Success("8.30.1");
+            string report = info.ArgumentList.Single(a => a.StartsWith("--report-path=", StringComparison.Ordinal)).Split('=', 2)[1];
+            File.WriteAllText(report, "0");
+            return Success();
+        });
+        try
+        {
+            foreach (string name in inherited) Environment.SetEnvironmentVariable(name, "inherited");
+            Assert.Equal("passed", scanner.Scan(clone, Plan).Verdict);
+        }
+        finally
+        {
+            foreach (string name in inherited) Environment.SetEnvironmentVariable(name, null);
+            Directory.Delete(clone, recursive: true);
+        }
+
+        string folder = started[0].Info.WorkingDirectory;
+        Assert.True(Path.IsPathFullyQualified(folder));
+        Assert.False(folder.StartsWith(clone, StringComparison.Ordinal));
+        Assert.False(Directory.Exists(folder));
+        Assert.All(started, process =>
+        {
+            Assert.Equal(folder, process.Info.WorkingDirectory);
+            Assert.True(process.Empty);
+            Assert.DoesNotContain(process.Info.Environment.Keys, name => name.StartsWith("GITLEAKS_", StringComparison.OrdinalIgnoreCase));
+            Assert.False(process.Info.Environment.ContainsKey("GIT_VERICAIRN_SCAN_TEST"));
+        });
+        Assert.Equal(["version"], started[0].Info.ArgumentList);
+        Assert.Equal(["-C", clone, "rev-parse", "--absolute-git-dir"], started[1].Info.ArgumentList);
+        Assert.All(started.Take(2), process => Assert.False(process.Info.Environment.ContainsKey("GIT_DIR") || process.Info.Environment.ContainsKey("GIT_WORK_TREE")));
+        Assert.All(started.Skip(2), process =>
+        {
+            Assert.Equal(gitDirectory, process.Info.Environment["GIT_DIR"]);
+            Assert.Equal(folder, process.Info.Environment["GIT_WORK_TREE"]);
+        });
+        ProcessStartInfo scan = Assert.Single(started, process => process.Info.FileName == "gitleaks" && process.Info.ArgumentList[0] == "git").Info;
+        Assert.Equal(folder, scan.ArgumentList[^1]);
+        foreach (string option in new[] { "--config=", "--gitleaks-ignore-path=" })
+            Assert.Equal(Path.GetDirectoryName(folder), Path.GetDirectoryName(scan.ArgumentList.Single(a => a.StartsWith(option, StringComparison.Ordinal))[option.Length..]));
+    }
+
     // FIX-150, after the Reviewer's review: before gitleaks runs, the scanner reads every commit, tree and blob the push carries, checked
     // against its id, and the range's patches exactly as gitleaks reads them. A read that fails, or stops early as a truncated read does,
     // and a gitleaks that logs its own read's failure while it exits 0 with no finding, each leave the scan incomplete, never passed.
@@ -136,6 +209,7 @@ public sealed class PushProviderTests
         int scans = 0;
         var scanner = new GitleaksScanner(info =>
         {
+            if (AsksForTheGitDirectory(info)) return Success(GitDirectory + "\n");
             if (info.FileName == "git" && info.ArgumentList.Contains("--verify-objects"))
             {
                 reads.Add("objects");
@@ -202,6 +276,7 @@ public sealed class PushProviderTests
         byte[]? applied = null;
         var scanner = new GitleaksScanner(info =>
         {
+            if (AsksForTheGitDirectory(info)) return Success(GitDirectory + "\n");
             if (info.FileName == "git" && info.ArgumentList.Contains("--name-only"))
             {
                 Assert.Equal("C", info.Environment["LC_ALL"]);
@@ -257,7 +332,8 @@ public sealed class PushProviderTests
     [InlineData("Failed")]
     public void MissingTimedOutAndIncompleteScannersNeverPass(string outcome)
     {
-        var scanner = new GitleaksScanner(info => info.FileName == "git" ? Success("2") : info.ArgumentList[0] == "version" ? Success("8.30.1")
+        var scanner = new GitleaksScanner(info => AsksForTheGitDirectory(info) ? Success(GitDirectory + "\n") : info.FileName == "git" ? Success("2")
+            : info.ArgumentList[0] == "version" ? Success("8.30.1")
             : new(Enum.Parse<ProcessOutcome>(outcome), outcome != "NotStarted", null, string.Empty, string.Empty));
         SecretScan scan = scanner.Scan(Path.GetTempPath(), Plan);
         Assert.False(scan.Passed(Plan));
@@ -297,6 +373,7 @@ public sealed class PushProviderTests
         int scans = 0;
         var scanner = new GitleaksScanner(info =>
         {
+            if (AsksForTheGitDirectory(info)) return Success(GitDirectory + "\n");
             if (info.FileName == "git") return new(ProcessOutcome.Exited, true, 128, string.Empty, "unreadable range");
             if (info.ArgumentList[0] == "version") return Success("8.30.1");
             scans++;
@@ -404,6 +481,11 @@ public sealed class PushProviderTests
     }
 
     private static ProcessResult Success(string output = "") => new(ProcessOutcome.Exited, true, 0, output, string.Empty);
+
+    // The clone's git directory, as git names it to the scan's first git process (FIX-160): an existing directory, by an absolute path.
+    private static readonly string GitDirectory = Path.GetTempPath();
+
+    private static bool AsksForTheGitDirectory(ProcessStartInfo info) => info.FileName == "git" && info.ArgumentList.Contains("--absolute-git-dir");
 
     private sealed class RecordedGit
     {
