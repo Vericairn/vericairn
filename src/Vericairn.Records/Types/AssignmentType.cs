@@ -29,7 +29,7 @@ public sealed class AssignmentType : IRecordType
         SavedPrompts.UseField,
         new("execution", "object", false, "Explicit execution choices and cumulative restrictions; launcher, roster, goal, assignment, then run precedence. Role restrictions remain binding.", 2),
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
-        new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests; from 0.9.4, optional repository (the identity of the estate or of a repository resource the work changes), excludedChanges (patterns in permittedChanges' grammar the work leaves out) and after (at most 20 assignment ids whose work it waits for, each followed to its current revision, never itself and never a cycle); from 0.9.4 (RUN-04), optional retrieval: public, which permits the work's runs to retrieve public sources with their harness's web tools, never with credentials, each source retained as an untrusted original; no other field or text permits it. A reader lacking these refuses the brief, which admits no unknown field."),
+        new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests; from 0.9.4, optional repository (the identity of the estate or of a repository resource the work changes), excludedChanges (patterns in permittedChanges' grammar the work leaves out) and after (at most 20 assignment ids whose work it waits for, each followed to its current revision, never itself and never a cycle); from 0.9.4 (RUN-04), optional retrieval: public, which permits the work's runs to retrieve public sources with their harness's web tools, never with credentials, each source retained as an untrusted original; no other field or text permits it. A reader lacking these refuses the brief, which admits no unknown field.") { Members = [.. AssignmentBrief.Members.Select(m => m.Describe())] },
         new("note", "string", false, "Free text."),
         new("step", "object", false, "For an assignment of a run's work order, the flow step it carries: key, instance for a step that runs over a list under each, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do. A review before hand-off adds review: the items it reviews (none for a step that declares no items) and the exact subject {type, id, hash} that carries them; its contributor is never an author of the step's work unless every item takes a self review.", 3),
         new("occurrence", "object", false, "From 0.9.4, for an assignment of a standing agent's work order, the occurrence it carries: key (the goal's identity, trigger, revision and item, or for a duty trigger duty/ and the duty occurrence's identity), trigger, revision (the goal revision the trigger's declaration originates from) and item (schedule {interval, dueAt}, event {record {type, id, hash}}, condition {failing, records}, request {at, by} or duty {occurrence, policy, rule, dueAt, deadline, schedule}). Every assignment of a standing agent's work order names one and only those do; a key holds one assignment, whoever records it, unless a person takes its step over. A reader lacking it refuses the assignment, which admits no unknown field.", 3),
@@ -47,16 +47,16 @@ public sealed class AssignmentType : IRecordType
     /// </summary>
     private static void Overlaps(ValidationContext context, BodyReader brief)
     {
-        if (brief.Since(3, "repository") && brief.Has("repository"))
+        if (brief.Since(3, AssignmentBrief.Repository.Name) && brief.Has(AssignmentBrief.Repository.Name))
         {
-            string? repository = brief.Ulid("repository", true);
+            string? repository = AssignmentBrief.Repository.Id(brief);
             if (repository is not null && !AssignmentOverlaps.IsRepository(context.Model, repository))
             {
                 brief.Error("assignment.repository", "repository", "The repository is the identity of the estate or of a repository resource: the first record of its lineage.");
             }
         }
 
-        IReadOnlyList<string>? excluded = brief.Since(3, "excludedChanges") ? brief.StringArray("excludedChanges", false, allowEmpty: false, maxItemLength: 2000) : null;
+        IReadOnlyList<string>? excluded = brief.Since(3, AssignmentBrief.ExcludedChanges.Name) ? AssignmentBrief.ExcludedChanges.Strings(brief) : null;
         foreach (string entry in excluded ?? [])
         {
             if (PathPatterns.Pattern(entry) is null)
@@ -65,7 +65,7 @@ public sealed class AssignmentType : IRecordType
             }
         }
 
-        IReadOnlyList<string>? after = brief.Since(3, "after") ? brief.StringArray("after", false, allowEmpty: false, maxItemLength: Records.Identity.Ulid.Length) : null;
+        IReadOnlyList<string>? after = brief.Since(3, AssignmentBrief.After.Name) ? AssignmentBrief.After.Strings(brief) : null;
         if (after is null)
         {
             return;
@@ -133,8 +133,9 @@ public sealed class AssignmentType : IRecordType
         BodyReader? brief = body.Nested("brief", true);
         if (brief is not null)
         {
-            brief.Text("outcome", true, 4000);
-            foreach (BodyReader source in brief.NestedArray("sources", true, allowEmpty: true) ?? [])
+            // From 0.9.4 (DOCS-46) each member is read by the rule the record reference describes it from (AssignmentBrief).
+            AssignmentBrief.Outcome.Text(brief);
+            foreach (BodyReader source in AssignmentBrief.Sources.Objects(brief) ?? [])
             {
                 RecordReference? reference = RecordParser.ParseReference(source.Element, source.Location, context.Findings);
                 if (reference is null)
@@ -149,17 +150,17 @@ public sealed class AssignmentType : IRecordType
                 }
             }
 
-            brief.StringArray("permittedChanges", true, allowEmpty: false, maxItemLength: 2000);
-            brief.StringArray("prohibitedEffects", true, allowEmpty: true, maxItemLength: 2000);
-            brief.StringArray("workspace", true, allowEmpty: false, maxItemLength: 500);
-            brief.StringArray("limits", true, allowEmpty: true, maxItemLength: 2000);
-            brief.StringArray("expectedOutputs", true, allowEmpty: false, maxItemLength: 2000);
-            brief.StringArray("reviewCriteria", true, allowEmpty: false, maxItemLength: 2000);
-            brief.Text("recovery", true, 4000);
-            if (context.Format >= 3)
-                brief.Text("reviewBrief", false, 1_000_000);
+            AssignmentBrief.PermittedChanges.Strings(brief);
+            AssignmentBrief.ProhibitedEffects.Strings(brief);
+            AssignmentBrief.Workspace.Strings(brief);
+            AssignmentBrief.Limits.Strings(brief);
+            AssignmentBrief.ExpectedOutputs.Strings(brief);
+            AssignmentBrief.ReviewCriteria.Strings(brief);
+            AssignmentBrief.Recovery.Text(brief);
+            if (context.Format >= AssignmentBrief.ReviewBrief.SinceFormat)
+                AssignmentBrief.ReviewBrief.Text(brief);
             Overlaps(context, brief);
-            if (brief.Since(3, "retrieval")) brief.Enum("retrieval", false, PublicRetrieval);
+            if (brief.Since(3, AssignmentBrief.Retrieval.Name)) AssignmentBrief.Retrieval.OneOf(brief);
 
             ProgressReporting.Request(brief);
             brief.NoOtherKeys();

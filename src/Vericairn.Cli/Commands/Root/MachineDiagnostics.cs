@@ -31,10 +31,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
         string custodyDetail = format is < 2
             ? $"the default for this estate, at record format {format}, which cannot name the Secure Enclave; {DeviceKeyStores.Default().Kind} once it is at format 2"
             : "default on this platform";
-        Probe enclave = !OperatingSystem.IsMacOS() ? new("not-applicable", null, null)
-            : SecureEnclaveKeyStore.Available()
-                ? new("present", "secure-enclave", "Secure Enclave custody available (record format 2): a person's device asks for Touch ID or the login password at every signature unless it is created with --presence false; an agent's never asks")
-                : new("unavailable", null, SecureEnclaveCustody.HelperPath() is null ? $"no {SecureEnclaveCustody.HelperName} helper beside the command line" : "no Secure Enclave available to this process");
+        Probe enclave = !OperatingSystem.IsMacOS() ? new("not-applicable", null, null) : Enclave(SecureEnclaveKeyStore.Available(), SecureEnclaveCustody.HelperPath() is not null);
         Probe presence = Presence(root, estate);
         string records = string.Join(", ", RecordFormats.Reads);
         string writes = $"writes an estate's own format, at most {RecordFormats.Current}";
@@ -79,7 +76,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
         context.Output.WriteLine($"custody   {custody} ({custodyDetail}); per-user state at {VericairnHome.Path()}");
         if (OperatingSystem.IsMacOS())
         {
-            context.Output.WriteLine(enclave.State == "present" ? "enclave   " + enclave.Detail : $"enclave   Secure Enclave custody unavailable ({enclave.Detail})");
+            context.Output.WriteLine(EnclaveLine(enclave));
             context.Output.WriteLine("presence  " + presence.Detail);
         }
         context.Output.WriteLine($"records   reads record formats {records}; {writes}");
@@ -96,6 +93,19 @@ internal sealed class MachineDiagnostics(CommandContext context)
 
         return Clean;
     }
+
+    /// <summary>
+    /// The enclave probe on a Mac: present when the helper reports a Secure Enclave available to this process; otherwise unavailable,
+    /// because the helper is not beside the command line or because it reports no Secure Enclave available to this process, which
+    /// describes the context the probe ran in, not the machine. The enrollment troubleshooting guide quotes each line (DOCS-45).
+    /// </summary>
+    internal static Probe Enclave(bool available, bool helper) => available
+        ? new("present", "secure-enclave", "Secure Enclave custody available (record format 2): a person's device asks for Touch ID or the login password at every signature unless it is created with --presence false; an agent's never asks")
+        : new("unavailable", null, helper ? "no Secure Enclave available to this process" : $"no {SecureEnclaveCustody.HelperName} helper beside the command line");
+
+    /// <summary>The report's enclave line for a probe on a Mac.</summary>
+    internal static string EnclaveLine(Probe enclave) =>
+        enclave.State == "present" ? "enclave   " + enclave.Detail : $"enclave   Secure Enclave custody unavailable ({enclave.Detail})";
 
     /// <summary>
     /// From 0.9.4 (ID-16): whether presence sessions may open here, and why not (design/presence-sessions.md §§ 10 and 11): present with

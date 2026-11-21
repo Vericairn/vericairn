@@ -61,6 +61,56 @@ length is considered, and a missing required timestamp is refused with
 `body.missing` and the same form. Nothing is written, and no value is converted
 to the required form on the caller's behalf.
 
+## Writing an assignment brief (0.9.4)
+
+From 0.9.4 (DOCS-46), `records describe assignment` and the generated `record-reference.md` list every member of an
+assignment's `brief` with its kind, whether it is required, whether an array may be empty, its limits and the record format
+that introduced it, from the same rules the validator reads the brief by: the reference's `assignment.brief` table, then a
+table for each member of fixed members of its own, such as `assignment.brief.sources` and
+`assignment.brief.progressRequest`. Every required member is present, a required array that may be empty is written `[]`,
+an item of an array is never an empty string, and the brief admits no member the table does not list. A path pattern in
+`permittedChanges`, such as `path:NOTES.md`, also needs `repository` on a new format-3 assignment, which `work assign` fills
+in ([record format 3](record-format-v3.md)).
+
+A minimal complete brief, assigned with `work assign`:
+
+```sh
+vericairn work assign W-1 --contributor <contributor-id> --by <operator-id> --brief brief.json
+```
+
+with `brief.json`:
+
+```json
+{"outcome": "NOTES.md holds a one-line greeting.", "sources": [], "permittedChanges": ["NOTES.md, one line"],
+ "prohibitedEffects": [], "workspace": ["the estate's repository, main branch"], "limits": [],
+ "expectedOutputs": ["NOTES.md"], "reviewCriteria": ["Does NOTES.md hold a greeting?"],
+ "recovery": "Read this brief and NOTES.md."}
+```
+
+`work assign` takes the brief alone and builds the record: its subject, the work order pinned to its current revision, and
+its body, the contributor and the brief. `records new assignment` takes the whole body and the subject as you write them,
+with the work order's id and its current hash, which `vericairn work brief W-1` shows as `work order <id> at <hash>`:
+
+```sh
+vericairn records new assignment --by <operator-id> --subject work-order:<work-order-id>:<work-order-hash> --body assignment.json
+```
+
+with `assignment.json`:
+
+```json
+{"contributor": "<contributor-id>",
+ "brief": {"outcome": "NOTES.md holds a one-line greeting.", "sources": [], "permittedChanges": ["NOTES.md, one line"],
+  "prohibitedEffects": [], "workspace": ["the estate's repository, main branch"], "limits": [],
+  "expectedOutputs": ["NOTES.md"], "reviewCriteria": ["Does NOTES.md hold a greeting?"],
+  "recovery": "Read this brief and NOTES.md."}}
+```
+
+There is no dry-run command. `records new` and `work assign` validate the estate together with the proposed record and write
+nothing when the estate would be invalid with it: they refuse with `Not written: the estate would be invalid with this record`,
+the number of errors and every finding at once, such as `body.missing` for a required member left out, and exit with code 1.
+A proposed record that is valid is written at once. `records validate` checks the estate as it stands, not a
+proposed body.
+
 ## Release lines and channels (0.9.0)
 
 These optional fields extend record format 3. Existing release bodies, hashes and

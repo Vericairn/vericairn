@@ -12,7 +12,22 @@ namespace Vericairn.Records.Types;
 /// <param name="Required">Whether the field is required (in the formats that have it).</param>
 /// <param name="Description">What the field means.</param>
 /// <param name="SinceFormat">The record format that introduced the field; records of older formats never carry it.</param>
-public sealed record FieldDescription(string Name, string Kind, bool Required, string Description, long SinceFormat = RecordFormats.First);
+public sealed record FieldDescription(string Name, string Kind, bool Required, string Description, long SinceFormat = RecordFormats.First)
+{
+    /// <summary>
+    /// From 0.9.4 (DOCS-46), for an array: whether it may be empty; null for any other kind. An item is never an empty string.
+    /// </summary>
+    public bool? EmptyAllowed { get; init; }
+
+    /// <summary>From 0.9.4 (DOCS-46): the value's limits in words, such as "1 to 4,000 characters"; null when none applies.</summary>
+    public string? Limits { get; init; }
+
+    /// <summary>
+    /// From 0.9.4 (DOCS-46), for an object of fixed members or an array of such objects: each member, described from the rules its
+    /// validator reads it by; empty for any other field.
+    /// </summary>
+    public IReadOnlyList<FieldDescription> Members { get; init; } = [];
+}
 
 /// <summary>Field kinds shown with the form a value takes.</summary>
 internal static class FieldKinds
