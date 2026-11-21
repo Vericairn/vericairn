@@ -112,6 +112,39 @@ public sealed class OperatorRecordTests
         Assert.Equal(0, f.Service.Validate().Errors);
     }
 
+    // FIX-154: operator record pushes through the same step as changes push, first and when resumed: the base chosen from the records
+    // is passed to the adapter and recorded as the push's basis, a retry finds it again, and the merge takes only that complete push.
+    [Fact]
+    public void AResumedPushTakesItsBaseFromTheRecordsAndItsMergeTakesOnlyACompletePush()
+    {
+        using var f = new Fixture();
+        f.Fail = "scan";
+        OperatorRecordResponse first = f.Run();
+        Assert.False(first.Ok);
+        RecordEnvelope failed = LatestPush(f);
+        Assert.Equal("known-failure", EstateModel.BodyString(failed, "status"));
+        // Refused before its dispatch, the push records no basis; its retry records the one it finds.
+        Assert.False(failed.Body.GetProperty("target").TryGetProperty("basis", out _));
+        f.Fail = null;
+        f.Reopen();
+        OperatorRecordResponse resumed = f.Run("The scanner is repaired; nothing was pushed.");
+        Assert.True(resumed.Ok, resumed.Message + " " + resumed.NextStep);
+        RecordEnvelope pushed = LatestPush(f);
+        Assert.Equal("observed-success", EstateModel.BodyString(pushed, "status"));
+        Assert.Equal(EstateModel.BodyString(failed, "identity"), EstateModel.BodyString(pushed, "identity"));
+        Assert.Equal("merge-base", pushed.Body.GetProperty("target").GetProperty("basis").GetString());
+        Assert.Equal(2, f.Remote.Recorded.Count);
+        Assert.All(f.Remote.Recorded, Assert.Empty);
+        Assert.Equal(1, f.Remote.Pushes);
+        Assert.Equal(0, f.Service.Validate().Errors);
+
+        static RecordEnvelope LatestPush(Fixture f)
+        {
+            EstateModel model = f.Service.Session.Load();
+            return model.Current("operation").Single(o => EstateModel.BodyString(o, "action") == "change-push");
+        }
+    }
+
     [Fact]
     public void ACommitWhoseReceiptWasLostIsVerifiedAfterRestartWithoutSigningOrCommittingAgain()
     {
@@ -1081,14 +1114,21 @@ public sealed class OperatorRecordTests
         public string Provider => Memory.Provider;
         public ProviderDescriptor Descriptor => Memory.Descriptor;
         public string PushRemote(string destination) => Memory.PushRemote(destination);
-        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) => new(branch, target, head, Basis, null, Basis);
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) =>
+            throw new InvalidOperationException("The runtime prepares a push with the records' heads.");
+        // The records' heads each preparation was given (FIX-154).
+        internal List<IReadOnlyList<string>> Recorded { get; } = [];
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head, IReadOnlyList<string> recorded)
+        { Recorded.Add(recorded); return new(branch, target, head, Basis, null, Basis); }
         public SecretScan Scan(string directory, PushPlan plan)
         {
             fixture.Step("scan");
             Assert.Contains(fixture.Service.Session.Load().OfType("operation"), o => EstateModel.BodyString(o, "action") == "change-push" && EstateModel.BodyString(o, "status") == "not-started");
             return new("scanner", "1.0.0", plan.Range, "passed", 0);
         }
-        public void Push(string directory, string remote, PushPlan plan, SecretScan scan)
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan) =>
+            throw new InvalidOperationException("The runtime pushes with the records' heads.");
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan, IReadOnlyList<string> recorded)
         { fixture.Step("push"); Assert.True(scan.Passed(plan)); Pushes++; RemoteHead = plan.Head; Receipt("push"); }
         public string? Observe(string directory, string remote, string branch) => RemoteHead;
         public ChangeReceipt Open(string destination, string branch, string target, string head, string title, string body)

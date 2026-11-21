@@ -13,11 +13,13 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 41, November 21, 2026. `estate upgrade` says whether the previous release can read the estate after it, refuses a one-way upgrade without `--one-way`, records a restore point and states the way back, in the development build.
+Revision 42, November 21, 2026. `estate upgrade` says whether the previous release can read the estate after it, refuses a one-way upgrade without `--one-way`, records a restore point and states the way back, in the development build.
 
-Revision 40, November 21, 2026. Add `worker drill`, the timed stop drill, which stops a scratch run and records the time from the stop to containment and to the run's last write as a `stop-drill` verification, in the development build.
+Revision 41, November 21, 2026. Add `worker drill`, the timed stop drill, which stops a scratch run and records the time from the stop to containment and to the run's last write as a `stop-drill` verification, in the development build.
 
-Revision 39, November 21, 2026. Add `observers list`, `declare`, `report` and `withdraw`, which declare the automated observers on this machine with their intervals and graces and keep their reports, and the `Observers (this machine):` lines that end human `status`, in the development build.
+Revision 40, November 21, 2026. Add `observers list`, `declare`, `report` and `withdraw`, which declare the automated observers on this machine with their intervals and graces and keep their reports, and the `Observers (this machine):` lines that end human `status`, in the development build.
+
+Revision 39, November 21, 2026. Add `progress target set`, `list`, `remove`, `refresh` and `follow`, which keep the estate's progress at a target such as a pinned GitHub discussion, in the development build.
 
 Revision 38, November 20, 2026. Say that under a `concurrent-paths` policy at `refuse`, `work assign`, `work attempt`, `records new assignment` and `worker run` refuse work that leaves an unmet or unavailable pair, naming each pair and the remedies that apply to the write, in the development build.
 
@@ -1300,6 +1302,16 @@ nothing, so while any record is unread, a record that does not count is read aga
 results and runs count toward failures and its outputs stay open. Every standing agent then reads `held` in `goal due`, naming
 the unread record, and `goal step` dispatches nothing of it ([record format 3](record-format-v3.md#identifiers-more-than-one-record-carries-094)).
 
+From 0.9.4 (FIX-159), no record counts because the record that would refuse it is unread: while records are unread, a record counts
+only when it counts with them left out and with them read each way they can be, so an unsigned record in the operator's name stays
+refused when the charter's requirement is unread, and a closed device's backdated records stay refused when the closing is unread
+(`record.duplicate-refused`; past 16 readings no record counts, `record.duplicate-unsettled`). A goal whose own line is unread is not
+reported missing: `goal due` says its state, failures and open outputs are not established, naming the duplicate, and exits 1. While records are unread `goal step` refuses before it records or dispatches,
+naming the finding, and an agent run's intent is refused for the hold whatever the failures read. `release submit`, every command
+that signs a record or a checkpoint, and `worker run` refuse the same way; while the estate reports any other error, `release
+submit`, `worker run` and a standing agent's `goal step` refuse too, and a record is written only when it clears every error, as
+before.
+
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]
 vericairn goal pause <goal> --by <sponsor> --stop-runs
@@ -1427,6 +1439,23 @@ and reports are kept beside the clone's live store on this machine.
 vericairn observers declare ci-main --kind ci --interval PT1H --grace PT15M --by <operator>
 vericairn observers report ci-main --outcome not-observing --reason quota-exhausted --by <principal>
 vericairn status
+```
+
+## `vericairn progress target` (0.9.4)
+
+Keeps the estate's progress at a target, such as a pinned GitHub discussion, through the adapter its configuration on this
+machine chooses (`WATCH-06`): `set`, `list` and `remove` configure targets and send nothing; `refresh <name>` brings one equal to
+the estate's progress now, creating its place once and replacing its text only when it differs, and `--dry-run` shows the text
+and sends nothing; `follow <name>` follows the daemon's event journal and refreshes and comments only on the events the target's
+triggers name, until interrupted or after `--count` outcomes. A destination anyone may read always takes the public form, which
+carries nothing a disclosure rule holds. `refresh` exits 0 when the target is equal, 2 when it refused and sent nothing, and 1
+when an effect was stopped or not confirmed; `--json` writes `vericairn.progress-target-outcome/1`, naming every record the text
+carries. See [Progress targets](progress-targets.md).
+
+```sh
+vericairn progress target set status --adapter github-discussions --setting repository=Example/example-estate --form private
+vericairn progress target refresh status --dry-run
+vericairn progress target follow status
 ```
 
 ## `vericairn estate first-authority` (0.9.3)

@@ -811,7 +811,9 @@ public sealed class OperatorRecordGitTests : IDisposable
         internal bool TargetPending { get; set; }
         internal int Pushes { get; private set; }
         private string? pushed;
-        public PushPlan Prepare(string directory, string remote, string branch, string target, string head)
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) =>
+            throw new InvalidOperationException("The runtime prepares a push with the records' heads.");
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head, IReadOnlyList<string> recorded)
         {
             Memory.Checks = [new("tests", head, "completed", "success")];
             Memory.SetTarget("Example/estate", new("main", Memory.MergeCommit, [TargetPending
@@ -819,7 +821,9 @@ public sealed class OperatorRecordGitTests : IDisposable
             return new(branch, target, head, basis, null, basis);
         }
         public SecretScan Scan(string directory, PushPlan plan) => new("scanner", "1.0.0", plan.Range, ScanPasses ? "passed" : "unavailable", ScanPasses ? 0 : null);
-        public void Push(string directory, string remote, PushPlan plan, SecretScan scan) { Assert.True(scan.Passed(plan)); pushed = plan.Head; Pushes++; }
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan) =>
+            throw new InvalidOperationException("The runtime pushes with the records' heads.");
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan, IReadOnlyList<string> recorded) { Assert.True(scan.Passed(plan)); pushed = plan.Head; Pushes++; }
         public string? Observe(string directory, string remote, string branch) => pushed;
         // The commits' messages as git reads them from the clone, so the check reads what the record commit adapter wrote.
         public IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan) => new GitPushAdapter().CommitMessages(directory, plan);

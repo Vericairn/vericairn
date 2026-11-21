@@ -1267,6 +1267,14 @@ internal static partial class StandingAgents
             refusals.Add(("operation.standing", $"Standing agent {goal.Id}'s until time {RecordParser.FormatTimestamp(until)} has passed: it returns to its sponsor, and a renewal is a goal revision its sponsor activates."));
         }
 
+        // From 0.9.4 (FIX-159): the hold, not only the failure count. While the estate leaves any record unread every standing agent reads held
+        // (Derive), and no run of it starts, whatever its failures read: judged now, or for an intent no record follows yet, as a new one; an
+        // intent already followed by its settlement keeps its reading.
+        if (model.UnreadableLines.Count > 0 && (before is null || !model.Records.Any(r => r.Supersedes == before.Id)) && Unreadable(model, goal, FlowRuns.Work(model, goal)) is RecordEnvelope unread)
+        {
+            refusals.Add(("operation.standing", $"Standing agent {goal.Id} is held: record {unread.Id} is not read, its line holding an identifier more than one record carries (record.duplicate-id), so no run of it starts until all but one of those records is removed."));
+        }
+
         List<AgentRuns.Run> runs = AgentRuns.All(model, before).Where(r => r.Goal is not null && model.Chain(model.Latest(goal)).Contains(r.Goal)).ToList();
         (int failures, _) = Failures(model, goal, runs, before);
         int limit = FailureLimit(goal);

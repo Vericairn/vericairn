@@ -35,6 +35,14 @@ public sealed partial class EstateService
         {
             EstateModel model = session.Load();
             RecordEnvelope? current = GoalView.Find(model, goal);
+            if (current is null && model.IsUnreadable(goal))
+            {
+                // From 0.9.4 (FIX-159): a goal whose line is left unread is not shown as missing: its state and counts are not established.
+                string copy = model.Findings.FirstOrDefault(f => f.Code is "record.duplicate-unsettled" or "record.duplicate-id")?.Location ?? EstateLayout.RecordsDirectory;
+                string message = $"Goal {goal} is not read while the estate leaves records unread (record.duplicate-id, {copy}): its state, failures and open outputs are not established, and nothing of it is dispatched until all but one record carrying each identifier is removed.";
+                return new GoalDueResponse(message + "\n", Element(new JsonObject { ["format"] = StandingView.DueFormat, ["goal"] = new JsonObject { ["id"] = goal }, ["standing"] = false, ["problem"] = message }));
+            }
+
             if (current is null)
             {
                 return null;
@@ -102,6 +110,12 @@ public sealed partial class EstateService
     /// </summary>
     private (Taken? Taken, GoalStepResponse? Response) StandingTaken(EstateModel model, RecordEnvelope current, GoalStepRequest request)
     {
+        // From 0.9.4 (FIX-159): a standing agent's goal step records, asks and dispatches nothing while the estate reports an error.
+        if (ActingRefusal.BeforeActing(model, "taking a step of standing agent " + current.Id) is Problem invalid)
+        {
+            return (null, new GoalStepResponse(current.Id, "none", invalid.Message, false, Problem: invalid));
+        }
+
         DateTimeOffset now = FlowClock.GetUtcNow();
         DateTimeOffset asOf = now;
         if (request.Now is string named)
