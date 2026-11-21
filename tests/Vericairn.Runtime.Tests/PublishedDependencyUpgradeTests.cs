@@ -38,7 +38,7 @@ public sealed class PublishedDependencyUpgradeTests
         service.DependencyBuild = fixture.Build;
         service.DependencyPlatform = "linux-x64";
         service.Providers = new() { VericairnReleases = new GitHubReleaseSource(client) };
-        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, initialized.Operator.Id, false));
+        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, initialized.Operator.Id, false) { OneWay = true });
         Assert.Null(problem);
         Assert.True(plan!.Applied);
         Assert.Equal("release 9.1.0", plan.FromPin);
@@ -79,7 +79,7 @@ public sealed class PublishedDependencyUpgradeTests
         using var fixture = new PublishedReleaseFixture();
         using var client = new HttpClient(fixture);
         using EstateService service = Open(estate, fixture, client);
-        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false));
+        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true });
         Assert.Null(problem);
         Assert.True(plan!.Applied);
         EstateModel model = estate.Load();
@@ -109,7 +109,7 @@ public sealed class PublishedDependencyUpgradeTests
         Assert.Equal(3, check.ToFormat);
         Assert.Equal(3 - fromFormat, check.Migrations.Count);
         Assert.Equal(before, Snapshot(estate.Root));
-        var (applied, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false));
+        var (applied, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true });
         Assert.Null(problem);
         Assert.True(applied!.Applied);
         EstateModel model = estate.Load();
@@ -132,7 +132,7 @@ public sealed class PublishedDependencyUpgradeTests
         Assert.All(historical, line => Assert.Contains(line, Snapshot(Path.Combine(estate.Root, "records"))));
         fixture.BeforeResponse = null;
         string[] once = Snapshot(estate.Root);
-        var (again, repeated) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false));
+        var (again, repeated) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true });
         Assert.Null(repeated);
         Assert.False(again!.Applied);
         Assert.Equal(once, Snapshot(estate.Root));
@@ -163,7 +163,7 @@ public sealed class PublishedDependencyUpgradeTests
         string[] state = Snapshot(live);
         foreach (bool check in new[] { true, false })
         {
-            var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, check));
+            var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, check) { OneWay = true });
             Assert.Null(plan);
             Assert.NotNull(problem);
             Assert.Contains(next, problem.Message, StringComparison.Ordinal);
@@ -184,7 +184,7 @@ public sealed class PublishedDependencyUpgradeTests
         using var client = new HttpClient(fixture);
         using EstateService service = Open(estate, fixture, client);
         string[] before = Snapshot(estate.Root);
-        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false));
+        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true });
         Assert.Null(plan);
         Assert.Contains(olderWriter ? "writes record format 2, older" : "does not read record format 1", problem!.Message, StringComparison.Ordinal);
         Assert.Contains("Choose a release", problem.Message, StringComparison.Ordinal);
@@ -201,7 +201,7 @@ public sealed class PublishedDependencyUpgradeTests
         fixture.Offline = true;
         using var client = new HttpClient(fixture);
         using EstateService service = Open(estate, fixture, client);
-        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { From = directory });
+        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true, From = directory });
         Assert.Null(problem);
         Assert.True(plan!.Applied);
         Assert.Empty(fixture.Requests);
@@ -248,7 +248,7 @@ public sealed class PublishedDependencyUpgradeTests
             service.DependencyBuild = fixture.Build;
             service.DependencyPlatform = "linux-x64";
             service.Providers = new() { VericairnReleases = new GitHubReleaseSource(client) };
-            var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false));
+            var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true });
             Assert.Null(plan);
             Assert.NotNull(problem);
         }
@@ -269,7 +269,7 @@ public sealed class PublishedDependencyUpgradeTests
         service.DependencyBuild = fixture.Build;
         service.DependencyPlatform = "linux-x64";
         service.Providers = new() { VericairnReleases = new GitHubReleaseSource(client) };
-        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false));
+        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true });
         Assert.Null(problem);
         Assert.True(plan!.Applied);
         Assert.True(Directory.Exists(live));
@@ -286,8 +286,8 @@ public sealed class PublishedDependencyUpgradeTests
         string[] before = Snapshot(estate.Root);
         foreach (UpgradeRequest request in new UpgradeRequest[]
         {
-            new("9.3.0", estate.OperatorId, false),
-            new(PublishedReleaseFixture.Version, estate.OperatorId, false) { ClientBuild = "9.1.0+" + PublishedReleaseFixture.Commit },
+            new("9.3.0", estate.OperatorId, false) { OneWay = true },
+            new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true, ClientBuild = "9.1.0+" + PublishedReleaseFixture.Commit },
         })
         {
             Assert.Contains("restart any serving daemon", service.Upgrade(request).Problem!.Message, StringComparison.Ordinal);
@@ -304,12 +304,16 @@ public sealed class PublishedDependencyUpgradeTests
         using var client = new HttpClient(fixture);
         using EstateService service = Open(estate, fixture, client);
         string[] before = Snapshot(estate.Root);
-        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.BuilderId, false));
+        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.BuilderId, false) { OneWay = true });
         Assert.Null(plan);
         Assert.NotNull(problem);
         Assert.Contains(problem.Findings, f => f.Code == "migration.author");
         Assert.Equal(before, Snapshot(estate.Root));
         Assert.Empty(estate.Load().OfType("observation"));
+        // From 0.9.4 (FIX-145) the restore point the refused upgrade made first is removed again.
+        string points = Path.Combine(Path.GetDirectoryName(service.Session.Live.Path)!, Vericairn.Runtime.Upgrade.UpgradeReturns.RestorePointsDirectory);
+        Assert.True(Directory.Exists(points));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(points));
     }
 
     [Fact]
@@ -321,7 +325,7 @@ public sealed class PublishedDependencyUpgradeTests
         using EstateService service = Open(estate, fixture, client);
         using var migrations = EstateUpgrade.UseMigrations([new FailedMigration()]);
         string[] before = Snapshot(estate.Root);
-        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false));
+        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true });
         Assert.Null(plan);
         Assert.Contains("nothing changed", problem!.Message, StringComparison.Ordinal);
         Assert.Equal(before, Snapshot(estate.Root));
@@ -336,7 +340,7 @@ public sealed class PublishedDependencyUpgradeTests
         using (EstateService service = Open(estate, fixture, client))
         {
             EstateService.UpgradeStage = stage => { if (stage == "recorded") throw new StoppedUpgrade(); };
-            try { Assert.Throws<StoppedUpgrade>(() => service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false))); }
+            try { Assert.Throws<StoppedUpgrade>(() => service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true })); }
             finally { EstateService.UpgradeStage = null; }
         }
         EstateModel interrupted = estate.Load();
@@ -346,7 +350,7 @@ public sealed class PublishedDependencyUpgradeTests
         Assert.False(interrupted.Findings.HasErrors, string.Join('\n', interrupted.Findings));
         using (EstateService service = Open(estate, fixture, client))
         {
-            var (applied, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false));
+            var (applied, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, estate.OperatorId, false) { OneWay = true });
             Assert.Null(problem);
             Assert.True(applied!.Applied);
             Assert.Equal(migration.Id, applied.Migration!.Id);

@@ -221,6 +221,25 @@ remains where the estate has no recorded Vericairn release, because the serving 
 published dependency. `vericairn runtime status` and `vericairn status` show the serving daemon's
 release against the estate's pin, with a mismatch line and its commands while they differ.
 
+From 0.9.4 (FIX-145), an upgrade can be undone, and says beforehand when the previous release could not come back to the estate.
+`--check` and the applied upgrade say whether the release pinned before can still read the estate after the upgrade: `readable`,
+`one-way` (the upgrade moves the record format, or adds to the manifest or the records something that release predates, each named) or
+`unconfirmed` (a source pin whose release is unknown). A one-way upgrade is refused, with nothing changed, until you confirm it with
+`--one-way`. Before it writes anything, the applied upgrade records a restore point: the estate repository's commit and an export of
+this machine's local state for the clone, its live store included, beside the live store under your Vericairn home. The migration
+record names the restore point by id, commit and inventory hash. The output ends with the way back to the previous release:
+
+1. Stop the runtime serving the estate on this machine (`vericairn runtime stop`).
+2. Return the estate's files to the restore point's commit: `git stash --include-untracked` before you commit the upgrade, or
+   `git revert` of its commit after. `estate/manifest.json` then pins the previous release again.
+3. With no runtime serving the estate, copy the restore point's exported state back beside the live store, removing the live
+   store's `-wal` and `-shm` files first; the output names both directories.
+4. Run the previous release: `./bootstrap runtime start` (`.\bootstrap.ps1 runtime start` on Windows) fetches the release the
+   manifest pins.
+
+Records written after a one-way upgrade stay behind on the way back, since the previous release cannot read them. A local-only
+estate's records are in its live store, so its restore point names no commit and the exported state carries them.
+
 From 0.9.2 the upgrade also names the estate's first authority in the manifest's `firstAuthority`, the root
 operator's admission of its own first device, when the manifest names none, and the migration's changes say so.
 Releases before 0.9.2 refuse a manifest that carries it, so upgrade every clone that reads or writes the estate.

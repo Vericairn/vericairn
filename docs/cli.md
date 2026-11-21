@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 41, November 21, 2026. `estate upgrade` says whether the previous release can read the estate after it, refuses a one-way upgrade without `--one-way`, records a restore point and states the way back, in the development build.
+
 Revision 40, November 21, 2026. Add `worker drill`, the timed stop drill, which stops a scratch run and records the time from the stop to containment and to the run's last write as a `stop-drill` verification, in the development build.
 
 Revision 39, November 21, 2026. Add `observers list`, `declare`, `report` and `withdraw`, which declare the automated observers on this machine with their intervals and graces and keep their reports, and the `Observers (this machine):` lines that end human `status`, in the development build.
@@ -538,6 +540,27 @@ run, goes to stderr as a `warning:`, and the exit code stays 0, since the upgrad
 `--json`, an applied upgrade adds `runtime`: `outcome` is `none`, `pinned`, `kept`, `replaced`, `stopped`, `not-stopped`,
 `unreachable` or `unchecked`; `served` and `started` give a daemon's `processId` and `release`, or null; `done` and `warning`
 carry the two texts, or null. See the [operator's guide](operator-guide.md#the-serving-runtime-after-an-upgrade-092).
+
+From 0.9.4 (FIX-145), an upgrade first says whether the release the estate is pinned to before it can still read the estate after
+it: `readable`; `one-way`, when the upgrade moves the record format, or adds a manifest field or a kind of record the previous release
+predates (the manifest's verified-dependency pin and the `vericairn-release` observation from 0.8.3, the followed line and channel from
+0.9.0, the first authority and history checkpoints from 0.9.2); or `unconfirmed`, when the previous pin is a source build whose release
+is unknown and the upgrade adds such a thing. `--check` and an applied upgrade print the verdict with each reason, and a one-way upgrade
+is refused (`one-way`), with nothing changed, unless `--one-way` confirms it. Before it writes anything, an applied upgrade records a
+restore point: the estate repository's checked-out commit (none for a local-only estate) and an export of this machine's local state for
+the clone, a consistent copy of its live store and the files beside it, under `restore-points/<id>` beside the live store, with an
+inventory of their hashes in `restore-point.json`. The migration record's changes name the restore point's id, commit and inventory
+hash and the verdict, never its directory. The output then states the way back to the previous release, step by step with this
+machine's paths: stop the runtime, return the estate's files to the commit (`git stash --include-untracked` before the upgrade is
+committed, a revert of its commit after), copy the exported state back beside the live store, and run the previous release. With
+`--json`, the response adds `return`: `previousPin`, `readability`, `oneWay`, `reasons`, `steps` and, once applied, `restorePoint`
+(`id`, `createdAt`, `commit`, `clean`, `directory`, `stateHash`, `files`). A restore point is removed again when the upgrade is not
+applied.
+
+```sh
+vericairn estate upgrade --to <published-version> --check
+vericairn estate upgrade --to <published-version> --by <principal id> --one-way
+```
 
 `vericairn runtime status` adds a `release` line with the serving daemon's release against the estate's pin and, while they
 differ, a `mismatch:` line with the commands that settle it. Its `--json` adds `servingRelease`, `pin` (the manifest's pin as
