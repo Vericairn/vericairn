@@ -824,45 +824,85 @@ the estate refuses every write while they stand; removing all but one of the
 records carrying the identifier makes the line read again. An estate with no such
 identifier reads exactly as before.
 
-In these readings leaving a record unread can only fail toward the person:
+From 0.9.4 (FIX-159) leaving a record unread never makes another count. A record
+can refuse others when read: a charter's signature requirement refuses unsigned
+records and its operator roots every admission; a revocation ends what its device
+signs; a history checkpoint's closing refuses what its device, key, grant or person
+signs and it does not witness; an adoption refuses unsigned records no anchoring
+checkpoint lists; a witnessed listing refuses other bytes under its identifier.
+Left out, such a record refuses nothing. So while records are unread the loader
+judges counting again with the unread records read each way they can be: each
+identifier more than one file carries read as one of the records carrying it (copies
+with the same content and signatures once) or as none of them, with the rest of its
+line. A record counts only when it counts in the reading that leaves the unread
+records out and in every such reading. One of those readings is the estate as it
+was before the copies were written, so whatever it refused stays refused, by every
+reading, check and write; and since the reading that leaves them out is among them,
+a copy can only take counting away. The records that count for nothing only for
+this reason are reported once (`record.duplicate-refused`, a warning). Past 16
+readings which records a reading would refuse is not established, and no record
+counts (`record.duplicate-unsettled`, an error) until all but one record carrying
+each identifier is removed. Only counting is judged this way; in every other respect
+the records read keep the reading that leaves the unread records out.
 
-- an answer it carried answers nothing, so its ask stays waiting, and a
-  disposition of a standing agent's output it carried disposes of nothing;
-- a standing agent's failures count an unread line of the goal's agent runs as
-  failed, and a run an unread record names as its own records decide it or as
-  failed (above);
-- a standing agent's output whose line is unread stays among its open outputs,
-  one for each first revision the line holds, and is adopted by nobody; an output
-  or an ask of a standing agent whose goal is unread is disposed of and answered
-  by nobody;
-- an unread assignment of the goal's work, or revision of a roster, ties the agents
-  it names to the goal, as if it were read;
+What holds while records are unread:
+
+- no record counts that a reading of the unread records refuses, so an unsigned
+  record in the operator's name stays refused when a copy of the charter's or its
+  revision's identifier leaves the requirement unread, and a record a closed
+  device signed stays refused when a copy of the closing's identifier, or two new
+  files superseding it, leaves the closing unread;
 - a record left unread can make others stop counting: the device, admission,
   principal or grant a record's signature or authority rests on may be the unread
   one, and a copy of a device's identifier, or two new files superseding it, leaves
-  every record that device signed counting for nothing. So while any record is
-  unread, a record that does not count is read against standing agents as a tied
-  agent's record is, and never for them: its blocked or abandoned results, intents
-  and revisions count toward failures, its outputs stay open until a revision that
+  every record that device signed counting for nothing; with the charter left
+  unread no admission counts, so no signed record does;
+- an answer an unread record carried answers nothing, so its ask stays waiting, and
+  a disposition of a standing agent's output it carried disposes of nothing;
+- a standing agent's failures count an unread line of the goal's agent runs as
+  failed, and a run an unread record names as its own records decide it or as
+  failed (above); a standing agent's output whose line is unread stays among its
+  open outputs, one for each first revision the line holds, and is adopted by
+  nobody; an output or an ask of a standing agent whose goal is unread is disposed
+  of and answered by nobody; an unread assignment of the goal's work, or revision
+  of a roster, ties the agents it names to the goal, as if it were read;
+- a record that does not count is read against standing agents as a tied agent's
+  record is, and never for them: its blocked or abandoned results, intents and
+  revisions count toward failures, its outputs stay open until a revision that
   counts disposes of them, its assignments and roster revisions tie, and it makes
   no success, cancellation, correction, stop, answer or disposition;
 - every standing agent reads `held` while the estate leaves any record unread,
   whatever its status reads, unless it is stopped or not dispatched here: what its
   records rest on reaches, through their devices, admissions, principals and grants,
   records anywhere in the estate. `goal due` names the unread record (one that names
-  a record of the agent when there is one), and `goal step` dispatches nothing of
-  the agent until all but one of the records carrying the identifier is removed.
+  a record of the agent when there is one), and no run of the agent starts: goal
+  step dispatches nothing of it and an agent run's intent is refused for the hold
+  (`operation.standing`), whatever its failures read. A goal whose own line is
+  unread is not shown as missing: `goal due` says its state, failures and open
+  outputs are not established;
+- nothing acts: release submission, every record a device signs on the runtime's
+  machine or that is prepared for a device elsewhere to sign, a pairing code, run
+  admission, preparation and launch, and a standing agent's goal step refuse
+  before they act, naming the finding, and so does every MCP tool and daemon route
+  that reaches them. While the estate reports any other error, release submission,
+  run admission and launch and a standing agent's goal step refuse the same way,
+  and a record is judged by the write boundary with the estate as it would be with
+  the record, as before, and stored only when it clears every error, so that an
+  estate can still be repaired by its records. Stopping a run is never refused.
 
-Elsewhere an unread line reads as absent, as if its files had been removed, and
-so do the records resting on it, such as those an unread device signed: no
-reading takes any of its records, or any copy's content, in another's place. A
-record that restricted another, such as a goal status, a review or a history
-checkpoint's closing, restricts nothing while it is unread, as when its file is
-removed, and a reading outside a standing agent's that counts records against a
-principal, such as a flow goal's ledger of runs, does not count it.
+Outside counting an unread line reads as absent, as if its files had been removed:
+no reading takes any of its records, or any copy's content, in another's place. What
+an unread record would restrict other than by refusing to count a record, such as a
+goal status, a review or a reconciliation's withdrawal, restricts nothing in the
+readings while it is unread, and a reading outside a standing agent's that counts
+records against a principal, such as a flow goal's ledger of runs, does not count
+it; nothing acts on such a reading while the duplicate stands, since every acting
+surface refuses.
 
 This adds no field and no record type within format 3. A reader that predates it
-reads the first of the records in path order, as before, and reports the others.
+reads the first of the records in path order, as before, and reports the others; a
+development build before FIX-159 counts a record a reading of the unread records
+refuses, and does not refuse acts while the estate reports an error.
 
 ## Security reports (0.9.2)
 
