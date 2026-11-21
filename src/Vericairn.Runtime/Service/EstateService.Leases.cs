@@ -818,22 +818,31 @@ public sealed partial class EstateService
     }
 
     /// <summary>
-    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): a new assignment an agent or a service would record of a step another
-    /// principal's assignment holds is refused, since it would take nothing from the holder and hold nothing itself: only a person hands
-    /// a held step to another principal, so a displaced holder never takes its step back by assigning it to itself, and no agent displaces
-    /// a person's holding. A revision of an assignment keeps its place and is not judged here. Null when it may be written.
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): a new assignment that states a time before the step's latest assignment is
+    /// refused, whoever writes it; and one an agent or a service would record of a step another principal's assignment holds is refused,
+    /// since it would take nothing from the holder and hold nothing itself: only a person hands a held step to another principal, so a
+    /// displaced holder never takes its step back, and no agent displaces a person's holding. A revision of an assignment keeps its place
+    /// and is not judged here. Null when it may be written.
     /// </summary>
     private static string? AssignmentTakesNothingRefusal(RecordDraft draft, EstateModel model)
     {
         if (draft.Type != "assignment" || draft.Supersedes is not null || draft.Subject is null || draft.Body.ValueKind != JsonValueKind.Object
-            || !model.ById.TryGetValue(draft.Subject.Id, out RecordEnvelope? order) || order.Type != "work-order"
-            || Routing.WouldHoldNothing(model, order, draft.By, draft.Body) is not RecordEnvelope holder)
+            || !model.ById.TryGetValue(draft.Subject.Id, out RecordEnvelope? order) || order.Type != "work-order")
         {
             return null;
         }
 
         string key = EstateModel.BodyString(model.Latest(order), "key") ?? order.Id;
-        return $"Not written: {PrincipalName(model, EstateModel.BodyString(holder, "contributor"))}'s assignment {holder.Id} holds this step of {key}, and only a person hands a held step to another principal; an assignment of it by {PrincipalName(model, draft.By)}, which is no person, would take nothing and hold nothing.";
+
+        // A new assignment is dated now, never before the step's latest assignment, whoever recorded that one.
+        if (draft.At is DateTimeOffset stated && Routing.LatestOfStep(model, order, draft.Body) is RecordEnvelope latest && stated < latest.AtTime)
+        {
+            return $"Not written: this assignment of {key} states {RecordParser.FormatTimestamp(stated)}, before the step's latest assignment {latest.Id} at {latest.At}; a new assignment is never dated before the assignments it follows.";
+        }
+
+        return Routing.WouldHoldNothing(model, order, draft.By, draft.Body) is RecordEnvelope holder
+            ? $"Not written: {PrincipalName(model, EstateModel.BodyString(holder, "contributor"))}'s assignment {holder.Id} holds this step of {key}, and only a person hands a held step to another principal; an assignment of it by {PrincipalName(model, draft.By)}, which is no person, would take nothing and hold nothing."
+            : null;
     }
 
     /// <summary>Why a registration's label, roles, capacity or lease length is refused; null when they are within their bounds.</summary>

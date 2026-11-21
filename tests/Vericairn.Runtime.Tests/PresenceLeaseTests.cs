@@ -272,6 +272,37 @@ public sealed class PresenceLeaseTests
     }
 
     [Fact]
+    public void ABackdatedAssignmentIsRefusedAndAPersonWhoGaveTheStepAwayTakesItOverAgain()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        Grant(run, builder, "local-engineering");
+        RecordEnvelope first = run.Estate.Load().ById[run.Assignment];
+        RecordEnvelope order = run.Estate.Load().ById[first.Subject!.Id];
+        TakeoverResponse taken = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op));
+        Assert.True(taken.Ok, taken.Message);
+
+        // The displaced agent's assignment of the step to the person holding it, stating a time before the first assignment, is refused.
+        var body = new System.Text.Json.Nodes.JsonObject { ["contributor"] = op, ["brief"] = System.Text.Json.Nodes.JsonNode.Parse(RunEstate.Brief) };
+        WriteOutcome backdated = run.Service.NewRecord(new NewRecordRequest("assignment", builder, RunEstate.Json(body.ToJsonString()), $"work-order:{order.Id}:{order.ComputedHash}",
+            At: RecordParser.FormatTimestamp(first.AtTime.AddSeconds(-1))));
+        Assert.Contains("before the step's latest assignment", backdated.Problem!.Message, StringComparison.Ordinal);
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(taken.Assignment!.Id, op, "widget, a work branch", "Carry it.")));
+
+        // The person gives the step to another agent of its role and takes it over again: the person's latest assignment holds it.
+        string helper = Agent(run);
+        string given = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-1", helper, op, RunEstate.Json(RunEstate.Brief)) { Repository = run.Resource })).Id;
+        TakeoverResponse again = run.Service.WorkTakeover(new TakeoverRequest(given, op));
+        Assert.True(again.Ok, again.Message);
+        EstateModel model = run.Estate.Load();
+        Assert.Equal(again.Assignment!.Id, Routing.HolderOf(model, model.ById[given])!.Id);
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(again.Assignment.Id, op, "widget, a work branch", "Carry it again.")));
+        Assert.Contains("no longer holds its step", run.Service.Attempt(new AttemptRequest(given, helper, "widget, a work branch", "Mine.")).Problem!.Message, StringComparison.Ordinal);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void ALateAttemptWrittenByHandLeavesTheDisplacedAssignmentDisplacedAndUnresolvedEffectsKeepTheirNotice()
     {
         using var run = new RunEstate(keepOperatorKey: true);

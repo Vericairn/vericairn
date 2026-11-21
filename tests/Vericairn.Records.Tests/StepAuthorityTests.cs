@@ -100,12 +100,17 @@ public class StepAuthorityTests
         Assert.Empty(Routing.Assignments(estate.Load(), w1));
         RecordEnvelope toPat = estate.Add("assignment", builder, Assignment(pat), w1.Reference);
 
-        // A run of it recorded later completes it, and the assignment to Pat stays what it was when it was recorded.
+        // Until a run completes the routed assignment, the builder's assignment to Pat holds the step, no person having assigned it.
+        Assert.Equal([toPat.Id], Routing.Assignments(estate.Load(), w1).Select(a => a.Id));
+
+        // A run of it recorded later completes it. From 0.9.4 (ID-11) the holder rule judges by who recorded each assignment, never by
+        // the times they state across kinds of writer: the operator's routed assignment is a person's, so it holds the step, and the
+        // builder's assignment to Pat, an agent's, takes nothing from it, whenever either was written. Both records stay valid.
         estate.Add("operation", op, Run(goal.Id, stranded.Id, builder, "agent-run:later"));
         EstateModel model = estate.Load();
         Assert.False(Routing.Stranded(model, stranded));
         Assert.True(Routing.Stranded(model, stranded, toPat));
-        Assert.Equal([stranded.Id, toPat.Id], Routing.Assignments(model, w1).Select(a => a.Id));
+        Assert.Equal([stranded.Id], Routing.Assignments(model, w1).Select(a => a.Id));
         Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location.StartsWith(toPat.ExpectedPath, StringComparison.Ordinal));
 
         // Routing's assignment of W-2 to Pat holds it only once the ask naming it is recorded, and an ask names only Pat's assignment.
@@ -121,6 +126,73 @@ public class StepAuthorityTests
         // routedWith names only a run or an ask.
         RecordEnvelope odd = estate.Add("assignment", op, Routed(pat, "later"), w2.Reference);
         Assert.Contains(estate.Load().Findings, f => f.Severity == Severity.Error && f.Location == odd.ExpectedPath + "#body.routedWith");
+    }
+
+    [Fact]
+    public void ThePersonsLatestAssignmentHoldsTheStepWhateverTimeAnAgentsAssignmentStatesAndAPersonMovesItAgain()
+    {
+        // From 0.9.4 (ID-11): the holder rule judges by who recorded each assignment, never by stated times across kinds of writer.
+        using var estate = new TestEstate(recordFormat: 2);
+        string op = estate.OperatorId;
+        string builder = estate.BuilderId;
+        string helper = estate.Add("principal", op, """{"kind":"agent","name":"Helper","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""").Id;
+        Grant(estate, builder, "local-engineering");
+        RecordEnvelope w1 = estate.Add("work-order", op, Order("W-1", null));
+        DateTimeOffset start = estate.Clock;
+        estate.SetClock(start.AddMinutes(10));
+        RecordEnvelope first = estate.Add("assignment", op, Assignment(builder), w1.Reference);
+        estate.SetClock(start.AddMinutes(20));
+        RecordEnvelope takenOver = estate.Add("assignment", op, Assignment(op), w1.Reference);
+
+        // The displaced agent, under local-engineering, assigns the step to the person holding it, stating a time before the first
+        // assignment, and to itself, stating a time between the two: neither takes the step, and the hand-over still holds it.
+        estate.SetClock(start.AddMinutes(5));
+        RecordEnvelope early = estate.Add("assignment", builder, Assignment(op), w1.Reference);
+        estate.SetClock(start.AddMinutes(15));
+        RecordEnvelope between = estate.Add("assignment", builder, Assignment(builder), w1.Reference);
+        EstateModel model = estate.Load();
+        Assert.Equal([first.Id, takenOver.Id], Routing.Assignments(model, w1).Select(a => a.Id));
+        Assert.Equal(takenOver.Id, Routing.HolderOf(model, model.ById[early.Id])!.Id);
+        Assert.True(Routing.Displaced(model, model.ById[between.Id]));
+        Assert.False(Routing.Displaced(model, model.ById[takenOver.Id]));
+
+        // The person who took it over gives it to the helper and takes it over again; each time the person's latest assignment holds it.
+        estate.SetClock(start.AddMinutes(30));
+        RecordEnvelope given = estate.Add("assignment", op, Assignment(helper), w1.Reference);
+        Assert.Equal(given.Id, Routing.HolderOf(estate.Load(), estate.Load().ById[first.Id])!.Id);
+        estate.SetClock(start.AddMinutes(40));
+        RecordEnvelope again = estate.Add("assignment", op, Assignment(op), w1.Reference);
+        model = estate.Load();
+        Assert.Equal(again.Id, Routing.HolderOf(model, model.ById[given.Id])!.Id);
+        Assert.True(Routing.Displaced(model, model.ById[given.Id]));
+
+        // An agent's assignment to the principal the person's latest assignment gave the step to, recorded after it, goes on holding for
+        // that principal; one to anyone else, whenever it is dated, holds nothing.
+        estate.SetClock(start.AddMinutes(50));
+        RecordEnvelope continued = estate.Add("assignment", builder, Assignment(op), w1.Reference);
+        RecordEnvelope late = estate.Add("assignment", builder, Assignment(helper), w1.Reference);
+        model = estate.Load();
+        Assert.Equal(continued.Id, Routing.HolderOf(model, model.ById[again.Id])!.Id);
+        Assert.False(Routing.Displaced(model, model.ById[again.Id]));
+        Assert.True(Routing.Displaced(model, model.ById[late.Id]));
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location.StartsWith("records/assignment/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WithoutAPersonsAssignmentTheFirstAgentsAssignmentHoldsAndAnotherAgentsTakesNothing()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        string op = estate.OperatorId;
+        string builder = estate.BuilderId;
+        string helper = estate.Add("principal", op, """{"kind":"agent","name":"Helper","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""").Id;
+        Grant(estate, builder, "local-engineering");
+        RecordEnvelope w1 = estate.Add("work-order", op, Order("W-1", null));
+        RecordEnvelope dispatched = estate.Add("assignment", builder, Assignment(helper), w1.Reference);
+        RecordEnvelope again = estate.Add("assignment", builder, Assignment(helper), w1.Reference);
+        RecordEnvelope moved = estate.Add("assignment", builder, Assignment(builder), w1.Reference);
+        EstateModel model = estate.Load();
+        Assert.Equal([dispatched.Id, again.Id], Routing.Assignments(model, w1).Select(a => a.Id));
+        Assert.True(Routing.Displaced(model, model.ById[moved.Id]));
     }
 
     private static string Person(TestEstate estate, string name) => estate.Add("principal", estate.OperatorId, $$"""{"kind":"human","name":"{{name}}","roles":["contributor"]}""").Id;

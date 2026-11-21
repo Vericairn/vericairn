@@ -608,46 +608,74 @@ public static partial class Routing
     }
 
     /// <summary>
-    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): of a work order's assignments in order, those that hold their step, which
-    /// each step's assignments pass in turn. The first holds it; a later one of the same principal goes on holding it; a later one of
-    /// another principal takes it over only when a person recorded it (a hand-over, which a lapse ask's basis also needs, or an operator's
-    /// or a sponsor's assignment) and that person was not displaced from the step before. An assignment an agent or a service recorded,
-    /// whatever its scope or grant, or one the displaced principal recorded, takes nothing from the holder and holds nothing itself, so its
-    /// writes are fenced as a displaced holder's are, and it never makes its author the holder again.
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): of a work order's assignments in order, those that hold their step, judged
+    /// for each step by the kind of principal that recorded each, never by stated times across kinds:
+    /// <list type="bullet">
+    /// <item>When a person has assigned the step (a hand-over, which a lapse ask's basis also needs, an operator's or a sponsor's
+    /// assignment, the record rules checking each one's authority), the person's assignments hold it, the last of them by its time,
+    /// whoever held it before: a person always moves a step again, to anyone, themselves included. An agent's or a service's assignment
+    /// of that step, whatever time it states, holds nothing, except one to the principal the last person's assignment gave the step to,
+    /// recorded after it, which goes on holding for that principal.</item>
+    /// <item>When no person has assigned the step, chronology counts among the assignments agents and services recorded: the first holds
+    /// it, a later one to the same principal goes on holding it, and a later one to another principal holds nothing, so an agent never
+    /// takes a step another principal holds; a holder routing had stored without its record when a later one was written held nothing
+    /// then, and that later one holds the step.</item>
+    /// </list>
+    /// An assignment that holds nothing never makes its author or contributor the holder, and its writes are fenced as a displaced
+    /// holder's are.
     /// </summary>
     private static List<RecordEnvelope> Holding(EstateModel model, IEnumerable<RecordEnvelope> ordered)
     {
         var holding = new List<RecordEnvelope>();
-        var steps = new Dictionary<string, (RecordEnvelope Holder, string? Principal, HashSet<string?> Displaced)>(StringComparer.Ordinal);
+        foreach (IGrouping<string, RecordEnvelope> step in ordered.GroupBy(a => HoldingKey(a.Body), StringComparer.Ordinal))
+        {
+            List<RecordEnvelope> all = [.. step];
+            List<RecordEnvelope> persons = [.. all.Where(a => GoalRules.IsPerson(model, Identity(model, a.By)))];
+            if (persons.Count == 0)
+            {
+                holding.AddRange(AgentsHolding(model, all));
+                continue;
+            }
+
+            RecordEnvelope last = persons[^1];
+            string? holder = Identity(model, EstateModel.BodyString(last, "contributor"));
+            holding.AddRange(persons);
+            holding.AddRange(all.Where(a => !persons.Contains(a) && GoalRules.Before(last, a) && Identity(model, EstateModel.BodyString(a, "contributor")) == holder));
+        }
+
+        return [.. holding.OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)];
+    }
+
+    /// <summary>The holding assignments of a step no person has assigned, in order: chronology among agents' and services' assignments.</summary>
+    private static List<RecordEnvelope> AgentsHolding(EstateModel model, List<RecordEnvelope> ordered)
+    {
+        var holding = new List<RecordEnvelope>();
+        RecordEnvelope? holder = null;
+        string? principal = null;
         foreach (RecordEnvelope assignment in ordered)
         {
-            string key = HoldingKey(assignment.Body);
             string? contributor = Identity(model, EstateModel.BodyString(assignment, "contributor"));
-            // A step whose holder routing had stored without its record when this one was written had no holder then: this one holds it.
-            if (!steps.TryGetValue(key, out (RecordEnvelope Holder, string? Principal, HashSet<string?> Displaced) step) || Stranded(model, step.Holder, assignment))
+            if (holder is null || contributor == principal || Stranded(model, holder, assignment))
             {
-                steps[key] = (assignment, contributor, step.Displaced ?? []);
-                holding.Add(assignment);
-                continue;
-            }
-
-            if (contributor == step.Principal)
-            {
-                steps[key] = (assignment, contributor, step.Displaced);
-                holding.Add(assignment);
-                continue;
-            }
-
-            string? author = Identity(model, assignment.By);
-            if (GoalRules.IsPerson(model, author) && !step.Displaced.Contains(author))
-            {
-                step.Displaced.Add(step.Principal);
-                steps[key] = (assignment, contributor, step.Displaced);
+                holder = assignment;
+                principal = contributor;
                 holding.Add(assignment);
             }
         }
 
         return holding;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11): the latest assignment of the step a new assignment would carry, by the time it states, whoever recorded it and
+    /// whether or not it holds the step; null when the step has none. A new assignment is never dated before it.
+    /// </summary>
+    internal static RecordEnvelope? LatestOfStep(EstateModel model, RecordEnvelope order, JsonElement body)
+    {
+        string key = HoldingKey(body);
+        IReadOnlyList<string> chain = model.Chain(model.Latest(order));
+        return model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && HoldingKey(a.Body) == key)
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
     /// <summary>

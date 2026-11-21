@@ -453,6 +453,31 @@ public class FlowDecisionTests
     }
 
     [Fact]
+    public void InTheCurrentRoundOnlyTheCurrentHoldersDecisionCountsABackdatedOneByADisplacedHolderIncluded()
+    {
+        // From 0.9.4 (ID-11): a person takes the gate over from the agent that held it; a decision the agent's device signed under its
+        // displaced assignment, written by hand and dated between its assignment and the hand-over, counts for nothing.
+        using var run = new FlowFixture(Gate(), rolesOf: f => Approvers(f, agent: true));
+        Draft(run);
+        RecordEnvelope held = run.Assign("gate", run.Estate.BuilderId);
+        DateTimeOffset assigned = run.Estate.Clock;
+        run.Estate.SetClock(assigned.AddMinutes(10));
+        RecordEnvelope handover = run.Assign("gate", run.Estate.OperatorId);
+        run.Estate.SetClock(assigned);
+        RecordEnvelope backdated = Decide(run, held, ["ship"], "From the displaced assignment.");
+        Assert.True(GoalRules.Before(backdated, handover));
+        FlowPosition.StepInstance gate = run.Step("gate");
+        Assert.Equal(("pending", run.Estate.OperatorId), (gate.Decision!.State, EstateModel.BodyString(gate.Assignment!, "contributor")));
+        Assert.Equal("blocked", run.Step("release").State);
+
+        // The current holder's decision counts.
+        run.Estate.SetClock(assigned.AddMinutes(20));
+        RecordEnvelope decided = Decide(run, handover, ["ship"], "From the current holder.");
+        FlowPosition.StepInstance taken = run.Step("gate");
+        Assert.Equal(("taken", decided.Id), (taken.Decision!.State, taken.Decision.Record!.Id));
+    }
+
+    [Fact]
     public void APathBackCountsTheDecisionsThatTookItOneARoundNeverFreshAssignments()
     {
         // Review finding 6: assignments made for other reasons never count, and a decision sent back and decided again counts once.
