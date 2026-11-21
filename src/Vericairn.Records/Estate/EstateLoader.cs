@@ -107,6 +107,8 @@ public static class EstateLoader
         var findings = new FindingList();
         var records = new List<RecordEnvelope>();
         var byId = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
+        var read = new List<(RecordEnvelope Record, string Location)>();
+        HashSet<string>? duplicated = null;
         if (files.Count == 0)
         {
             findings.Info("records.empty", EstateLayout.RecordsDirectory, "No records yet.");
@@ -150,11 +152,20 @@ public static class EstateLoader
 
             if (!byId.TryAdd(record.Id, record))
             {
-                findings.Error("record.duplicate-id", location, $"Another record already has id {record.Id}.");
-                continue;
+                (duplicated ??= new HashSet<string>(StringComparer.Ordinal)).Add(record.Id);
             }
 
-            records.Add(record);
+            read.Add((record, location));
+        }
+
+        IReadOnlyList<IReadOnlyList<RecordEnvelope>> unreadable = [];
+        if (duplicated is null)
+        {
+            records.AddRange(read.Select(r => r.Record));
+        }
+        else
+        {
+            unreadable = LeaveOutDuplicates(read, duplicated, records, byId, findings);
         }
 
         var supersession = new FindingList();
@@ -171,6 +182,7 @@ public static class EstateLoader
             FilePaths = files.Select(f => f.Path).ToHashSet(StringComparer.Ordinal),
             AuthorityAtRecordTime = authorityAtRecordTime,
             Signatures = signatures,
+            UnreadableLines = unreadable,
         };
         if (!judge)
         {
@@ -303,6 +315,76 @@ public static class EstateLoader
         }
 
         return model;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-156): an identifier more than one record file carries is unreadable, whatever their dates, paths or contents, and so
+    /// is every record of its line: every record joined to one of those files through supersedes, either way, the record each copy says it
+    /// supersedes among them. None of them enters the estate as read, so no reading takes one copy in another's place, takes an earlier
+    /// revision of the line for its latest, or reads a later revision as a line of its own. Each copy is reported (record.duplicate-id, an
+    /// error and a reconcile task) and each other record of its line noted (record.duplicate-line); the records left out are kept apart,
+    /// line by line, for the readings that count what they cannot read against the principal it would favor
+    /// (<see cref="EstateModel.UnreadableLines"/>). Removing all but one copy makes the line read again.
+    /// </summary>
+    private static List<List<RecordEnvelope>> LeaveOutDuplicates(List<(RecordEnvelope Record, string Location)> read, HashSet<string> duplicated,
+        List<RecordEnvelope> records, Dictionary<string, RecordEnvelope> byId, FindingList findings)
+    {
+        var parent = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Find(string id)
+        {
+            string root = id;
+            while (parent.TryGetValue(root, out string? above) && above != root) root = above;
+            while (parent.TryGetValue(id, out string? above) && above != root)
+            {
+                parent[id] = root;
+                id = above;
+            }
+
+            return root;
+        }
+
+        foreach ((RecordEnvelope record, _) in read)
+        {
+            if (record.Supersedes is string prior && Find(record.Id) is string a && Find(prior) is string b && a != b)
+            {
+                parent[a] = b;
+            }
+        }
+
+        Dictionary<string, int> copies = read.Where(r => duplicated.Contains(r.Record.Id)).GroupBy(r => r.Record.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        Dictionary<string, string> heldBy = duplicated.GroupBy(Find, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Order(StringComparer.Ordinal).First(), StringComparer.Ordinal);
+        var lines = new Dictionary<string, List<RecordEnvelope>>(StringComparer.Ordinal);
+        var order = new List<List<RecordEnvelope>>();
+        byId.Clear();
+        foreach ((RecordEnvelope record, string location) in read)
+        {
+            string root = Find(record.Id);
+            if (!heldBy.TryGetValue(root, out string? held))
+            {
+                records.Add(record);
+                byId[record.Id] = record;
+                continue;
+            }
+
+            if (!lines.TryGetValue(root, out List<RecordEnvelope>? line))
+            {
+                line = [];
+                lines[root] = line;
+                order.Add(line);
+            }
+
+            line.Add(record);
+            if (copies.TryGetValue(record.Id, out int count))
+            {
+                findings.Error("record.duplicate-id", location, $"{count.ToString(System.Globalization.CultureInfo.InvariantCulture)} records carry id {record.Id}: none of them is read, nor any record of its line, until all but one is removed.");
+            }
+            else
+            {
+                findings.Warning("record.duplicate-line", location, $"Not read: its line holds id {held}, which {copies[held].ToString(System.Globalization.CultureInfo.InvariantCulture)} records carry (record.duplicate-id); it is read again once all but one of them is removed.");
+            }
+        }
+
+        return order;
     }
 
     // The public keys the device records name: every key a signature may be verified with.

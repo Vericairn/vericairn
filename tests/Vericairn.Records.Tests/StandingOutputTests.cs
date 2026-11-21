@@ -862,6 +862,46 @@ public class StandingOutputTests
     }
 
     [Fact]
+    public void ARecordReusingADispositionsIdentifierLeavesTheOutputOpenAndTheAgentHeld()
+    {
+        // From 0.9.4 (FIX-156): the operator parks the agent's possibility and opens it again; the carrier writes by hand a record carrying the
+        // identifier of the operator's reopening, parking it again, dated in an earlier month so that its path sorts first, or in a later one.
+        // Neither copy is read, nor any revision of the possibility: it stays open and counted, and the agent is held until the copy is removed.
+        foreach (DateTimeOffset month in new[] { StandingAgentTests.EarlierMonth, StandingAgentTests.LaterMonth })
+        {
+            using var fixture = new StandingFixture();
+            (RecordEnvelope assignment, RecordEnvelope run, string key) = Carried(fixture);
+            JsonObject raised = RaisedBy(fixture, assignment, run, key);
+            RecordEnvelope possibility = fixture.Add("possibility", Possibility(raised, "cache/index"), builder: true);
+            RecordEnvelope parked = fixture.Add("possibility", Revised(possibility, b =>
+            {
+                b["disposition"] = "parked";
+                b["reason"] = "Not before the index format settles.";
+            }), supersedes: possibility.Id);
+            Assert.Equal(0, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+            RecordEnvelope reopened = fixture.Add("possibility", Revised(parked, b =>
+            {
+                b["disposition"] = "open";
+                b["reason"] = "The index format settled.";
+            }), supersedes: parked.Id);
+            Assert.False(fixture.Estate.Load().Findings.HasErrors, Errors(fixture.Estate.Load().Findings));
+            Assert.Equal(1, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
+
+            RecordEnvelope copy = StandingAgentTests.Reusing(fixture, reopened, Revised(parked, b => b["reason"] = "Parked again by hand."), month, parked.Id);
+            EstateModel model = fixture.Estate.Load();
+            StandingAgents.Agent agent = fixture.Agent(fixture.Estate.Clock);
+            Assert.Equal(("held", 1), (agent.State, agent.OpenOutputs));
+            Assert.Contains("record.duplicate-id", agent.Reason, StringComparison.Ordinal);
+            Assert.False(model.ById.ContainsKey(possibility.Id));
+            Assert.Equal(new[] { copy.ExpectedPath, reopened.ExpectedPath }.Order(StringComparer.Ordinal), model.Findings.Where(f => f.Code == "record.duplicate-id").Select(f => f.Location).Order(StringComparer.Ordinal));
+
+            StandingAgentTests.Remove(fixture, copy);
+            agent = fixture.Agent(fixture.Estate.Clock);
+            Assert.Equal(("active", 1), (agent.State, agent.OpenOutputs));
+        }
+    }
+
+    [Fact]
     public void NoAgentWithdrawsAStandingAgentsAskOrClosesItsPublicationRequestByAnyRecord()
     {
         using var fixture = new StandingFixture();

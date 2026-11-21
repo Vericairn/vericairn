@@ -691,28 +691,50 @@ charges each period's runs against the period's caps.
 
 The consecutive failed runs count each settled `agent-run` of the goal once, in
 the order the runs settled (each at the later of its intent and its first
-settling revision no tied agent wrote, or, without one, its first settling
-revision). A run is read
+settling revision no tied agent wrote, first by the number of revisions no tied
+agent wrote above it on its own `supersedes` chain, then by `at` and identifier;
+or, without one, its first settling revision). A run is read
 from its lineage: every `operation` whose `supersedes` chain reaches the run's
 intent, on every branch, whatever divergent successors, the order of identifiers
 or a `reconciliation` make current. Where a revision no agent tied to the goal (as
 the `ask` row of the standing outputs below reads ties) wrote settles the run or
-cancels it, the deepest revision no tied agent wrote, by its number of
-`supersedes` steps from the intent and never by its `at`, decides the run, and the
-revisions tied agents wrote count for nothing; when the deciding revision is not
-settled, the run counts for nothing. Only where no such revision settles
+cancels it, the run's untied heads decide it and the revisions tied agents wrote
+count for nothing. From 0.9.4 (FIX-156) an untied head is a revision no tied
+agent wrote that no other such revision follows on its own `supersedes` chain,
+directly or through revisions tied agents wrote. Each head reads as the run
+would by it alone: a success, a failure, or nothing when it leaves the run
+canceled or unsettled. On one line, as the worker and `records new` write every
+revision on the run's latest, the head is its latest untied revision, so an
+untied principal's correction written on the settlement it corrects counts as
+written, however many revisions a tied agent put between them. Where heads on
+different branches read differently, the reading least favorable to the agent
+decides: a failure over nothing, nothing over a success. Neither the number of
+`supersedes` steps nor `at` ranks one untied revision over another, so a branch a
+tied agent padded with revisions of its own ranks nothing. Only where no such revision settles
 or cancels the run does a `known-failure` revision a tied agent wrote count, as a
-failure. A run succeeded when the deciding revision is `observed-success` with
+failure. A head reads as a success when it is `observed-success` with
 `observed.reference` naming a `completed` or `partial` result on an attempt of
 its assignment, recorded after its intent, and no tied agent wrote its intent;
-otherwise it failed when a `result` with outcome `blocked` or `abandoned` was
+otherwise as a failure when a `result` with outcome `blocked` or `abandoned` was
 recorded on an attempt on its assignment, any revision of either, after its intent
 and before the intent of the assignment's next run, whatever a later result or a
-correction says, or when the deciding revision is `known-failure`, unless its stop
+correction says, or when it is `known-failure`, unless its stop
 was requested by the goal's sponsor, when a person, or an operator, as they stood
 when the stop was recorded, in a revision no tied agent wrote; any other
 principal's stop and the worker's for a cap count. Any other run counts for
-nothing, one that exited cleanly with no result included. From 0.9.4 the worker
+nothing, one that exited cleanly with no result included. Records the estate
+leaves unread because their line holds an identifier more than one record carries
+(see [Identifiers more than one record carries](#identifiers-more-than-one-record-carries-094))
+count against the agent: a line of the goal's `agent-run` operations that is not
+read counts as one failed run for each intent it holds, at least one, at the
+latest `at` among its records; a run that an unread record names, by its
+assignment, an attempt or result on it or a record of its lineage, counts as its
+own records decide it when they make it a success or a failure, and otherwise as
+failed; and while any record is unread, a record that does not count, whose
+device, admission, principal or grant may be the unread one, is read as a tied
+agent's record: an intent, a revision, an attempt or a blocked or abandoned
+result counts toward a failure, and none makes a success, cancels, corrects or
+stops a run. From 0.9.4 the worker
 names in `observed.reference` of an observed success the latest `completed` or
 `partial` result its agent recorded during the run, on an attempt recorded during
 the run, as it sees them at the run's exit, and names none otherwise; a reader
@@ -727,7 +749,8 @@ of the failures, answered by a decision the `ask` row counts, after which no run
 settled before the earlier of the ask and that decision counts. So no attempt,
 result, run revision, divergent revision, reconciliation or decision a tied agent
 writes ends the pause or turns a success an untied settlement names into a
-failure, whatever its `at`.
+failure, whatever its `at`, and no record carrying another's identifier does,
+whatever its `at` or path.
 
 A reader of format 3 that predates these fields refuses an assignment that
 carries `occurrence` as an unknown key and refuses a goal whose plan carries
@@ -781,6 +804,65 @@ one of them as an unknown key, as any later format-3 field, so the estate's pin
 keeps every machine on a release that reads them. A format-2 estate refuses them.
 `records describe possibility`, `records describe ask` and `records describe
 operator-request` include this contract.
+
+## Identifiers more than one record carries (0.9.4)
+
+A record's identifier is its own: the write boundary refuses a record whose
+identifier the estate already holds, so two record files carry one identifier only
+when one was written by hand or a copy was left behind. Before 0.9.4 the loader
+read the first of them in path order, so a record dated in an earlier month, whose
+path sorts first, was read in place of the record it copied. From 0.9.4 (FIX-156)
+such an identifier is unread, whatever the records' `at`, paths or contents, and so
+is every record of its line: every record joined to one of those files through
+`supersedes`, either way, including the record each copy names as the one it
+supersedes. None of them enters the estate as read. No chain, lineage, lookup or
+supersession reads any of them, so no copy is read in another's place, no earlier
+revision of the line reads as its latest, and no later one reads as a line of its
+own. Each copy is reported (`record.duplicate-id`, an error and a reconcile task)
+and each other record of its line noted (`record.duplicate-line`, a warning), so
+the estate refuses every write while they stand; removing all but one of the
+records carrying the identifier makes the line read again. An estate with no such
+identifier reads exactly as before.
+
+In these readings leaving a record unread can only fail toward the person:
+
+- an answer it carried answers nothing, so its ask stays waiting, and a
+  disposition of a standing agent's output it carried disposes of nothing;
+- a standing agent's failures count an unread line of the goal's agent runs as
+  failed, and a run an unread record names as its own records decide it or as
+  failed (above);
+- a standing agent's output whose line is unread stays among its open outputs,
+  one for each first revision the line holds, and is adopted by nobody; an output
+  or an ask of a standing agent whose goal is unread is disposed of and answered
+  by nobody;
+- an unread assignment of the goal's work, or revision of a roster, ties the agents
+  it names to the goal, as if it were read;
+- a record left unread can make others stop counting: the device, admission,
+  principal or grant a record's signature or authority rests on may be the unread
+  one, and a copy of a device's identifier, or two new files superseding it, leaves
+  every record that device signed counting for nothing. So while any record is
+  unread, a record that does not count is read against standing agents as a tied
+  agent's record is, and never for them: its blocked or abandoned results, intents
+  and revisions count toward failures, its outputs stay open until a revision that
+  counts disposes of them, its assignments and roster revisions tie, and it makes
+  no success, cancellation, correction, stop, answer or disposition;
+- every standing agent reads `held` while the estate leaves any record unread,
+  whatever its status reads, unless it is stopped or not dispatched here: what its
+  records rest on reaches, through their devices, admissions, principals and grants,
+  records anywhere in the estate. `goal due` names the unread record (one that names
+  a record of the agent when there is one), and `goal step` dispatches nothing of
+  the agent until all but one of the records carrying the identifier is removed.
+
+Elsewhere an unread line reads as absent, as if its files had been removed, and
+so do the records resting on it, such as those an unread device signed: no
+reading takes any of its records, or any copy's content, in another's place. A
+record that restricted another, such as a goal status, a review or a history
+checkpoint's closing, restricts nothing while it is unread, as when its file is
+removed, and a reading outside a standing agent's that counts records against a
+principal, such as a flow goal's ledger of runs, does not count it.
+
+This adds no field and no record type within format 3. A reader that predates it
+reads the first of the records in path order, as before, and reports the others.
 
 ## Security reports (0.9.2)
 

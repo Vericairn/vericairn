@@ -59,8 +59,37 @@ public sealed class EstateModel
     /// <summary>Repository root.</summary>
     public string Root { get; }
 
-    /// <summary>All parsed records in path order, those that do not count among them: they are kept as evidence and reported.</summary>
+    /// <summary>
+    /// All parsed records in path order, those that do not count among them: they are kept as evidence and reported. From 0.9.4 (FIX-156)
+    /// a record whose identifier another record file also carries, and every record of its line, is not among them
+    /// (<see cref="UnreadableLines"/>).
+    /// </summary>
     public IReadOnlyList<RecordEnvelope> Records { get; }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-156): the records the loader left out because their line holds an identifier more than one record file carries, each
+    /// line's records in path order, every copy among them. No lookup, chain or supersession of this model reads them; only the readings
+    /// that count what they cannot read against the principal it would favor do (the standing agents' failures, open outputs, ties and
+    /// hold). Empty for an estate with no such identifier.
+    /// </summary>
+    internal IReadOnlyList<IReadOnlyList<RecordEnvelope>> UnreadableLines
+    {
+        get => unreadableLines;
+        init
+        {
+            unreadableLines = value;
+            unreadableIds = value.SelectMany(line => line).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        }
+    }
+
+    private readonly IReadOnlyList<IReadOnlyList<RecordEnvelope>> unreadableLines = [];
+    private readonly HashSet<string> unreadableIds = new(StringComparer.Ordinal);
+
+    /// <summary>From 0.9.4 (FIX-156): every record of <see cref="UnreadableLines"/>, in path order within each line.</summary>
+    internal IEnumerable<RecordEnvelope> Unreadable => unreadableLines.SelectMany(line => line);
+
+    /// <summary>From 0.9.4 (FIX-156): whether an identifier is that of a record left out of this model as unreadable.</summary>
+    internal bool IsUnreadable(string? id) => id is not null && unreadableIds.Contains(id);
 
     /// <summary>
     /// The records that count, in path order (design/signed-history.md § 6). Type and subject lookups, currency and supersession read
@@ -68,7 +97,7 @@ public sealed class EstateModel
     /// </summary>
     public IReadOnlyList<RecordEnvelope> CountingRecords { get; private set; }
 
-    /// <summary>Records by id, those that do not count among them.</summary>
+    /// <summary>Records by id, those that do not count among them; from 0.9.4 (FIX-156) no unreadable record (<see cref="UnreadableLines"/>).</summary>
     public IReadOnlyDictionary<string, RecordEnvelope> ById { get; }
 
     /// <summary>Superseded record id to the id of its counting successor; a record that does not count supersedes nothing.</summary>

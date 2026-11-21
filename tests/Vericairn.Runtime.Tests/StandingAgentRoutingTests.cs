@@ -346,6 +346,147 @@ public class StandingAgentRoutingTests
     }
 
     [Fact]
+    public void ARecordReusingAnIdentifierOfAFailedRunLeavesThePauseHeldAndNothingRouted()
+    {
+        // From 0.9.4 (FIX-156), through the worker: after three failed runs, the builder writes by hand a record carrying the identifier of the
+        // third run's settlement, as an observed success, dated in the month before so that its path sorts first, or in the month after; then
+        // one carrying its intent's identifier naming no goal. After each, goal due reads the agent held with three failures, and goal step
+        // starts no run; removing the copy reads the run again.
+        using var run = new RunEstate(recordFormat: 3);
+        string builder = run.Estate.BuilderId;
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 });
+        string? third = null;
+        for (int i = 0; i < 3; i++)
+        {
+            GoalStepResponse failing = Step(run, goal, "fail-" + i, scenario: "claude-fails");
+            Assert.True(failing.Ok, failing.Message);
+            Assert.Equal("known-failure", run.Settled(failing.Run!.Run).Status);
+            third = failing.Run.Run;
+        }
+
+        JsonElement Due() => run.Service.GoalDue(goal)!.Json;
+        (string, int) Pause() => (Due().GetProperty("state").GetString()!, Due().GetProperty("failures").GetProperty("consecutive").GetInt32());
+        Assert.Equal(("held", 3), Pause());
+        AgentRuns.Run failed = AgentRuns.Find(run.Estate.Load(), third!)!;
+        RecordEnvelope intent = failed.Intent;
+        RecordEnvelope settled = failed.Revisions.First(r => EstateModel.BodyString(r, "status") == "known-failure");
+        var signer = new Vericairn.Records.Signing.StoreSigner(new Vericairn.Records.Signing.FileKeyStore(Vericairn.Records.Signing.VericairnHome.Path()), run.BuilderDevice);
+        DateTimeOffset now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        RecordEnvelope Reusing(RecordEnvelope original, JsonObject body, DateTimeOffset at)
+        {
+            run.Estate.SetClock(at);
+            RecordEnvelope copy = run.Estate.Add("operation", builder, body.ToJsonString(), original.Subject, original.Supersedes, id: original.Id, signer: signer);
+            Assert.NotEqual(original.ExpectedPath, copy.ExpectedPath);
+            return copy;
+        }
+
+        void Remove(RecordEnvelope copy) => File.Delete(Path.Combine(run.Estate.Root, copy.ExpectedPath.Replace('/', Path.DirectorySeparatorChar)));
+        foreach (int months in new[] { -1, 1 })
+        {
+            JsonObject success = JsonNode.Parse(settled.Body.GetRawText())!.AsObject();
+            success["status"] = "observed-success";
+            RecordEnvelope copy = Reusing(settled, success, now.AddMonths(months));
+            Assert.Equal(("held", 3), Pause());
+            Assert.Contains("record.duplicate-id", Due().GetProperty("reason").GetString(), StringComparison.Ordinal);
+            Assert.Null(Step(run, goal, "after-settlement-" + months).Run);
+            Remove(copy);
+            Assert.Equal(("held", 3), Pause());
+        }
+
+        JsonObject elsewhere = JsonNode.Parse(intent.Body.GetRawText())!.AsObject();
+        elsewhere["target"]!.AsObject().Remove("goal");
+        elsewhere["status"] = "canceled";
+        Reusing(intent, elsewhere, now.AddMonths(-1));
+        Assert.Equal(("held", 3), Pause());
+        Assert.Null(Step(run, goal, "after-intent").Run);
+    }
+
+    /// <summary>
+    /// Leaves a record of a runtime's estate unread, written by hand by the builder (FIX-156's review): a copy of its identifier dated in the
+    /// month before or the month after, a decision carrying it, or two new files sharing a fresh identifier that both supersede it. Returns the
+    /// files written, for removal.
+    /// </summary>
+    internal static IReadOnlyList<RecordEnvelope> LeaveUnread(RunEstate run, RecordEnvelope original, string shape)
+    {
+        DateTimeOffset now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        string body = original.Body.GetRawText();
+        string builder = run.Estate.BuilderId;
+        switch (shape)
+        {
+            case "earlier":
+            case "later":
+                run.Estate.SetClock(now.AddMonths(shape == "earlier" ? -1 : 1));
+                return [run.Estate.Add(original.Type, builder, body, original.Subject, original.Supersedes, id: original.Id)];
+            case "other-type":
+                run.Estate.SetClock(now);
+                var decision = new JsonObject
+                {
+                    ["title"] = "A decision", ["statement"] = "Nothing.", ["summary"] = "Nothing.", ["synthesis"] = "Nothing.", ["effects"] = new JsonArray("nothing"), ["affects"] = new JsonArray(),
+                    ["decidedBy"] = run.Estate.OperatorId, ["decidedAt"] = RecordParser.FormatTimestamp(now), ["stake"] = "low", ["notAuthorized"] = new JsonArray("spending"),
+                };
+                return [run.Estate.Add("decision", builder, decision.ToJsonString(), id: original.Id)];
+            default:
+                string fresh = Vericairn.Records.Identity.Ulid.NewUlid(now).Value;
+                run.Estate.SetClock(now);
+                RecordEnvelope first = run.Estate.Add(original.Type, builder, body, original.Subject, original.Id, id: fresh);
+                run.Estate.SetClock(now.AddMonths(1));
+                return [first, run.Estate.Add(original.Type, builder, body, original.Subject, original.Id, id: fresh)];
+        }
+    }
+
+    /// <summary>The builder's device and its admission in a runtime's estate.</summary>
+    internal static RecordEnvelope BuilderRecord(RunEstate run, string target)
+    {
+        EstateModel model = run.Estate.Load();
+        return target == "device" ? model.ById[run.BuilderDevice] : Assert.Single(model.OfType("admission"), a => a.Subject?.Id == run.BuilderDevice);
+    }
+
+    [Fact]
+    public void LeavingTheCarriersDeviceOrAdmissionUnreadLeavesThePauseHeldAndNothingRouted()
+    {
+        // FIX-156's review, through the worker: three runs exit cleanly after the builder, signing with its admitted device, recorded a blocked
+        // result in each. The builder then leaves its own device or admission unread by hand, in each of four ways, so that its signed results
+        // stop counting: goal due reads the agent held with three failures all the same and goal step starts no run; removing the files reads
+        // the estate as before.
+        using var run = new RunEstate(recordFormat: 3);
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 });
+        string? assignment = null;
+        for (int i = 0; i < 3; i++)
+        {
+            GoalStepResponse step = Step(run, goal, "clean-" + i);
+            Assert.True(step.Run is not null, step.Message);
+            Assert.Equal("observed-success", run.Settled(step.Run!.Run).Status);
+            assignment ??= step.Assignment!.Id;
+            Blocked(run, assignment);
+        }
+
+        JsonElement Due() => run.Service.GoalDue(goal)!.Json;
+        (string, int) Pause() => (Due().GetProperty("state").GetString()!, Due().GetProperty("failures").GetProperty("consecutive").GetInt32());
+        Assert.Equal(("held", 3), Pause());
+        Assert.Equal(0, run.Service.Check().Errors);
+        foreach (string target in new[] { "device", "admission" })
+        {
+            foreach (string shape in new[] { "earlier", "later", "other-type", "fresh-pair" })
+            {
+                RecordEnvelope original = BuilderRecord(run, target);
+                IReadOnlyList<RecordEnvelope> written = LeaveUnread(run, original, shape);
+                Assert.True(run.Estate.Load().IsUnreadable(original.Id), $"{target}, {shape}");
+                Assert.True(("held", 3) == Pause(), $"{target}, {shape}: {Pause()}");
+                Assert.Contains("record.duplicate-id", Due().GetProperty("reason").GetString(), StringComparison.Ordinal);
+                Assert.Null(Step(run, goal, $"after-{target}-{shape}").Run);
+                foreach (RecordEnvelope file in written)
+                {
+                    File.Delete(Path.Combine(run.Estate.Root, file.ExpectedPath.Replace('/', Path.DirectorySeparatorChar)));
+                }
+
+                Assert.Equal(("held", 3), Pause());
+            }
+        }
+
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void ALapsedOrPausedAgentDispatchesNothingAndATimeAheadOfTheClockIsRefused()
     {
         using var run = new RunEstate(recordFormat: 3);
