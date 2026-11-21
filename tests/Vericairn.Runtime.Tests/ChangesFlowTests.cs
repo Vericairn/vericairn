@@ -778,7 +778,7 @@ public sealed class ChangesFlowTests
         f.SeedPull(pushed: false);
         ChangeResponse result = f.Service.ChangesMerge(f.Merge);
         Assert.False(result.Ok);
-        Assert.Contains("No successful scanned push of this exact head", result.Message, StringComparison.Ordinal);
+        Assert.Contains("No complete checked push of this exact head", result.Message, StringComparison.Ordinal);
         Assert.Null(f.Provider.MergedHead);
     }
 
@@ -847,10 +847,21 @@ public sealed class ChangesFlowTests
         internal int Preparations { get; private set; }
         internal int Pushes { get; private set; }
         internal string? RemoteHead { get; set; }
-        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) { BeforePrepare?.Invoke(); Preparations++; return new(branch, target, head, Basis, null, Basis); }
-        public void Push(string directory, string remote, PushPlan plan, SecretScan scan)
+        // The records' heads each preparation and push was given (FIX-154), and the base a test chooses from them.
+        internal List<IReadOnlyList<string>> Recorded { get; } = [];
+        internal Func<IReadOnlyList<string>, string>? ChooseBase { get; set; }
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) =>
+            throw new InvalidOperationException("The runtime prepares a push with the records' heads.");
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head, IReadOnlyList<string> recorded)
         {
-            BeforePush?.Invoke(); Pushes++;
+            BeforePrepare?.Invoke(); Preparations++; Recorded.Add(recorded);
+            return new(branch, target, head, ChooseBase?.Invoke(recorded) ?? Basis, null, Basis);
+        }
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan) =>
+            throw new InvalidOperationException("The runtime pushes with the records' heads.");
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan, IReadOnlyList<string> recorded)
+        {
+            BeforePush?.Invoke(); Pushes++; Recorded.Add(recorded);
             Assert.True(scan.Passed(plan));
             if (Uncertain) throw new ProviderUncertainException("Unconfirmed request.");
             RemoteHead = plan.Head;

@@ -8,7 +8,7 @@ using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Adapters.Git;
 
-/// <summary>Explicit, single-ref pushes through git, pinned to a scanned commit and the observed remote head.</summary>
+/// <summary>Explicit, single-ref pushes through git, pinned to a scanned commit and the observed remote head, never to the target branch.</summary>
 /// <remarks>
 /// Every git process runs without the system and global configuration. Remote access runs from a private bare repository that reads
 /// the clone's objects but never its configuration, so the clone's address rewrites, transport settings and hooks cannot change
@@ -52,41 +52,60 @@ public sealed class GitPushAdapter : IPushAdapter
         this.textLimit = textLimit;
     }
 
+    // How many of the records' heads a preparation tries, newest first, before it takes the merge base (FIX-154).
+    internal const int RecordedLimit = 16;
+
     /// <inheritdoc />
-    public PushPlan Prepare(string directory, string remote, string branch, string target, string head)
+    /// <remarks>From 0.9.4 (FIX-154) the scan starts at the merge base with the target's observed head, whatever the remote branch holds.</remarks>
+    public PushPlan Prepare(string directory, string remote, string branch, string target, string head) => Prepare(directory, remote, branch, target, head, []);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The remote branch's and the target's heads are observed at the remote, never read from the clone's remote-tracking refs. A
+    /// recorded head counts only when <c>merge-base --is-ancestor</c> shows, from the real objects, that the remote branch's head and the
+    /// new head both descend from it; a recorded head missing from the clone, or any other answer, falls back to the merge base.
+    /// </remarks>
+    public PushPlan Prepare(string directory, string remote, string branch, string target, string head, IReadOnlyList<string> recorded)
     {
+        ArgumentNullException.ThrowIfNull(recorded);
         if (!Patterns.Commit.IsMatch(head)) throw new ProviderRefusedException("A push needs an exact head.");
         if (Read(directory, "rev-parse", "--is-shallow-repository").Trim() != "false")
             throw new ProviderRefusedException("A checked push requires complete local history; a shallow clone cannot establish every commit in its scan range.");
         Branch(directory, branch);
         Branch(directory, target);
+        if (string.Equals(branch, target, StringComparison.Ordinal))
+            throw new ProviderRefusedException("A checked push never updates its target branch; push another branch and merge it through its pull request.");
         string local = Read(directory, "rev-parse", "--verify", "refs/heads/" + branch + "^{commit}").Trim();
         if (local != head || Read(directory, "rev-parse", "--verify", "HEAD").Trim() != head)
             throw new ProviderRefusedException("The local branch or checked-out head moved.");
         string? remoteHead = Observe(directory, remote, branch);
         string targetHead = Observe(directory, remote, target) ?? throw new ProviderRefusedException("The remote target branch does not exist.");
-        string basis;
-        if (remoteHead is not null)
-        {
-            if (Invoke(directory, ["merge-base", "--is-ancestor", remoteHead, head]) is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 })
-                throw new ProviderRefusedException("The remote branch is not a known ancestor of this head; fetch and reconcile outside this operation.");
-            basis = remoteHead;
-        }
-        else
-        {
-            basis = Read(directory, "merge-base", targetHead, head).Trim();
-        }
+        if (remoteHead is not null && !Ancestor(directory, remoteHead, head))
+            throw new ProviderRefusedException("The remote branch is not a known ancestor of this head; fetch and reconcile outside this operation.");
+        // The newest complete recorded push of the branch that the remote branch still holds, else the merge base with the target: the
+        // range then holds every commit the target does not hold that no complete checked push covered, however it reached the branch.
+        string? basis = remoteHead is null ? null : recorded.Take(RecordedLimit)
+            .FirstOrDefault(r => r is not null && Patterns.Commit.IsMatch(r) && Ancestor(directory, r, remoteHead) && Ancestor(directory, r, head));
+        basis ??= Read(directory, "merge-base", targetHead, head).Trim();
         if (!Patterns.Commit.IsMatch(basis)) throw new ProviderRefusedException("The exact scan base could not be established.");
         return new(branch, target, head, basis, remoteHead, targetHead);
     }
 
+    // Whether the commit descends from the ancestor, by the real objects; a missing object or an unreadable answer is not ancestry.
+    private bool Ancestor(string directory, string ancestor, string commit) =>
+        Invoke(directory, ["merge-base", "--is-ancestor", ancestor, commit]) is { Outcome: ProcessOutcome.Exited, ExitCode: 0 };
+
     /// <inheritdoc />
-    public void Push(string directory, string remote, PushPlan plan, SecretScan scan)
+    public void Push(string directory, string remote, PushPlan plan, SecretScan scan) => Push(directory, remote, plan, scan, []);
+
+    /// <inheritdoc />
+    public void Push(string directory, string remote, PushPlan plan, SecretScan scan, IReadOnlyList<string> recorded)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(scan);
+        ArgumentNullException.ThrowIfNull(recorded);
         if (!scan.Passed(plan)) throw new ProviderRefusedException("A push requires a successful scan of exactly its commits.");
-        if (Prepare(directory, remote, plan.Branch, plan.Target, plan.Head) != plan)
+        if (Prepare(directory, remote, plan.Branch, plan.Target, plan.Head, recorded) != plan)
             throw new ProviderRefusedException("The push's remote expectation or scan range moved; prepare and scan again.");
         string objects = Objects(directory);
         ProcessResult result = Remote(remote, objects, ["-c", "push.followTags=false", "push", "--porcelain", "--no-follow-tags", "--recurse-submodules=no",
