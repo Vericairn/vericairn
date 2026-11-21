@@ -63,4 +63,24 @@ public sealed class OptionalRequestServiceTests
         Assert.False(f.Api.OperatorRequests().Json.TryGetProperty("optional", out _));
         Assert.Equal(0, f.Api.Validate().Errors);
     }
+
+    [Fact]
+    public void OnlyTheOperatorARequestIsPutToTurnsItOptional()
+    {
+        using var f = new OperatorCloseFixture();
+        RecordEnvelope work = RequestData.Work(f.Estate);
+        JsonObject body = RequestData.Body(f.Estate);
+        WriteOutcome required = f.Api.OperatorRequestWrite(new(f.Estate.BuilderId, JsonSerializer.SerializeToElement(body), OperatorRequestTests.Subject(work)));
+        Assert.True(required.Ok, required.Problem?.Message);
+        body["optional"] = true;
+
+        WriteOutcome byRequester = f.Api.OperatorRequestWrite(new(f.Estate.BuilderId, JsonSerializer.SerializeToElement(body), OperatorRequestTests.Subject(work), required.Written!.Id, required.Written.Hash));
+        WriteOutcome byOperator = f.Api.OperatorRequestWrite(new(f.Estate.OperatorId, JsonSerializer.SerializeToElement(body), OperatorRequestTests.Subject(work), required.Written.Id, required.Written.Hash));
+
+        Assert.False(byRequester.Ok);
+        Assert.Contains(byRequester.Problem!.Findings, x => x.Code == "operator-request.optional");
+        Assert.True(byOperator.Ok, byOperator.Problem?.Message);
+        Assert.Equal(0, f.Api.OperatorRequests().Json.GetProperty("waiting").GetInt32());
+        Assert.Equal(byOperator.Written!.Id, f.Api.OperatorRequests().Json.GetProperty("optional")[0].GetProperty("revision").GetString());
+    }
 }

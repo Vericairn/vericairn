@@ -65,7 +65,11 @@ internal sealed class OperatorFetchCommand : Command
 
             Directory.CreateDirectory(folder);
             foreach ((string name, _, byte[] bytes) in files) Write(Path.Combine(folder, name), bytes);
-            Write(Path.Combine(folder, GuideName), System.Text.Encoding.UTF8.GetBytes(OperatorRequests.Guide(request)));
+            // Optional as the estate reads it: among the queue's possible todos.
+            JsonElement queue = api.OperatorRequests().Json;
+            bool optional = queue.TryGetProperty("optional", out JsonElement todos) && todos.ValueKind == JsonValueKind.Array
+                && todos.EnumerateArray().Any(t => t.TryGetProperty("revision", out JsonElement revision) && revision.GetString() == request.Id);
+            Write(Path.Combine(folder, GuideName), System.Text.Encoding.UTF8.GetBytes(OperatorRequests.Guide(request, optional)));
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(new

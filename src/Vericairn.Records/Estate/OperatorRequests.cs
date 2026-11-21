@@ -62,13 +62,30 @@ public static class OperatorRequests
         public IReadOnlyList<RecordEnvelope> Optional { get; init; } = [];
     }
 
-    /// <summary>From 0.9.4 (OPS-22): whether a request is marked optional, a possible todo that never holds a release's closing or a goal's evaluation.</summary>
-    public static bool IsOptional(RecordEnvelope request)
+    /// <summary>
+    /// From 0.9.4 (OPS-22): whether a request is optional, a possible todo that never holds a release's closing or a goal's evaluation. Its
+    /// revisions are read in order: a request its requester created optional is optional; a revision that turns a required request optional
+    /// counts only when the operator it is put to, a person holding the operator role, wrote it; a revision that makes it required always
+    /// counts. A run's step request is never optional.
+    /// </summary>
+    public static bool IsOptional(EstateModel model, RecordEnvelope request)
     {
+        ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(request);
-        return request.Type == "operator-request" && request.Body.ValueKind == System.Text.Json.JsonValueKind.Object
-            && request.Body.TryGetProperty("optional", out System.Text.Json.JsonElement optional) && optional.ValueKind == System.Text.Json.JsonValueKind.True
-            && FlowStops.StepOf(request) is null;
+        if (request.Type != "operator-request" || FlowStops.StepOf(request) is not null) return false;
+        bool optional = false;
+        bool first = true;
+        foreach (string id in model.Chain(request))
+        {
+            if (!model.ById.TryGetValue(id, out RecordEnvelope? revision)) continue;
+            bool marked = OperatorRequestType.Optional(revision);
+            if (first || !marked || optional) optional = marked;
+            else optional = revision.By == EstateModel.BodyString(revision, "to") && GoalRules.IsPerson(model, revision.By) && model.HasRoleAt(revision.By, Roles.Operator, revision);
+            first = false;
+            if (revision.Id == request.Id) break;
+        }
+
+        return optional;
     }
 
     /// <summary>Every open request that waits on the operator, in original request order, optionally addressed to one operator.</summary>
@@ -91,7 +108,7 @@ public static class OperatorRequests
         {
             if (FlowStops.StepOf(request) is not FlowStops.FlowStepReference step)
             {
-                (IsOptional(request) ? optional : open).Add(request);
+                (IsOptional(model, request) ? optional : open).Add(request);
                 continue;
             }
 
@@ -154,7 +171,7 @@ public static class OperatorRequests
             derived["optional"] = new JsonArray(queue.Optional.Select(r =>
             {
                 JsonObject item = Item(model, r);
-                item["guide"] = Guide(r);
+                item["guide"] = Guide(r, optional: true);
                 return (JsonNode)item;
             }).ToArray());
         }
@@ -243,13 +260,13 @@ public static class OperatorRequests
     /// recommendation, where it lands, what waits while it stays open, each pinned item by its hash with its text or command verbatim and each
     /// file by its name, and the commands that close it. It reinterprets nothing.
     /// </summary>
-    public static string Guide(RecordEnvelope request)
+    public static string Guide(RecordEnvelope request, bool optional)
     {
         ArgumentNullException.ThrowIfNull(request);
         string to = EstateModel.BodyString(request, "to") ?? "<operator-id>";
         var text = new StringBuilder("# ").Append(EstateModel.BodyString(request, "action")).Append("\n\n")
             .Append("Operator request ").Append(request.Id).Append(" at ").Append(request.ComputedHash).Append(", put to ").Append(to)
-            .Append(" by ").Append(EstateModel.BodyString(request, "askedBy")).Append(IsOptional(request) ? "; optional, a possible todo that holds nothing" : string.Empty).Append(".\n\n")
+            .Append(" by ").Append(EstateModel.BodyString(request, "askedBy")).Append(optional ? "; optional, a possible todo that holds nothing" : string.Empty).Append(".\n\n")
             .Append("Recommendation: ").Append(EstateModel.BodyString(request, "recommendation")).Append("\n\n")
             .Append("Why: ").Append(EstateModel.BodyString(request, "why")).Append("\n\n")
             .Append("Destination: ").Append(EstateModel.BodyString(request, "destination")).Append("\n\n")

@@ -31,7 +31,7 @@ public sealed class OptionalRequestTests
         OperatorRequests.Waiting queue = OperatorRequests.WaitingOf(model, null, DateTimeOffset.UtcNow);
         Assert.Equal([waiting.Id], queue.Open.Select(r => r.Id));
         Assert.Equal([todo.Id], queue.Optional.Select(r => r.Id));
-        Assert.True(OperatorRequests.IsOptional(todo));
+        Assert.True(OperatorRequests.IsOptional(model, todo));
         JsonObject derived = OperatorRequests.Derive(model);
         Assert.Equal(1, derived["waiting"]!.GetValue<int>());
         JsonObject listed = Assert.IsType<JsonObject>(Assert.Single(derived["optional"]!.AsArray()));
@@ -100,6 +100,53 @@ public sealed class OptionalRequestTests
 
         Assert.Contains(model.Findings, f => f.Code == "operator-request.optional" && f.Location.StartsWith(stepped.ExpectedPath, StringComparison.Ordinal));
         Assert.Contains(model.Findings, f => f.Code == "body.type" && f.Location.StartsWith(worded.ExpectedPath, StringComparison.Ordinal));
-        Assert.False(OperatorRequests.IsOptional(stepped));
+        Assert.False(OperatorRequests.IsOptional(model, stepped));
+    }
+
+    [Fact]
+    public void ARequesterCannotTurnItsOwnRequiredRequestOptionalButTheOperatorItIsPutToCan()
+    {
+        using var estate = new TestEstate(3);
+        RecordEnvelope work = OperatorRequestTests.Work(estate);
+        JsonObject body = OperatorRequestTests.Body(estate);
+        RecordEnvelope required = estate.Add("operator-request", estate.BuilderId, body.ToJsonString(), work.Reference);
+        body["optional"] = true;
+        using JsonDocument none = JsonDocument.Parse("""{"type":"operator-request","max":0}""");
+
+        // The requester's own revision is refused by the record rules, and counts for nothing: the request still holds.
+        RecordEnvelope byRequester = estate.Add("operator-request", estate.BuilderId, body.ToJsonString(), work.Reference, required.Id);
+        EstateModel model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "operator-request.optional" && f.Location.StartsWith(byRequester.ExpectedPath, StringComparison.Ordinal));
+        Assert.False(OperatorRequests.IsOptional(model, byRequester));
+        Assert.Equal("not-met", GoalPredicates.EvaluatePredicate(model, none.RootElement).Value);
+        Assert.Equal([byRequester.Id], OperatorRequests.WaitingOf(model, null, DateTimeOffset.UtcNow).Open.Select(r => r.Id));
+    }
+
+    [Fact]
+    public void TheOperatorItIsPutToMarksARequiredRequestOptionalOnTheirWordAndNothingElse()
+    {
+        using var estate = new TestEstate(3);
+        RecordEnvelope work = OperatorRequestTests.Work(estate);
+        JsonObject body = OperatorRequestTests.Body(estate);
+        RecordEnvelope required = estate.Add("operator-request", estate.BuilderId, body.ToJsonString(), work.Reference);
+        body["optional"] = true;
+        using JsonDocument none = JsonDocument.Parse("""{"type":"operator-request","max":0}""");
+
+        RecordEnvelope byOperator = estate.Add("operator-request", estate.OperatorId, body.ToJsonString(), work.Reference, required.Id);
+
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+        Assert.True(OperatorRequests.IsOptional(model, byOperator));
+        Assert.Equal("met", GoalPredicates.EvaluatePredicate(model, none.RootElement).Value);
+        Assert.Equal([byOperator.Id], OperatorRequests.WaitingOf(model, null, DateTimeOffset.UtcNow).Optional.Select(r => r.Id));
+        // The requester's later revision keeps it optional; the operator may change only the mark.
+        JsonObject reworded = JsonNode.Parse(body.ToJsonString())!.AsObject();
+        reworded["why"] = "A clearer reason.";
+        RecordEnvelope kept = estate.Add("operator-request", estate.BuilderId, reworded.ToJsonString(), work.Reference, byOperator.Id);
+        Assert.False(estate.Load().Findings.HasErrors, string.Join('\n', estate.Load().Findings));
+        Assert.True(OperatorRequests.IsOptional(estate.Load(), kept));
+        reworded["why"] = "The operator's own reason.";
+        RecordEnvelope widened = estate.Add("operator-request", estate.OperatorId, reworded.ToJsonString(), work.Reference, kept.Id);
+        Assert.Contains(estate.Load().Findings, f => f.Code == "operator-request.revision" && f.Location.StartsWith(widened.ExpectedPath, StringComparison.Ordinal));
     }
 }

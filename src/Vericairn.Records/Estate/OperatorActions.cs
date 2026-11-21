@@ -72,7 +72,7 @@ public static class OperatorActions
             {
                 string to = EstateModel.BodyString(request, "to") ?? "?";
                 JsonObject todo = OperatorRequests.Item(model, request);
-                todo["guide"] = OperatorRequests.Guide(request);
+                todo["guide"] = OperatorRequests.Guide(request, optional: true);
                 var commands = new JsonArray();
                 List<string> fetch = ["operator", "fetch", request.Id, "--to", "<folder>"];
                 commands.Add(new JsonObject { ["by"] = to, ["command"] = "vericairn " + string.Join(' ', fetch), ["arguments"] = Strings(fetch), ["purpose"] = "Write its pinned files, under their names, and its guide into a folder. Reading signs nothing." });

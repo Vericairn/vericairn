@@ -220,7 +220,7 @@ public static class GoalPredicates
         // From 0.9.4 (OPS-22) an optional request is a possible todo and never holds a goal's evaluation: a predicate over requests counts none.
         if (type == "operator-request")
         {
-            candidates.RemoveAll(OperatorRequests.IsOptional);
+            candidates.RemoveAll(r => OperatorRequests.IsOptional(model, r));
         }
 
         // A carrier is never among its own placed work: a work order may place itself in its own release plan, and a predicate over the

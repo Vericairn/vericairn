@@ -141,7 +141,12 @@ when an object is missing or does not match its hash, a name is not a plain file
 exists already; it never replaces a file. The folder is created when missing. It signs and records nothing. `--json` prints the
 request, the guide's name and each file's name, hash and size.
 
-Marking a request optional is a revision of it by its requester, keeping everything else; a closed request cannot be revised.
+A requester may record a request optional from the start. A required request becomes optional only on your word: a revision you,
+the operator it is put to and a person, write yourself, changing its `optional` mark and nothing else
+(`vericairn operator request --by <operator-id> --supersedes <request-revision> --expected <request-hash> --body request.json`). Its
+requester's own revision never turns it optional: the record rules refuse it, and a goal's predicates and the queue read such a mark
+as counting for nothing, so the request still holds what waits on it. A revision that makes a request required again always counts,
+and the requester's later revisions keep the mark as it stands. A closed request cannot be revised.
 The `optional` field is additive within record format 3: a reader before 0.9.4 refuses a request that carries it, so an estate
 marks requests optional only after every writer upgrades.
 
