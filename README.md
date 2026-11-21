@@ -120,7 +120,7 @@ disclosures and security notices.
   yourself at the edition that sells it, no access to your estate will require a Vericairn account, and you
   can move between Vericairn's hosting and your own either way; the [roadmap](ROADMAP.md#editions--planned-direction)
   lists all five no-lock-in rules.
-- Separately installed extensions and the package registry, at milestone M4.
+- Separately installed extensions and the package registry, at a later milestone.
 - Vericairn's catalog, at later milestones: more than 3,000 planned entries, including 1,290 domain packs,
   992 foundries, 301 adapters and 575 providers. The creator domains above come first. Every entry is
   planned; a name in the catalog is scope, not availability. The catalog covers:
@@ -128,13 +128,13 @@ disclosures and security notices.
     video and video series, worldbuilding, media, documentation, marketing, canon, adaptation, continuity,
     franchises, rights, localization, release readiness, analytics, crowdfunding, AI applications and
     extension ecosystems.
-  - 27 industries: aerospace and defense; chemicals; construction; e-commerce and online retail; education
+  - 28 industries: aerospace and defense; chemicals; construction; e-commerce and online retail; education
     institutions; environmental consulting; finance, accounting and audit; food and agriculture; governance,
     risk and compliance; information technology services and operations; insurance; land management; legal
     practice operations; life sciences quality and regulatory; manufacturing quality and operations; marine;
-    marketing and advertising; medical; mining and minerals; nonprofits and grants; oil field; public sector;
-    real estate and property management; refinery; telecommunications; transportation and logistics; and
-    utilities and power.
+    marketing and advertising; medical; mining and minerals; music and audio; nonprofits and grants; oil field;
+    public sector; real estate and property management; refinery; telecommunications; transportation and
+    logistics; and utilities and power.
   - In regulated fields, agents prepare and check the work, and licensed or authorized people make the
     decisions and perform the acts reserved to them.
 - The [roadmap](ROADMAP.md) gives the order.
