@@ -181,11 +181,11 @@ public sealed class AvailabilityRoutingTests
         WriteOutcome late = run.Service.Result(new ResultRequest(attempt, builder, RunEstate.Json("""{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}""")));
         Assert.Contains("no longer holds its step", late.Problem!.Message, StringComparison.Ordinal);
 
-        // A hand-over's basis is a person's act: an agent's record citing one is invalid.
+        // A hand-over is a person's act: an agent's assignment of the held step, citing a basis or not, takes nothing and is refused.
         RecordEnvelope order = run.Estate.Load().ById[handover.Subject!.Id];
         var agents = new System.Text.Json.Nodes.JsonObject { ["contributor"] = stranger, ["brief"] = System.Text.Json.Nodes.JsonNode.Parse(RunEstate.Brief), ["basis"] = ask };
         WriteOutcome byAgent = run.Service.NewRecord(new NewRecordRequest("assignment", helper, RunEstate.Json(agents.ToJsonString()), $"work-order:{order.Id}:{order.ComputedHash}"));
-        Assert.Contains(byAgent.Problem!.Findings, f => f.Code == "assignment.basis");
+        Assert.Contains("only a person hands a held step to another principal", byAgent.Problem!.Message, StringComparison.Ordinal);
         EstateModel model = run.Estate.Load();
         Assert.True(Routing.Displaced(model, model.ById[run.Assignment]));
         run.Service.SweepPresence();

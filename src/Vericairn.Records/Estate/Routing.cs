@@ -4,6 +4,7 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Estate;
@@ -526,15 +527,87 @@ public static class Routing
     /// <summary>
     /// The current assignments of a work order that hold its step, any revision of it, oldest first; the last one holds the step. An
     /// assignment routing stored without the record it was routed with holds nothing (<see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/>).
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10) neither does one that would take the step from another principal's
+    /// holding without a person's act (<see cref="Holding"/>).
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
         IReadOnlyList<string> chain = model.Chain(model.Latest(order));
-        return model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && !Stranded(model, a))
-            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
+        return Holding(model, model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && !Stranded(model, a))
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal));
     }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): of a work order's assignments in order, those that hold their step, which
+    /// each step's assignments pass in turn. The first holds it; a later one of the same principal goes on holding it; a later one of
+    /// another principal takes it over only when a person recorded it (a hand-over, which a lapse ask's basis also needs, or an operator's
+    /// or a sponsor's assignment) and that person was not displaced from the step before. An assignment an agent or a service recorded,
+    /// whatever its scope or grant, or one the displaced principal recorded, takes nothing from the holder and holds nothing itself, so its
+    /// writes are fenced as a displaced holder's are, and it never makes its author the holder again.
+    /// </summary>
+    private static List<RecordEnvelope> Holding(EstateModel model, IEnumerable<RecordEnvelope> ordered)
+    {
+        var holding = new List<RecordEnvelope>();
+        var steps = new Dictionary<string, (string? Holder, HashSet<string?> Displaced)>(StringComparer.Ordinal);
+        foreach (RecordEnvelope assignment in ordered)
+        {
+            string key = HoldingKey(assignment.Body);
+            string? contributor = Identity(model, EstateModel.BodyString(assignment, "contributor"));
+            if (!steps.TryGetValue(key, out (string? Holder, HashSet<string?> Displaced) step))
+            {
+                steps[key] = (contributor, []);
+                holding.Add(assignment);
+                continue;
+            }
+
+            if (contributor == step.Holder)
+            {
+                holding.Add(assignment);
+                continue;
+            }
+
+            string? author = Identity(model, assignment.By);
+            if (GoalRules.IsPerson(model, author) && !step.Displaced.Contains(author))
+            {
+                step.Displaced.Add(step.Holder);
+                steps[key] = (contributor, step.Displaced);
+                holding.Add(assignment);
+            }
+        }
+
+        return holding;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11): the step an assignment body carries, as the holder rule tells steps apart: its flow step and item, a review's
+    /// subject and items, and a standing agent's occurrence; the same for every assignment of a work order that is neither.
+    /// </summary>
+    internal static string HoldingKey(JsonElement body)
+    {
+        JsonElement step = TJson.Object(body, "step");
+        JsonElement review = TJson.Object(step, "review");
+        return string.Join('\n', TJson.Text(step, "key") ?? string.Empty, TJson.Text(step, "instance") ?? string.Empty, review.ValueKind == JsonValueKind.Object ? "review" : string.Empty,
+            TJson.Text(TJson.Object(review, "subject"), "id") ?? string.Empty, string.Join(',', TJson.Strings(review, "items").Order(StringComparer.Ordinal)),
+            TJson.Text(TJson.Object(body, "occurrence"), "key") ?? string.Empty);
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11): the assignment that holds the step a new assignment would carry, when it is another principal's and the new
+    /// assignment's author is no person, so that it would take nothing and hold nothing; null otherwise.
+    /// </summary>
+    internal static RecordEnvelope? WouldHoldNothing(EstateModel model, RecordEnvelope order, string by, JsonElement body)
+    {
+        string key = HoldingKey(body);
+        RecordEnvelope? holder = Assignments(model, order).LastOrDefault(a => HoldingKey(a.Body) == key);
+        string? contributor = TJson.Text(body, "contributor");
+        return holder is not null && Identity(model, EstateModel.BodyString(holder, "contributor")) != Identity(model, contributor) && !GoalRules.IsPerson(model, Identity(model, by))
+            ? holder : null;
+    }
+
+    private static string? Identity(EstateModel model, string? principal) =>
+        model.CurrentPrincipal(principal) is RecordEnvelope record ? model.Chain(record)[0] : principal;
 
     /// <summary>
     /// The current assignments that hold one step: of a run's work order, those that name that flow step and item; of any other work

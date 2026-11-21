@@ -2823,8 +2823,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return (null, communicationRefusal);
         }
 
-        // From 0.9.4 (ID-11): only the step's current holder acts, whatever time its record states.
-        if (DisplacedWriteRefusal(draft, current) is string displacedRefusal)
+        // From 0.9.4 (ID-11): only the step's current holder acts, whatever time its record states, and only a person hands a held step on.
+        if ((DisplacedWriteRefusal(draft, current) ?? AssignmentTakesNothingRefusal(draft, current)) is string displacedRefusal)
         {
             return (null, displacedRefusal);
         }

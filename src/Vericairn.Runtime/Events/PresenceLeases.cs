@@ -58,6 +58,12 @@ internal sealed class PresenceLeaseState
     /// <summary>The ask recorded about its lapse for each assignment it holds, by the assignment's first record's id.</summary>
     public Dictionary<string, string> Asks { get; init; } = new(StringComparer.Ordinal);
 
+    /// <summary>When the sweep next tries an ask it could not record, by the assignment's first record's id, in Unix seconds.</summary>
+    public Dictionary<string, long> Retry { get; init; } = new(StringComparer.Ordinal);
+
+    /// <summary>How many times the sweep has tried each ask it could not record, by the assignment's first record's id.</summary>
+    public Dictionary<string, int> Tries { get; init; } = new(StringComparer.Ordinal);
+
     /// <summary>True when the lease has not lapsed.</summary>
     [JsonIgnore]
     public bool Live => LapsedAt is null;

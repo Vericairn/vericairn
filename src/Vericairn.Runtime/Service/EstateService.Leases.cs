@@ -29,6 +29,7 @@ public sealed partial class EstateService
     private const string LeasesKey = "presence:leases";
     private const int MaxLeases = 64;
     private const int MaxLeasesPerPrincipal = 8;
+    private const int MaxLeasesKeptPerPrincipal = 2 * MaxLeasesPerPrincipal;
 
     /// <summary>How long a lapsed lease that holds nothing is still listed before it is dropped.</summary>
     private static readonly TimeSpan LapsedListed = TimeSpan.FromHours(1);
@@ -108,6 +109,23 @@ public sealed partial class EstateService
                 return LeaseProblem("unavailable", $"{PrincipalName(model, principal)} already holds {MaxLeasesPerPrincipal} live sessions here; release one or let it lapse first. Nothing was registered.");
             }
 
+            // A principal keeps at most twice its live limit in all, lapsed leases included, so that no one principal fills the runtime's
+            // sessions: its oldest lapsed leases that hold nothing make room first.
+            foreach (PresenceLeaseState old in leases.Where(l => l.Principal == principal && !l.Live && l.Holds.Count == 0 && l.Asks.Count == 0).OrderBy(l => l.LapsedAt).ToList())
+            {
+                if (leases.Count(l => l.Principal == principal) < MaxLeasesKeptPerPrincipal)
+                {
+                    break;
+                }
+
+                leases.Remove(old);
+            }
+
+            if (leases.Count(l => l.Principal == principal) >= MaxLeasesKeptPerPrincipal)
+            {
+                return LeaseProblem("unavailable", $"{PrincipalName(model, principal)} already keeps {MaxLeasesKeptPerPrincipal} sessions here, live or lapsed holding work; nothing was registered.");
+            }
+
             if (leases.Count >= MaxLeases && leases.Where(l => !l.Live && l.Holds.Count == 0 && l.Asks.Count == 0).OrderBy(l => l.LapsedAt).FirstOrDefault() is { } dropped)
             {
                 leases.Remove(dropped);
@@ -159,7 +177,16 @@ public sealed partial class EstateService
             }
 
             DateTimeOffset now = PresenceClock.GetUtcNow();
+            ExpireLeases(leases, now);
             bool restored = state.LapsedAt is not null;
+
+            // A lapsed lease comes back only within its principal's limit of live sessions, as a registration would.
+            if (restored && leases.Count(l => l != state && l.Live && l.Principal == state.Principal) >= MaxLeasesPerPrincipal)
+            {
+                WriteLeases(leases);
+                return LeaseProblem("unavailable", $"{PrincipalName(model, state.Principal)} already holds {MaxLeasesPerPrincipal} live sessions here, so session {state.Session} stays lapsed; release one first.");
+            }
+
             state.RenewedAt = now.ToUnixTimeSeconds();
             state.ExpiresAt = state.RenewedAt + state.LeaseSeconds;
             state.LapsedAt = null;
@@ -288,7 +315,8 @@ public sealed partial class EstateService
             foreach (LapsedHolding holding in holdings.Where(h => h.Ask is null))
             {
                 string identity = model.Chain(holding.Assignment)[0];
-                if (holding.Lease.Asks.ContainsKey(identity) || now < holding.Since.AddSeconds(Routing.ReassignAfterSeconds(model, holding.Goal)))
+                if (holding.Lease.Asks.ContainsKey(identity) || now < holding.Since.AddSeconds(Routing.ReassignAfterSeconds(model, holding.Goal))
+                    || holding.Lease.Retry.TryGetValue(identity, out long next) && now.ToUnixTimeSeconds() < next)
                 {
                     continue;
                 }
@@ -296,7 +324,16 @@ public sealed partial class EstateService
                 if (RecordLapseAskLocked(model, holding) is string ask)
                 {
                     holding.Lease.Asks[identity] = ask;
+                    holding.Lease.Retry.Remove(identity);
+                    holding.Lease.Tries.Remove(identity);
                     model = session.Load();
+                }
+                else
+                {
+                    // A refused ask is tried again after a minute, then after twice as long each time, up to an hour, never every sweep.
+                    int tries = holding.Lease.Tries.GetValueOrDefault(identity) + 1;
+                    holding.Lease.Tries[identity] = tries;
+                    holding.Lease.Retry[identity] = now.ToUnixTimeSeconds() + Math.Min(3600L, 60L << Math.Min(tries - 1, 6));
                 }
             }
 
@@ -320,6 +357,11 @@ public sealed partial class EstateService
                 }
 
                 lease.Holds.RemoveAll(h => OpenHolding(model, lease.Principal, h) is null && !lease.Asks.ContainsKey(h));
+                foreach (string identity in lease.Retry.Keys.Where(k => !standing.Contains((lease.Session, k))).ToList())
+                {
+                    lease.Retry.Remove(identity);
+                    lease.Tries.Remove(identity);
+                }
             }
 
             long cutoff = now.Add(-LapsedListed).ToUnixTimeSeconds();
@@ -444,6 +486,8 @@ public sealed partial class EstateService
                 : $"session {session} of {agent} lapsed at {RecordParser.FormatTimestamp(holding.Since)}: its transport renewed its lease no more, and it holds assignment {assignment.Id} of {key}";
             string asked = holding.Ask is string ask
                 ? $"Ask {ask} asks {PrincipalName(model, holding.Asked)} whether to hand the step to another principal of its role."
+                : holding.Lease.Retry.TryGetValue(model.Chain(assignment)[0], out long retry)
+                ? $"No ask could be recorded here: only {PrincipalName(model, assignment.By)}, who recorded the assignment, signs its lapse ask, and the write was refused; it is tried again from {Time(retry)}."
                 : $"Still lapsed {after} seconds after that, {PrincipalName(model, holding.Asked)} is asked whether to hand the step to another principal of its role.";
             yield return ("incident", $"session {holding.Lease.Session}: assignment {assignment.Id}",
                 $"A local observation of this runtime: {what}. {asked} Presence, liveness and progress claims are separate facts; a heartbeat restores the lease.",
@@ -558,9 +602,9 @@ public sealed partial class EstateService
         goal is null ? model.RootOperator : GoalRules.AccepterOf(model, goal).Principal ?? Routing.Decider(model, goal);
 
     /// <summary>
-    /// Records the ask a lapse holding work becomes: to the goal's accountable principal, about the assignment, recommending its hand-over;
-    /// authored by the principal that made the assignment, else the one asked, else the root operator, whichever this machine can sign
-    /// for. Null when none can be recorded, and the attention stays. Caller holds the gate.
+    /// Records the ask a lapse holding work becomes: to the goal's accountable principal, about the assignment, recommending its hand-over,
+    /// signed by the principal that recorded the assignment, as the stall rule signs with the principal that started the run, and by no
+    /// other. Null when it cannot be recorded here, and the attention stays while the sweep backs off. Caller holds the gate.
     /// </summary>
     private string? RecordLapseAskLocked(EstateModel model, LapsedHolding holding)
     {
@@ -590,16 +634,8 @@ public sealed partial class EstateService
             body["goal"] = holding.Goal.Id;
         }
 
-        foreach (string by in new[] { assignment.By, to, model.RootOperator }.OfType<string>().Distinct(StringComparer.Ordinal))
-        {
-            WriteOutcome written = WriteLocked(new RecordDraft("ask", by, Element(body), assignment.Reference), model);
-            if (written.Ok)
-            {
-                return written.Written!.Id;
-            }
-        }
-
-        return null;
+        WriteOutcome written = WriteLocked(new RecordDraft("ask", assignment.By, Element(body), assignment.Reference), model);
+        return written.Ok ? written.Written!.Id : null;
     }
 
     /// <summary>
@@ -752,8 +788,32 @@ public sealed partial class EstateService
         }
 
         string what = draft.Type switch { "attempt" => "an attempt", "result" => "a result", _ => "a progress claim" };
-        string key = WorkView.OrderOfAssignment(model, assignment) is { } order ? EstateModel.BodyString(model.Latest(order), "key") ?? order.Id : assignment.Id;
-        return $"Assignment {assignment.Id} no longer holds its step of {key}: assignment {holder.Id} of {PrincipalName(model, EstateModel.BodyString(holder, "contributor"))} holds it now. Only the step's current holder records {what}, whatever time it states; nothing was written.";
+        RecordEnvelope? order = WorkView.OrderOfAssignment(model, assignment);
+        string key = order is null ? assignment.Id : EstateModel.BodyString(model.Latest(order), "key") ?? order.Id;
+        IReadOnlyList<string> chain = model.Chain(model.Latest(assignment));
+        bool held = order is not null && Routing.Assignments(model, order).Any(a => chain.Contains(a.Id));
+        return held
+            ? $"Assignment {assignment.Id} no longer holds its step of {key}: assignment {holder.Id} of {PrincipalName(model, EstateModel.BodyString(holder, "contributor"))} holds it now. Only the step's current holder records {what}, whatever time it states; nothing was written."
+            : $"Assignment {assignment.Id} holds nothing of its step of {key}: assignment {holder.Id} of {PrincipalName(model, EstateModel.BodyString(holder, "contributor"))} holds it, and only a person hands a held step to another principal. Only the step's current holder records {what}, whatever time it states; nothing was written.";
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): a new assignment an agent or a service would record of a step another
+    /// principal's assignment holds is refused, since it would take nothing from the holder and hold nothing itself: only a person hands
+    /// a held step to another principal, so a displaced holder never takes its step back by assigning it to itself, and no agent displaces
+    /// a person's holding. A revision of an assignment keeps its place and is not judged here. Null when it may be written.
+    /// </summary>
+    private static string? AssignmentTakesNothingRefusal(RecordDraft draft, EstateModel model)
+    {
+        if (draft.Type != "assignment" || draft.Supersedes is not null || draft.Subject is null || draft.Body.ValueKind != JsonValueKind.Object
+            || !model.ById.TryGetValue(draft.Subject.Id, out RecordEnvelope? order) || order.Type != "work-order"
+            || Routing.WouldHoldNothing(model, order, draft.By, draft.Body) is not RecordEnvelope holder)
+        {
+            return null;
+        }
+
+        string key = EstateModel.BodyString(model.Latest(order), "key") ?? order.Id;
+        return $"Not written: {PrincipalName(model, EstateModel.BodyString(holder, "contributor"))}'s assignment {holder.Id} holds this step of {key}, and only a person hands a held step to another principal; an assignment of it by {PrincipalName(model, draft.By)}, which is no person, would take nothing and hold nothing.";
     }
 
     /// <summary>Why a registration's label, roles, capacity or lease length is refused; null when they are within their bounds.</summary>

@@ -230,6 +230,140 @@ public sealed class PresenceLeaseTests
     }
 
     [Fact]
+    public void ADisplacedAgentNeverTakesItsStepBackByAssigningItToItselfAndAPersonsAssignmentDisplaces()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        Grant(run, builder, "local-engineering");
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Build the widget.")));
+        TakeoverResponse taken = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op));
+        Assert.True(taken.Ok, taken.Message);
+        string handover = taken.Assignment!.Id;
+
+        // The displaced agent, under local-engineering, cannot assign the step to itself or to another agent through the runtime.
+        WriteOutcome itself = run.Service.Assign(new AssignRequest("W-1", builder, builder, RunEstate.Json(RunEstate.Brief)) { Repository = run.Resource });
+        Assert.Contains("only a person hands a held step to another principal", itself.Problem!.Message, StringComparison.Ordinal);
+
+        // Written by hand, its assignment takes nothing: the person's hand-over still holds the step, the person's attempt counts and the
+        // agent's attempts on either assignment are refused.
+        RecordEnvelope order = run.Estate.Load().ById[run.Estate.Load().ById[run.Assignment].Subject!.Id];
+        var signer = new StoreSigner(new FileKeyStore(VericairnHome.Path()), run.BuilderDevice);
+        run.Estate.SetClock(DateTimeOffset.UtcNow);
+        var body = new System.Text.Json.Nodes.JsonObject { ["contributor"] = builder, ["brief"] = System.Text.Json.Nodes.JsonNode.Parse(RunEstate.Brief), ["note"] = "Taken back." };
+        RecordEnvelope back = run.Estate.Add("assignment", builder, body.ToJsonString(), order.Reference, signer: signer);
+        EstateModel model = run.Estate.Load();
+        Assert.Equal(handover, Routing.HolderOf(model, model.ById[back.Id])!.Id);
+        Assert.Equal(handover, Routing.HolderOf(model, model.ById[run.Assignment])!.Id);
+        Assert.DoesNotContain(Routing.Assignments(model, order), a => a.Id == back.Id);
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(handover, op, "widget, a work branch", "Finish it.")));
+        Assert.Contains($"Assignment {back.Id} holds nothing of its step of W-1", run.Service.Attempt(new AttemptRequest(back.Id, builder, "widget, a work branch", "Mine again.")).Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains("no longer holds its step", run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Mine again.")).Problem!.Message, StringComparison.Ordinal);
+        Assert.Equal(WorkView.Displaced, Assert.Single(WorkView.AssignmentItems(model), i => i.AssignmentId == back.Id).State);
+        JsonElement route = Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == "W-1").GetProperty("route");
+        Assert.Equal(("assigned", op), (route.GetProperty("state").GetString(), route.GetProperty("principal").GetString()));
+
+        // A person's plain assignment of the step to another principal displaces without a basis: the operator, holding it, gives it away.
+        string helper = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Helper","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")))).Id;
+        string given = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-1", helper, op, RunEstate.Json(RunEstate.Brief)) { Repository = run.Resource })).Id;
+        model = run.Estate.Load();
+        Assert.Equal(given, Routing.HolderOf(model, model.ById[handover])!.Id);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ALateAttemptWrittenByHandLeavesTheDisplacedAssignmentDisplacedAndUnresolvedEffectsKeepTheirNotice()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Build the widget."))).Id;
+        string result = RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, builder, RunEstate.Json("""{"outcome":"partial","summary":"Half.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":["A post may have been published; reconcile it under its original identity."],"nextStep":"Reconcile it."}""")))).Id;
+        Assert.True(run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op)).Ok);
+
+        // The earlier result reads displaced and asks no review, but its unresolved effect keeps its own notice for the operator.
+        Assert.Equal(WorkView.Displaced, Assert.Single(WorkView.AssignmentItems(run.Estate.Load()), i => i.AssignmentId == run.Assignment).State);
+        Assert.DoesNotContain(run.Service.AttentionGet(op).Items, i => i.SubjectId == result && i.Kind == "decision needed");
+        Assert.Contains(run.Service.AttentionGet(op).Items, i => i.SubjectId == result && i.Kind == "uncertain-effect");
+
+        // A late attempt the displaced holder's device signed and someone wrote by hand leaves the assignment displaced, not in progress.
+        var signer = new StoreSigner(new FileKeyStore(VericairnHome.Path()), run.BuilderDevice);
+        run.Estate.SetClock(DateTimeOffset.UtcNow);
+        RecordEnvelope assignment = run.Estate.Load().ById[run.Assignment];
+        run.Estate.Add("attempt", builder, """{"workspace":"widget, a work branch","note":"Carry on.","startedAt":"2026-11-21T12:00:00Z"}""", assignment.Reference, signer: signer);
+        Assert.Equal(WorkView.Displaced, Assert.Single(WorkView.AssignmentItems(run.Estate.Load()), i => i.AssignmentId == run.Assignment).State);
+    }
+
+    [Fact]
+    public void AHeartbeatRestoresALapsedLeaseOnlyWithinItsPrincipalsLimitAndNoPrincipalFillsTheRuntime()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        SteppedClock clock = Present(run);
+        string builder = run.Estate.BuilderId;
+        List<PresenceLease> first = [.. Enumerable.Range(0, 8).Select(i => run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "first " + i, LeaseSeconds: 30)).Lease!)];
+        clock.Advance(TimeSpan.FromSeconds(31));
+        run.Service.SweepPresence();
+        List<PresenceLease> second = [.. Enumerable.Range(0, 8).Select(i => run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "second " + i, LeaseSeconds: 30)).Lease!)];
+        Assert.All(second, Assert.NotNull);
+
+        // Eight live already: a lapsed one of the first eight stays lapsed.
+        PresenceLeaseResponse refused = run.Service.PresenceHeartbeat(first[0].Lease);
+        Assert.Equal("unavailable", refused.Problem!.Code);
+        Assert.Equal("lapsed", Assert.Single(run.Service.Presence().Sessions, s => s.Session == first[0].Session).State);
+        Assert.Equal(8, run.Service.Presence(builder).Sessions.Count(s => s.State == "live"));
+
+        // Lapsed leases holding nothing make room for the same principal's next ones, which never exceed twice its live limit in all.
+        clock.Advance(TimeSpan.FromSeconds(31));
+        run.Service.SweepPresence();
+        for (int i = 0; i < 8; i++)
+        {
+            Assert.True(run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "third " + i, LeaseSeconds: 30)).Ok);
+        }
+
+        Assert.Equal(16, run.Service.Presence(builder).Sessions.Count);
+        Assert.True(run.Service.PresenceRegister(new PresenceRegisterRequest(Agent(run), "another agent's session")).Ok);
+    }
+
+    [Fact]
+    public void AnAskTheAssignmentsAuthorCannotSignHereIsTriedAgainOnlyAfterABackOff()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        SteppedClock clock = Present(run);
+        // Every ask write is refused here, as when the assignment's author signs nothing on this machine.
+        run.Service.BeforeValidatingRecords = records =>
+        {
+            if (records.Any(r => r.Envelope.Type == "ask")) throw new InvalidOperationException("Refused for the test.");
+        };
+        string op = run.Estate.OperatorId;
+        run.Service.PresenceRegister(new PresenceRegisterRequest(run.Estate.BuilderId, "a builder session"));
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, run.Estate.BuilderId, "widget, a work branch", "Build the widget.")));
+        clock.Advance(TimeSpan.FromSeconds(90 + PresenceVocabulary.DefaultReassignAfterSeconds));
+
+        // Only the operator, who recorded the assignment, signs its lapse ask, and the write is refused: none is recorded, the attention
+        // says so, and the next try waits a minute.
+        run.Service.SweepPresence();
+        Assert.Empty(run.Service.Records("ask"));
+        string retry = RecordParser.FormatTimestamp(clock.GetUtcNow().AddSeconds(60));
+        Assert.Contains($"No ask could be recorded here: only Test Operator, who recorded the assignment, signs its lapse ask, and the write was refused; it is tried again from {retry}.", Lapse(run, op)!.Why, StringComparison.Ordinal);
+        clock.Advance(TimeSpan.FromSeconds(59));
+        run.Service.SweepPresence();
+        Assert.Contains($"tried again from {retry}.", Lapse(run, op)!.Why, StringComparison.Ordinal);
+
+        // Past it, the sweep tries once more and then waits twice as long.
+        clock.Advance(TimeSpan.FromSeconds(1));
+        run.Service.SweepPresence();
+        Assert.Contains($"tried again from {RecordParser.FormatTimestamp(clock.GetUtcNow().AddSeconds(120))}.", Lapse(run, op)!.Why, StringComparison.Ordinal);
+        Assert.Empty(run.Service.Records("ask"));
+
+        // Once the write is accepted, the next try records the ask, signed by the assignment's author.
+        run.Service.BeforeValidatingRecords = null;
+        clock.Advance(TimeSpan.FromSeconds(120));
+        run.Service.SweepPresence();
+        RecordEnvelope ask = run.Estate.Load().ById[Assert.Single(run.Service.Records("ask")).Id];
+        Assert.Equal(run.Estate.Load().ById[run.Assignment].By, ask.By);
+    }
+
+    [Fact]
     public async Task TheTransportRenewsTheLeaseOnItsIntervalRegistersAgainWhenItIsGoneAndReleasesItAtTheEnd()
     {
         using var run = new RunEstate(keepOperatorKey: true);
@@ -263,6 +397,17 @@ public sealed class PresenceLeaseTests
         // Disposal releases the lease: the session's end is no lapse.
         Assert.Empty(run.Service.Presence().Sessions);
     }
+
+    /// <summary>The operator's grant of a scope to a principal, on a decision of the operator's.</summary>
+    private static void Grant(RunEstate run, string grantee, string scope)
+    {
+        string op = run.Estate.OperatorId;
+        string decision = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, RunEstate.Json($$"""{"title":"A grant","statement":"Grant {{scope}}.","summary":"A grant.","synthesis":"A grant of {{scope}}.","effects":["{{scope}}"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-15T12:00:00Z","stake":"medium","notAuthorized":[]}""")))).Id;
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("authority", op, RunEstate.Json($$"""{"grantee":"{{grantee}}","scope":["{{scope}}"],"reserved":[],"conditions":[],"basis":"{{decision}}"}"""))));
+    }
+
+    private static string Agent(RunEstate run) =>
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", run.Estate.OperatorId, RunEstate.Json("""{"kind":"agent","name":"Another Agent","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")))).Id;
 
     /// <summary>Keeps presence on the service as the daemon does, beside an event journal, judged by a clock the test moves.</summary>
     private static SteppedClock Present(RunEstate run)

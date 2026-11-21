@@ -21,7 +21,7 @@ public static class WorkView
     /// <param name="Attempts">Number of current attempts.</param>
     /// <param name="LatestResultId">The current result of the latest attempt, if any.</param>
     /// <param name="Outcome">That result's outcome, or "none".</param>
-    /// <param name="State">no attempt, in progress, awaiting review, accepted, accepted (earlier revision), or from 0.9.4 displaced: its result awaits no review, since a later assignment holds its step.</param>
+    /// <param name="State">no attempt, in progress, awaiting review, accepted, accepted (earlier revision), or from 0.9.4 displaced: it no longer holds its step, so its attempts are no work in progress and its result awaits no review.</param>
     public sealed record AssignmentItem(string Key, string AssignmentId, string ContributorId, string ContributorName, int Attempts, string? LatestResultId, string Outcome, string State);
 
     /// <summary>Finds the current work order with a key, or the latest revision of the work order with an id.</summary>
@@ -109,7 +109,7 @@ public static class WorkView
         return acceptance is null ? "awaiting review" : "accepted (earlier revision)";
     }
 
-    /// <summary>From 0.9.4 (ID-11): the state of an assignment whose result awaits no review, since a later assignment holds its step.</summary>
+    /// <summary>From 0.9.4 (ID-11): the state of an assignment that no longer holds its step: its attempts are no work in progress and its result awaits no review.</summary>
     public const string Displaced = "displaced";
 
     /// <summary>Every current assignment with its derived state, ordered by work-order key then assignment id.</summary>
@@ -126,9 +126,10 @@ public static class WorkView
             RecordEnvelope? latestAttempt = attempts.Count == 0 ? null : attempts[attempts.Count - 1];
             RecordEnvelope? result = latestAttempt is null ? null : ResultOf(model, latestAttempt);
             string state = latestAttempt is null ? "no attempt" : result is null ? "in progress" : ResultState(model, result);
-            // From 0.9.4 (ID-11): a result on an assignment that no longer holds its step, recorded by another runtime before the
-            // hand-over reached it, is labeled displaced, and review routing skips it: only the current holder's work counts.
-            if (state == "awaiting review" && Routing.Displaced(model, assignment))
+            // From 0.9.4 (ID-11): an assignment that no longer holds its step is labeled displaced, whatever attempt or result another
+            // runtime recorded on it before the hand-over reached it or was written by hand: no review is routed to it and it is no work
+            // in progress, since only the current holder's work counts. An accepted result keeps its acceptance.
+            if (state is "no attempt" or "in progress" or "awaiting review" && Routing.Displaced(model, assignment))
             {
                 state = Displaced;
             }
