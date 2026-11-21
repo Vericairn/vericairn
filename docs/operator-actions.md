@@ -283,6 +283,47 @@ or the complete selection was stored, 1 means a record or selection refusal, and
 arguments or a client failure. An interrupted client request retains the existing uncertainty
 rules: inspect current acceptances before retrying.
 
+## Answer open asks with their recommendations in one act (0.9.4)
+
+From 0.9.4 (OPS-16), you answer a selection of the asks waiting on you, or all of them, each with its recommendation, in one
+act signed by your own admitted device. Run it on your device:
+
+```sh
+vericairn operator answer
+vericairn operator answer --select <ask-id> --select <ask-id> --by <operator-id>
+vericairn operator answer --all --by <operator-id> --stake low
+```
+
+Without a selection the command is read-only. It lists every ask waiting on an operator, as `operator list` does, or on
+`--by`: each by its exact revision and hash, with its recommendation and that recommendation's SHA-256 first, then the question,
+what happens while it stays unanswered and its options. A carried ask waits as its request and is not listed. With `--select`
+or `--all` the act is shown the same way before anything is signed, and the runtime compares every ask and recommendation hash
+with the current records: an ask revised, answered, withdrawn or carried since, or a recommendation that is not the one shown,
+refuses the whole act, and `--all` also refuses when an ask arrived. Nothing is written then; read the asks again.
+
+Each ask gets its own decision. Its `statement` is the act's: `Take the recommendation: answered in one signed act after
+inspecting the exact ask and its recommendation.`, its summary and synthesis carry the recommendation as the ask states it, its
+effect says the recommendation is taken, `notAuthorized` says it authorizes nothing the recommendation does not state, and its
+stake is `--stake` (default `low`); the ask supplies none. `decidedAt` is the act's time, the same for every decision of the act,
+and its `act` member names the act: `id`, the exact ask revision (`ask`, `hash`), the recommendation's SHA-256
+(`recommendation`) and how many asks the act answered (`count`). All decisions are signed before the batch stores any, and stored
+together; an interrupted storage keeps its receipts and journal for reconciliation, as `operator close` does.
+
+Only the operator an ask is put to answers it in an act, and only a person: an agent never performs it, whatever role it holds,
+and the record format refuses a decision naming an act that its decider did not record and sign. A decision of an act takes the
+recommendation and nothing more: it carries no guided answer, change set, documents, obligations, policy requirements, release
+review or prompt use. Answering one ask alone, with your own words, works as before, and an ask you answer in chat is still
+recorded by the builder. Where presence sessions are on, the act signs under `decision from ask` sessions: up to 16 decisions
+listed by exact hash under one check, a list for each 16, each announced before its own check; while an agent run this machine's
+worker started is unsettled under your user, each decision asks its own check. No MCP tool performs the act.
+
+`GET /v1/operator/answers` (optional `to`) and `POST /v1/operator/answers` carry the listing and the act; SDK clients use
+`OperatorAnswerCandidates(principal)` and `OperatorAnswer(OperatorAnswerRequest)`, or their `Async` counterparts. Each item
+provides `ToSelection()` to copy its ask pin and recommendation hash. The request carries `by`, `selection`, optional `all`
+(default `false`) and `stake` (default `low`); the response carries the act's `act` id, `written` receipts, `ok` and `problem`.
+An authenticated device acts only for its own principal. From Remote, the same act signs each decision with the phone's presence
+key ([Remote](remote.md#answering-asks-with-their-recommendations-094)).
+
 ## Record and merge in one command
 
 Fill the required body fields, inspect the pinned evidence, and run the item's **Record and merge**

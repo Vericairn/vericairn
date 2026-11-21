@@ -122,6 +122,8 @@ public static class OpenApiDocument
         ("POST", "/v1/operator/unfinished"),
         ("GET", "/v1/operator/close"),
         ("POST", "/v1/operator/close"),
+        ("GET", "/v1/operator/answers"),
+        ("POST", "/v1/operator/answers"),
         ("GET", "/v1/goals"),
         ("POST", "/v1/goals"),
         ("GET", "/v1/goals/{id}"),
@@ -294,7 +296,7 @@ public static class OpenApiDocument
                     new JsonObject { ["name"] = "key", ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "An event's key, sha256:<64 hex digits>." },
                     new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = EventPrincipalDescription });
 
-            if (method == "GET" && path is "/v1/asks" or "/v1/operator/requests")
+            if (method == "GET" && path is "/v1/asks" or "/v1/operator/requests" or "/v1/operator/answers")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "to", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The principal asked, by id; every principal when omitted." });
             }
@@ -614,6 +616,15 @@ public static class OpenApiDocument
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } },
             };
         }
+        else if (path == "/v1/operator/answers")
+        {
+            string schema = method == "GET" ? "OperatorAnswerCandidatesResponse" : "OperatorAnswerResponse";
+            responses["200"] = new JsonObject
+            {
+                ["description"] = schema + ": inspect ok and problem. A changed ask or recommendation, a changed membership with all, an agent or anyone but the operator the asks are put to refuses the whole act with no decision. Storage interruptions retain written receipts and require reconciliation.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } },
+            };
+        }
         else if (path == "/v1/operator/close")
         {
             string schema = method == "GET" ? "OperatorCloseCandidatesResponse" : "OperatorCloseResponse";
@@ -821,6 +832,25 @@ public static class OpenApiDocument
         closeCandidates["properties"]!["items"]!["items"] = SchemaReference("OperatorCloseItem");
         JsonObject closeResponse = Object(("written", "array"), ("ok", "boolean"), ("problem", "object"));
         closeResponse["properties"]!["written"]!["items"] = Object(("path", "string"), ("id", "string"), ("hash", "string"));
+
+        JsonObject answerSelection = Object(("ask", "object"), ("recommendation", "string"));
+        answerSelection["required"] = new JsonArray("ask", "recommendation");
+        answerSelection["properties"]!["ask"] = SchemaReference("OperatorClosePin");
+        JsonObject answerItem = Object(("ask", "object"), ("to", "string"), ("recommendation", "string"), ("recommendationHash", "string"), ("question", "string"),
+            ("consequence", "string"), ("options", "array"), ("state", "string"));
+        answerItem["required"] = new JsonArray("ask", "to", "recommendation", "recommendationHash", "question", "consequence", "options", "state");
+        answerItem["properties"]!["ask"] = SchemaReference("OperatorClosePin");
+        answerItem["properties"]!["options"]!["items"] = new JsonObject { ["type"] = "string" };
+        JsonObject answerRequest = Object(("by", "string"), ("selection", "array"), ("all", "boolean"), ("stake", "string"));
+        answerRequest["required"] = new JsonArray("by", "selection");
+        answerRequest["properties"]!["selection"]!["items"] = SchemaReference("OperatorAnswerSelection");
+        answerRequest["properties"]!["all"]!["default"] = false;
+        answerRequest["properties"]!["stake"]!["enum"] = new JsonArray("low", "medium", "high", "critical");
+        answerRequest["properties"]!["stake"]!["default"] = "low";
+        JsonObject answerCandidates = Object(("items", "array"), ("ok", "boolean"), ("problem", "object"));
+        answerCandidates["properties"]!["items"]!["items"] = SchemaReference("OperatorAnswerItem");
+        JsonObject answerResponse = Object(("act", "string"), ("written", "array"), ("ok", "boolean"), ("problem", "object"));
+        answerResponse["properties"]!["written"]!["items"] = Object(("path", "string"), ("id", "string"), ("hash", "string"));
 
         JsonObject requestWrite = Object(("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("expected", "string"));
         requestWrite["required"] = new JsonArray("by", "body", "subject");
@@ -1048,6 +1078,11 @@ public static class OpenApiDocument
             ["OperatorCloseRequest"] = closeRequest,
             ["OperatorCloseCandidatesResponse"] = closeCandidates,
             ["OperatorCloseResponse"] = closeResponse,
+            ["OperatorAnswerSelection"] = answerSelection,
+            ["OperatorAnswerItem"] = answerItem,
+            ["OperatorAnswerRequest"] = answerRequest,
+            ["OperatorAnswerCandidatesResponse"] = answerCandidates,
+            ["OperatorAnswerResponse"] = answerResponse,
             ["OperatorRecordResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("nextStep", "string"), ("record", "object"), ("branch", "string"), ("head", "string"), ("change", "object"), ("problem", "object")),
             ["ChangesOpenRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("title", "string"), ("body", "string"), ("by", "string"), ("reconciliation", "string")),
             ["ChangesMergeRequest"] = Object(("product", "string"), ("pullRequest", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
@@ -1210,6 +1245,7 @@ public static class OpenApiDocument
         "/v1/operator/asks/{id}/carry" => "OperatorRequestCarryRequest",
         "/v1/operator/requests/{id}/done" or "/v1/operator/requests/{id}/dismiss" => "OperatorRequestCloseRequest",
         "/v1/operator/close" => "OperatorCloseRequest",
+        "/v1/operator/answers" => "OperatorAnswerRequest",
         "/v1/changes/open" => "ChangesOpenRequest",
         "/v1/changes/merge" => "ChangesMergeRequest",
         "/v1/changes/observe" => "ChangesObserveRequest",
@@ -1337,6 +1373,8 @@ public static class OpenApiDocument
         ("GET", "/v1/operator/actions") => "Every open operator ask, pending operator acceptance and recorded waiting reserved action, with reasons, dependencies, exact record-authoring commands and required JSON input (vericairn.operator-actions/1). Text follows communication settings, defaulting to the estate's root operator; JSON always contains the complete queue. Record errors suppress authoring commands. This read neither signs nor records, inspects keys or calls providers. Not exposed through MCP.",
         ("GET", "/v1/operator/close") => "Read every current work order whose latest result is completed, has current passing reviews and has no acceptance of that exact result. Includes the exit question, result summary, review summaries and independence, and exact record hashes. Reads sign and write nothing. Not exposed through MCP.",
         ("POST", "/v1/operator/close") => "Close the exact displayed selections with the operator's admitted signing device. Each acceptance pins its result and names every displayed passing review as its basis. All also pins complete candidate membership. Changed evidence, missing passing reviews and non-operators refuse the whole action without writes. Custody checks presence per signature, or from 0.9.4 once for an announced list of up to 16 acceptances under a presence session where the release helper and the macOS version allow it and neither the charter nor the device's owner asks per signature. Not exposed through MCP.",
+        ("GET", "/v1/operator/answers") => "From 0.9.4: every ask waiting on an operator, or on the one named by to, that an act may answer with its recommendation: the exact ask revision, its recommendation and that recommendation's SHA-256 first, then the question, the consequence of leaving it unanswered, its options and state. Reading answers nothing.",
+        ("POST", "/v1/operator/answers") => "From 0.9.4: answer the exact displayed asks with their recommendations in one act signed by the operator's own admitted device: one decision for each ask naming the act, decidedAt the act's time, stored together. A changed ask or recommendation refuses the whole act; all also pins the complete membership of the asks waiting on the operator. Only the operator the asks are put to, a person, performs it; never through MCP.",
         ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it. The body's limits.deadline is validated and recorded but not yet enforced; goal next and goal step hold a run of a flow at limits.consecutiveFailures, which is otherwise validated and recorded but not enforced, and a direct worker start is not held by it.",
         ("GET", "/v1/goals/{id}") => "A goal by the id of any of its revisions: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its acceptance.",
         ("GET", "/v1/overlaps") => "From 0.9.4: the overlap check's view (vericairn.overlaps/1): the active assignments by repository, each with its effective permitted paths (its interpretable patterns less its exclusions, and in the estate's own repository less records/ and objects/) and why it is active, and every overlap of two of them with its patterns, witnesses (up to 20 tracked paths at the registered clone's main line, else the shortest valid path either could create), resolution and the concurrent-paths policies whose selection it meets. Read-only; the clone's answers are this machine's, labeled so.",

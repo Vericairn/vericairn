@@ -85,6 +85,7 @@ public sealed partial class RemoteViewModel : Observable
         AddEstateCommand = new AsyncCommand(() => { Pairing = true; return Task.CompletedTask; }, () => !Busy);
         CancelPairingCommand = new AsyncCommand(() => { Pairing = false; return Task.CompletedTask; }, () => !Busy && Estates.Count > 0);
         InitializeDecisionCommands();
+        InitializeAnswerCommands();
         InitializeInspectionCommands();
         InitializePolicyCommands();
         foreach (RuntimeConnection connection in connections.List())
@@ -121,6 +122,8 @@ public sealed partial class RemoteViewModel : Observable
             if (!Set(ref selected, value)) return;
             SetDecision(null);
             SetPolicyDetail(null);
+            SetAnswerChoices([], false);
+            AnswerMessage = string.Empty;
             RestoreDecisions();
             DecisionMessage = string.Empty;
             detailCurrent = false;
@@ -159,6 +162,7 @@ public sealed partial class RemoteViewModel : Observable
             CancelPairingCommand.NotifyCanExecuteChanged();
             NotifyInspectionCommands();
             NotifyDecisionCommands();
+            NotifyAnswerCommands();
         }
     }
 
@@ -344,6 +348,8 @@ public sealed partial class RemoteViewModel : Observable
         decisionCurrent = false;
         MaterialReviewed = false;
         NotifyDecision();
+        answersCurrent = false;
+        AnswersReviewed = false;
         ConnectionState = ConnectionStates.Connecting;
         ConnectionMessage = "Checking the runtime's identity and this phone's access.";
         try

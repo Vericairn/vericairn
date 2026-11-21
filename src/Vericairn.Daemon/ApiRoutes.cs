@@ -134,6 +134,9 @@ public static class ApiRoutes
         app.MapPost($"{v}/operator/record", async (OperatorRecordRequest request, HttpContext context) => Results.Json(await service.OperatorRecordAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/operator/unfinished", () => Results.Json(service.OperatorUnfinished(), ProtocolJson.Options));
         app.MapPost($"{v}/operator/unfinished", async (OperatorFinishRequest request, HttpContext context) => Results.Json(await service.OperatorFinishAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
+        // From 0.9.4 (OPS-16): the asks an act may answer with their recommendations, and the act itself.
+        app.MapGet($"{v}/operator/answers", (string? to) => Results.Json(service.OperatorAnswerCandidates(to), ProtocolJson.Options));
+        app.MapPost($"{v}/operator/answers", async (OperatorAnswerRequest request, HttpContext context) => Results.Json(await service.OperatorAnswerAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/operator/close", () => Results.Json(service.OperatorCloseCandidates(), ProtocolJson.Options));
         app.MapPost($"{v}/operator/close", async (OperatorCloseRequest request, HttpContext context) => Results.Json(await service.OperatorCloseAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/goals", () => Results.Json(service.Goals(), ProtocolJson.Options));

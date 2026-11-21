@@ -237,6 +237,29 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <Expander Header="Answer asks with their recommendations" AutomationProperties.Name="Answer the asks waiting on you with their recommendations in one act">
+                <StackPanel Spacing="6">
+                  <Button Content="Read the asks waiting on me" Command="{Binding ReadAnswersCommand}" AutomationProperties.Name="Read the asks waiting on you, each with its recommendation; reading answers nothing" />
+                  <ItemsControl ItemsSource="{Binding AnswerChoices}" AutomationProperties.Name="Asks and their recommendations, by hash first">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:RemoteAnswerChoice">
+                        <Border Classes="card">
+                          <StackPanel Spacing="2">
+                            <CheckBox IsChecked="{Binding Selected}" Content="Answer this ask with its recommendation" AutomationProperties.Name="Answer this ask with its recommendation" />
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Label}" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <ComboBox ItemsSource="{x:Static vm:RemoteViewModel.DecisionStakes}" SelectedItem="{Binding AnswerStake}" IsVisible="{Binding HasAnswerChoices}" AutomationProperties.Name="Each decision's stake" />
+                  <SelectableTextBlock MinHeight="24" Text="{Binding AnswerReview}" TextWrapping="Wrap" IsVisible="{Binding HasAnswerChoices}" />
+                  <CheckBox IsChecked="{Binding AnswersReviewed}" IsVisible="{Binding HasAnswerChoices}" Content="I reviewed each ask and recommendation shown" AutomationProperties.Name="Confirm you reviewed each ask and recommendation shown" />
+                  <Button Content="Sign the act" Command="{Binding SignAnswersCommand}" IsVisible="{Binding HasAnswerChoices}" AutomationProperties.Name="Answer the selected asks with their recommendations, each signed by this phone's presence key" />
+                  <TextBlock Text="{Binding AnswerMessage}" TextWrapping="Wrap" />
+                  <ItemsControl ItemsSource="{Binding AnswerReceipts}" AutomationProperties.Name="Decisions the act wrote" />
+                </StackPanel>
+              </Expander>
               <TextBlock FontWeight="SemiBold" Text="Local drafts and original submissions" />
               <ListBox ItemsSource="{Binding DecisionDrafts}" SelectedItem="{Binding SelectedDraft}" AutomationProperties.Name="Drafts and submissions for this exact phone connection">
                 <ListBox.ItemTemplate>

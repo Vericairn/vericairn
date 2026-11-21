@@ -32,6 +32,8 @@ public class PolicyGoldenFixtureTests
         EstateModel reviewModel = reviews.Estate.Load();
         Assert.False(reviewModel.Findings.HasErrors, string.Join('\n', reviewModel.Findings));
         using PolicyFixture requests = OperatorRequestTests.RecordedFixture();
+        // From 0.9.4 (OPS-16) a decision of the operator's act answers an ask with its recommendation.
+        DecisionActTests.AddAct(requests);
         EstateModel requestModel = requests.Estate.Load();
         Assert.False(requestModel.Findings.HasErrors, string.Join('\n', requestModel.Findings));
         using TestEstate firstParty = FirstPartyTemplateTests.RecordedFixture();

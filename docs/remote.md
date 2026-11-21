@@ -4,8 +4,8 @@ Remote is Vericairn's phone companion for iOS and Android: a client of an estate
 of one and never a separate estate. It uses the same presentation, state language and SDK as Workbench.
 
 This guide describes Remote's pairing, attention, work, decision and policy views, added in 0.9.0 with REMOTE-01 to REMOTE-03
-and POLICY-05, with the estate's history line and the stops of its runs from 0.9.2, and the presence key that alone signs a
-decision on the phone (REMOTE-11). It is a **developer build**: it is not in an app
+and POLICY-05, with the estate's history line and the stops of its runs from 0.9.2, the presence key that alone signs a
+decision on the phone (REMOTE-11), and from 0.9.4 answering asks with their recommendations in one act (OPS-16). It is a **developer build**: it is not in an app
 store, and no real-device qualification is recorded for it.
 
 ## What this build does
@@ -111,6 +111,25 @@ write ledger names the request device that sent it.
 **Defer** acknowledges only the original notice's attention state. It answers or accepts nothing. **Request changes** explains
 the desktop route; this phone flow has no suitable change-request record and sends no substitute. Preparing handoffs for these
 decision drafts remains a later step; the draft stays on this phone.
+
+## Answering asks with their recommendations (0.9.4)
+
+From 0.9.4 (OPS-16), an operator answers the asks waiting on them with their recommendations in one act from the phone. In
+Attention, open **Answer asks with their recommendations** and choose **Read the asks waiting on me**: each ask is listed by its
+exact revision and hash with its recommendation's SHA-256 and recommendation first, then the question and what happens while it
+stays unanswered. Every ask starts selected; clear any you do not answer this way. Choose each decision's stake, read the act as
+it will be signed, confirm that you reviewed it, then choose **Sign the act**. Reading answers nothing.
+
+Before the first signature Remote reads the asks again, and the act refuses whole, signing and sending nothing, if any selected
+ask or recommendation changed or no longer waits on you. Each ask then gets its own decision naming the act, with `decidedAt`
+the act's time, signed by the phone's presence key, which asks for Face ID, Touch ID, a fingerprint or the device passcode at
+each signature, as every phone signature does: a phone keeps one presence check per decision. Each decision is prepared by the
+runtime, checked against the request and the ask as shown immediately before the presence key asks and again before its
+signature leaves, and written as its own record; the runtime checks the ask and recommendation again when it writes. A change
+during the act stops it before the next signature: the decisions already written stand as answers of the act, the message says
+how many of how many were written, and an ask once answered is never answered again, so nothing is answered twice. The act's
+outcome is shown until the app closes; unlike a single decision's draft it is not kept in app storage, and the asks the act
+answered no longer wait on you. A phone without its presence key signs no act.
 
 ## Drafts and observed outcomes
 

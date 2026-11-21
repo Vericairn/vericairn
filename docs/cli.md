@@ -165,6 +165,32 @@ sessions are on, up to 16 acceptances are listed by exact hash and signed under 
 [operator actions guide](operator-actions.md#close-finished-steps-in-one-action) describes saved
 listings, API/SDK counterparts and recovery after interrupted storage.
 
+## `vericairn operator answer` (0.9.4)
+
+From 0.9.4 (OPS-16), the operator answers open asks with their recommendations in one signed act. Without a
+selection the command lists every ask waiting on an operator, or on `--by`, each by its exact revision and hash with its
+recommendation and that recommendation's SHA-256 first, then its question, the consequence of leaving it unanswered and its
+options. It writes nothing.
+
+| Option | Meaning |
+|---|---|
+| `--select <ask-id>` | Answer that ask with its recommendation; repeat for several asks. |
+| `--all` | Answer every ask waiting on `--by`; cannot be combined with `--select`. |
+| `--by <operator-id>` | Required with a selection: the operator the asks are put to, a person, acting on their own admitted device. Narrows the listing. |
+| `--stake <stake>` | Each decision's stake: `low` (the default), `medium`, `high` or `critical`. |
+| `--from <file>` | Use a saved `operator answer --json` listing with a selection; `-` reads standard input. |
+| `--json` | Print one typed response. The act is shown on standard error before signing. |
+| `--estate <root>`, `-e <root>` | Select the estate. |
+
+Each selected ask gets its own decision, signed by the operator's device and naming the act in its `act` member, with
+`decidedAt` the act's time; all are stored together. A changed ask or recommendation, an ask answered, withdrawn or carried in
+the meantime, a changed membership with `--all`, an agent or anyone but the operator the asks are put to refuses the whole act
+without a decision. Where presence sessions are on, up to 16 decisions are listed by exact hash and signed under one presence
+check, a list for each 16 ([presence sessions on standard error](#presence-sessions-on-standard-error-094)). Exit 0 means every
+selected ask was answered, 1 a refusal, and 2 invalid arguments or a client failure. The
+[operator actions guide](operator-actions.md#answer-open-asks-with-their-recommendations-in-one-act-094) describes the
+decisions, the API and SDK counterparts and Remote.
+
 ## `vericairn decisions new`
 
 From 0.8.4, `decisions new` records a supplied operator answer with its exact design document pins. See the [operator workflow](operator-guide.md#record-an-answered-ask-with-its-design-changes).
