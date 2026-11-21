@@ -52,7 +52,6 @@ public sealed partial class ChangeFragmentTests
         repository.Write("docs/changes/0.9.4/FIX-4.md", "# FIX-4: No placement\n\n## docs/operator-guide.md\n\n> Text.\n");
         repository.Write("docs/changes/0.9.4/FIX-7.md", "# FIX-7: Unquoted\n\n## docs/operator-guide.md\n\n### In \"x\"\n\nPlain text, not quoted.\n");
         repository.Write("docs/changes/0.9.4/FIX-8.md", "# FIX-8: A preamble\n\nSome text before any section.\n\n## docs/operator-guide.md\n\n### In \"x\"\n\n> Text.\n");
-        repository.Write("docs/changes/0.9.4/FIX-9.md", "# FIX-9: Other roots\n\n## docs/operator-guide.md\n\n### In \"x\"\n\n> Keep it in ~" + "/clone, not in /" + "tmp/scratch.\n");
         repository.Write("docs/changes/0.9.3/FIX-5.md", Fragment("FIX-5", "0.9.3"));
         repository.Write("docs/changes/next/FIX-6.md", Fragment("FIX-6", "0.9.4"));
         repository.Write("docs/changes/stray.md", "# Stray\n");
@@ -67,11 +66,72 @@ public sealed partial class ChangeFragmentTests
         Assert.Contains("docs/changes/0.9.4/FIX-4.md: each held guide's section places its text under a level-three heading saying where it goes.", problems);
         Assert.Contains("docs/changes/0.9.4/FIX-7.md: a placement's text is a block quote, every line of it beginning with >.", problems);
         Assert.Contains("docs/changes/0.9.4/FIX-8.md: nothing but blank lines comes between the title and the first held guide's section.", problems);
-        Assert.Contains("docs/changes/0.9.4/FIX-9.md: a fragment names no machine path.", problems);
         Assert.Contains("docs/changes/0.9.3: the documentation set of 0.9.3 is frozen, so its fragments were applied and removed with it; FIX-5.md remains.", problems);
         Assert.Contains("docs/changes/next: a directory under docs/changes is named for the release in preparation, such as 0.9.4.", problems);
         Assert.Contains("docs/changes/stray.md: only README.md lives directly under docs/changes.", problems);
         Assert.DoesNotContain(problems, p => p.StartsWith("docs/changes/0.9.4/POLICY-08.md", StringComparison.Ordinal));
+    }
+
+    // Each form a fragment may quote: a home-relative path that names no user, as the held guides name a user's own directories, a
+    // path below a variable, a root named alone, a relative path and a web address. The roots are split so that no literal is one.
+    [Theory]
+    [InlineData("> A run is refused while the user's own `~/.agents` supplies skills.")]
+    [InlineData("> A launchd agent (`~/Library/LaunchAgents`) or a systemd user unit (`~/.config/systemd/user`).")]
+    [InlineData(@"> On Windows, below `~\AppData\Local`, `%USERPROFILE%\AppData` or `$env:USERPROFILE\AppData`.")]
+    [InlineData("> In `$HOME/.config/vericairn`, `${HOME}/.config` or *~/.config*, never [the home](~/).")]
+    [InlineData("> In `$TMPDIR/vericairn`, else `$XDG_RUNTIME_DIR/vericairn`, or `~/" + "tmp/x`.")]
+    [InlineData("> The system `/" + "tmp` is permitted, as is `/" + "tmp/`, and files in /" + "tmp/.")]
+    [InlineData("> Homes live below `/" + "Users` and `/" + "home/`, volumes below **/" + "Volumes/** and globs such as `/" + "Users/*/Library` name no one.")]
+    [InlineData("> See docs/" + "home/guide.md, src/" + "tmp/x, ./" + "tmp/x and ../" + "Users/x.")]
+    [InlineData("> See https://example.invalid/" + "home/x, a bare `file://` scheme and file:///etc/hosts.")]
+    [InlineData("> Strike ~~this~~ and ~that~; it took ~10/s.")]
+    public void AHomeRelativePathThatNamesNoUserAndARootNamedAlonePass(string quoted) => Assert.Empty(Quoting(quoted));
+
+    // Each form that names one machine: a user's home on macOS, Linux and Windows, a volume, a temporary folder and a host, in plain text,
+    // code, emphasis, links, file URLs, a table and after any mark a path can follow.
+    [Theory]
+    [InlineData("> Read /" + "Users/alice/clone first.")]
+    [InlineData("> Read `/" + "Users/alice` first.")]
+    [InlineData("> Read */" + "Users/alice* first.")]
+    [InlineData("> Read [the clone](/" + "Users/alice/clone).")]
+    [InlineData("> Read file:///" + "Users/alice/clone first.")]
+    [InlineData(">/" + "Users/alice/clone")]
+    [InlineData("> See /" + "home/alice/.config here.")]
+    [InlineData("> See `/" + "home/<user>/.config` here.")]
+    [InlineData("> See /" + "root/.config here.")]
+    [InlineData("> See ~alice/clone or ~alice\\clone here.")]
+    [InlineData("> See C:" + @"\Users\alice here.")]
+    [InlineData("> See C:/" + "Users/alice here.")]
+    [InlineData("> See file:///C:/" + "Users/alice here.")]
+    [InlineData("> See /" + "Volumes/Data/estate here.")]
+    [InlineData("> See _/" + "Volumes/Data_ here.")]
+    [InlineData("> See **/" + "Volumes/Data** here.")]
+    [InlineData("> See /" + "mnt/c/estates here.")]
+    [InlineData("> See /" + "media/alice/usb here.")]
+    [InlineData(@"> See D:\estates here.")]
+    [InlineData(@"> See \\server\share\estate or `\\.\pipe\vericairn` here.")]
+    [InlineData("> See file://server/share/estate here.")]
+    [InlineData("> See file://localhost/" + "Users/alice here.")]
+    [InlineData("> See /" + "tmp/scratch here.")]
+    [InlineData("> See /" + "tmp/_build here.")]
+    [InlineData("> See /" + "private/" + "tmp/scratch here.")]
+    [InlineData("> See /" + "var/" + "tmp/scratch here.")]
+    [InlineData("> See /" + "var/folders/ab/cd/T/x here.")]
+    [InlineData("> See /" + "private/var/folders/ab/cd/T/x here.")]
+    [InlineData("> After a colon:/" + "tmp/x, a comma,/" + "tmp/y or a quote \"/" + "tmp/z\".")]
+    [InlineData("> | /" + "tmp/x | a cell |")]
+    [InlineData("> |/" + "tmp/x|")]
+    [InlineData("> In (/" + "tmp/x) or with --dir=/" + "tmp/x.")]
+    public void APathNamingOneMachinesHomeVolumeOrTemporaryFolderIsRefusedWhereverItBegins(string quoted) =>
+        Assert.Equal(["docs/changes/0.9.4/OPS-17.md: a fragment names no machine path."], Quoting(quoted));
+
+    // The problems of a fragment that follows the layout, its one placement quoting the given line.
+    private static IReadOnlyList<string> Quoting(string quoted)
+    {
+        using var repository = new Scratch();
+        repository.Write("docs/changes/README.md", "# Per-change fragments\n");
+        repository.Write("docs/changes/0.9.4/OPS-17.md", $"# OPS-17: A quoted path\n\n## docs/operator-guide.md\n\n### In \"x\"\n\n{quoted}\n");
+        return Problems(repository.Root);
     }
 
     /// <summary>Every departure of a repository's <c>docs/changes</c> from the fragment layout, in a stable order; empty when it follows it.</summary>
@@ -205,9 +265,13 @@ public sealed partial class ChangeFragmentTests
     [GeneratedRegex(@"\A[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[0-9]+\z")]
     private static partial Regex Key();
 
-    // A machine path, split so that the pattern itself is not one: a home, volume, root user's or mount root, a home by tilde, a
-    // temporary root or a drive letter. A root is matched where a path begins, after a space, quote, bracket or line start.
-    [GeneratedRegex(@"(?:^|[\s`'""(<\[=])(?:/" + "Users/|/" + "Volumes/|/" + "home/|/" + "root/|/" + "mnt/|/private/" + "tmp|/" + "tmp/|/var/" + "folders/|~/)|[A-Za-z]:\\\\", RegexOptions.Multiline)]
+    // A machine path, as docs/changes/README.md states it: a name below a user's home root, a volume root or a temporary root (each
+    // also below /private), a tilde followed by a user's name, a drive letter, a network share, or a file URL naming a host. It begins
+    // where a path begins: at the start of a line or after any character but a letter, a digit, '.', '-', '~' or '}', so that a
+    // relative path and one below a variable are not one. A name follows the root's slash, past any leading dots or underscores, so that
+    // a root named alone, before white space, a closing mark or punctuation, is not one; neither is a home-relative path naming no user.
+    [GeneratedRegex(@"(?<![A-Za-z0-9.~}-])(?:(?:(?:/private)?/(?:tmp|var/tmp|var/folders)|/(?:Users|home|root|Volumes|mnt|media))/[._]*[^\s/\\`'""()\[\]>*_|,;:.!?]" +
+        @"|~[A-Za-z_][A-Za-z0-9_.-]*[/\\]|[A-Za-z]:[\\/]|\\\\[A-Za-z0-9.?$_-]+\\[A-Za-z0-9.$_-]|(?i:file)://[^\s/\\`'""()\[\]>*|,;!?])")]
     private static partial Regex MachinePath();
 
     private sealed class Scratch : IDisposable

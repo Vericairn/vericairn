@@ -1,5 +1,7 @@
 # Per-change fragments for the held guides
 
+Revision 3, November 20, 2026. Say which paths a fragment may not name and that a home-relative path naming no user and a root named alone are not machine paths (OPS-17 re-check).
+
 Revision 2, November 20, 2026. Say that nothing comes between the title and the first section and that every line of placed text is quoted (OPS-17 review).
 
 Revision 1, November 20, 2026. Define the fragment layout under `docs/changes/<version>/`, through which a change hands its text for a held guide to the documentation-set change of its release (OPS-17).
@@ -27,7 +29,15 @@ this file is the only file directly under `docs/changes/`.
 - Under a guide, each placement is a level-three heading that says where the text goes, such as
   `### In "18. Routing, asks and the worker", after the paragraph beginning "goal step takes"`, followed by the text to insert as a
   block quote, every line of it beginning with `>`, in the guide's own style ("From 0.9.4, ..." for a changed behavior).
-- A fragment names no machine path and states only what its own change adds.
+- A fragment states only what its own change adds, and names no machine path: no path that names one machine's user home, volume
+  or temporary folder, in plain text, code, emphasis, a link, a table or a file URL. A machine path is a name below `/Users`, `/home`
+  or `/root`, a tilde followed by a user's name and a slash (`~name/`), a name below `/Volumes`, `/mnt` or `/media`, any path on a
+  drive letter (`C:\` or `C:/`), a network share (`\\server\share`), a name below `/tmp`, `/var/tmp` or `/var/folders`, each of
+  these three also below `/private`, or a file URL naming a host (`file://server/`). It begins where a path begins, at the start of a
+  line or after any character but a letter, a digit, `.`, `-`, `~` or `}`, so that a relative path such as `docs/home/guide.md` or
+  one below a variable such as `$TMPDIR/vericairn` is not one. A home-relative path that names no user, such as
+  `~/.config/systemd/user`, `$HOME/.config` or `%USERPROFILE%\AppData`, and a root named alone, such as `/tmp` or `/Users`, are not
+  machine paths.
 
 ```markdown
 # POLICY-08: The concurrent-paths policy kind holds an unresolved overlap
