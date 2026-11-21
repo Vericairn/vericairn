@@ -421,7 +421,7 @@ internal static class StandingAgents
         // The gates over what is due: the goal's status, until, the failure pause, the period's caps and the concurrency.
         AgentRuns.Ledger ledger = AgentRuns.Of(model, current);
         Period? period = PeriodOf(model, current, runs, asOf);
-        (int failures, RecordEnvelope? failure) = Failures(model, current, assignments, runs);
+        (int failures, RecordEnvelope? failure) = Failures(model, current, runs);
         int awaitingCap = AwaitingReviewCap(current);
         int awaiting = AwaitingCount(model, order, null);
         int openCap = StandingOutputs.CapsOf(current).Open;
@@ -771,84 +771,240 @@ internal static class StandingAgents
     }
 
     /// <summary>
-    /// The goal's consecutive failed runs that count toward the failure pause, judged from the records before a record when one is given:
-    /// one outcome for each settled run, in the order the runs were started: the latest result recorded on its assignment between its start
-    /// and the next run of that assignment, failed when blocked or abandoned, whatever the harness's exit; or, with no result, its settlement,
-    /// failed when a known failure, unless who decides for the goal asked it to stop (its sponsor when a person, or an operator, as they
-    /// stood when the stop was recorded), when the failure is theirs and not the agent's; a run that settled with neither a result nor a failure counts for nothing. Only the failures after the
-    /// last success, and after the failure its sponsor last answered the pause's ask about, count; the latest of them first.
+    /// The goal's consecutive failed runs that count toward the failure pause, judged from the records before a record when one is given,
+    /// read so that no record of an agent tied to the goal ends the pause, whatever its date (§ 10; from 0.9.4, FIX-155). Each settled run
+    /// has one outcome. It failed when a blocked or abandoned result was recorded on its assignment after it started and before the next run
+    /// of that assignment started, any such result whatever a later one or a correction says, or when it settled as a known failure unless
+    /// who decides for the goal asked it to stop (<see cref="DeciderStopped"/>). It succeeded when it settled as an observed success that
+    /// names the completed or partial result its agent recorded during it (<see cref="Seen"/>), with no such failure result, and no principal
+    /// tied to the goal recorded its intent or its settlement. Otherwise it counts for nothing, a clean exit with no result included. A
+    /// completed or partial result, and the attempt it closes, is a claim another principal reviews and never makes a run succeed by
+    /// itself: only the settlement, which no tied principal wrote, names it, and nothing written after it, whatever its date. A run is read
+    /// from its whole lineage (<see cref="Lineages"/>), every revision on every branch. When a revision no tied principal wrote settles or
+    /// cancels it, the deepest revision no tied principal wrote decides it, read by its depth in the lineage and never by a date, and every
+    /// revision a tied principal wrote counts for nothing: such a decision that leaves it canceled or unsettled makes it count for nothing,
+    /// so an untied principal's correction, such as the operator's, counts as written, and a success it names stands whatever a tied
+    /// principal records afterwards. Only where no untied revision settles or cancels the run does a known-failure settlement a tied principal
+    /// wrote count, as its failure, as for an agent that steps its own goal. A run no tied
+    /// principal recorded ends at the next run whose intent no tied principal recorded, so no run a tied principal records takes a result
+    /// off another. The outcomes count in the order the runs settled, each at the later of its intent and its settlement. An answered ask of
+    /// the pause naming one of the failures cuts every outcome settled before the earlier of the ask and its first answer
+    /// (<see cref="Answer"/>); after the cut a success ends the failures before it only while they are fewer than the limit, so once they
+    /// reach it the pause holds until such an answer. Returns the failures that count and the latest of them.
     /// </summary>
-    private static (int Count, RecordEnvelope? Latest) Failures(EstateModel model, RecordEnvelope goal, IReadOnlyList<RecordEnvelope> assignments, IReadOnlyList<AgentRuns.Run> runs, RecordEnvelope? before = null)
+    private static (int Count, RecordEnvelope? Latest) Failures(EstateModel model, RecordEnvelope goal, IReadOnlyList<AgentRuns.Run> runs, RecordEnvelope? before = null)
     {
         bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
-        List<AgentRuns.Run> settled = [.. runs.Where(r => r.IsSettled && Counts(r.Latest)).OrderBy(r => r.Intent.At, StringComparer.Ordinal).ThenBy(r => r.Intent.Id, StringComparer.Ordinal)];
-        var outcomes = new List<(RecordEnvelope Record, bool Failed)>();
-        foreach (AgentRuns.Run run in settled)
+        bool Tied(string by) => StandingOutputs.Tied(model, goal, by, before);
+        static bool Settles(RecordEnvelope revision) => AgentRuns.Settled.Contains(EstateModel.BodyString(revision, "status") ?? string.Empty);
+        static bool Terminal(RecordEnvelope revision) => Settles(revision) || EstateModel.BodyString(revision, "status") == "canceled";
+        Dictionary<string, List<(RecordEnvelope Record, int Depth)>> lineages = Lineages(model, Counts);
+        List<(RecordEnvelope Record, int Depth)> Lineage(AgentRuns.Run run) => lineages.GetValueOrDefault(run.Intent.Id) ?? [(run.Intent, 0)];
+        static RecordEnvelope? Deepest(IEnumerable<(RecordEnvelope Record, int Depth)> line) => line.OrderBy(e => e.Depth).ThenBy(e => e.Record.At, StringComparer.Ordinal)
+            .ThenBy(e => e.Record.Id, StringComparer.Ordinal).Select(e => e.Record).LastOrDefault();
+        static RecordEnvelope? Shallowest(IEnumerable<(RecordEnvelope Record, int Depth)> line) => line.OrderBy(e => e.Depth).ThenBy(e => e.Record.At, StringComparer.Ordinal)
+            .ThenBy(e => e.Record.Id, StringComparer.Ordinal).Select(e => e.Record).FirstOrDefault();
+        bool Settled(AgentRuns.Run run) => Lineage(run).Any(e => Settles(e.Record));
+        var outcomes = new List<(RecordEnvelope At, RecordEnvelope Record, bool Failed, IReadOnlyList<RecordEnvelope> Records)>();
+        foreach (AgentRuns.Run run in runs.Where(r => Counts(r.Intent) && Settled(r)))
         {
+            // From FIX-155 a run is read from its whole lineage, every revision on every branch whatever the chain as read selects, so no fork,
+            // identifier order or reconciliation hides a revision. When a revision no tied principal wrote settles or cancels the run, the
+            // deepest revision no tied principal wrote decides it and the tied principals' revisions count for nothing; only otherwise does a
+            // tied principal's known-failure settlement count, as its failure. Depth in the lineage orders them, never a date.
+            List<(RecordEnvelope Record, int Depth)> line = Lineage(run);
+            List<(RecordEnvelope Record, int Depth)> untied = [.. line.Where(e => !Tied(e.Record.By))];
+            bool spoken = untied.Any(e => Terminal(e.Record));
+            RecordEnvelope? word = spoken ? Deepest(untied) : null;
+            if (spoken && !Settles(word!))
+            {
+                // The latest word no tied principal wrote leaves the run canceled or unsettled: it counts for nothing.
+                continue;
+            }
+
+            RecordEnvelope? decided = word;
+            RecordEnvelope? admitted = spoken ? null : Shallowest(line.Where(e => Tied(e.Record.By) && EstateModel.BodyString(e.Record, "status") == "known-failure"));
+            RecordEnvelope settlement = (spoken ? Shallowest(untied.Where(e => Settles(e.Record))) : null) ?? admitted ?? Shallowest(line.Where(e => Settles(e.Record)))!;
+            bool tied = Tied(run.Intent.By) || decided is null;
             RecordEnvelope? carried = run.Assignment is string id && model.ById.TryGetValue(id, out RecordEnvelope? found) ? model.Latest(found) : null;
             IReadOnlyList<string> chain = carried is null ? [] : model.Chain(carried);
-            AgentRuns.Run? next = runs.Where(r => r.Assignment is not null && chain.Contains(r.Assignment) && GoalRules.Before(run.Intent, r.Intent))
+            AgentRuns.Run? next = runs.Where(r => r.Assignment is not null && chain.Contains(r.Assignment) && GoalRules.Before(run.Intent, r.Intent) && Counts(r.Intent)
+                    && (!Tied(r.Intent.By) || (tied && Settled(r))))
                 .OrderBy(r => r.Intent.At, StringComparer.Ordinal).ThenBy(r => r.Intent.Id, StringComparer.Ordinal).FirstOrDefault();
-            RecordEnvelope? result = carried is null ? null : chain.Select(c => model.ById[c]).SelectMany(a => WorkView.AttemptsOf(model, a))
-                .SelectMany(attempt => model.About(attempt.Id, "result"))
-                .Where(r => Counts(r) && GoalRules.Before(run.Intent, r) && (next is null || GoalRules.Before(r, next.Intent)))
-                .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
-            if (result is not null)
+
+            // Every result of every attempt on the assignment, superseded attempts and results among them, so no revision takes a failure back.
+            List<RecordEnvelope> failed = [.. chain.SelectMany(a => model.About(a, "attempt")).SelectMany(attempt => model.About(attempt.Id, "result")).DistinctBy(r => r.Id)
+                .Where(r => Counts(r) && GoalRules.Before(run.Intent, r) && (next is null || GoalRules.Before(r, next.Intent)) && EstateModel.BodyString(r, "outcome") is "blocked" or "abandoned")
+                .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)];
+            RecordEnvelope at = GoalRules.Before(run.Intent, settlement) ? settlement : run.Intent;
+            IReadOnlyList<RecordEnvelope> named = [.. line.Select(e => e.Record), .. failed];
+
+            // A success an untied settlement names stands whatever a tied principal records afterwards, a blocked result included.
+            if (!tied && EstateModel.BodyString(decided!, "status") == "observed-success" && Seen(model, run, decided!, chain, before) is not null)
             {
-                outcomes.Add((result, EstateModel.BodyString(result, "outcome") is "blocked" or "abandoned"));
+                outcomes.Add((at, decided!, false, named));
             }
-            else if (run.Status == "known-failure" && !DeciderStopped(model, goal, run))
+            else if (failed.Count > 0)
             {
-                outcomes.Add((run.Latest, true));
+                outcomes.Add((at, failed[^1], true, named));
+            }
+            else if (decided is not null && EstateModel.BodyString(decided, "status") == "known-failure" && !DeciderStopped(model, goal, decided, before))
+            {
+                outcomes.Add((at, decided, true, named));
+            }
+            else if (admitted is not null)
+            {
+                outcomes.Add((at, admitted, true, named));
             }
         }
 
-        // A failure an answered ask of the pause names, and every outcome before it, no longer counts: the sponsor's answer lets the agent go on.
-        // From GOAL-08 only the pause's ask goal step recorded counts, never another principal's ask in its words, and only an answer no
-        // agent tied to the goal recorded (Asks.State leaves those out, StandingOutputs.SelfAnswer), whatever date it claims; judged before
-        // a record, such as a run's intent, by the ties written before it, so a later tie makes no earlier record wrong.
-        List<RecordEnvelope> asks = [.. Routing.AsksOf(model, goal).Where(a => Counts(a) && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(NextEligible.AttentionQuestion, StringComparison.Ordinal)
-            && RuntimeAsk(model, goal, a) && Answered(model, a, before))];
+        outcomes = [.. outcomes.OrderBy(o => o.At.At, StringComparer.Ordinal).ThenBy(o => o.At.Id, StringComparer.Ordinal)];
+
+        // The sponsor's answer lets the agent go on. From GOAL-08 only the pause's ask goal step recorded counts, never another principal's
+        // ask in its words, and only an answer no agent tied to the goal recorded (Asks.State leaves those out, StandingOutputs.SelfAnswer),
+        // whatever date it claims; judged before a record, such as a run's intent, by the ties written before it, so a later tie makes no
+        // earlier record wrong. From FIX-155 how far it reaches is read from the ask and its answer, never from where a result falls.
         int cut = -1;
-        for (int i = 0; i < outcomes.Count; i++)
+        foreach (RecordEnvelope ask in Routing.AsksOf(model, goal).Where(a => Counts(a) && RuntimeAsk(model, goal, a)
+            && (EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(NextEligible.AttentionQuestion, StringComparison.Ordinal)))
         {
-            IReadOnlyList<string> named = model.Chain(outcomes[i].Record);
-            if (asks.Any(a => model.Latest(a).Subject is RecordReference subject && named.Contains(subject.Id)))
+            if (model.Latest(ask).Subject is not RecordReference subject || Answer(model, ask, before) is not RecordEnvelope answer)
             {
-                cut = i;
+                continue;
+            }
+
+            RecordEnvelope put = StandingOutputs.FirstOf(model, ask);
+            RecordEnvelope bound = GoalRules.Before(put, answer) ? put : answer;
+            int last = outcomes.FindLastIndex(o => GoalRules.Before(o.At, bound));
+            if (last > cut && outcomes.Take(last + 1).Any(o => o.Failed && o.Records.Any(r => model.Chain(r).Contains(subject.Id))))
+            {
+                cut = last;
             }
         }
 
-        List<(RecordEnvelope Record, bool Failed)> trailing = [.. outcomes.Skip(cut + 1).Reverse().TakeWhile(o => o.Failed)];
-        return (trailing.Count, trailing.Count == 0 ? null : trailing[0].Record);
+        int count = 0;
+        int limit = FailureLimit(goal);
+        RecordEnvelope? latest = null;
+        foreach ((_, RecordEnvelope record, bool failure, _) in outcomes.Skip(cut + 1))
+        {
+            if (failure)
+            {
+                count++;
+                latest = record;
+            }
+            else if (count < limit)
+            {
+                count = 0;
+                latest = null;
+            }
+        }
+
+        return (count, latest);
     }
 
     /// <summary>
-    /// True when an ask is answered, as <see cref="Asks.State"/> reads it now; before a record, when an answer recorded before it counted
-    /// then (<see cref="StandingOutputs.Counting"/> as of it) and its asker has not withdrawn it.
+    /// From 0.9.4 (FIX-155): each agent run's lineage, by its intent: every operation record that counts whose supersedes chain reaches the
+    /// intent through operation records, on every branch, with its depth below the intent (the intent itself at depth zero). Unlike the
+    /// chain as read (<see cref="AgentRuns.Run.Revisions"/>), which follows one successor of each record, no fork, identifier order or
+    /// reconciliation takes a record out of its run's lineage. A record judged before another counts only when written before it, and so
+    /// does each record above it.
     /// </summary>
-    private static bool Answered(EstateModel model, RecordEnvelope ask, RecordEnvelope? before)
+    private static Dictionary<string, List<(RecordEnvelope Record, int Depth)>> Lineages(EstateModel model, Func<RecordEnvelope, bool> counts)
+    {
+        var operations = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
+        foreach (RecordEnvelope operation in model.OfType("operation").Where(counts))
+        {
+            operations.TryAdd(operation.Id, operation);
+        }
+
+        var located = new Dictionary<string, (string? Intent, int Depth)>(StringComparer.Ordinal);
+        (string? Intent, int Depth) Locate(RecordEnvelope record, HashSet<string> visiting)
+        {
+            if (located.TryGetValue(record.Id, out (string? Intent, int Depth) known))
+            {
+                return known;
+            }
+
+            (string? Intent, int Depth) place = (null, 0);
+            if (visiting.Add(record.Id))
+            {
+                if (record.Supersedes is null)
+                {
+                    place = EstateModel.BodyString(record, "action") == OperationType.AgentRun ? (record.Id, 0) : (null, 0);
+                }
+                else if (operations.TryGetValue(record.Supersedes, out RecordEnvelope? parent) && Locate(parent, visiting) is { Intent: string intent } above)
+                {
+                    place = (intent, above.Depth + 1);
+                }
+            }
+
+            located[record.Id] = place;
+            return place;
+        }
+
+        var lineages = new Dictionary<string, List<(RecordEnvelope Record, int Depth)>>(StringComparer.Ordinal);
+        foreach (RecordEnvelope operation in operations.Values)
+        {
+            if (Locate(operation, new HashSet<string>(StringComparer.Ordinal)) is { Intent: string intent } place)
+            {
+                if (!lineages.TryGetValue(intent, out List<(RecordEnvelope Record, int Depth)>? line))
+                {
+                    line = [];
+                    lineages[intent] = line;
+                }
+
+                line.Add((operation, place.Depth));
+            }
+        }
+
+        return lineages;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-155): the result a run's settlement names in observed.reference, as the worker records the completed or partial result
+    /// its agent recorded during the run on an attempt of that run; null unless it names a completed or partial result on an attempt of the
+    /// run's assignment, recorded after the run started (and before the record judged, when one is). A run that exits cleanly with no result
+    /// names none.
+    /// </summary>
+    private static RecordEnvelope? Seen(EstateModel model, AgentRuns.Run run, RecordEnvelope settlement, IReadOnlyList<string> chain, RecordEnvelope? before)
+    {
+        return TJson.Text(TJson.Object(settlement.Body, "observed"), "reference") is string id && model.ById.TryGetValue(id, out RecordEnvelope? result) && result.Type == "result"
+            && EstateModel.BodyString(result, "outcome") is "completed" or "partial" && GoalRules.Before(run.Intent, result) && (before is null || GoalRules.Before(result, before))
+            && result.Subject is RecordReference attempt && model.ById.TryGetValue(attempt.Id, out RecordEnvelope? closed) && closed.Subject is RecordReference carried && chain.Contains(carried.Id)
+            ? result : null;
+    }
+
+    /// <summary>
+    /// The first answer of an ask, as <see cref="Asks.State"/> reads it now; before a record, the first answer recorded before it that
+    /// counted then (<see cref="StandingOutputs.Counting"/> as of it), while its asker has not withdrawn it. Null while none answers it.
+    /// </summary>
+    private static RecordEnvelope? Answer(EstateModel model, RecordEnvelope ask, RecordEnvelope? before)
     {
         if (before is null)
         {
-            return Asks.State(model, ask).State == "answered";
+            (string state, IReadOnlyList<RecordEnvelope> answers) = Asks.State(model, ask);
+            return state == "answered" ? answers[0] : null;
         }
 
         RecordEnvelope latest = model.Latest(ask);
-        return EstateModel.BodyString(latest, "state") != "withdrawn"
-            && StandingOutputs.Counting(model, latest, model.DecisionsAnswering(model.Chain(latest)), before).Any(d => GoalRules.Before(d, before));
+        return EstateModel.BodyString(latest, "state") == "withdrawn" ? null
+            : StandingOutputs.Counting(model, latest, model.DecisionsAnswering(model.Chain(latest)), before).Where(d => GoalRules.Before(d, before))
+                .OrderBy(d => d.At, StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal).FirstOrDefault();
     }
 
     /// <summary>
     /// True when who decides for the goal asked a run to stop, read as the records stood when the stop was first recorded: the sponsor its
     /// goal revision then names, when a person, or a principal holding the operator role then (goal pause --stop-runs, goal stop, an
     /// operator's run stop). A stop anyone else requested, the dispatcher that started the run included, and the worker's for a cap the
-    /// run reached, leave its known failure the agent's.
+    /// run reached, leave its known failure the agent's; and from FIX-155 so does a stop first recorded in a revision a principal tied to
+    /// the goal wrote, whoever it names, judged before a record by the ties written before it. The stop is the one the settlement read
+    /// (<paramref name="settled"/>) names, first recorded along that settlement's own supersedes chain.
     /// </summary>
-    private static bool DeciderStopped(EstateModel model, RecordEnvelope goal, AgentRuns.Run run)
+    private static bool DeciderStopped(EstateModel model, RecordEnvelope goal, RecordEnvelope settled, RecordEnvelope? before)
     {
-        if (TJson.Text(TJson.Object(run.Latest.Body, "stop"), "requestedBy") is not string by || by == "worker"
-            || run.Revisions.FirstOrDefault(r => TJson.Text(TJson.Object(r.Body, "stop"), "requestedBy") == by) is not RecordEnvelope stopped)
+        if (TJson.Text(TJson.Object(settled.Body, "stop"), "requestedBy") is not string by || by == "worker"
+            || model.Chain(settled).Select(model.ById.GetValueOrDefault).OfType<RecordEnvelope>().FirstOrDefault(r => TJson.Text(TJson.Object(r.Body, "stop"), "requestedBy") == by) is not RecordEnvelope stopped
+            || StandingOutputs.Tied(model, goal, stopped.By, before))
         {
             return false;
         }
@@ -1007,10 +1163,7 @@ internal static class StandingAgents
         }
 
         List<AgentRuns.Run> runs = AgentRuns.All(model, before).Where(r => r.Goal is not null && model.Chain(model.Latest(goal)).Contains(r.Goal)).ToList();
-        IReadOnlyList<RecordEnvelope> assignments = FlowRuns.Work(model, goal) is RecordEnvelope order
-            ? Routing.Assignments(model, order).Where(a => KeyOf(a) is not null && (before is null || GoalRules.Before(a, before))).ToList()
-            : [];
-        (int failures, _) = Failures(model, goal, assignments, runs, before);
+        (int failures, _) = Failures(model, goal, runs, before);
         int limit = FailureLimit(goal);
         if (failures >= limit)
         {

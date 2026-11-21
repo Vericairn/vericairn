@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Estate;
 
@@ -19,14 +20,21 @@ public static class OperatorRequests
     /// <summary>At most three requests are presented in one delivery.</summary>
     public const int PerDelivery = 3;
 
-    /// <summary>All outcomes pinned to any revision of this request, including observed effects.</summary>
+    /// <summary>
+    /// All outcomes pinned to any revision of this request, including observed effects. From 0.9.4 (FIX-155), of a standing agent's
+    /// publication request only those an operator who is a person recorded, neither its author nor its askedBy, close it, as the estate
+    /// check requires of each (standing.own-output, standing.publication): an agent's closure, written by hand with any date, closes nothing.
+    /// </summary>
     public static IEnumerable<RecordEnvelope> Closures(EstateModel model, RecordEnvelope request)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(request);
         IReadOnlyList<string> chain = model.Chain(request);
+        RecordEnvelope first = StandingOutputs.FirstOf(model, request);
+        bool standing = StandingOutputs.Of(first) is not null;
         return model.CountingRecords.Where(r => r.Subject is { Type: "operator-request" } subject && chain.Contains(subject.Id) &&
-            (r.Type == "operator-request-close" || r.Type == "observation" && EstateModel.BodyString(r, "kind") == "operator-request"));
+            (r.Type == "operator-request-close" || r.Type == "observation" && EstateModel.BodyString(r, "kind") == "operator-request")
+            && (!standing || (r.By != first.By && r.By != EstateModel.BodyString(first, "askedBy") && GoalRules.IsPerson(model, r.By) && model.HasRoleAt(r.By, Roles.Operator, r))));
     }
 
     /// <summary>The current request that carries an ask, if any. The original ask remains readable and unanswered.</summary>

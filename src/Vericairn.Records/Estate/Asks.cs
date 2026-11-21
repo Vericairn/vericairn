@@ -42,13 +42,24 @@ public static class Asks
         public IReadOnlyList<RecordEnvelope> Queued => Asks.Skip(PerDelivery).ToList();
     }
 
-    /// <summary>An ask's derived state and the current decisions that answer it, oldest first.</summary>
+    /// <summary>
+    /// An ask's derived state and the current decisions that answer it, oldest first. From 0.9.4 a decision on an ask a standing agent's goal
+    /// guards answers nothing when the agent or an agent tied to its goal recorded it, and a standing agent's ask is never withdrawn.
+    /// </summary>
     public static (string State, IReadOnlyList<RecordEnvelope> Answers) State(EstateModel model, RecordEnvelope ask)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(ask);
         RecordEnvelope latest = model.Latest(ask);
         string recorded = EstateModel.BodyString(latest, "state") ?? "open";
+        if (recorded == "withdrawn" && !StandingOutputs.Withdrawn(model, latest))
+        {
+            // From 0.9.4 (FIX-155), a standing agent's ask is never withdrawn (standing.own-output): a decision of the person asked disposes
+            // of it, so a withdrawal reads as the waiting state the chain recorded before it.
+            recorded = model.Chain(latest).Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>()
+                .Select(r => EstateModel.BodyString(r, "state")).LastOrDefault(s => s is not null and not "withdrawn") ?? "open";
+        }
+
         if (recorded == "withdrawn")
         {
             return (recorded, []);

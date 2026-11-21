@@ -350,7 +350,8 @@ public class StandingAgentTests
         StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
         RecordEnvelope assignment = fixture.Assign(occurrence);
 
-        // Two failures, then a run that settles with neither a result nor a failure and counts for nothing.
+        // Two failures, then a run its sponsor asked to stop, which settles with neither a result nor a failure of its own and counts for
+        // nothing (from FIX-155 a run that settles as an observed success with no result is a success; see the failure pause's tests).
         foreach (string outcome in new[] { "blocked", "abandoned" })
         {
             RecordEnvelope intent = fixture.RunIntent(assignment, "run-" + outcome);
@@ -358,11 +359,11 @@ public class StandingAgentTests
             fixture.Settle(intent, "observed-success");
         }
 
-        fixture.Settle(fixture.RunIntent(assignment, "run-silent"), "observed-success");
+        fixture.Settle(fixture.RunIntent(assignment, "run-silent"), "known-failure", fixture.Estate.OperatorId);
         Assert.Equal(("active", 2), (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures));
 
         // The fourth run's intent is accepted at two failures; its own blocked result, recorded after it, is the third failure. Judged again
-        // as the records stood before it, the intent stays valid: that later result is the fourth run's, never the silent run's before it.
+        // as the records stood before it, the intent stays valid: that later result is the fourth run's, never the stopped run's before it.
         RecordEnvelope fourth = fixture.RunIntent(assignment, "run-fourth");
         RecordEnvelope blocked = fixture.Result(assignment, "blocked");
         fixture.Settle(fourth, "observed-success");
@@ -411,6 +412,284 @@ public class StandingAgentTests
 
         held = fixture.Agent(fixture.Estate.Clock);
         Assert.Equal(("held", 3, last!.Id), (held.State, held.Failures, held.FailureTrigger!.Id));
+    }
+
+    [Fact]
+    public void NoRecordOfTheCarrierEndsItsFailurePauseWhateverItsDateAndOnlyThePersonsAnswerDoes()
+    {
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+        string builder = fixture.Estate.BuilderId;
+        (string, int, string?) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures, fixture.Agent(fixture.Estate.Clock).FailureTrigger?.Id);
+
+        // The builder, which the roster names for the researcher role, carries the occurrence and holds local-engineering, so it may record
+        // runs as well. Three runs the operator records fail, the third after five minutes in flight: the pause holds.
+        fixture.Add("authority", new JsonObject { ["grantee"] = builder, ["scope"] = new JsonArray("local-engineering"), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(), ["basis"] = fixture.Policies.Decision.Id });
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+        fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
+        fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
+        RecordEnvelope third = fixture.RunIntent(assignment, "run-3");
+        fixture.Estate.SetClock(fixture.Estate.Clock.AddMinutes(5));
+        RecordEnvelope last = fixture.Settle(third, "known-failure");
+        Assert.Equal(("held", 3, last.Id), Pause());
+
+        // The carrier records its own attempt and a completed result on the assignment, now: a claim another principal reviews, which ends
+        // nothing, so the pause holds and the failures stay three.
+        RecordEnvelope claim = fixture.Result(assignment, "completed");
+        Assert.Equal(("held", 3, last.Id), Pause());
+
+        // Nor does a run of its own, written by hand and dated while the third was in flight, that settles as an observed success with a
+        // completed result in it, which also lies within the third run: a run a tied principal records never succeeds.
+        DateTimeOffset now = fixture.Estate.Clock;
+        fixture.Estate.SetClock(third.AtTime.AddSeconds(30));
+        RecordEnvelope own = fixture.Add("operation", fixture.RunBody(assignment, "run-own", "not-started"), builder: true);
+        fixture.Result(assignment, "completed");
+        fixture.Settle(own, "observed-success", builder: true);
+        fixture.Estate.SetClock(now);
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings));
+        Assert.Equal(("held", 3, last.Id), Pause());
+        Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+
+        // The person's answer to the pause's ask ends it; the operator's review returns the carrier's result, so the occurrence runs again.
+        AnswerPause(fixture, last);
+        Assert.Equal(("active", 0, null), Pause());
+        fixture.Review(claim, "findings");
+
+        // Two more failures, then a run the carrier records whose known-failure settlement says the operator asked it to stop: a stop a
+        // principal tied to the goal records is no stop of who decides for the goal, so the failures are three and the pause holds again.
+        fixture.Settle(fixture.RunIntent(assignment, "run-4"), "known-failure");
+        fixture.Settle(fixture.RunIntent(assignment, "run-5"), "known-failure");
+        RecordEnvelope claimed = fixture.Settle(fixture.Add("operation", fixture.RunBody(assignment, "run-claimed", "not-started"), builder: true), "known-failure", fixture.Estate.OperatorId, builder: true);
+        Assert.Equal(("held", 3, claimed.Id), Pause());
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings));
+    }
+
+    [Fact]
+    public void ACleanExitWithNoResultEndsNoFailuresARunNamingItsResultEndsThemBelowTheLimitAndAtTheLimitOnlyTheAnswerDoes()
+    {
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 40, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 40, ["wallMinutes"] = 800 });
+        (string, int, string?) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures, fixture.Agent(fixture.Estate.Clock).FailureTrigger?.Id);
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+
+        // Four rounds of two failed runs and a run that exits cleanly with no result, as the Reviewer probed: a clean exit leaves nothing to
+        // review and ends no failures, so it never lowers the count, and every third failure since the person last answered pauses the agent
+        // until the person's answer.
+        int expected = 0;
+        RecordEnvelope? clean = null;
+        for (int round = 1; round <= 4; round++)
+        {
+            foreach (string name in new[] { "first", "second" })
+            {
+                RecordEnvelope failed = fixture.Settle(fixture.RunIntent(assignment, $"run-{round}-{name}"), "known-failure");
+                if (++expected == 3)
+                {
+                    Assert.Equal(("held", 3, failed.Id), Pause());
+                    Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, $"run-{round}-{name}-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+                    AnswerPause(fixture, failed);
+                    expected = 0;
+                }
+
+                Assert.Equal(("active", expected), (Pause().Item1, Pause().Item2));
+            }
+
+            clean = fixture.RunIntent(assignment, $"run-{round}-clean");
+            fixture.Estate.SetClock(fixture.Estate.Clock.AddMinutes(1));
+            fixture.Settle(clean, "observed-success");
+            Assert.Equal(("active", expected), (Pause().Item1, Pause().Item2));
+        }
+
+        Assert.Equal(2, expected);
+
+        // The carrier writes by hand a completed result dated within the last clean run: that run's settlement names no result, so it still
+        // counts for nothing and the count stays two. The operator's review returns the result, so the occurrence runs again.
+        DateTimeOffset now = fixture.Estate.Clock;
+        fixture.Estate.SetClock(clean!.AtTime.AddSeconds(10));
+        RecordEnvelope backdated = fixture.Result(assignment, "completed");
+        fixture.Estate.SetClock(now);
+        Assert.Equal(("active", 2), (Pause().Item1, Pause().Item2));
+        fixture.Review(backdated, "findings");
+
+        // A run that settles as an observed success naming the completed result its agent recorded during it ends the failures below the limit.
+        RecordEnvelope succeeding = fixture.RunIntent(assignment, "run-succeeds");
+        RecordEnvelope done = fixture.Result(assignment, "completed");
+        fixture.Settle(succeeding, "observed-success", result: done);
+        Assert.Equal(("active", 0, null), Pause());
+        fixture.Review(done, "findings");
+
+        // A completed result in a run that settles as a known failure is the carrier's claim, and the run failed; so did one whose blocked
+        // result the carrier took back by a completed correction after the run settled naming no result. The operator's review returns each
+        // claim, so the occurrence runs again.
+        RecordEnvelope claimed = fixture.RunIntent(assignment, "run-claimed");
+        RecordEnvelope claim = fixture.Result(assignment, "completed");
+        RecordEnvelope failedClaim = fixture.Settle(claimed, "known-failure", result: claim);
+        Assert.Equal(("active", 1, failedClaim.Id), Pause());
+        fixture.Review(claim, "findings");
+        RecordEnvelope corrected = fixture.RunIntent(assignment, "run-corrected");
+        RecordEnvelope blocked = fixture.Result(assignment, "blocked");
+        JsonObject correction = PolicyFixture.Body(blocked);
+        correction["outcome"] = "completed";
+        fixture.Settle(corrected, "observed-success");
+        RecordEnvelope taken = fixture.Add("result", correction, builder: true, subject: blocked.Subject, supersedes: blocked.Id);
+        Assert.Equal(("active", 2, blocked.Id), Pause());
+        fixture.Review(taken, "findings");
+
+        // A run starts and another beside it; the second fails, so three fail in a row and the pause holds. The first then settles as an
+        // observed success naming its result: once the failures reach the limit a success ends nothing, and a run intent is refused until the
+        // person's answer, which ends the pause.
+        RecordEnvelope beside = fixture.RunIntent(assignment, "run-beside");
+        RecordEnvelope third = fixture.Settle(fixture.RunIntent(assignment, "run-third"), "known-failure");
+        Assert.Equal(("held", 3, third.Id), Pause());
+        RecordEnvelope besideResult = fixture.Result(assignment, "completed");
+        fixture.Settle(beside, "observed-success", result: besideResult);
+        Assert.Equal(("held", 3, third.Id), Pause());
+        Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+        AnswerPause(fixture, third);
+        Assert.Equal(("active", 0, null), Pause());
+        Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings));
+    }
+
+    [Fact]
+    public void TheCarriersRevisionOfASettledFailureTakesBackNoFailureAndTheOperatorsCorrectionCountsAsWritten()
+    {
+        foreach (string status in new[] { "canceled", "uncertain", "observed-success" })
+        {
+            using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+            (string, int, string?) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures, fixture.Agent(fixture.Estate.Clock).FailureTrigger?.Id);
+            StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+            RecordEnvelope assignment = fixture.Assign(occurrence);
+            JsonObject Revised(RecordEnvelope settled, string to, RecordEnvelope? result = null)
+            {
+                JsonObject body = PolicyFixture.Body(settled);
+                body["status"] = to;
+                if (result is not null) body["observed"]!["reference"] = result.Id;
+                return body;
+            }
+
+            // Below the limit: two runs the operator records fail, and the carrier, which the roster names and which carried them, writes by
+            // hand a revision of the second settlement: it takes back no failure.
+            fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
+            RecordEnvelope second = fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
+            RecordEnvelope below = fixture.Add("operation", Revised(second, status), builder: true, supersedes: second.Id);
+            Assert.Equal(("active", 2, second.Id), Pause());
+
+            // At the limit: the third fails and the pause holds; the carrier's revision of that settlement, a success naming a completed result
+            // it records afterwards included, ends nothing: the pause holds at three and a run intent is refused.
+            RecordEnvelope third = fixture.Settle(fixture.RunIntent(assignment, "run-3"), "known-failure");
+            Assert.Equal(("held", 3, third.Id), Pause());
+            RecordEnvelope? late = status == "observed-success" ? fixture.Result(assignment, "completed") : null;
+            RecordEnvelope atLimit = fixture.Add("operation", Revised(third, status, late), builder: true, supersedes: third.Id);
+            Assert.Equal(("held", 3, third.Id), Pause());
+            Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+            List<Finding> errors = [.. fixture.Estate.Load().Findings.Where(f => f.Severity == Severity.Error)];
+            Assert.Contains(errors, f => f.Location.Contains(below.Id, StringComparison.Ordinal));
+            Assert.Contains(errors, f => f.Location.Contains(atLimit.Id, StringComparison.Ordinal));
+
+            // The operator's own correction of the third settlement to canceled counts as written, as it did before: that run counts for nothing,
+            // and two failures remain.
+            fixture.Add("operation", Revised(atLimit, "canceled"), supersedes: atLimit.Id);
+            Assert.Equal(("active", 2), (Pause().Item1, Pause().Item2));
+        }
+    }
+
+    /// <summary>
+    /// An identifier below another, so that a record carrying it sorts before that one among a record's successors: its time part a little
+    /// earlier and its random part the same, so it meets none of the identifiers generated beside that one.
+    /// </summary>
+    public static string Below(string id)
+    {
+        const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+        char[] chars = id.ToCharArray();
+        int at = Array.FindLastIndex(chars, 9, c => c != '0');
+        chars[at] = Alphabet[Alphabet.IndexOf(chars[at], StringComparison.Ordinal) - 1];
+        return new string(chars);
+    }
+
+    /// <summary>A record the builder writes by hand superseding a run's record beside its real successor, dated as that record and sorting before its successor.</summary>
+    private static RecordEnvelope Fork(StandingFixture fixture, RecordEnvelope superseded, RecordEnvelope successor, string status)
+    {
+        JsonObject body = PolicyFixture.Body(successor);
+        body["status"] = status;
+        DateTimeOffset now = fixture.Estate.Clock;
+        fixture.Estate.SetClock(superseded.AtTime.AddSeconds(-1));
+        RecordEnvelope fork = fixture.Estate.Add("operation", fixture.Estate.BuilderId, body.ToJsonString(), supersedes: superseded.Id, id: Below(successor.Id));
+        fixture.Estate.SetClock(now);
+        return fork;
+    }
+
+    [Fact]
+    public void ADivergentRevisionOfAFailedRunHidesNoFailureWhateverItsIdentifierOrReconciliation()
+    {
+        foreach (string status in new[] { "canceled", "uncertain", "observed-success" })
+        {
+            using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 3 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+            (string, int) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures);
+            StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+            RecordEnvelope assignment = fixture.Assign(occurrence);
+            EstateModel Model() => fixture.Estate.Load();
+
+            // Below the limit: the carrier writes by hand a record superseding the second run's dispatched revision beside its settlement,
+            // sorting before it, so the run as read takes the carrier's branch: the failure stays counted.
+            fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
+            RecordEnvelope second = fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
+            RecordEnvelope dispatched = Model().ById[second.Supersedes!];
+            Fork(fixture, dispatched, second, status);
+            Assert.NotEqual(second.Id, Model().SupersededBy[dispatched.Id]);
+            Assert.Equal(("active", 2), Pause());
+
+            // At the limit: a record superseding the third run's intent beside its dispatched revision, and then one superseding its
+            // dispatched revision beside its settlement that the carrier's own reconciliation keeps, each leave the pause held at three.
+            RecordEnvelope intent = fixture.RunIntent(assignment, "run-3");
+            RecordEnvelope third = fixture.Settle(intent, "known-failure");
+            Assert.Equal(("held", 3), Pause());
+            RecordEnvelope running = Model().ById[third.Supersedes!];
+            Fork(fixture, intent, running, status);
+            Assert.Equal(("held", 3), Pause());
+            RecordEnvelope kept = Fork(fixture, running, third, status);
+            fixture.Add("reconciliation", new JsonObject { ["kept"] = kept.Id, ["withdrawn"] = new JsonArray(third.Id), ["note"] = "Keep the carrier's revision." }, builder: true, subject: running.Reference);
+            Assert.Equal(("held", 3), Pause());
+            Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void TheOperatorsCorrectionOfASelfSteppingAgentsFailureCountsAndACarriersFailureRecordLeavesAnUntiedSuccessCounted()
+    {
+        using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+        string builder = fixture.Estate.BuilderId;
+        (string, int) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures);
+        fixture.Add("authority", new JsonObject { ["grantee"] = builder, ["scope"] = new JsonArray("local-engineering"), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(), ["basis"] = fixture.Policies.Decision.Id });
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+
+        // The builder, which the roster names for the role and which carries the occurrence, records its own runs under local-engineering, as
+        // an agent stepping its own goal does: their known failures count, and three hold the pause.
+        RecordEnvelope? third = null;
+        for (int i = 1; i <= 3; i++)
+        {
+            third = fixture.Settle(fixture.Add("operation", fixture.RunBody(assignment, "run-own-" + i, "not-started"), builder: true), "known-failure", builder: true);
+        }
+
+        Assert.Equal(("held", 3), Pause());
+
+        // The operator's correction of the third settlement to canceled counts as written: that run counts for nothing, and two remain.
+        JsonObject canceled = PolicyFixture.Body(third!);
+        canceled["status"] = "canceled";
+        fixture.Add("operation", canceled, supersedes: third!.Id);
+        Assert.Equal(("active", 2), Pause());
+
+        // A run the operator records and settles as a success naming the completed result its agent recorded in it ends the failures; the
+        // carrier's known-failure record beside that settlement, sorting before it, and its revision of it, leave the success counted.
+        RecordEnvelope intent = fixture.RunIntent(assignment, "run-succeeds");
+        RecordEnvelope done = fixture.Result(assignment, "completed");
+        RecordEnvelope success = fixture.Settle(intent, "observed-success", result: done);
+        Assert.Equal(("active", 0), Pause());
+        Fork(fixture, fixture.Estate.Load().ById[success.Supersedes!], success, "known-failure");
+        Assert.Equal(("active", 0), Pause());
+        JsonObject failed = PolicyFixture.Body(success);
+        failed["status"] = "known-failure";
+        fixture.Add("operation", failed, builder: true, supersedes: success.Id);
+        Assert.Equal(("active", 0), Pause());
     }
 
     [Fact]

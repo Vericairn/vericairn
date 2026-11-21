@@ -581,6 +581,7 @@ internal sealed partial class RunDispatchService(
             outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal] };
         }
         supervisor.RetainSettlement(outcome, scope);
+        string? seen = null;
 
         try
         {
@@ -588,9 +589,16 @@ internal sealed partial class RunDispatchService(
             {
                 EstateModel model = session.Load();
                 AgentRuns.Run? found = AgentRuns.Find(model, run);
-                if (found is not null && !model.OfType("attempt").Any(a => a.Subject?.Id == found.Assignment && a.By == found.Principal
-                    && !priorAttempts.Contains(a.Id) && string.CompareOrdinal(a.At, RecordParser.FormatTimestamp(outcome.LaunchedAt)) >= 0
-                    && string.CompareOrdinal(a.At, RecordParser.FormatTimestamp(outcome.ExitedAt)) <= 0))
+                bool During(RecordEnvelope record) => string.CompareOrdinal(record.At, RecordParser.FormatTimestamp(outcome.LaunchedAt)) >= 0
+                    && string.CompareOrdinal(record.At, RecordParser.FormatTimestamp(outcome.ExitedAt)) <= 0;
+                List<RecordEnvelope> attempts = found is null ? [] : [.. model.OfType("attempt").Where(a => a.Subject?.Id == found.Assignment && a.By == found.Principal && !priorAttempts.Contains(a.Id) && During(a))];
+
+                // From 0.9.4 (FIX-155), the settlement names the completed or partial result the agent recorded during the run, on an attempt
+                // of this run, as seen at its exit: the one sign of a standing agent's success its failure pause reads, so that no result
+                // written after the settlement, whatever date it claims, makes the run a success.
+                seen = attempts.SelectMany(a => model.About(a.Id, "result")).Where(r => r.By == found!.Principal && During(r) && EstateModel.BodyString(r, "outcome") is "completed" or "partial")
+                    .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault()?.Id;
+                if (found is not null && attempts.Count == 0)
                 {
                     var signal = new RunSignal("attempt-missing", "warning", RecordParser.FormatTimestamp(outcome.ExitedAt),
                         "The run settled without the agent's attempt on its assignment during the run. A clean harness exit does not establish that the agent did the work.");
@@ -611,7 +619,7 @@ internal sealed partial class RunDispatchService(
             lock (gate)
             {
                 string? status = null;
-                WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome, scope)["status"]?.GetValue<string>());
+                WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome, scope, result: seen)["status"]?.GetValue<string>());
                 if (!settled.Ok)
                 {
                     supervisor.Settled(null, settled.Problem?.Message);
@@ -648,8 +656,11 @@ internal sealed partial class RunDispatchService(
         previous["dispatchedAt"] = RecordParser.FormatTimestamp(launchedAt);
     });
 
-    /// <summary>The settlement of a run: its observed effect, its usage unit by unit, the units not reported, and a stop's facts.</summary>
-    private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope, TimeSpan? minute = null, double? heartbeatSeconds = null)
+    /// <summary>
+    /// The settlement of a run: its observed effect, its usage unit by unit, the units not reported, and a stop's facts; for an observed
+    /// success, the result its agent recorded during the run, when the worker saw one at its exit, in observed.reference.
+    /// </summary>
+    private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope, TimeSpan? minute = null, double? heartbeatSeconds = null, string? result = null)
     {
         JsonElement cap = body["cap"] is JsonNode node ? Element(node.AsObject()) : default;
         TimeSpan elapsed = outcome.Elapsed ?? (outcome.ExitedAt - outcome.LaunchedAt);
@@ -682,6 +693,11 @@ internal sealed partial class RunDispatchService(
         body["scope"] = JsonSerializer.SerializeToNode(scope, RunRecordJson);
         body["signals"] = JsonSerializer.SerializeToNode(outcome.Signals ?? [], RunRecordJson);
         body["observed"] = new JsonObject { ["summary"] = summary, ["at"] = RecordParser.FormatTimestamp(outcome.ExitedAt) };
+        if (result is not null && body["status"]?.GetValue<string>() == "observed-success")
+        {
+            body["observed"]!["reference"] = result;
+        }
+
         body["dispatchedAt"] ??= RecordParser.FormatTimestamp(outcome.LaunchedAt);
         body["usage"] = usage;
         if (outcome.Liveness is not null)

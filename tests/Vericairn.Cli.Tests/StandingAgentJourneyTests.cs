@@ -201,6 +201,45 @@ public class StandingAgentJourneyTests
     }
 
     [Fact]
+    public void RecordsNewTakesTheCarriersOwnCompletedResultAndThePauseHoldsUntilTheOperatorsAnswer()
+    {
+        string scratch = CliHarness.TempDirectory("carrier-result-scratch");
+        try
+        {
+            // A helper carried three runs that ended with blocked results, and the builder's goal step put the failure pause's ask to the operator.
+            using var fixture = new SteppedAsksFixture();
+            JsonElement Due() => CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Root, "--json", "goal", "due", fixture.Goal).Json;
+            (string, int) Pause() => (Due().GetProperty("state").GetString()!, Due().GetProperty("failures").GetProperty("consecutive").GetInt32());
+            Assert.Equal(("held", 3), Pause());
+
+            // records new takes the helper's own attempt and a completed result on the assignment, a claim another principal reviews; the pause
+            // holds and the failures stay three.
+            string startedAt = RecordParser.FormatTimestamp(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+            RecordEnvelope assignment = Vericairn.Records.Estate.EstateLoader.Load(fixture.Root).ById[fixture.Assignment];
+            CliHarness.Outcome attempt = CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Root, "--json", "records", "new", "attempt", "--by", fixture.Helper,
+                "--subject", $"assignment:{assignment.Id}:{assignment.ComputedHash}", "--body", CliHarness.WriteJson(scratch, "attempt.json", $$"""{"startedAt":"{{startedAt}}","workspace":"research repository, a work branch","note":"Research again."}"""));
+            Assert.True(attempt.Code == 0, attempt.Err + attempt.Out);
+            CliHarness.Outcome result = CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Root, "--json", "records", "new", "result", "--by", fixture.Helper,
+                "--subject", $"attempt:{attempt.Id}:{attempt.Hash}", "--body", CliHarness.WriteJson(scratch, "result.json", """{"outcome":"completed","summary":"Researched after all.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review the findings."}"""));
+            Assert.True(result.Code == 0, result.Err + result.Out);
+            Assert.Equal(("held", 3), Pause());
+
+            // The builder records the operator's answer to the pause's ask, which ends it.
+            string decidedAt = RecordParser.FormatTimestamp(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds()));
+            CliHarness.Outcome answered = CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Root, "--json", "records", "new", "decision", "--by", fixture.Builder, "--body", CliHarness.WriteJson(scratch, "answer.json", $$"""
+                {"title":"Go on","statement":"Let the researcher go on.","summary":"The operator answers.","synthesis":"The operator answers the runtime's ask.","effects":["the agent goes on"],"affects":[],"decidedBy":"{{fixture.Operator}}","decidedAt":"{{decidedAt}}","stake":"low","notAuthorized":["spending"],"answers":["{{fixture.Pause}}"]}
+                """));
+            Assert.True(answered.Code == 0, answered.Err + answered.Out);
+            Assert.Equal(("active", 0), Pause());
+            Assert.Equal(0, fixture.Service.Check().Errors);
+        }
+        finally
+        {
+            CliHarness.Delete(scratch);
+        }
+    }
+
+    [Fact]
     public void RecordsNewRefusesAStandingAgentsAnswerToItsOwnAskAndAnAuthorsAdoptionOfItsOwnPossibility()
     {
         string root = CliHarness.TempDirectory("standing-answers");

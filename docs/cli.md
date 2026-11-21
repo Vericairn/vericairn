@@ -1227,13 +1227,38 @@ Every assignment of the standing work order names an occurrence. Nothing is disp
 until time; when a period's cap is reached its occurrences defer and `goal step` asks the sponsor once in the period; while results
 awaiting review reach the plan's `awaitingReview` (`--awaiting-review`, three when unset) dispatch defers; while the runs in flight
 fill the budget's concurrency (one when it states none) occurrences wait; and after the goal's `limits.consecutiveFailures` failed
-runs in a row (three when it sets none), each run counted once by its result, failed when blocked or abandoned whatever its
-harness's exit, or with no result by its settlement as a known failure unless its sponsor (when a person) or an operator asked it to
-stop (`--stop-runs`, `goal stop`, `worker stop`; a stop by anyone else, the dispatcher that started it included, counts), `goal
-step` asks the sponsor once and dispatches nothing until a decision answers it. A run's intent is refused at the record, whatever
+runs in a row (three when it sets none) `goal step` asks the sponsor once and dispatches nothing until a decision answers it. Each
+settled run counts once, in the order the runs settled: it succeeded when it settled as an observed success whose settlement names
+the completed or partial result its agent recorded during the run; otherwise it failed when a blocked or abandoned result was
+recorded on its assignment after it started and before the assignment's next run started, whatever a later result or a correction
+says, or when it settled as a known failure, unless its sponsor (when a person) or an operator asked it to stop (`--stop-runs`,
+`goal stop`, `worker stop`; a stop by anyone else, the dispatcher that started it included, counts); any other run, one whose
+harness exited cleanly with no result included, counts for nothing. A run's intent is refused at the record, whatever
 route starts it, for a run on no occurrence or on a settled one, past the until time, during the failure pause, past the period's
 runs or while results awaiting review reach their cap, each judged by the records before the intent. A second standing agent of one
 role over one subject is never activated, nor one past its until time.
+
+From 0.9.4 (FIX-155), no agent ends its own failure pause by any record it writes, whatever date the record claims. Two events
+end failures, and only these. A success ends the failures before it while they are fewer than the limit: a run the runtime
+observed succeed, whose intent and settlement a principal not tied to the goal recorded (tied as a question's answer reads it,
+below), and whose settlement names the completed or partial result its agent recorded during the run on an attempt of that run, as
+the worker names the one it sees at the run's exit. Once the failures reach the limit, a success ends nothing, a run already in
+flight when they did included, and only the answer to the pause's ask ends them: a decision of the person it was put to, or one a
+principal not tied to the goal records for that person, after which no run settled before the ask, or before that answer when it
+came first, counts. A run whose harness exits cleanly with no result counts for nothing, so it leaves the failures as they were and
+nothing to review. A completed or partial result, and the attempt it closes, is a claim another principal reviews, and it never
+makes a run succeed by itself, whether recorded with `work result`, `records new` or by hand: only a settlement names it, and
+nothing written after the settlement, whatever date it claims, so after three failed runs the carrying agent's own attempt and
+completed result leave the pause held and the failures at three. A run settled from the worker's retained observation, or by hand,
+names no result unless its writer names one. A run is read from all of its records, every revision on every branch, whatever a
+fork, the order of identifiers or a reconciliation makes its current revision. Where a record that no agent tied to the goal wrote
+settles or cancels the run, the latest record no tied agent wrote, by its place in the run's history and never by its date, decides
+the run (when that record leaves it canceled or unsettled, the run counts for nothing), and the records tied agents wrote count for
+nothing: their revisions and divergent records take back no failure and turn no success into a failure, and an untied principal's
+correction, such as the operator's, counts as written. Only where no record by an untied principal settles or cancels the run does
+a known-failure settlement a tied agent wrote count, as a failure, as for an agent that steps its own goal. A run whose intent or
+settlement an agent tied to the goal recorded never succeeds, a stop such an agent records names no one who decides for the goal,
+and its runs never take a result off a run another principal recorded.
 
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]
@@ -1261,7 +1286,13 @@ From 0.9.4 (GOAL-08), every output of a standing agent's occurrence is a record 
 the assignment that carries the occurrence records it, through the MCP tools `standing_possibility`, `standing_question` and
 `standing_publication`, `POST /v1/standing/outputs` or the SDK's `StandingOutput`, and the runtime names in its `raisedBy` the goal,
 the occurrence, the assignment and, for an agent, its run in flight. No standing agent adopts, declines, parks, answers or withdraws
-its own output.
+its own output. From 0.9.4 (FIX-155), a disposition reads as an answer does: a decline, park or adoption of a possibility that its
+raiser or any agent tied to the standing agent records disposes of nothing, whatever date it claims, so the possibility stays open
+and counted, reads open to `work new --from-possibility` and the agent's next brief, and is disposed of by the next revision a
+person or a principal not tied to the goal records. Such a disposition is an error where what ties its author was written first
+(`standing.own-output`) and is otherwise reported (`standing.output-now`), which the record write refuses for a new one. In the same
+way, a withdrawal of the agent's ask leaves it waiting, and a close or observation of its publication request by anyone but an
+operator who is a person closes nothing.
 
 - **A recommendation** is an open possibility with a `fingerprint`, the flow's rule for what makes two the same, and its sources;
   optionally evidence for and against (no scores), review triggers, links to possibilities it duplicates or supersedes, and
@@ -1279,7 +1310,8 @@ its own output.
 - **A question** is an ask to a person, who decides for the goal when none is named; a decision of that person answers it. A
   decision recorded by the agent that asked, or by any agent tied to the standing agent, is refused, whatever `decidedBy` it
   names, and answers nothing; the same holds for the renewal, period-cap and failure-pause asks goal step puts about the agent,
-  so no agent ends its own failure pause. An agent is tied when any assignment of the goal's work has named it as contributor,
+  so no agent's decision lifts its own failure pause, and from FIX-155 no attempt, result or run it records ends the pause
+  either (above). An agent is tied when any assignment of the goal's work has named it as contributor,
   or any revision of the goal's role, in the goal's own roles or the roster, has named it, whatever date a record claims and
   whatever the roster names now. Both only grow, so a roster or assignment change can re-open an answered ask for the person and
   never closes one: a decision an agent recorded before it was tied stops answering once it is. Any principal nothing ties to the
