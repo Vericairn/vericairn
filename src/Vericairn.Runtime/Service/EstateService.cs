@@ -83,7 +83,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     internal static EstateService Open(string root, WorkerOptions? workerOptions) => Open(root, workerOptions, null);
 
     // A test opens two runtimes with different homes on one working tree in one process; a host uses the process's home.
-    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home)
+    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home) => Open(root, workerOptions, home, oneShot: false, judgments: null);
+
+    /// <summary>
+    /// From 0.9.4 (FIX-148): opens the runtime of one command that runs and ends, as the command line hosts it without a daemon: the model
+    /// its opening judges is kept for the command's later loads while the records and the manifest are unchanged and the runtime has
+    /// written nothing (<see cref="EstateSession.KeepsJudgment"/>), so the command judges the estate once. Long-lived hosts open with
+    /// <see cref="Open(string)"/> and judge at every load.
+    /// </summary>
+    internal static EstateService OpenOneShot(string root) => Open(root, null, null, oneShot: true, judgments: null);
+
+    /// <summary>
+    /// Opens a runtime as <see cref="Open(string, WorkerOptions?, string?)"/> does, one-shot or not, counting its judgments in a given
+    /// context (a test's, with fresh signature tables) or in a new one reading the process's tables.
+    /// </summary>
+    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home, bool oneShot, JudgmentContext? judgments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
@@ -91,9 +105,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             throw new InvalidOperationException($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
         }
 
-        var service = new EstateService(home is null ? EstateSession.Open(root) : EstateSession.Open(root, false, home));
+        var service = new EstateService(EstateSession.Open(root, false, home ?? VericairnHome.Path(), judgments));
         try
         {
+            // Chosen before the opening judges, so its judgment is the one the command keeps.
+            service.session.KeepsJudgment = oneShot;
             if (workerOptions is not null) service.WorkerOptions = workerOptions;
             service.JudgeInterruptedBatches();
             // One judgment of the estate serves both startup passes unless the first stores a settlement (FIX-136).
@@ -127,13 +143,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     internal string? ReportedVersion { get; set; }
 
     /// <inheritdoc />
-    public HealthResponse Health()
-    {
-        lock (gate)
-        {
-            return new HealthResponse(ApiVersion.Current, ReportedVersion ?? Version, session.Manifest.Estate, session.Root, session.Profile, session.Manifest.RecordFormat, startedAt, Environment.ProcessId);
-        }
-    }
+    public HealthResponse Health() =>
+        // From 0.9.4 (FIX-152) without the gate: every field is set when the runtime opens, so health answers while another call judges.
+        new(ApiVersion.Current, ReportedVersion ?? Version, session.Manifest.Estate, session.Root, session.Profile, session.Manifest.RecordFormat, startedAt, Environment.ProcessId);
 
     /// <inheritdoc />
     public StatusResponse Status() => Status(null);
@@ -143,8 +155,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     {
         lock (gate)
         {
+            using IDisposable stage = ClientOperationActivity.Stage("deriving status");
             EstateModel model = MeasureStatus("load-and-validate", session.Load, observe);
-            PolicySections sections = ReadPolicySections(model, observe);
+            PolicySections sections = SharedPolicySections(model, observe);
             FindingList checks = MeasureStatus("repository-and-section-checks", () => SectionChecks(model, ChecksWithBatches(model), sections), observe);
             JsonObject json = MeasureStatus("status-json", () =>
             {
@@ -169,6 +182,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private static T MeasureStatus<T>(string phase, Func<T> action, Action<string, TimeSpan>? observe)
     {
+        // From 0.9.4 (FIX-152) each phase is also the stage a client operation stopped at its request limit names, where it has its own.
+        using IDisposable stage = ClientOperationActivity.Stage(StatusStage(phase));
         if (observe is null) return action();
         long start = System.Diagnostics.Stopwatch.GetTimestamp();
         T result = action();
@@ -176,13 +191,25 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return result;
     }
 
+    // The status phases that are stages of their own; the others are named by what they call (the judgment, the repository checks,
+    // the required attention) or by the call around them.
+    private static string? StatusStage(string phase) => phase switch
+    {
+        "policy-snapshot" => "reading the estate's policy basis",
+        "policy-evaluation" => "evaluating the estate's policies",
+        "writing-evaluation" => "evaluating the estate's writing rules and exceptions",
+        "policy-views" => "presenting the policies, writing exceptions and operator duties",
+        "status-json" or "status-text-and-response" => "rendering status",
+        _ => null,
+    };
+
     /// <inheritdoc />
     public ProgressResponse Progress()
     {
         lock (gate)
         {
             EstateModel model = session.Load();
-            ProgressResponse progress = ProgressCore(model, RepositoryChecks(model));
+            ProgressResponse progress = SharedProgress(model);
             JsonObject json = JsonNode.Parse(progress.Json.GetRawText())!.AsObject();
             json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model, () => progress), ProtocolJson.Options);
             return progress with { Json = Element(json), EventsCursor = EventsCursorLocked(model, null, new EventPass { Runs = true }) };
@@ -191,7 +218,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private ProgressResponse ProgressCore(EstateModel model, FindingList checks)
     {
-        PolicySections sections = ReadPolicySections(model);
+        using IDisposable stage = ClientOperationActivity.Stage("deriving progress");
+        PolicySections sections = SharedPolicySections(model);
         checks = SectionChecks(model, checks, sections);
         JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
         AddPolicySections(json, sections);
@@ -221,6 +249,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     // Use the already loaded model for all exact record references in this refresh. No per-item store reloads.
     private IReadOnlyList<CommunicationAttention> RequiredAttention(EstateModel model, Func<ProgressResponse> progress, bool includeLocalObservations = true, string? recipient = null, Func<RunsResponse>? runs = null, DateTimeOffset? requestsAt = null)
     {
+        using IDisposable stage = ClientOperationActivity.Stage(AttentionStage);
         var cache = new Dictionary<string, RecordResponse>(StringComparer.Ordinal);
         RecordResponse Response(RecordEnvelope record)
         {
@@ -512,8 +541,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
         {
-            IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = session.LoadFiles(files);
+            // One snapshot's model and the files it was judged from: a one-shot command's kept judgment, never a second one (FIX-148).
+            (EstateModel model, IReadOnlyList<RecordFile> files) = session.LoadWithFiles();
             if (RequestDeviceRefusal(model) is not null)
             {
                 return new BriefResponse(ContextDenied + "\n", Element(new JsonObject { ["completeness"] = ContextDenied }),
@@ -2116,7 +2145,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return current.Model;
             }
 
-            EstateModel model = EstateLoader.Load(session.Root, session.CanonicalFiles());
+            EstateModel model = EstateLoader.Load(session.Root, session.CanonicalFiles(), null, context: session.Judgments);
             Interlocked.Increment(ref standingLoads);
             // Kept only when nothing changed while the records were read, so a kept model is never older than its stamp says.
             if (session.Stamp() == stamp)
@@ -2992,7 +3021,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     private FindingList ChecksWithBatches(EstateModel model)
     {
-        FindingList checks = RepositoryChecks(model);
+        FindingList checks = SharedRepositoryChecks(model);
         foreach (Finding finding in InterruptedBatches(model))
         {
             checks.Add(finding);
@@ -3006,8 +3035,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return checks;
     }
 
-    private FindingList RepositoryChecks(EstateModel model) =>
-        EstateChecks.Run(model, Providers.Source("git")?.IgnoredEstateEntries(model.Root));
+    // Each pass is counted in the runtime's context (FIX-152), so a test shows how many a command runs.
+    private FindingList RepositoryChecks(EstateModel model)
+    {
+        using IDisposable stage = ClientOperationActivity.Stage("running the repository checks (the working tree walk and the writing scan)");
+        session.Judgments.CheckedRepository();
+        return EstateChecks.Run(model, Providers.Source("git")?.IgnoredEstateEntries(model.Root));
+    }
 
     /// <summary>
     /// The batches this machine began storing and did not finish, each a warning of code batch.incomplete, a reconcile task naming what

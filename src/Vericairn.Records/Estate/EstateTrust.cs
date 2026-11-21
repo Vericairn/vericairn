@@ -55,6 +55,8 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<string, int[]> admissionRefusals = new(StringComparer.Ordinal);
     private readonly bool admissionsByClosingIds = ByClosingIds.Value;
     private readonly bool admissionsAudited = Audited.Value;
+    private readonly SignatureTables.Judgment? signatureJudgment;
+    private readonly SignatureTables signatureTables;
     private AdmissionIndex? admissionIndex;
     private RecordEnvelope? requiredSince;
     private bool requiredSinceKnown;
@@ -85,6 +87,8 @@ internal sealed partial class EstateTrust
         bool unsettled = false, bool authorityGiven = false, RecordEnvelope? authority = null)
     {
         this.model = model;
+        signatureJudgment = model.Signatures;
+        signatureTables = signatureJudgment?.Tables ?? SignatureTables.Process;
         Manifest = manifest;
         Unsettled = unsettled;
         // Read through the type lookups, which hold every record until the loader keeps only those that count, so that judging a model
@@ -1334,13 +1338,15 @@ internal sealed partial class EstateTrust
     /// <summary>
     /// Whether a signature over a content hash verifies with a key. The answer depends on nothing else, so it is kept when judgments are
     /// made afresh after closings: the proofs that read it depend on device lines, which closings change, but the arithmetic does not.
+    /// From 0.9.4 (FIX-148) a verdict that verifies is also kept for the process, by the exact key, hash and signature
+    /// (<see cref="SignatureTables"/>), so a later judgment verifies only what no earlier one did; a false is kept for this judgment alone.
     /// </summary>
     private bool VerifiesWith(string key, string hash, byte[] digest, string signature)
     {
         lock (gate)
         {
             if (keyVerdicts.TryGetValue((key, hash, signature), out bool known)) return known;
-            bool value = RecordSigning.Verify(key, digest, signature);
+            bool value = signatureTables.Verifies(key, hash, digest, signature, signatureJudgment);
             keyVerdicts[(key, hash, signature)] = value;
             return value;
         }
@@ -1395,7 +1401,7 @@ internal sealed partial class EstateTrust
         byte[] digest = RecordSigning.Digest(record.ComputedHash);
         string identity = IdentityOf(previous);
         List<RecordSignature> named = record.Signatures.Where(s => s.Device == identity).ToList();
-        if (!named.Any(s => RecordSigning.Verify(before, digest, s.Signature)) || !named.Any(s => RecordSigning.Verify(after, digest, s.Signature)))
+        if (!named.Any(s => VerifiesWith(before, record.ComputedHash, digest, s.Signature)) || !named.Any(s => VerifiesWith(after, record.ComputedHash, digest, s.Signature)))
             findings.Error("signature.rotation", record.ExpectedPath + "#signatures", "A rotation is signed both by the device's previous key and by its new key.");
     }
 

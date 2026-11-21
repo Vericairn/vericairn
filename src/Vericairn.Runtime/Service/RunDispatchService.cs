@@ -122,6 +122,8 @@ internal sealed partial class RunDispatchService(
         }
 
         var abandon = new CancellationTokenSource();
+        // A runtime that supervises a run is long-lived from here on: it judges at every load, as the daemon does (FIX-148).
+        session.KeepsJudgment = false;
         supervisions[run] = (Task.Run(() =>
         {
             try { Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token, admitted.Efficiency, Excluded(plan.Assignment)); }

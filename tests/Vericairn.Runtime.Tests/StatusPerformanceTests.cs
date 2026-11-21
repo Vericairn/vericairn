@@ -70,9 +70,22 @@ internal sealed class GeneratedStatusEstate : IDisposable
     private readonly PolicyFixture fixture = new();
     internal string Root => fixture.Estate.Root;
 
-    internal GeneratedStatusEstate(int orders, int goals = 0, bool operations = false, bool livingDocuments = false)
+    internal GeneratedStatusEstate(int orders, int goals = 0, bool operations = false, bool livingDocuments = false, int carriers = 0)
     {
         var documents = new RecordEnvelope?[32];
+        // From 0.9.4 (FIX-149): release carriers shaped like the first-party estate's, each with work placed in it and no input work orders.
+        RecordEnvelope? product = carriers == 0 ? null : fixture.Add("product", new()
+        {
+            ["name"] = "Generated", ["slug"] = "generated", ["summary"] = "A generated product.",
+            ["editions"] = new JsonArray(new JsonObject { ["name"] = "Community", ["slug"] = "community", ["summary"] = "Free." }),
+            ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "Command line." }),
+        });
+        RecordEnvelope[] releases = [.. Enumerable.Range(0, carriers).Select(c => fixture.Add("work-order", new()
+        {
+            ["key"] = "REL-" + c.ToString("D3", CultureInfo.InvariantCulture), ["kind"] = "ordinary", ["title"] = "Generated release",
+            ["intent"] = "Release the generated work.", ["scope"] = new JsonArray("test fixtures"), ["exitQuestion"] = "Is it released?",
+            ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("a release"),
+        }))];
         RecordEnvelope[] planned = [.. Enumerable.Range(0, goals).Select(g => fixture.Add("goal", new()
         {
             ["title"] = "Generated goal " + g.ToString(CultureInfo.InvariantCulture), ["objective"] = "Finish the generated work.",
@@ -95,13 +108,18 @@ internal sealed class GeneratedStatusEstate : IDisposable
 
         for (int i = 0; i < orders; i++)
         {
-            RecordEnvelope order = fixture.Add("work-order", new()
+            var body = new JsonObject
             {
                 ["key"] = "TASK-" + i.ToString("D5", CultureInfo.InvariantCulture), ["kind"] = "ordinary", ["title"] = "Generated work",
                 ["intent"] = "Exercise a growing history.", ["scope"] = new JsonArray("test fixtures"), ["exitQuestion"] = "Is the result ready?",
                 ["inputs"] = planned.Length == 0 ? new JsonArray() : new JsonArray(new JsonObject { ["type"] = "goal", ["id"] = planned[i % planned.Length].Id }),
                 ["deliverables"] = new JsonArray("checked result"),
-            });
+            };
+            if (releases.Length > 0) body["placement"] = new JsonObject
+            {
+                ["kind"] = "release", ["carrier"] = releases[i % releases.Length].Id, ["product"] = product!.Id, ["version"] = "1.0." + (i % releases.Length).ToString(CultureInfo.InvariantCulture),
+            };
+            RecordEnvelope order = fixture.Add("work-order", body);
             if (operations) fixture.Add("operation", new()
             {
                 ["provider"] = "example", ["action"] = "dispatch-build", ["identity"] = "example:build-" + i.ToString(CultureInfo.InvariantCulture), ["intent"] = "Build the work.",
