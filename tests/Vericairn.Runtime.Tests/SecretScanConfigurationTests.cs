@@ -19,7 +19,7 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "vericairn-scan-test-" + Guid.NewGuid().ToString("N"));
 
-    private string Repository => Path.Combine(root, "work");
+    internal string Repository => Path.Combine(root, "work");
 
     [Fact]
     public void TheConfigurationKeepsEveryRuleAndOnlyVericairnsOwnAllowances()
@@ -168,6 +168,93 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         Assert.Equal("findings", Scan(basis, head).Verdict);
     }
 
+    // FIX-150, after the Reviewer's re-check: the scan asks git for merges' patches with -m, whose form the clone's log.diffMerges chose.
+    // With off or none git showed no merge's patch, and a token only a merge adds passed; with a combined form, which git refuses to write
+    // to a file and gitleaks cannot parse, every range holding a merge was incomplete. Every git process of the scan now reads a merge as
+    // its patch against its first parent, whatever the clone says: a clean merge passes, and a merge's own token is found, once.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("off")]
+    [InlineData("none")]
+    [InlineData("on")]
+    [InlineData("m")]
+    [InlineData("first-parent")]
+    [InlineData("1")]
+    [InlineData("separate")]
+    [InlineData("combined")]
+    [InlineData("c")]
+    [InlineData("dense-combined")]
+    [InlineData("cc")]
+    [InlineData("remerge")]
+    [InlineData("r")]
+    public void ATokenAddedOnlyByAMergeIsFoundWhateverTheClonesMergeDiffSetting(string? setting)
+    {
+        string basis = Start();
+        string first = Commit([("first.txt", "The first side.\n")]);
+        Git("checkout", "--quiet", "--detach", basis);
+        string second = Commit([("second.txt", "The second side.\n")]);
+        if (setting is not null) Git("config", "log.diffMerges", setting);
+        string clean = Merge([first, second], [("second.txt", "The second side.\n")]);
+        Assert.Equal("passed", Scan(basis, clean).Verdict);
+        string added = Merge([first, second], [("second.txt", "The second side.\n"), ("merged.txt", "credential = " + Token() + "\n")]);
+        SecretScan scan = Scan(basis, added);
+        Assert.Equal("findings", scan.Verdict);
+        Assert.Equal(1, scan.FindingCount);
+    }
+
+    // Every merge shape gives gitleaks a patch it parses: a conflict resolved with a token, and a merge of three branches adding one,
+    // which remerge, reading only merges of two parents, skipped. Each is found once, even in a clone that turns merge patches off.
+    [Theory]
+    [InlineData("resolved conflict")]
+    [InlineData("three parents")]
+    public void EveryMergeShapeIsReadAgainstItsFirstParent(string shape)
+    {
+        string basis = Start();
+        string head;
+        if (shape == "resolved conflict")
+        {
+            string ours = Commit([("readme.txt", "Our line.\n")]);
+            Git("checkout", "--quiet", "--detach", basis);
+            string theirs = Commit([("readme.txt", "Their line.\n")]);
+            Git("config", "log.diffMerges", "off");
+            head = Merge([ours, theirs], [("readme.txt", "credential = " + Token() + "\n")]);
+        }
+        else
+        {
+            var parents = new List<string>();
+            foreach (string name in new[] { "first", "second", "third" })
+            {
+                Git("checkout", "--quiet", "--detach", basis);
+                parents.Add(Commit([(name + ".txt", "The " + name + " branch.\n")]));
+            }
+
+            Git("config", "log.diffMerges", "off");
+            head = Merge([.. parents], [("second.txt", "The second branch.\n"), ("third.txt", "The third branch.\n"), ("merged.txt", "credential = " + Token() + "\n")]);
+        }
+
+        SecretScan scan = Scan(basis, head);
+        Assert.Equal("findings", scan.Verdict);
+        Assert.Equal(1, scan.FindingCount);
+    }
+
+    // A merge's patch against its first parent holds every line the merge adds, its own and those it brings in from its other parents,
+    // even from one outside the range: the target branch merged into the pushed branch brings the target's lines into the merge's patch,
+    // and they are read, while a merge whose first parent is the target holds only the pushed branch's lines. Here the target already
+    // holds a token, outside both ranges: it is found in the first and not in the second.
+    [Fact]
+    public void AMergesPatchHoldsTheLinesItBringsFromItsOtherParents()
+    {
+        string basis = Start();
+        string branch = Commit([("branch.txt", "The branch's change.\n")]);
+        Git("checkout", "--quiet", "--detach", basis);
+        string held = "credential = " + Token() + "\n";
+        string target = Commit([("target.txt", held)]);
+        string intoBranch = Merge([branch, target], [("target.txt", held)]);
+        Assert.Equal("findings", Scan(target, intoBranch).Verdict);
+        string intoTarget = Merge([target, branch], [("branch.txt", "The branch's change.\n")]);
+        Assert.Equal("passed", Scan(target, intoTarget).Verdict);
+    }
+
     [Fact]
     public void AnInventoryNamingARecordIdThatSpellsAKeyWordPasses()
     {
@@ -290,7 +377,7 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
     }
 
     // A new repository with one commit, which the scanned range starts from; skipped without an installed gitleaks.
-    private string Start()
+    internal string Start()
     {
         Assert.SkipWhen(Gitleaks is null, "Set VERICAIRN_TEST_GITLEAKS to an installed gitleaks of at least 8.25.0 to scan real commits.");
         TestPrerequisites.RequireGit();
@@ -300,7 +387,7 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         return Commit([("readme.txt", "Initial content.\n")]);
     }
 
-    private string Commit((string Path, string Content)[] files)
+    internal string Commit((string Path, string Content)[] files)
     {
         foreach ((string path, string content) in files)
         {
@@ -314,8 +401,25 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         return Git("rev-parse", "HEAD");
     }
 
+    // A merge commit of these parents whose tree is the first parent's with these files written. A merge is its tree and its parents,
+    // so whether git's merge machinery reached that tree cleanly, through a resolved conflict or not at all changes nothing the scan reads.
+    private string Merge(string[] parents, (string Path, string Content)[] files)
+    {
+        Git("checkout", "--quiet", "--force", "--detach", parents[0]);
+        foreach ((string path, string content) in files)
+        {
+            File.WriteAllText(Path.Combine(Repository, path.Replace('/', Path.DirectorySeparatorChar)), content);
+            Git("add", "--", path);
+        }
+
+        var arguments = new List<string> { "commit-tree", Git("write-tree") };
+        foreach (string parent in parents) arguments.AddRange(["-p", parent]);
+        arguments.AddRange(["-m", "Merge"]);
+        return Git([.. arguments]);
+    }
+
     // Scans base..head with the installed gitleaks; adjust sees each process the scanner starts after the scanner has prepared it.
-    private SecretScan Scan(string basis, string head, Action<ProcessStartInfo>? adjust = null)
+    internal SecretScan Scan(string basis, string head, Action<ProcessStartInfo>? adjust = null)
     {
         var scanner = new GitleaksScanner(info =>
         {
@@ -329,9 +433,9 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
     private static string? Gitleaks => Environment.GetEnvironmentVariable("VERICAIRN_TEST_GITLEAKS");
 
     // A GitHub token, assembled at run time, so that this file holds no credential-shaped text of its own.
-    private static string Token() => "ghp" + "_" + RandomNumberGenerator.GetString("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789", 36);
+    internal static string Token() => "ghp" + "_" + RandomNumberGenerator.GetString("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789", 36);
 
-    private string Git(params string[] args)
+    internal string Git(params string[] args)
     {
         var info = new ProcessStartInfo("git") { WorkingDirectory = Repository, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
@@ -351,4 +455,45 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
     {
         if (Directory.Exists(root)) WorkspaceCleanup.Delete(root);
     }
+}
+
+/// <summary>Tests that set a git variable in this test process's own environment, standing for the pushing process's, which no other test may see.</summary>
+[CollectionDefinition("inherited git environment", DisableParallelization = true)]
+public sealed class InheritedGitEnvironmentIsolation;
+
+/// <summary>
+/// FIX-150, after the Reviewer's re-check: the scan's processes kept git's routing variables, which the push adapter's drop. A shallow
+/// file naming the head, given directly or in a copy of the repository that GIT_DIR names, made git take the head for a commit without
+/// parents, so a token in a middle commit of the range passed while the push, reading the real history, still carried that commit.
+/// </summary>
+[Collection("inherited git environment")]
+public sealed class SecretScanInheritedEnvironmentTests : IDisposable
+{
+    private readonly SecretScanConfigurationTests scans = new();
+
+    [Theory]
+    [InlineData("GIT_SHALLOW_FILE")]
+    [InlineData("GIT_DIR")]
+    public void ATokenInAMiddleCommitIsFoundWhateverRoutingThePushingProcessCarries(string variable)
+    {
+        string basis = scans.Start();
+        scans.Commit([("settings.txt", "credential = " + SecretScanConfigurationTests.Token() + "\n")]);
+        string head = scans.Commit([("settings.txt", "A plain setting.\n")]);
+        Assert.Equal("findings", scans.Scan(basis, head).Verdict);
+        string root = Path.GetDirectoryName(scans.Repository)!;
+        string value = Path.Combine(root, variable == "GIT_DIR" ? "shallow.git" : "shallow");
+        if (variable == "GIT_DIR") scans.Git("clone", "--bare", "--quiet", scans.Repository, value);
+        File.WriteAllText(variable == "GIT_DIR" ? Path.Combine(value, "shallow") : value, head + "\n");
+        string? saved = Environment.GetEnvironmentVariable(variable);
+        Environment.SetEnvironmentVariable(variable, value);
+        try
+        {
+            // Under this environment git itself sees the range as the head alone.
+            Assert.Equal("1", scans.Git("rev-list", "--count", basis + ".." + head));
+            Assert.Equal("findings", scans.Scan(basis, head).Verdict);
+        }
+        finally { Environment.SetEnvironmentVariable(variable, saved); }
+    }
+
+    public void Dispose() => scans.Dispose();
 }

@@ -82,10 +82,40 @@ public sealed class PushProviderTests
             Assert.True(Path.IsPathFullyQualified(grafts) && !File.Exists(grafts) && !Directory.Exists(Path.GetDirectoryName(grafts)));
             Assert.False(info.Environment.ContainsKey("GIT_CONFIG_PARAMETERS"));
             Assert.False(info.Environment.ContainsKey(Trace));
-            Assert.Equal("7", info.Environment["GIT_CONFIG_COUNT"]);
+            Assert.Equal("8", info.Environment["GIT_CONFIG_COUNT"]);
             Assert.Equal(["core.commitGraph=false", "pack.useBitmaps=false", "core.multiPackIndex=false", "color.ui=false", "color.diff=false", "log.showRoot=true",
-                "log.showSignature=false"], Enumerable.Range(0, 7).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
+                "log.showSignature=false", "log.diffMerges=first-parent"], Enumerable.Range(0, 8).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
         });
+    }
+
+    // FIX-150, after the Reviewer's re-check: the scan's processes drop every inherited variable the push's processes drop, both taken
+    // from one list, so that neither reads another repository, object store, history or configuration than the clone's own. The scan
+    // drops every other configuration variable too, keeping only the settings it forces, and git's trace variables.
+    [Fact]
+    public void TheScanDropsEveryInheritedRoutingVariableThePushDrops()
+    {
+        string[] routing = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+            "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_NO_REPLACE_OBJECTS",
+            "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_REDIRECT_STDIN", "GIT_REDIRECT_STDOUT", "GIT_REDIRECT_STDERR"];
+        Assert.Equal(routing, GitRouting.Names);
+        string[] indexed = ["GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_12", "GIT_CONFIG_VALUE_12"];
+        ProcessStartInfo Inherited()
+        {
+            var info = new ProcessStartInfo("git");
+            foreach (string name in routing.Concat(indexed).Concat(["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM", "GIT_TRACE_SETUP"]))
+                info.Environment[name] = "inherited";
+            return info;
+        }
+
+        ProcessStartInfo push = Inherited();
+        GitPushAdapter.Isolate(push, []);
+        Assert.All(routing.Concat(indexed), name => Assert.NotEqual("inherited", push.Environment.TryGetValue(name, out string? value) ? value : null));
+        ProcessStartInfo scan = Inherited();
+        GitleaksScanner.Isolate(scan);
+        Assert.DoesNotContain(scan.Environment, variable => variable.Value == "inherited");
+        Assert.Equal("1", scan.Environment["GIT_NO_REPLACE_OBJECTS"]);
+        Assert.Equal("8", scan.Environment["GIT_CONFIG_COUNT"]);
+        Assert.False(scan.Environment.ContainsKey("GIT_CONFIG_KEY_12"));
     }
 
     // FIX-150, after the Reviewer's review: before gitleaks runs, the scanner reads every commit, tree and blob the push carries, checked

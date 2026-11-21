@@ -51,7 +51,8 @@ public sealed partial class GitleaksScanner : ISecretScanner
     /// </summary>
     internal const string InventoryLine = "(" + InventoryTypes + @")/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}";
 
-    // The options of gitleaks' history read, git log -p -U0 over the range, which the scanner's own patch read repeats exactly.
+    // The options of gitleaks' history read, git log -p -U0 over the range, which the scanner's own patch read repeats exactly; -m reads
+    // each merge as its patch against its first parent, whatever the clone's log.diffMerges says (ReadSettings).
     private static readonly string[] LogOptions = ["--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text"];
 
     // The patch read's output goes nowhere: it is read to establish that git can read every patch, never retained.
@@ -149,19 +150,26 @@ public sealed partial class GitleaksScanner : ISecretScanner
 
     // A clone's display settings can also change what git log -p shows gitleaks while the push still delivers every object: color makes
     // gitleaks parse nothing, log.showRoot=false hides a root commit's patch, and a signature check's diagnostics stop gitleaks' read.
-    // Every git process the scan starts reads these values instead, and none inherits git's trace variables, whose output on standard
-    // error would stop gitleaks' read too (FIX-150).
+    // The form of a merge's patch, which -m asks for, is log.diffMerges': off or none shows none, a combined form is one git will not
+    // write to a file and gitleaks cannot parse, and remerge skips a merge of more than two parents. A merge is read as its patch against
+    // its first parent, which holds every line the merge adds, its own or brought in from another parent, while each commit of another
+    // parent that the range holds is read with its own patch. Every git process the scan starts reads these values instead, and none
+    // inherits git's trace variables, whose output on standard error would stop gitleaks' read too (FIX-150).
     private static readonly (string Key, string Value)[] ReadSettings = [("core.commitGraph", "false"), ("pack.useBitmaps", "false"), ("core.multiPackIndex", "false"),
-        ("color.ui", "false"), ("color.diff", "false"), ("log.showRoot", "true"), ("log.showSignature", "false")];
+        ("color.ui", "false"), ("color.diff", "false"), ("log.showRoot", "true"), ("log.showSignature", "false"), ("log.diffMerges", "first-parent")];
 
-    private static void Isolate(ProcessStartInfo info)
+    // The scan reads the history the push carries: its processes drop every routing variable the push adapter's drop, from the same list,
+    // since a shallow file, another repository or another object store named in the environment would show git a shorter or another
+    // history than the push sends; then every other configuration variable, keeping only the settings forced here, and git's trace
+    // variables (FIX-150).
+    internal static void Isolate(ProcessStartInfo info)
     {
+        GitRouting.Remove(info);
+        foreach (string name in info.Environment.Keys.Where(n => n.StartsWith("GIT_CONFIG", StringComparison.OrdinalIgnoreCase)
+            || n.StartsWith("GIT_TRACE", StringComparison.OrdinalIgnoreCase)).ToArray())
+            info.Environment.Remove(name);
         info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
         info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
-        info.Environment.Remove("GIT_CONFIG_PARAMETERS");
-        foreach (string name in info.Environment.Keys.Where(n => n.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase)
-            || n.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase) || n.StartsWith("GIT_TRACE", StringComparison.OrdinalIgnoreCase)).ToArray())
-            info.Environment.Remove(name);
         info.Environment["GIT_CONFIG_COUNT"] = ReadSettings.Length.ToString(CultureInfo.InvariantCulture);
         for (int i = 0; i < ReadSettings.Length; i++)
         {

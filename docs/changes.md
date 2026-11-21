@@ -115,7 +115,17 @@ without it, each by its own SHA-256.
 
 The recorded scan's version names gitleaks' version and the configuration's SHA-256,
 for example `8.30.1; rules sha256:…`, so each scan identifies the rules it applied.
-Merge diffs are included; external diff commands and text conversion are disabled.
+Each merge commit of the range is read as its patch against its first parent,
+which holds every line the merge adds: its own, written by hand or in resolving a
+conflict, and those it brings in from its other parents, even from one outside
+the range, such as the target branch merged into the pushed branch. Each commit
+of another parent that the range holds is read with its own patch. From 0.9.4
+(FIX-150), every git process of the scan reads merges that way whatever the
+clone's `log.diffMerges` setting. Before 0.9.4 that setting chose the form: by
+default a merge was read against each of its parents, `off` and `none` hid its
+lines from the scan, gitleaks found nothing in the `combined` and
+`dense-combined` forms, which it cannot parse, and `remerge` skips a merge of
+more than two parents. External diff commands and text conversion are disabled.
 Text diffs are requested even for paths marked as binary by repository attributes.
 The range's readability is checked independently before
 and after the scan. From 0.9.4 (FIX-150), the scanner also reads, before
@@ -126,9 +136,17 @@ corrupt or truncated object, or gitleaks reports that its own read of the histor
 failed, which it does without changing its exit status, the scan is incomplete
 and the push refuses. Before 0.9.4 such an object stopped gitleaks' read with no
 finding, and the scan passed even when an older commit of the range held a
-secret. Every git process of the scan ignores the clone's color, root commit and
-signature display settings and git's trace variables, each of which changes
-what gitleaks reads. The report contains only a finding count. The recorded scan
+secret. Every git process of the scan ignores the clone's color, root commit,
+signature and merge display settings and git's trace variables, each of which
+changes what gitleaks reads. It also drops every git variable that the push's
+own git processes drop, taken from the same list: those naming another
+repository, work tree, index, object store, shallow file, grafts file or
+replacement references, those limiting where git looks for a repository, and on
+Windows those redirecting git's standard streams; and every configuration
+variable, keeping only the settings the scan forces. Before 0.9.4 a shallow file
+or another repository named in the pushing process's environment could show git
+a shorter history than the push carries, so that a commit of the push went
+unscanned. The report contains only a finding count. The recorded scan
 contains the tool, version, range, verdict and count, never matched text, findings
 or process output. Findings, an unavailable scanner, a timeout, an unreadable
 range or an incomplete report refuse the push.

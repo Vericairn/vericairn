@@ -20,10 +20,6 @@ public sealed class GitPushAdapter : IPushAdapter
     // Canonical names, as git config --get-regexp matches them: section and variable names in lower case.
     private const string Carried = @"^credential\.|^http\.(sslbackend|sslcainfo|sslcapath|schannelcheckrevoke|schannelusesslcainfo)$";
 
-    // Inherited routing must not redirect a read or a push to another repository, object store or configuration.
-    private static readonly string[] Routing = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_INDEX_FILE", "GIT_NAMESPACE", "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
-
     // Derived object data a clone can write for itself: the commit-graph, reachability bitmaps and the multi-pack-index. A checked
     // push establishes its range and fast-forward check from the real objects alone, so every git process the adapter runs ignores
     // these caches; a clone that misreports ancestry in them cannot change where a push goes or what it carries.
@@ -375,8 +371,7 @@ public sealed class GitPushAdapter : IPushAdapter
     private List<KeyValuePair<string, string>> Settings(string control)
     {
         ProcessStartInfo info = Start(control, ["--git-dir=" + control, "config", "--show-scope", "-z", "--get-regexp", Carried]);
-        foreach (string name in Routing) info.Environment.Remove(name);
-        foreach (string name in info.Environment.Keys.Where(Indexed).ToArray()) info.Environment.Remove(name);
+        GitRouting.Remove(info);
         ProcessResult result = run(info);
         if (result is { Outcome: ProcessOutcome.Exited, ExitCode: 1 } && result.StandardOutput.Length == 0) return [];
         if (result.Outcome != ProcessOutcome.Exited || result.ExitCode != 0)
@@ -402,10 +397,11 @@ public sealed class GitPushAdapter : IPushAdapter
         return info;
     }
 
-    private static void Isolate(ProcessStartInfo info, List<KeyValuePair<string, string>> settings)
+    // Inherited routing must not redirect a read or a push to another repository, object store, history or configuration: the names come
+    // from the list the secret scan's processes drop too (GitRouting), so the scan reads the history the push carries.
+    internal static void Isolate(ProcessStartInfo info, List<KeyValuePair<string, string>> settings)
     {
-        foreach (string name in Routing) info.Environment.Remove(name);
-        foreach (string name in info.Environment.Keys.Where(Indexed).ToArray()) info.Environment.Remove(name);
+        GitRouting.Remove(info);
         info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
         info.Environment["GIT_CONFIG_GLOBAL"] = string.Empty;
         info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
@@ -422,7 +418,4 @@ public sealed class GitPushAdapter : IPushAdapter
             info.Environment["GIT_CONFIG_VALUE_" + i.ToString(System.Globalization.CultureInfo.InvariantCulture)] = settings[i].Value;
         }
     }
-
-    private static bool Indexed(string name) =>
-        name.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase);
 }
