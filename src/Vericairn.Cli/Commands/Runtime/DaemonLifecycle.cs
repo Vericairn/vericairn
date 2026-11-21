@@ -9,6 +9,7 @@ using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Processes;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Updates;
 using Vericairn.Sdk;
@@ -157,7 +158,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         ProcessStartInfo info = DaemonStart(ServiceInstaller.CurrentLauncher(), root, PresenceSessionBuild.Current);
 
         NativeMethods.KeepStandardHandlesFromChildren();
-        using Process? process = Process.Start(info);
+        using Process? process = ProgramPath.Start(info);
         if (process is null)
         {
             return "The daemon process did not start.";

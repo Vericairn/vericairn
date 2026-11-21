@@ -227,6 +227,38 @@ public class ContainedProcessTests
         }
     }
 
+    [Fact]
+    public void AProgramIsStartedByAnAbsolutePathAndOneThatCannotBeResolvedStartsNothing()
+    {
+        // From 0.9.4 (FIX-161): the stand-in named relative to the start's working directory, which holds it, is refused before
+        // anything is created, as is a bare name no absolute directory of PATH holds; both are the start failure callers handle.
+        using var run = new RunEstate();
+        string report = run.Report("generic");
+        List<string> command = FakeHarness.Command("generic", report);
+        string relative = Path.GetRelativePath(run.Scratch, command[0]);
+        Assert.SkipWhen(Path.IsPathFullyQualified(relative), "The test executable is on another volume than the scratch directory, so no relative path reaches it.");
+        Assert.True(File.Exists(Path.Combine(run.Scratch, relative)));
+        foreach (string program in new[] { relative, "vericairn-absent-" + Guid.NewGuid().ToString("N") })
+        {
+            var info = new ProcessStartInfo(program) { WorkingDirectory = run.Scratch };
+            foreach (string argument in command.Skip(1)) info.ArgumentList.Add(argument);
+            System.ComponentModel.Win32Exception refused = Assert.Throws<Vericairn.Records.Processes.ProgramNotFoundException>(() => ContainedProcess.Start(info));
+            Assert.Equal(2, refused.NativeErrorCode);
+        }
+
+        Assert.Empty(FakeHarness.Reports(report));
+        ContainedProcess started = Start(run, "generic");
+        try
+        {
+            Assert.True(started.WaitForExit(TestTiming.HangTimeout));
+            Assert.Single(FakeHarness.Reports(report));
+        }
+        finally
+        {
+            started.Close();
+        }
+    }
+
     private static ContainedProcess Start(RunEstate run, string scenario, string? stop = null)
     {
         List<string> command = FakeHarness.Command(scenario, run.Report(scenario));

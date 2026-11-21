@@ -21,6 +21,9 @@
     <!-- From 0.9.4 (ID-16): the daemon's service definitions start the runtime with a release build's environment. -->
     <InternalsVisibleTo Include="Vericairn.Daemon" />
     <InternalsVisibleTo Include="Vericairn.Daemon.Tests" />
+    <!-- From 0.9.4 (FIX-161): the adapters and the software pack start their programs through the one program resolver. -->
+    <InternalsVisibleTo Include="Vericairn.Adapters.Git" />
+    <InternalsVisibleTo Include="Vericairn.Packs.Software" />
   </ItemGroup>
 
   <ItemGroup>

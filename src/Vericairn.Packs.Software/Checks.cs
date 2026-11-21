@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Model;
+using Vericairn.Records.Processes;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Packs.Software;
@@ -57,7 +58,7 @@ public static class Checks
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            using Process process = Process.Start(info) ?? throw new ProviderRefusedException($"{command[0]} did not start.");
+            using Process process = ProgramPath.Start(info) ?? throw new ProviderRefusedException($"{command[0]} did not start.");
             Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
             Task<string> standardError = process.StandardError.ReadToEndAsync();
             bool finished = process.WaitForExit((int)Math.Min(timeout.TotalMilliseconds, int.MaxValue));

@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
+using Vericairn.Records.Processes;
 
 namespace Vericairn.Records.Signing;
 
@@ -194,7 +195,7 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
             start.ArgumentList.Add(argument);
         }
 
-        using Process process = Process.Start(start) ?? throw new InvalidOperationException($"The {SecureEnclaveCustody.HelperName} helper did not start.");
+        using Process process = ProgramPath.Start(start) ?? throw new InvalidOperationException($"The {SecureEnclaveCustody.HelperName} helper did not start.");
         Task<string> output = process.StandardOutput.ReadToEndAsync();
         Task<string> error = process.StandardError.ReadToEndAsync();
         if (input is not null)

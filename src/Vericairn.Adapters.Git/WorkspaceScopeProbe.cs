@@ -4,6 +4,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
+using Vericairn.Records.Processes;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Adapters.Git;
@@ -70,7 +71,7 @@ public static class WorkspaceScopeProbe
             clock ??= TimeProvider.System;
             long started = clock.GetTimestamp();
             using var budget = new CancellationTokenSource(deadline, clock);
-            using Process process = Process.Start(info) ?? throw new IOException("The scope observer could not start.");
+            using Process process = ProgramPath.Start(info) ?? throw new IOException("The scope observer could not start.");
             process.StandardInput.Close();
             Task<string> output = process.StandardOutput.ReadToEndAsync();
             Task<string> error = process.StandardError.ReadToEndAsync();

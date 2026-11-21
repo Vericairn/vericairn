@@ -8,6 +8,7 @@ using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Processes;
 using Vericairn.Records.Signing;
 using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
@@ -176,7 +177,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo(tool) { ArgumentList = { argument }, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false });
+            using var process = ProgramPath.Start(new ProcessStartInfo(tool) { ArgumentList = { argument }, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false });
             if (process is null)
             {
                 return null;

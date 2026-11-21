@@ -4,6 +4,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
+using Vericairn.Records.Processes;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -59,7 +60,7 @@ internal static class WorkspaceGitCommand
             info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
             info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
             info.Environment["GIT_NO_LAZY_FETCH"] = "1";
-            using Process process = Process.Start(info) ?? throw new ProviderRefusedException("Git did not start.");
+            using Process process = ProgramPath.Start(info) ?? throw new ProviderRefusedException("Git did not start.");
             Task<string> standardOutput = WorkspaceGitScope.ReadAsync(process.StandardOutput);
             Task<string> standardError = WorkspaceGitScope.ReadAsync(process.StandardError);
             if (input is not null)

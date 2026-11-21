@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Processes;
 
 namespace Vericairn.Adapters.Git;
 
@@ -110,7 +111,7 @@ internal static class GitDocumentHistory
         info.Environment["GIT_NO_LAZY_FETCH"] = "1";
         try
         {
-            using Process process = Process.Start(info) ?? throw new IOException("Git did not start.");
+            using Process process = ProgramPath.Start(info) ?? throw new IOException("Git did not start.");
             using var timeout = new CancellationTokenSource(remaining);
             try
             {

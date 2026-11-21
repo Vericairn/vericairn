@@ -9,6 +9,7 @@ using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Processes;
 using Vericairn.Records.Types;
 
 namespace Vericairn.Adapters.Git;
@@ -220,7 +221,7 @@ public sealed partial class GitFileSource : IDocumentSource
 
     internal static Process Start(ProcessStartInfo info)
     {
-        Process process = Process.Start(info) ?? throw new InvalidOperationException("git did not start.");
+        Process process = ProgramPath.Start(info) ?? throw new InvalidOperationException("git did not start.");
         if (StartedProcesses.Value is { } started) Interlocked.Increment(ref started.Value);
         return process;
     }

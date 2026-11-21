@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+using Vericairn.Records.Processes;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Adapters.Git;
@@ -120,7 +121,7 @@ internal static class WorkspaceGitScope
             info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
             try
             {
-                using Process process = Process.Start(info) ?? throw new IOException("Git could not inspect the committed scope.");
+                using Process process = ProgramPath.Start(info) ?? throw new IOException("Git could not inspect the committed scope.");
                 Task<string> output = ReadAsync(process.StandardOutput);
                 Task<string> error = ReadAsync(process.StandardError);
                 Task writing = WriteAsync(process.StandardInput, input);

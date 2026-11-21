@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Text;
 using Vericairn.Protocol;
+using Vericairn.Records.Processes;
 
 namespace Vericairn.Workbench;
 
@@ -129,7 +130,7 @@ public sealed class CliRuntimeManager : IRuntimeManager
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            using Process? process = Process.Start(start);
+            using Process? process = ProgramPath.Start(start);
             if (process is null)
             {
                 return new RuntimeOutcome(false, "The command line could not be started.");
