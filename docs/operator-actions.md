@@ -324,6 +324,51 @@ provides `ToSelection()` to copy its ask pin and recommendation hash. The reques
 An authenticated device acts only for its own principal. From Remote, the same act signs each decision with the phone's presence
 key ([Remote](remote.md#answering-asks-with-their-recommendations-094)).
 
+## Sign every ready item in one reviewed act (0.9.4)
+
+From 0.9.4 (OPS-24), `vericairn operator act --ready` lists every operator item whose command is ready and signs the ones you
+choose in one act on your own admitted device:
+
+```sh
+vericairn operator act --ready --by <operator-id>
+vericairn operator act --ready --all --by <operator-id> --skip <item> --dismiss "<request item>=<your reason>"
+vericairn operator act --ready --select <item> --select <item> --by <operator-id>
+```
+
+Without a choice the command is read-only. Each listed item names its id, its kind, what its signature records, its exact subject
+revision and the exact basis it rests on:
+
+| Kind | Ready when | What its signature records |
+| --- | --- | --- |
+| `close` | `operator close` lists the step: a completed latest result with current passing reviews and no acceptance | An acceptance of that exact result, on the basis of every passing review shown |
+| `answer` | An ask waits on you, as `operator answer` lists it | A decision answering it with its recommendation, as [one act](#answer-open-asks-with-their-recommendations-in-one-act-094) records it |
+| `goal-acceptance` | `operator list` offers you its acceptance command: activated, every predicate holding, evaluated, and you neither its evaluator nor a step's author | An acceptance of the goal relying on its current evaluation |
+| `release-acceptance`, `milestone-acceptance`, `milestone-result-acceptance` | `operator list` offers you its acceptance command | An acceptance of that exact candidate, milestone or result; it publishes nothing |
+| `request` | An open action request put to you; a run's reserved step and a publication's close are not listed, since their own commands complete them | A close of the request as done, recording that you did what it asks; dismissed, your reason |
+
+`--all` signs every listed item except those named with `--skip`, which wait, and `--dismiss`, which dismisses a request with your
+reason; with `--all` the act refuses if any item became ready or stopped being ready since the listing. `--select` signs only the
+items named, every other item waits, and `--dismiss` may join it. Only a request is dismissed; any other item is left waiting. The
+act is shown before anything is signed: each item with its choice and what its signature records. The runtime compares every chosen
+item's subject, basis and recommendation with the current records, again after signing and before storing: an item that changed or
+is no longer ready refuses the whole act and writes nothing. `--stake` (default `low`) is each answer's decision stake.
+
+Each chosen record is authored completely before the first signature and stored together with the others; nothing outside the list
+of choices is signed. Where presence sessions are on, the records sign under one presence check whose announced list names each
+by type and exact hash; the closed vocabulary of session actions has no name of its own for this act, so the list is announced as
+`operator close`, the closing of ready operator items. A list holds at most 16 exact entries and 128 signatures, and every record of
+the act is an exact entry, so an act of more than 16 records announces one list for each 16, in the order shown, each just before
+its own check. While an agent run this machine's worker started is unsettled under your user, each record asks its own check. A
+declined or unanswered check signs nothing and stops the act. Only a person holding the operator role performs the act, for their
+own items, never an agent; no MCP tool performs it.
+
+`GET /v1/operator/act` (optional `by`) and `POST /v1/operator/act` carry the list and the act; SDK clients use
+`OperatorActItems(principal)` and `OperatorAct(OperatorActRequest)`, or their `Async` counterparts. Each item provides
+`Choose(choice, reason)` to copy its pins with your choice (`sign`, `wait` or `dismiss`). The request carries `by`, `choices`,
+optional `all` (default `false`) and `stake`; the response carries the act's `act` id, each stored record in `written` (`item`,
+`choice`, `record`), `ok` and `problem`. Workbench (Work → Operator act: ready items) and Remote (Attention → Ready items) offer the
+same reviewed list ([Workbench](workbench.md#what-exists), [Remote](remote.md#ready-items-in-one-reviewed-act-094)).
+
 ## Record and merge in one command
 
 Fill the required body fields, inspect the pinned evidence, and run the item's **Record and merge**

@@ -86,6 +86,7 @@ public sealed partial class RemoteViewModel : Observable
         CancelPairingCommand = new AsyncCommand(() => { Pairing = false; return Task.CompletedTask; }, () => !Busy && Estates.Count > 0);
         InitializeDecisionCommands();
         InitializeAnswerCommands();
+        InitializeActCommands();
         InitializeInspectionCommands();
         InitializePolicyCommands();
         foreach (RuntimeConnection connection in connections.List())
@@ -124,6 +125,8 @@ public sealed partial class RemoteViewModel : Observable
             SetPolicyDetail(null);
             SetAnswerChoices([], false);
             AnswerMessage = string.Empty;
+            SetActChoices([], false);
+            ActMessage = string.Empty;
             RestoreDecisions();
             DecisionMessage = string.Empty;
             detailCurrent = false;
@@ -163,6 +166,7 @@ public sealed partial class RemoteViewModel : Observable
             NotifyInspectionCommands();
             NotifyDecisionCommands();
             NotifyAnswerCommands();
+            NotifyActCommands();
         }
     }
 
@@ -240,6 +244,7 @@ public sealed partial class RemoteViewModel : Observable
 
     /// <summary>True while the last observation has a standing agent to show.</summary>
     public bool HasStanding => Standing.Count > 0;
+
 
     /// <summary>
     /// From 0.9.4 (PROC-18), the due times of the estate's runs from the last observation: each step whose timing gates its start, when it
@@ -350,6 +355,8 @@ public sealed partial class RemoteViewModel : Observable
         NotifyDecision();
         answersCurrent = false;
         AnswersReviewed = false;
+        actCurrent = false;
+        ActReviewed = false;
         ConnectionState = ConnectionStates.Connecting;
         ConnectionMessage = "Checking the runtime's identity and this phone's access.";
         try

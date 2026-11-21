@@ -191,6 +191,33 @@ selected ask was answered, 1 a refusal, and 2 invalid arguments or a client fail
 [operator actions guide](operator-actions.md#answer-open-asks-with-their-recommendations-in-one-act-094) describes the
 decisions, the API and SDK counterparts and Remote.
 
+## `vericairn operator act --ready` (0.9.4)
+
+From 0.9.4 (OPS-24), the operator signs every ready item in one reviewed act. With `--ready` alone the command lists every
+operator item whose command is ready for `--by`, or the root operator: acceptances of reviewed results, answers with their
+recommendations, a goal's, a release candidate's, a milestone's and a milestone result's acceptance, and action requests' closes,
+each with what its signature records, its exact subject and basis. It writes nothing.
+
+| Option | Meaning |
+|---|---|
+| `--ready` | Required: list, or act on, the items whose command is ready. |
+| `--all` | Sign every listed item except those skipped or dismissed; refuses if the list changes. Cannot be combined with `--select`. |
+| `--select <item>` | Sign that item; repeat for several. Every other item waits. |
+| `--skip <item>` | With `--all`, leave that item waiting; repeatable. |
+| `--dismiss <item>=<reason>` | Dismiss that request with your reason; repeatable. Only a request is dismissed. |
+| `--by <operator-id>` | Required to act: the operator, a person, acting on their own admitted device. |
+| `--stake <stake>` | Each answer's decision stake: `low` (the default), `medium`, `high` or `critical`. |
+| `--from <file>` | Use a saved `operator act --ready --json` listing with a choice; `-` reads standard input. |
+| `--json` | Print one typed response. The reviewed act is shown on standard error before signing. |
+| `--estate <root>`, `-e <root>` | Select the estate. |
+
+A chosen item that changed or is no longer ready, a changed list with `--all`, a dismissal of an item that is not a request, an
+agent or anyone but the acting operator refuses the whole act without a record. Where presence sessions are on, the act's records
+sign under one presence check whose announced list names each, up to 16 to a list, a list for each 16
+([presence sessions on standard error](#presence-sessions-on-standard-error-094)). Exit 0 means every chosen record was stored, 1 a
+refusal, and 2 invalid arguments or a client failure. See the
+[operator actions guide](operator-actions.md#sign-every-ready-item-in-one-reviewed-act-094).
+
 ## `vericairn decisions new`
 
 From 0.8.4, `decisions new` records a supplied operator answer with its exact design document pins. See the [operator workflow](operator-guide.md#record-an-answered-ask-with-its-design-changes).

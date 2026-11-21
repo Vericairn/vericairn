@@ -208,9 +208,11 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(159, synchronous.Length);
-        // From 0.9.4 (OPS-16) answering asks with their recommendations in one act, each with its default and its cancellable counterpart.
-        foreach (string name in new[] { nameof(IEstateApi.OperatorAnswerCandidates), nameof(IEstateApi.OperatorAnswer), nameof(IEstateApi.OperatorAnswerCandidatesAsync), nameof(IEstateApi.OperatorAnswerAsync) })
+        Assert.Equal(161, synchronous.Length);
+        // From 0.9.4 answering asks with their recommendations in one act (OPS-16) and one reviewed act over every ready item (OPS-24), each
+        // with its default and its cancellable counterpart.
+        foreach (string name in new[] { nameof(IEstateApi.OperatorAnswerCandidates), nameof(IEstateApi.OperatorAnswer), nameof(IEstateApi.OperatorAnswerCandidatesAsync), nameof(IEstateApi.OperatorAnswerAsync),
+            nameof(IEstateApi.OperatorActItems), nameof(IEstateApi.OperatorAct), nameof(IEstateApi.OperatorActItemsAsync), nameof(IEstateApi.OperatorActAsync) })
             Assert.False(typeof(IEstateApi).GetMethod(name)!.IsAbstract);
         // From 0.9.4 (GOAL-08) a standing agent's outputs, with its default and its cancellable counterpart.
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.StandingOutput));

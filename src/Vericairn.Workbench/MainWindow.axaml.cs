@@ -473,6 +473,12 @@ public partial class MainWindow : Window
         _ = OpenAndFocusAsync(shell.OpenProgressAsync());
     }
 
+    private void OnOpenOperatorAct(object? sender, RoutedEventArgs e) => _ = OpenAndFocusAsync(shell.OpenOperatorActAsync());
+
+    private async void OnRefreshOperatorAct(object? sender, RoutedEventArgs e) => await shell.RefreshOperatorActAsync(DocumentOf<OperatorActDocument>(sender)).ConfigureAwait(true);
+
+    private async void OnSignOperatorAct(object? sender, RoutedEventArgs e) => await shell.SignOperatorActAsync(DocumentOf<OperatorActDocument>(sender)).ConfigureAwait(true);
+
     private void OnOpenHandoff(object? sender, RoutedEventArgs e)
     {
         _ = OpenAndFocusAsync(shell.OpenHandoffAsync());

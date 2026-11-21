@@ -5,7 +5,7 @@ of one and never a separate estate. It uses the same presentation, state languag
 
 This guide describes Remote's pairing, attention, work, decision and policy views, added in 0.9.0 with REMOTE-01 to REMOTE-03
 and POLICY-05, with the estate's history line and the stops of its runs from 0.9.2, the presence key that alone signs a
-decision on the phone (REMOTE-11), and from 0.9.4 answering asks with their recommendations in one act (OPS-16). It is a **developer build**: it is not in an app
+decision on the phone (REMOTE-11), from 0.9.4 answering asks with their recommendations in one act (OPS-16), and signing every ready item in one reviewed act (OPS-24). It is a **developer build**: it is not in an app
 store, and no real-device qualification is recorded for it.
 
 ## What this build does
@@ -130,6 +130,22 @@ during the act stops it before the next signature: the decisions already written
 how many of how many were written, and an ask once answered is never answered again, so nothing is answered twice. The act's
 outcome is shown until the app closes; unlike a single decision's draft it is not kept in app storage, and the asks the act
 answered no longer wait on you. A phone without its presence key signs no act.
+
+## Ready items in one reviewed act (0.9.4)
+
+From 0.9.4 (OPS-24), Remote offers the same reviewed list as `vericairn operator act --ready`. In Attention, open **Ready items:
+one reviewed act** and choose **Read my ready items**: every operator item whose command is ready for you is listed with what its
+signature records, its exact subject and basis, and an ask's recommendation by hash. Each starts chosen to sign; choose **wait** to
+leave it waiting, or, for a request, **dismiss** with your reason. Read the act as it will be signed, confirm it, then choose **Sign
+the act**. Reading signs nothing.
+
+Before the first signature Remote reads the list again, and the act refuses whole, signing and sending nothing, if any item changed
+or the list changed. Each chosen record is the one the runtime's act would sign, prepared by the runtime and signed by the phone's
+presence key, one presence check each, as every phone signature is; it is checked against the item as shown immediately before the
+presence key asks and again before its signature leaves, and the runtime checks it against the estate when it writes. A change during
+the act stops it before the next signature: the records already written stand, the message says how many of how many were written,
+and an item already signed is no longer ready, so nothing is signed twice. Nothing outside the reviewed list is signed. As with
+answers, the act's outcome is shown until the app closes and is not kept in app storage.
 
 ## Drafts and observed outcomes
 
