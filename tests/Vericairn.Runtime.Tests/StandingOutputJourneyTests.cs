@@ -303,6 +303,41 @@ public class StandingOutputJourneyTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void ARecordReusingADispositionsIdentifierLeavesTheOutputOpenAndNothingRouted()
+    {
+        // From 0.9.4 (FIX-156), through the worker: the builder records a possibility in its run, the operator parks it and opens it again, and
+        // the builder writes by hand a record carrying the identifier of the reopening, parking it again, dated in the month before so that
+        // its path sorts first. goal due reads the output open and the agent held, goal step starts no run and nobody adopts the possibility.
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        (string goal, string assignment) = Carried(run);
+        string raised = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(builder, assignment, "possibility", JsonSerializer.SerializeToElement(Possibility("cache/index", draft: true))))).Id;
+        JsonObject Disposed(string id, string disposition, string reason)
+        {
+            JsonObject body = JsonNode.Parse(run.Estate.Load().ById[id].Body.GetRawText())!.AsObject();
+            body["disposition"] = disposition;
+            body["reason"] = reason;
+            return body;
+        }
+
+        string parked = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("possibility", op, JsonSerializer.SerializeToElement(Disposed(raised, "parked", "Not before the index format settles.")), Supersedes: raised))).Id;
+        string reopened = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("possibility", op, JsonSerializer.SerializeToElement(Disposed(parked, "open", "The index format settled.")), Supersedes: parked))).Id;
+        JsonElement Due() => run.Service.GoalDue(goal)!.Json;
+        Assert.Equal(1, Due().GetProperty("outputs").GetProperty("open").GetInt32());
+        Assert.Equal(0, run.Service.Check().Errors);
+
+        var signer = new StoreSigner(new FileKeyStore(VericairnHome.Path()), run.BuilderDevice);
+        RecordEnvelope original = run.Estate.Load().ById[reopened];
+        run.Estate.SetClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMonths(-1).ToUnixTimeSeconds()));
+        RecordEnvelope copy = run.Estate.Add("possibility", builder, Disposed(parked, "parked", "Parked again by hand.").ToJsonString(), supersedes: parked, id: reopened, signer: signer);
+        Assert.NotEqual(original.ExpectedPath, copy.ExpectedPath);
+        Assert.Equal(("held", 1), (Due().GetProperty("state").GetString(), Due().GetProperty("outputs").GetProperty("open").GetInt32()));
+        Assert.Null(StandingAgentRoutingTests.Step(run, goal, "after-copy").Run);
+        Assert.False(run.Service.WorkNew(new WorkNewRequest(op, Key: "IDX-1") { FromPossibility = raised }).Ok);
+    }
+
     /// <summary>A standing agent whose occurrence goal step routed to the builder, with a second run of it in flight; its goal and assignment.</summary>
     private static (string Goal, string Assignment) Carried(RunEstate run, string[]? holders = null)
     {

@@ -22,7 +22,7 @@ namespace Vericairn.Records.Estate;
 /// is due is a pure function of the records, the pinned flow and an explicit UTC time, repeated before dispatch; a key holds at most one
 /// assignment, whoever records it, and the period caps, the concurrency and the failure pause hold every run.
 /// </summary>
-internal static class StandingAgents
+internal static partial class StandingAgents
 {
     /// <summary>The trigger kinds a standing plan declares (design/standing-agents.md § 6).</summary>
     public static readonly ImmutableArray<string> TriggerKinds = ["schedule", "duty", "event", "condition", "request"];
@@ -428,12 +428,14 @@ internal static class StandingAgents
         int open = StandingOutputs.OpenCount(model, current);
         int limit = FailureLimit(current);
         int inFlight = runs.Count(r => r.InFlight);
+        RecordEnvelope? unreadable = Unreadable(model, current, order);
         (string state, string reason) = status switch
         {
             "active" when flow is null => ("unavailable", $"the goal is shown and none of it is dispatched here: its {unavailable}"),
             "active" when step is null => ("unavailable", $"flow {flow!.Pin.Id} declares no single routed work step, which each occurrence carries as one assignment"),
             "active" when order is null => ("unavailable", "its work order is missing"),
             "active" when until is { } u && asOf >= u => ("lapsed", $"its until time {RecordParser.FormatTimestamp(u)} has passed: it returns to its sponsor, and a renewal is a goal revision its sponsor activates"),
+            "active" when unreadable is not null => ("held", $"record {unreadable.Id}, which names a record of the agent, is not read: its line holds an identifier more than one record carries (record.duplicate-id), so nothing of the agent is read in its place, and it is held until all but one of those records is removed"),
             "active" when failures >= limit => ("held", $"{failures.ToString(CultureInfo.InvariantCulture)} of its runs failed in a row, its limit of {limit.ToString(CultureInfo.InvariantCulture)}: it is paused until its sponsor answers the ask about it"),
             "active" => ("active", "its occurrences are carried one per goal step, within its caps"),
             "abandoned" => ("stopped", "the goal is abandoned: nothing of it is dispatched again"),
@@ -781,13 +783,20 @@ internal static class StandingAgents
     /// completed or partial result, and the attempt it closes, is a claim another principal reviews and never makes a run succeed by
     /// itself: only the settlement, which no tied principal wrote, names it, and nothing written after it, whatever its date. A run is read
     /// from its whole lineage (<see cref="Lineages"/>), every revision on every branch. When a revision no tied principal wrote settles or
-    /// cancels it, the deepest revision no tied principal wrote decides it, read by its depth in the lineage and never by a date, and every
-    /// revision a tied principal wrote counts for nothing: such a decision that leaves it canceled or unsettled makes it count for nothing,
-    /// so an untied principal's correction, such as the operator's, counts as written, and a success it names stands whatever a tied
-    /// principal records afterwards. Only where no untied revision settles or cancels the run does a known-failure settlement a tied principal
-    /// wrote count, as its failure, as for an agent that steps its own goal. A run no tied
+    /// cancels it, the revisions no tied principal wrote that no other such revision follows on its own supersedes chain, its untied heads,
+    /// decide it, and every revision a tied principal wrote counts for nothing: from FIX-156 each head reads as the outcome above (a head
+    /// that leaves the run canceled or unsettled counts for nothing), and where heads on different branches read differently the one least
+    /// favorable to the agent decides, a failure over nothing and nothing over a success, so neither depth nor a branch a tied principal
+    /// padded ranks one untied revision over another. On one line that is its latest untied revision, so an untied principal's correction,
+    /// such as the operator's, counts as written, and a success it names stands whatever a tied principal records afterwards. Only where no
+    /// untied revision settles or cancels the run does a known-failure settlement a tied principal wrote count, as its failure, as for an
+    /// agent that steps its own goal. A run no tied
     /// principal recorded ends at the next run whose intent no tied principal recorded, so no run a tied principal records takes a result
-    /// off another. The outcomes count in the order the runs settled, each at the later of its intent and its settlement. An answered ask of
+    /// off another. From FIX-156 a record the loader left out as unreadable (<see cref="EstateModel.UnreadableLines"/>) counts against the
+    /// agent: a line of the goal's agent runs that cannot be read counts as one failed run for each intent it holds (at least one), at the
+    /// latest of its records; and a run that an unreadable record names, by its assignment, an attempt or result on it or a record of its
+    /// lineage, counts as its own records decide it when they make it a success or a failure, and otherwise as failed. The outcomes count in
+    /// the order the runs settled, each at the later of its intent and its first settlement no tied principal wrote. An answered ask of
     /// the pause naming one of the failures cuts every outcome settled before the earlier of the ask and its first answer
     /// (<see cref="Answer"/>); after the cut a success ends the failures before it only while they are fewer than the limit, so once they
     /// reach it the pause holds until such an answer. Returns the failures that count and the latest of them.
@@ -800,32 +809,27 @@ internal static class StandingAgents
         static bool Terminal(RecordEnvelope revision) => Settles(revision) || EstateModel.BodyString(revision, "status") == "canceled";
         Dictionary<string, List<(RecordEnvelope Record, int Depth)>> lineages = Lineages(model, Counts);
         List<(RecordEnvelope Record, int Depth)> Lineage(AgentRuns.Run run) => lineages.GetValueOrDefault(run.Intent.Id) ?? [(run.Intent, 0)];
-        static RecordEnvelope? Deepest(IEnumerable<(RecordEnvelope Record, int Depth)> line) => line.OrderBy(e => e.Depth).ThenBy(e => e.Record.At, StringComparer.Ordinal)
-            .ThenBy(e => e.Record.Id, StringComparer.Ordinal).Select(e => e.Record).LastOrDefault();
         static RecordEnvelope? Shallowest(IEnumerable<(RecordEnvelope Record, int Depth)> line) => line.OrderBy(e => e.Depth).ThenBy(e => e.Record.At, StringComparer.Ordinal)
             .ThenBy(e => e.Record.Id, StringComparer.Ordinal).Select(e => e.Record).FirstOrDefault();
         bool Settled(AgentRuns.Run run) => Lineage(run).Any(e => Settles(e.Record));
+        // From FIX-156 what the records the loader left out name: a run one of them names counts against the agent unless its own records decide it.
+        HashSet<string> unread = model.UnreadableLines.Count == 0 ? [] : model.Unreadable.SelectMany(Names).ToHashSet(StringComparer.Ordinal);
         var outcomes = new List<(RecordEnvelope At, RecordEnvelope Record, bool Failed, IReadOnlyList<RecordEnvelope> Records)>();
         foreach (AgentRuns.Run run in runs.Where(r => Counts(r.Intent) && Settled(r)))
         {
             // From FIX-155 a run is read from its whole lineage, every revision on every branch whatever the chain as read selects, so no fork,
-            // identifier order or reconciliation hides a revision. When a revision no tied principal wrote settles or cancels the run, the
-            // deepest revision no tied principal wrote decides it and the tied principals' revisions count for nothing; only otherwise does a
-            // tied principal's known-failure settlement count, as its failure. Depth in the lineage orders them, never a date.
+            // identifier order or reconciliation hides a revision. When a revision no tied principal wrote settles or cancels the run, its
+            // untied heads decide it and the tied principals' revisions count for nothing; only otherwise does a tied principal's known-failure
+            // settlement count, as its failure. From FIX-156 heads that disagree yield the outcome least favorable to the agent, and an untied
+            // revision is placed by the untied revisions above it, so no depth, date or padding ranks one over another.
             List<(RecordEnvelope Record, int Depth)> line = Lineage(run);
             List<(RecordEnvelope Record, int Depth)> untied = [.. line.Where(e => !Tied(e.Record.By))];
             bool spoken = untied.Any(e => Terminal(e.Record));
-            RecordEnvelope? word = spoken ? Deepest(untied) : null;
-            if (spoken && !Settles(word!))
-            {
-                // The latest word no tied principal wrote leaves the run canceled or unsettled: it counts for nothing.
-                continue;
-            }
-
-            RecordEnvelope? decided = word;
+            (List<RecordEnvelope> heads, Dictionary<string, int> above) = Heads(line, untied);
+            IEnumerable<RecordEnvelope> Placed(IEnumerable<RecordEnvelope> records) => records.OrderBy(r => above[r.Id]).ThenBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal);
             RecordEnvelope? admitted = spoken ? null : Shallowest(line.Where(e => Tied(e.Record.By) && EstateModel.BodyString(e.Record, "status") == "known-failure"));
-            RecordEnvelope settlement = (spoken ? Shallowest(untied.Where(e => Settles(e.Record))) : null) ?? admitted ?? Shallowest(line.Where(e => Settles(e.Record)))!;
-            bool tied = Tied(run.Intent.By) || decided is null;
+            RecordEnvelope settlement = (spoken ? Placed(untied.Select(e => e.Record).Where(Settles)).FirstOrDefault() : null) ?? admitted ?? Shallowest(line.Where(e => Settles(e.Record)))!;
+            bool tied = Tied(run.Intent.By);
             RecordEnvelope? carried = run.Assignment is string id && model.ById.TryGetValue(id, out RecordEnvelope? found) ? model.Latest(found) : null;
             IReadOnlyList<string> chain = carried is null ? [] : model.Chain(carried);
             AgentRuns.Run? next = runs.Where(r => r.Assignment is not null && chain.Contains(r.Assignment) && GoalRules.Before(run.Intent, r.Intent) && Counts(r.Intent)
@@ -833,28 +837,68 @@ internal static class StandingAgents
                 .OrderBy(r => r.Intent.At, StringComparer.Ordinal).ThenBy(r => r.Intent.Id, StringComparer.Ordinal).FirstOrDefault();
 
             // Every result of every attempt on the assignment, superseded attempts and results among them, so no revision takes a failure back.
-            List<RecordEnvelope> failed = [.. chain.SelectMany(a => model.About(a, "attempt")).SelectMany(attempt => model.About(attempt.Id, "result")).DistinctBy(r => r.Id)
+            List<RecordEnvelope> attempts = [.. chain.SelectMany(a => model.About(a, "attempt")).DistinctBy(a => a.Id)];
+            List<RecordEnvelope> results = [.. attempts.SelectMany(attempt => model.About(attempt.Id, "result")).DistinctBy(r => r.Id)];
+            List<RecordEnvelope> failed = [.. results
                 .Where(r => Counts(r) && GoalRules.Before(run.Intent, r) && (next is null || GoalRules.Before(r, next.Intent)) && EstateModel.BodyString(r, "outcome") is "blocked" or "abandoned")
                 .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)];
             RecordEnvelope at = GoalRules.Before(run.Intent, settlement) ? settlement : run.Intent;
             IReadOnlyList<RecordEnvelope> named = [.. line.Select(e => e.Record), .. failed];
 
-            // A success an untied settlement names stands whatever a tied principal records afterwards, a blocked result included.
-            if (!tied && EstateModel.BodyString(decided!, "status") == "observed-success" && Seen(model, run, decided!, chain, before) is not null)
+            // How one untied head reads: 2 a failure, 1 nothing, 0 a success, each with the record it rests on.
+            (int Rank, RecordEnvelope Record) Reading(RecordEnvelope head) =>
+                !Settles(head) ? (1, head)
+                : !tied && EstateModel.BodyString(head, "status") == "observed-success" && Seen(model, run, head, chain, before) is not null ? (0, head)
+                : failed.Count > 0 ? (2, failed[^1])
+                : EstateModel.BodyString(head, "status") == "known-failure" && !DeciderStopped(model, goal, head, before) ? (2, head)
+                : (1, head);
+
+            (int Rank, RecordEnvelope Record)? outcome = null;
+            if (spoken)
             {
-                outcomes.Add((at, decided!, false, named));
+                // A success an untied settlement names stands whatever a tied principal records afterwards, a blocked result included; heads
+                // on different branches that disagree yield the outcome least favorable to the agent.
+                outcome = Placed(heads).Select(Reading).OrderByDescending(r => r.Rank).First();
             }
             else if (failed.Count > 0)
             {
-                outcomes.Add((at, failed[^1], true, named));
-            }
-            else if (decided is not null && EstateModel.BodyString(decided, "status") == "known-failure" && !DeciderStopped(model, goal, decided, before))
-            {
-                outcomes.Add((at, decided, true, named));
+                outcome = (2, failed[^1]);
             }
             else if (admitted is not null)
             {
-                outcomes.Add((at, admitted, true, named));
+                outcome = (2, admitted);
+            }
+
+            if (outcome is not { Rank: 0 or 2 } && unread.Count > 0
+                && (chain.Concat(attempts.Select(a => a.Id)).Concat(results.Select(r => r.Id)).Concat(line.Select(e => e.Record.Id)).Any(unread.Contains) || model.IsUnreadable(run.Assignment)))
+            {
+                // A record the loader left out names this run, which its own records leave counting for nothing: it counts as failed.
+                outcome = (2, failed.LastOrDefault() ?? (spoken ? Placed(heads).First() : settlement));
+            }
+
+            if (outcome is { Rank: not 1 } decided)
+            {
+                outcomes.Add((at, decided.Record, decided.Rank == 2, named));
+            }
+        }
+
+        // From FIX-156 each line of the goal's agent runs the loader left out counts as one failed run for each intent it holds, at least one,
+        // at the latest of its records, so that no identifier another record reuses takes a run out of the count.
+        IReadOnlyList<string> goals = model.Chain(model.Latest(goal));
+        foreach (IReadOnlyList<RecordEnvelope> unreadable in model.UnreadableLines)
+        {
+            List<RecordEnvelope> carrying = [.. unreadable.Where(r => r.Type == "operation" && EstateModel.BodyString(r, "action") == OperationType.AgentRun
+                && TJson.Text(TJson.Object(r.Body, "target"), "goal") is string named && goals.Contains(named))];
+            if (carrying.Count == 0 || !unreadable.Any(Counts))
+            {
+                continue;
+            }
+
+            RecordEnvelope last = unreadable.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).Last();
+            int intents = Math.Max(1, carrying.Where(r => r.Supersedes is null).Select(r => r.Id).Distinct(StringComparer.Ordinal).Count());
+            for (int i = 0; i < intents; i++)
+            {
+                outcomes.Add((last, last, true, unreadable));
             }
         }
 
@@ -958,6 +1002,48 @@ internal static class StandingAgents
         }
 
         return lineages;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-156): a run's untied heads, the revisions in <paramref name="untied"/> that no other revision there follows on its own
+    /// supersedes chain, directly or through revisions a tied principal wrote, in the lineage's order; and, for each revision of the lineage,
+    /// how many untied revisions lie above it on that chain. A tied principal's revisions add nothing to either, so a branch it padded raises
+    /// no untied revision above another, and an untied revision written on any branch is a head until an untied revision follows it.
+    /// </summary>
+    private static (List<RecordEnvelope> Heads, Dictionary<string, int> Above) Heads(List<(RecordEnvelope Record, int Depth)> line, List<(RecordEnvelope Record, int Depth)> untied)
+    {
+        var byId = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
+        foreach ((RecordEnvelope record, _) in line)
+        {
+            byId.TryAdd(record.Id, record);
+        }
+
+        var free = untied.Select(e => e.Record.Id).ToHashSet(StringComparer.Ordinal);
+        var above = new Dictionary<string, int>(StringComparer.Ordinal);
+        var followed = new HashSet<string>(StringComparer.Ordinal);
+        foreach ((RecordEnvelope record, _) in line)
+        {
+            int count = 0;
+            var seen = new HashSet<string>(StringComparer.Ordinal) { record.Id };
+            string? prior = record.Supersedes;
+            while (prior is not null && byId.TryGetValue(prior, out RecordEnvelope? earlier) && seen.Add(prior))
+            {
+                if (free.Contains(prior))
+                {
+                    count++;
+                    if (free.Contains(record.Id))
+                    {
+                        followed.Add(prior);
+                    }
+                }
+
+                prior = earlier.Supersedes;
+            }
+
+            above[record.Id] = count;
+        }
+
+        return ([.. untied.Select(e => e.Record).Where(r => !followed.Contains(r.Id))], above);
     }
 
     /// <summary>

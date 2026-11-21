@@ -346,6 +346,62 @@ public class StandingAgentRoutingTests
     }
 
     [Fact]
+    public void ARecordReusingAnIdentifierOfAFailedRunLeavesThePauseHeldAndNothingRouted()
+    {
+        // From 0.9.4 (FIX-156), through the worker: after three failed runs, the builder writes by hand a record carrying the identifier of the
+        // third run's settlement, as an observed success, dated in the month before so that its path sorts first, or in the month after; then
+        // one carrying its intent's identifier naming no goal. After each, goal due reads the agent held with three failures, and goal step
+        // starts no run; removing the copy reads the run again.
+        using var run = new RunEstate(recordFormat: 3);
+        string builder = run.Estate.BuilderId;
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 });
+        string? third = null;
+        for (int i = 0; i < 3; i++)
+        {
+            GoalStepResponse failing = Step(run, goal, "fail-" + i, scenario: "claude-fails");
+            Assert.True(failing.Ok, failing.Message);
+            Assert.Equal("known-failure", run.Settled(failing.Run!.Run).Status);
+            third = failing.Run.Run;
+        }
+
+        JsonElement Due() => run.Service.GoalDue(goal)!.Json;
+        (string, int) Pause() => (Due().GetProperty("state").GetString()!, Due().GetProperty("failures").GetProperty("consecutive").GetInt32());
+        Assert.Equal(("held", 3), Pause());
+        AgentRuns.Run failed = AgentRuns.Find(run.Estate.Load(), third!)!;
+        RecordEnvelope intent = failed.Intent;
+        RecordEnvelope settled = failed.Revisions.First(r => EstateModel.BodyString(r, "status") == "known-failure");
+        var signer = new Vericairn.Records.Signing.StoreSigner(new Vericairn.Records.Signing.FileKeyStore(Vericairn.Records.Signing.VericairnHome.Path()), run.BuilderDevice);
+        DateTimeOffset now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        RecordEnvelope Reusing(RecordEnvelope original, JsonObject body, DateTimeOffset at)
+        {
+            run.Estate.SetClock(at);
+            RecordEnvelope copy = run.Estate.Add("operation", builder, body.ToJsonString(), original.Subject, original.Supersedes, id: original.Id, signer: signer);
+            Assert.NotEqual(original.ExpectedPath, copy.ExpectedPath);
+            return copy;
+        }
+
+        void Remove(RecordEnvelope copy) => File.Delete(Path.Combine(run.Estate.Root, copy.ExpectedPath.Replace('/', Path.DirectorySeparatorChar)));
+        foreach (int months in new[] { -1, 1 })
+        {
+            JsonObject success = JsonNode.Parse(settled.Body.GetRawText())!.AsObject();
+            success["status"] = "observed-success";
+            RecordEnvelope copy = Reusing(settled, success, now.AddMonths(months));
+            Assert.Equal(("held", 3), Pause());
+            Assert.Contains("record.duplicate-id", Due().GetProperty("reason").GetString(), StringComparison.Ordinal);
+            Assert.Null(Step(run, goal, "after-settlement-" + months).Run);
+            Remove(copy);
+            Assert.Equal(("held", 3), Pause());
+        }
+
+        JsonObject elsewhere = JsonNode.Parse(intent.Body.GetRawText())!.AsObject();
+        elsewhere["target"]!.AsObject().Remove("goal");
+        elsewhere["status"] = "canceled";
+        Reusing(intent, elsewhere, now.AddMonths(-1));
+        Assert.Equal(("held", 3), Pause());
+        Assert.Null(Step(run, goal, "after-intent").Run);
+    }
+
+    [Fact]
     public void ALapsedOrPausedAgentDispatchesNothingAndATimeAheadOfTheClockIsRefused()
     {
         using var run = new RunEstate(recordFormat: 3);

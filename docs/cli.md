@@ -1252,13 +1252,23 @@ nothing written after the settlement, whatever date it claims, so after three fa
 completed result leave the pause held and the failures at three. A run settled from the worker's retained observation, or by hand,
 names no result unless its writer names one. A run is read from all of its records, every revision on every branch, whatever a
 fork, the order of identifiers or a reconciliation makes its current revision. Where a record that no agent tied to the goal wrote
-settles or cancels the run, the latest record no tied agent wrote, by its place in the run's history and never by its date, decides
-the run (when that record leaves it canceled or unsettled, the run counts for nothing), and the records tied agents wrote count for
-nothing: their revisions and divergent records take back no failure and turn no success into a failure, and an untied principal's
-correction, such as the operator's, counts as written. Only where no record by an untied principal settles or cancels the run does
-a known-failure settlement a tied agent wrote count, as a failure, as for an agent that steps its own goal. A run whose intent or
-settlement an agent tied to the goal recorded never succeeds, a stop such an agent records names no one who decides for the goal,
-and its runs never take a result off a run another principal recorded.
+settles or cancels the run, the records tied agents wrote count for nothing: their revisions and divergent records take back no
+failure and turn no success into a failure. From 0.9.4 (FIX-156) the run is then decided by its latest untied records: each record
+no tied agent wrote that no other such record follows on its own chain of revisions, however many records a tied agent put between
+them. On one chain that is the latest untied record, so an untied principal's correction, such as the operator's, written on the
+settlement it corrects counts as written (when it leaves the run canceled or unsettled, the run counts for nothing). Where such
+records on different branches read differently, the reading least favorable to the agent decides, a failure over nothing and
+nothing over a success; neither a record's place in the run's history nor its date ranks one over another. Only where no record by an
+untied principal settles or cancels the run does a known-failure settlement a tied agent wrote count, as a failure, as for an agent
+that steps its own goal. A run whose intent or settlement an agent tied to the goal recorded never succeeds, a stop such an agent
+records names no one who decides for the goal, and its runs never take a result off a run another principal recorded.
+
+From 0.9.4 (FIX-156), a record carrying another record's identifier is never read in its place, whatever its date or path: the estate
+reads neither of them, nor any record of their line (`record.duplicate-id`, `record.duplicate-line`), and refuses every write until
+all but one is removed. Such records count against the agent: a run of the goal that cannot be read counts as failed, a run an
+unread record names counts as its own records decide it or as failed, an output that cannot be read stays open, an answer that
+cannot be read answers nothing, and `goal due` reads an agent that any unread record names `held`, naming that record, so `goal
+step` dispatches nothing of it ([record format 3](record-format-v3.md#identifiers-more-than-one-record-carries-094)).
 
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]

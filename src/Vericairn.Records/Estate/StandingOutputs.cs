@@ -149,7 +149,8 @@ internal static partial class StandingOutputs
     /// asks still waiting and its publication requests not closed, each read at its revision as it stood then. From FIX-155 no record of
     /// the agent, or of an agent tied to its goal, closes one, whatever its date: a possibility reads as <see cref="Disposition"/> says, an
     /// ask waits until a decision <see cref="Counting"/> keeps answers it (no revision withdraws a standing agent's ask), and a publication
-    /// request stays open until an operator who is a person closes it (<see cref="OperatorRequests.Closures"/>).
+    /// request stays open until an operator who is a person closes it (<see cref="OperatorRequests.Closures"/>). From FIX-156 an output whose
+    /// line the loader left out as unreadable (<see cref="EstateModel.UnreadableLines"/>) stays open, so no reused identifier frees one.
     /// </summary>
     public static int OpenCount(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
@@ -173,6 +174,18 @@ internal static partial class StandingOutputs
                 _ => false,
             };
             open += counts ? 1 : 0;
+        }
+
+        // From FIX-156 an output line the loader left out as unreadable stays open: one for each first revision it holds, at least one.
+        foreach (IReadOnlyList<RecordEnvelope> line in model.UnreadableLines)
+        {
+            List<RecordEnvelope> raised = [.. line.Where(r => OutputTypes.Contains(r.Type) && Of(r)?.Goal == identity)];
+            if (raised.Count == 0 || (before is not null && !line.Any(r => GoalRules.Before(r, before))))
+            {
+                continue;
+            }
+
+            open += Math.Max(1, raised.Where(r => !raised.Any(o => o.Id == r.Supersedes && o.Type == r.Type)).Select(r => r.Id).Distinct(StringComparer.Ordinal).Count());
         }
 
         return open;
@@ -200,6 +213,12 @@ internal static partial class StandingOutputs
 
         RecordEnvelope? goal = model.ById.TryGetValue(raised.Goal, out RecordEnvelope? named) && named.Type == "goal" ? named : null;
         string? disposition = EstateModel.BodyString(first, "disposition");
+        if (goal is null && model.IsUnreadable(raised.Goal))
+        {
+            // From FIX-156: with its goal unreadable, no one can be told apart from an agent tied to it, so no revision disposes of it.
+            return disposition;
+        }
+
         JsonElement adopted = TJson.Object(first.Body, "adoptedAs");
         bool after = false;
         foreach (string id in model.Chain(revision))
@@ -614,7 +633,8 @@ internal static partial class StandingOutputs
             }
         }
 
-        foreach (RecordEnvelope assignment in model.OfType("assignment"))
+        // From FIX-156 a record the loader left out as unreadable ties every agent it would tie, so no reused identifier unties one.
+        foreach (RecordEnvelope assignment in model.OfType("assignment").Concat(model.Unreadable.Where(r => r.Type == "assignment")))
         {
             if (assignment.Subject is not null && orders.Contains(assignment.Subject.Id) && EstateModel.BodyString(assignment, "contributor") is string contributor)
             {
@@ -640,7 +660,7 @@ internal static partial class StandingOutputs
 
             if (roster)
             {
-                foreach (RecordEnvelope record in model.OfType("roster"))
+                foreach (RecordEnvelope record in model.OfType("roster").Concat(model.Unreadable.Where(r => r.Type == "roster")))
                 {
                     Name(Routing.Named(record.Body, role) ?? [], role, record);
                 }
@@ -706,6 +726,27 @@ internal static partial class StandingOutputs
     }
 
     /// <summary>
+    /// From 0.9.4 (FIX-156): whether an ask would be guarded by a standing agent's goal that the loader left out as unreadable: a standing
+    /// agent's ask whose raisedBy names such a goal, or one of the runtime's asks, by its opening words, whose goal is such a record.
+    /// </summary>
+    private static bool GuardedByUnreadable(EstateModel model, RecordEnvelope ask)
+    {
+        if (model.UnreadableLines.Count == 0)
+        {
+            return false;
+        }
+
+        if (Of(FirstOf(model, ask)) is RaisedBy raised)
+        {
+            return model.IsUnreadable(raised.Goal);
+        }
+
+        RecordEnvelope latest = model.Latest(ask);
+        string question = EstateModel.BodyString(latest, "question") ?? string.Empty;
+        return RuntimeWords.Any(p => question.StartsWith(p, StringComparison.Ordinal)) && model.IsUnreadable(EstateModel.BodyString(latest, "goal"));
+    }
+
+    /// <summary>
     /// Why a decision that answers an ask a standing agent's goal guards (<see cref="GuardedBy"/>) answers nothing (§ 8: no standing agent
     /// answers its own output, and none ends its own failure pause), whatever its decidedBy names: it is recorded by the agent that raised
     /// a standing agent's ask (the author of its first revision, which names raisedBy), or by an agent tied to the goal (<see cref="TieOf"/>),
@@ -746,6 +787,12 @@ internal static partial class StandingOutputs
     internal static List<RecordEnvelope> Counting(EstateModel model, RecordEnvelope ask, IEnumerable<RecordEnvelope> answers, RecordEnvelope? asOf = null)
     {
         List<RecordEnvelope> all = [.. answers];
+        if (all.Count > 0 && GuardedByUnreadable(model, ask))
+        {
+            // From FIX-156: an ask of a standing agent whose goal is unreadable stays waiting, since no answer can be told apart from its own.
+            return [];
+        }
+
         return all.Count == 0 || GuardedBy(model, ask) is not RecordEnvelope goal ? all : all.FindAll(d => SelfAnswer(model, d, ask, goal, asOf) is null);
     }
 

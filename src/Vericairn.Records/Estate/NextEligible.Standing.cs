@@ -44,7 +44,8 @@ public static partial class NextEligible
         string status = agent.Status;
         AgentRuns.Ledger ledger = AgentRuns.Of(model, current);
         AttentionRoute? failure = null;
-        if (agent.State == "held" && agent.FailureTrigger is RecordEnvelope failed)
+        // From FIX-156 an agent held only by a record it cannot read asks nothing of the sponsor about failures.
+        if (agent.State == "held" && agent.Failures >= agent.FailureLimit && agent.FailureTrigger is RecordEnvelope failed)
         {
             var attention = new FlowPosition.Attention("consecutive-failures", failed, $"the standing agent's runs failed {agent.Failures} times in a row, the limit of {agent.FailureLimit} its goal sets: nothing more of it is dispatched until the sponsor answers");
             failure = new AttentionRoute(attention, AttentionOf(model, current, status, "sponsor", attention, machine, attentionOnly: true));

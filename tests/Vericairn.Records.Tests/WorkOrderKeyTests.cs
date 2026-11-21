@@ -108,7 +108,8 @@ public sealed class WorkOrderKeyTests(ITestOutputHelper output)
     public void TwoFilesWithOneIdAreNotDuplicateKeysOfEachOther()
     {
         // The scan compared ids, so two copies of one record under different paths shared no key with each other; record.duplicate-id
-        // reports them instead. A third work order with the key is a duplicate of both.
+        // reports them instead. From 0.9.4 (FIX-156) neither copy is read, so a third work order with the key meets none of them; once
+        // one copy is removed, the third is a duplicate of the one that remains.
         using var estate = new TestEstate(3);
         RecordEnvelope order = estate.Add("work-order", estate.OperatorId, Order("W-1").ToJsonString());
         string original = Path.Combine(estate.Root, order.ExpectedPath);
@@ -117,8 +118,12 @@ public sealed class WorkOrderKeyTests(ITestOutputHelper output)
         File.Copy(original, copy);
         EstateModel model = estate.Load();
         Assert.DoesNotContain(model.Findings, f => f.Code == Code);
+        Assert.Equal(2, model.Findings.Count(f => f.Code == "record.duplicate-id"));
+        Assert.False(model.ById.ContainsKey(order.Id));
 
         RecordEnvelope other = estate.Add("work-order", estate.OperatorId, Order("W-1").ToJsonString());
+        Assert.DoesNotContain(estate.Load().Findings, f => f.Code == Code);
+        File.Delete(copy);
         Assert.Contains(estate.Load().Findings, f => f.Code == Code && f.Location == other.ExpectedPath);
     }
 

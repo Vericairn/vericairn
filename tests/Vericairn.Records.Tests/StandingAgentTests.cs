@@ -692,6 +692,201 @@ public class StandingAgentTests
         Assert.Equal(("active", 0), Pause());
     }
 
+    /// <summary>An earlier month than the fixture's records, so that a record dated in it sorts before them by path, and a later one.</summary>
+    public static readonly DateTimeOffset EarlierMonth = new(2026, 9, 15, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A later month than the fixture's records, so that a record dated in it sorts after them by path.</summary>
+    public static readonly DateTimeOffset LaterMonth = new(2026, 12, 15, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>
+    /// The builder's hand-written record carrying another record's identifier, with its own body, dated in the month given: its path sorts
+    /// before that record's for an earlier month and after it for a later one.
+    /// </summary>
+    internal static RecordEnvelope Reusing(StandingFixture fixture, RecordEnvelope original, JsonObject body, DateTimeOffset at, string? supersedes)
+    {
+        DateTimeOffset now = fixture.Estate.Clock;
+        fixture.Estate.SetClock(at);
+        RecordEnvelope copy = fixture.Estate.Add(original.Type, fixture.Estate.BuilderId, body.ToJsonString(), subject: original.Subject, supersedes: supersedes, id: original.Id);
+        fixture.Estate.SetClock(now);
+        Assert.NotEqual(original.ExpectedPath, copy.ExpectedPath);
+        return copy;
+    }
+
+    /// <summary>Removes a record's file, as the operator removes a copy.</summary>
+    internal static void Remove(StandingFixture fixture, RecordEnvelope record) => File.Delete(Path.Combine(fixture.Estate.Root, record.ExpectedPath.Replace('/', Path.DirectorySeparatorChar)));
+
+    [Fact]
+    public void ARecordReusingASettlementsIdentifierTakesBackNoFailureWhateverItsMonth()
+    {
+        // The Reviewer's probe of FIX-155: the carrier writes by hand a record carrying the identifier of a failed run's settlement, canceled
+        // or an observed success naming a completed result, dated in an earlier month so that its path sorts first, or in a later one.
+        // Neither copy is read, nor any record of the run: the run counts as failed, and the agent is held until the copy is removed.
+        foreach (string status in new[] { "canceled", "observed-success" })
+        {
+            foreach (DateTimeOffset month in new[] { EarlierMonth, LaterMonth })
+            {
+                using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+                (string, int) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures);
+                StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+                RecordEnvelope assignment = fixture.Assign(occurrence);
+                RecordEnvelope? done = null;
+                JsonObject Revised(RecordEnvelope settled)
+                {
+                    JsonObject body = PolicyFixture.Body(settled);
+                    body["status"] = status;
+                    if (done is not null) body["observed"]!["reference"] = done.Id;
+                    return body;
+                }
+
+                // Below the limit: two runs the operator records fail; the copy of the second settlement leaves both counted, and holds the agent.
+                fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
+                RecordEnvelope second = fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
+                done = status == "observed-success" ? fixture.Result(assignment, "completed") : null;
+                RecordEnvelope below = Reusing(fixture, second, Revised(second), month, second.Supersedes);
+                StandingAgents.Agent agent = fixture.Agent(fixture.Estate.Clock);
+                Assert.Equal(("held", 2), (agent.State, agent.Failures));
+                Assert.Contains("record.duplicate-id", agent.Reason, StringComparison.Ordinal);
+                Assert.All(agent.Occurrences, o => Assert.NotEqual("due", o.State));
+                Remove(fixture, below);
+                Assert.Equal(("active", 2), Pause());
+
+                // At the limit: the third fails and the pause holds; the copy of its settlement leaves it held at three and a run intent refused.
+                RecordEnvelope third = fixture.Settle(fixture.RunIntent(assignment, "run-3"), "known-failure");
+                Assert.Equal(("held", 3), Pause());
+                RecordEnvelope copy = Reusing(fixture, third, Revised(third), month, third.Supersedes);
+                Assert.Equal(("held", 3), Pause());
+                Assert.Contains("record.duplicate-id", fixture.Agent(fixture.Estate.Clock).Reason, StringComparison.Ordinal);
+                Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+                EstateModel model = fixture.Estate.Load();
+                Assert.Equal(new[] { copy.ExpectedPath, third.ExpectedPath }.Order(StringComparer.Ordinal), model.Findings.Where(f => f.Code == "record.duplicate-id").Select(f => f.Location).Order(StringComparer.Ordinal));
+                Assert.False(model.ById.ContainsKey(third.Id));
+
+                // Removing the copy reads the run again: three failures hold the pause.
+                Remove(fixture, copy);
+                StandingAgents.Agent restored = fixture.Agent(fixture.Estate.Clock);
+                Assert.Equal(("held", 3), (restored.State, restored.Failures));
+                Assert.Contains("failed in a row", restored.Reason, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    [Fact]
+    public void ARecordReusingARunIntentsIdentifierTakesNoRunOutOfTheCount()
+    {
+        // A copy of a failed run's intent naming no goal, dated in an earlier month so that it is read first, or in a later one: the run's line
+        // is not read, and it counts as one failed run of the goal its other records name.
+        foreach (DateTimeOffset month in new[] { EarlierMonth, LaterMonth })
+        {
+            using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+            (string, int) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures);
+            StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+            RecordEnvelope assignment = fixture.Assign(occurrence);
+            fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
+            fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
+            RecordEnvelope intent = fixture.RunIntent(assignment, "run-3");
+            fixture.Settle(intent, "known-failure");
+            Assert.Equal(("held", 3), Pause());
+
+            JsonObject body = PolicyFixture.Body(intent);
+            body["target"]!.AsObject().Remove("goal");
+            body["status"] = "canceled";
+            RecordEnvelope copy = Reusing(fixture, intent, body, month, null);
+            StandingAgents.Agent agent = fixture.Agent(fixture.Estate.Clock);
+            Assert.Equal(("held", 3), (agent.State, agent.Failures));
+            Assert.Contains("record.duplicate-id", agent.Reason, StringComparison.Ordinal);
+            Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+            Remove(fixture, copy);
+            Assert.Equal(("held", 3), Pause());
+        }
+    }
+
+    /// <summary>A run's revision as goal step's worker writes it, by the operator or by the builder: its status, and once settled what it observed.</summary>
+    private static JsonObject Revision(StandingFixture fixture, RecordEnvelope assignment, RecordEnvelope intent, string status, RecordEnvelope? result = null)
+    {
+        JsonObject body = fixture.RunBody(assignment, intent.Body.GetProperty("identity").GetString()!, status);
+        body["dispatchedAt"] = intent.At;
+        if (AgentRuns.Settled.Contains(status))
+        {
+            body["observed"] = new JsonObject { ["summary"] = "The run ended.", ["at"] = RecordParser.FormatTimestamp(fixture.Estate.Clock) };
+            if (result is not null) body["observed"]!["reference"] = result.Id;
+            body["usage"] = new JsonObject { ["wallMinutes"] = 5, ["unreported"] = new JsonArray() };
+        }
+
+        return body;
+    }
+
+    [Fact]
+    public void AnUntiedRevisionOnABranchATiedPrincipalPaddedNeitherOutranksAnUntiedSettlementNorIsOutrankedWrongly()
+    {
+        // The depth rule of FIX-155's last review: the carrier pads a run's dispatched revision with ten revisions of its own, and the operator
+        // writes by hand on the branches it made. Tied revisions place nothing; on one line the untied revision the others lead to decides;
+        // across branches the untied heads' least favorable reading decides, a failure over nothing and nothing over a success.
+        foreach (string shape in new[] { "unsettled-on-the-padding", "success-on-the-padding", "correction-over-the-padding", "correction-on-a-fork" })
+        {
+            using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+            (string, int) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures);
+            StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+            RecordEnvelope assignment = fixture.Assign(occurrence);
+            fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
+            fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
+            Assert.Equal(("active", 2), Pause());
+
+            RecordEnvelope intent = fixture.RunIntent(assignment, "run-3");
+            RecordEnvelope? done = shape == "success-on-the-padding" ? fixture.Result(assignment, "completed") : null;
+            RecordEnvelope dispatched = fixture.Add("operation", Revision(fixture, assignment, intent, "dispatched"), supersedes: intent.Id);
+            RecordEnvelope? firstPad = null;
+            RecordEnvelope Pad(RecordEnvelope from)
+            {
+                RecordEnvelope last = from;
+                for (int i = 0; i < 10; i++)
+                {
+                    last = fixture.Add("operation", Revision(fixture, assignment, intent, "dispatched"), builder: true, supersedes: last.Id);
+                    firstPad ??= last;
+                }
+
+                return last;
+            }
+
+            // The carrier's fork of the dispatched revision, sorting before its padding, so the run as read ends on it.
+            RecordEnvelope Fork() => fixture.Estate.Add("operation", fixture.Estate.BuilderId, Revision(fixture, assignment, intent, "dispatched").ToJsonString(), supersedes: dispatched.Id, id: Below(firstPad!.Id));
+
+            (string, int) expected;
+            switch (shape)
+            {
+                case "unsettled-on-the-padding":
+                    // An untied revision leaving the run dispatched at the padded end (depth 12), then the operator's known failure on the
+                    // carrier's fork (depth 3): the settlement is not outranked by the deeper unsettled one, and three failures hold.
+                    fixture.Add("operation", Revision(fixture, assignment, intent, "dispatched"), supersedes: Pad(dispatched).Id);
+                    fixture.Add("operation", Revision(fixture, assignment, intent, "known-failure"), supersedes: Fork().Id);
+                    expected = ("held", 3);
+                    break;
+                case "success-on-the-padding":
+                    // The operator's success naming the completed result at the padded end, and its revision leaving the run dispatched on
+                    // a shallower fork: the heads disagree, so the run counts for nothing and ends no failure.
+                    fixture.Add("operation", Revision(fixture, assignment, intent, "observed-success", done), supersedes: Pad(dispatched).Id);
+                    fixture.Add("operation", Revision(fixture, assignment, intent, "dispatched"), supersedes: dispatched.Id);
+                    expected = ("active", 2);
+                    break;
+                case "correction-over-the-padding":
+                    // The operator's known failure, padded by the carrier, and the operator's correction to canceled written over the padding:
+                    // the correction follows the settlement on its own chain and counts as written.
+                    RecordEnvelope settled = fixture.Add("operation", Revision(fixture, assignment, intent, "known-failure"), supersedes: dispatched.Id);
+                    fixture.Add("operation", Revision(fixture, assignment, intent, "canceled"), supersedes: Pad(settled).Id);
+                    expected = ("active", 2);
+                    break;
+                default:
+                    // The operator's known failure at the padded end and its correction to canceled on a shallower fork, which does not follow
+                    // it: the failure is not outranked, as it was not by depth before.
+                    fixture.Add("operation", Revision(fixture, assignment, intent, "known-failure"), supersedes: Pad(dispatched).Id);
+                    fixture.Add("operation", Revision(fixture, assignment, intent, "canceled"), supersedes: dispatched.Id);
+                    expected = ("held", 3);
+                    break;
+            }
+
+            Assert.True(expected == Pause(), $"{shape}: {Pause()}");
+        }
+    }
+
     [Fact]
     public void ARunIntentIsRefusedPastUntilDuringThePausePastThePeriodsRunsAndOnASettledOccurrenceWhoeverRecordsIt()
     {
