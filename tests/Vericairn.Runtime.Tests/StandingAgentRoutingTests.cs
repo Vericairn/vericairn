@@ -258,6 +258,47 @@ public class StandingAgentRoutingTests
     }
 
     [Fact]
+    public void TheCarriersRevisionOfItsFailedRunsSettlementLeavesThePauseHeldAndNothingRouted()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string builder = run.Estate.BuilderId;
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 });
+        string? third = null;
+        for (int i = 0; i < 3; i++)
+        {
+            GoalStepResponse failing = Step(run, goal, "fail-" + i, scenario: "claude-fails");
+            Assert.True(failing.Ok, failing.Message);
+            Assert.Equal("known-failure", run.Settled(failing.Run!.Run).Status);
+            third = failing.Run.Run;
+        }
+
+        (string, int) Due() => (run.Service.GoalDue(goal)!.Json.GetProperty("state").GetString()!, run.Service.GoalDue(goal)!.Json.GetProperty("failures").GetProperty("consecutive").GetInt32());
+        Assert.Equal(("held", 3), Due());
+        RecordEnvelope settled = AgentRuns.Find(run.Estate.Load(), third!)!.Latest;
+
+        // Through the service, the builder, which carried the failed runs, revises the third run's settlement: refused.
+        JsonObject canceled = JsonNode.Parse(settled.Body.GetRawText())!.AsObject();
+        canceled["status"] = "canceled";
+        WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("operation", builder, JsonSerializer.SerializeToElement(canceled), Supersedes: settled.Id));
+        Assert.False(refused.Ok);
+        Assert.Equal(("held", 3), Due());
+
+        // Written by hand, its revisions to canceled, to uncertain and to an observed success take back no failure: goal due reads the agent
+        // held with three failures after each, and goal step starts no run.
+        string latest = settled.Id;
+        run.Estate.SetClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds()));
+        foreach (string status in new[] { "canceled", "uncertain", "observed-success" })
+        {
+            JsonObject revised = JsonNode.Parse(settled.Body.GetRawText())!.AsObject();
+            revised["status"] = status;
+            latest = run.Estate.Add("operation", builder, revised.ToJsonString(), supersedes: latest).Id;
+            Assert.Equal(("held", 3), Due());
+            GoalStepResponse step = Step(run, goal, "after-" + status);
+            Assert.Null(step.Run);
+        }
+    }
+
+    [Fact]
     public void ALapsedOrPausedAgentDispatchesNothingAndATimeAheadOfTheClockIsRefused()
     {
         using var run = new RunEstate(recordFormat: 3);

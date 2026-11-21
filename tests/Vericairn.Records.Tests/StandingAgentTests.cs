@@ -550,6 +550,49 @@ public class StandingAgentTests
     }
 
     [Fact]
+    public void TheCarriersRevisionOfASettledFailureTakesBackNoFailureAndTheOperatorsCorrectionCountsAsWritten()
+    {
+        foreach (string status in new[] { "canceled", "uncertain", "observed-success" })
+        {
+            using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+            (string, int, string?) Pause() => (fixture.Agent(fixture.Estate.Clock).State, fixture.Agent(fixture.Estate.Clock).Failures, fixture.Agent(fixture.Estate.Clock).FailureTrigger?.Id);
+            StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+            RecordEnvelope assignment = fixture.Assign(occurrence);
+            JsonObject Revised(RecordEnvelope settled, string to, RecordEnvelope? result = null)
+            {
+                JsonObject body = PolicyFixture.Body(settled);
+                body["status"] = to;
+                if (result is not null) body["observed"]!["reference"] = result.Id;
+                return body;
+            }
+
+            // Below the limit: two runs the operator records fail, and the carrier, which the roster names and which carried them, writes by
+            // hand a revision of the second settlement: it takes back no failure.
+            fixture.Settle(fixture.RunIntent(assignment, "run-1"), "known-failure");
+            RecordEnvelope second = fixture.Settle(fixture.RunIntent(assignment, "run-2"), "known-failure");
+            RecordEnvelope below = fixture.Add("operation", Revised(second, status), builder: true, supersedes: second.Id);
+            Assert.Equal(("active", 2, second.Id), Pause());
+
+            // At the limit: the third fails and the pause holds; the carrier's revision of that settlement, a success naming a completed result
+            // it records afterwards included, ends nothing: the pause holds at three and a run intent is refused.
+            RecordEnvelope third = fixture.Settle(fixture.RunIntent(assignment, "run-3"), "known-failure");
+            Assert.Equal(("held", 3, third.Id), Pause());
+            RecordEnvelope? late = status == "observed-success" ? fixture.Result(assignment, "completed") : null;
+            RecordEnvelope atLimit = fixture.Add("operation", Revised(third, status, late), builder: true, supersedes: third.Id);
+            Assert.Equal(("held", 3, third.Id), Pause());
+            Assert.Contains(Validate(fixture, "operation", fixture.RunBody(assignment, "run-held", "not-started")), f => f.Code == "operation.standing" && f.Message.Contains("failed in a row", StringComparison.Ordinal));
+            List<Finding> errors = [.. fixture.Estate.Load().Findings.Where(f => f.Severity == Severity.Error)];
+            Assert.Contains(errors, f => f.Location.Contains(below.Id, StringComparison.Ordinal));
+            Assert.Contains(errors, f => f.Location.Contains(atLimit.Id, StringComparison.Ordinal));
+
+            // The operator's own correction of the third settlement to canceled counts as written, as it did before: that run counts for nothing,
+            // and two failures remain.
+            fixture.Add("operation", Revised(atLimit, "canceled"), supersedes: atLimit.Id);
+            Assert.Equal(("active", 2), (Pause().Item1, Pause().Item2));
+        }
+    }
+
+    [Fact]
     public void ARunIntentIsRefusedPastUntilDuringThePausePastThePeriodsRunsAndOnASettledOccurrenceWhoeverRecordsIt()
     {
         using var fixture = new StandingFixture(budget: Roomy.DeepClone().AsObject(), period: new JsonObject { ["unit"] = "months", ["runs"] = 2, ["wallMinutes"] = 200 }, until: "2026-10-13T13:00:00Z");

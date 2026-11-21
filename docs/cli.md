@@ -1250,9 +1250,11 @@ nothing to review. A completed or partial result, and the attempt it closes, is 
 makes a run succeed by itself, whether recorded with `work result`, `records new` or by hand: only a settlement names it, and
 nothing written after the settlement, whatever date it claims, so after three failed runs the carrying agent's own attempt and
 completed result leave the pause held and the failures at three. A run settled from the worker's retained observation, or by hand,
-names no result unless its writer names one. A run whose intent or settlement an agent tied to the goal recorded never succeeds, a
-stop such an agent records names no one who decides for the goal, and its runs never take a result off a run another principal
-recorded.
+names no result unless its writer names one. A run's status and settlement are read from the latest of its revisions no agent tied
+to the goal wrote, so such an agent's revision of a settled run, to canceled, uncertain or a success, takes back no failure, while a
+known-failure settlement it wrote still counts as one; an untied principal's correction counts as written. A run whose intent or
+settlement an agent tied to the goal recorded never succeeds, a stop such an agent records names no one who decides for the goal,
+and its runs never take a result off a run another principal recorded.
 
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]

@@ -702,7 +702,11 @@ worker's for a cap count. A run succeeded when it settled `observed-success`
 with `observed.reference` naming a `completed` or `partial` result on an attempt
 of its assignment, recorded after its intent, with no such failure result, and no
 tied agent wrote its intent or its settlement; any other run counts for nothing,
-one that exited cleanly with no result included. From 0.9.4 the worker names in
+one that exited cleanly with no result included. A run's status, settlement and
+`observed.reference` are read from the latest of its revisions no tied agent
+wrote, whatever their `at`, so a tied agent's revision of a settled run changes
+none of them, while a `known-failure` revision a tied agent wrote still counts as
+a failure; an untied principal's revision counts as written. From 0.9.4 the worker names in
 `observed.reference` of an observed success the latest `completed` or `partial`
 result its agent recorded during the run, on an attempt recorded during the run,
 as it sees them at the run's exit, and names none otherwise; a reader that

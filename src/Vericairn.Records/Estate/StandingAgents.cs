@@ -779,7 +779,10 @@ internal static class StandingAgents
     /// names the completed or partial result its agent recorded during it (<see cref="Seen"/>), with no such failure result, and no principal
     /// tied to the goal recorded its intent or its settlement. Otherwise it counts for nothing, a clean exit with no result included. A
     /// completed or partial result, and the attempt it closes, is a claim another principal reviews and never makes a run succeed by
-    /// itself: only the settlement, which no tied principal wrote, names it, and nothing written after it, whatever its date. A run no tied
+    /// itself: only the settlement, which no tied principal wrote, names it, and nothing written after it, whatever its date. A run's status,
+    /// settlement and reference are read from the latest of its revisions no tied principal wrote, so a tied principal's revision of a settled
+    /// run, to canceled, uncertain or a success, changes nothing, while a known-failure settlement a tied principal wrote still counts as a
+    /// failure; a correction by an untied principal, such as the operator's, counts as written. A run no tied
     /// principal recorded ends at the next run whose intent no tied principal recorded, so no run a tied principal records takes a result
     /// off another. The outcomes count in the order the runs settled, each at the later of its intent and its settlement. An answered ask of
     /// the pause naming one of the failures cuts every outcome settled before the earlier of the ask and its first answer
@@ -790,14 +793,24 @@ internal static class StandingAgents
     {
         bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
         bool Tied(string by) => StandingOutputs.Tied(model, goal, by, before);
+        static bool Settles(RecordEnvelope revision) => AgentRuns.Settled.Contains(EstateModel.BodyString(revision, "status") ?? string.Empty);
+        RecordEnvelope? Settlement(AgentRuns.Run run) => run.Revisions.FirstOrDefault(r => Counts(r) && Settles(r));
         var outcomes = new List<(RecordEnvelope At, RecordEnvelope Record, bool Failed, IReadOnlyList<RecordEnvelope> Records)>();
-        foreach (AgentRuns.Run run in runs.Where(r => r.IsSettled && Counts(r.Latest)))
+        foreach (AgentRuns.Run run in runs.Where(r => Counts(r.Intent) && Settlement(r) is not null))
         {
-            RecordEnvelope settlement = run.Revisions.First(r => AgentRuns.Settled.Contains(EstateModel.BodyString(r, "status") ?? string.Empty));
-            bool tied = Tied(run.Intent.By) || Tied(settlement.By);
+            // From FIX-155 a run is read from the revisions no tied principal wrote, whatever their dates: its outcome is the latest of those,
+            // so a tied principal's revision of a settlement, to canceled, uncertain or a success, takes back no failure. A tied principal's
+            // own known-failure settlement still counts as a failure, as its blocked results do; nothing it writes makes a run succeed.
+            List<RecordEnvelope> revisions = [.. run.Revisions.Where(Counts)];
+            RecordEnvelope? untied = revisions.LastOrDefault(r => !Tied(r.By));
+            RecordEnvelope? decided = untied is not null && Settles(untied) ? untied : null;
+            RecordEnvelope? admitted = revisions.FirstOrDefault(r => Tied(r.By) && EstateModel.BodyString(r, "status") == "known-failure");
+            RecordEnvelope settlement = revisions.FirstOrDefault(r => !Tied(r.By) && Settles(r)) ?? Settlement(run)!;
+            bool tied = Tied(run.Intent.By) || decided is null;
             RecordEnvelope? carried = run.Assignment is string id && model.ById.TryGetValue(id, out RecordEnvelope? found) ? model.Latest(found) : null;
             IReadOnlyList<string> chain = carried is null ? [] : model.Chain(carried);
-            AgentRuns.Run? next = runs.Where(r => r.Assignment is not null && chain.Contains(r.Assignment) && GoalRules.Before(run.Intent, r.Intent) && (!Tied(r.Intent.By) || (tied && r.IsSettled)))
+            AgentRuns.Run? next = runs.Where(r => r.Assignment is not null && chain.Contains(r.Assignment) && GoalRules.Before(run.Intent, r.Intent) && Counts(r.Intent)
+                    && (!Tied(r.Intent.By) || (tied && Settlement(r) is not null)))
                 .OrderBy(r => r.Intent.At, StringComparer.Ordinal).ThenBy(r => r.Intent.Id, StringComparer.Ordinal).FirstOrDefault();
 
             // Every result of every attempt on the assignment, superseded attempts and results among them, so no revision takes a failure back.
@@ -809,13 +822,17 @@ internal static class StandingAgents
             {
                 outcomes.Add((at, failed[^1], true, [run.Latest, .. failed]));
             }
-            else if (run.Status == "known-failure" && !DeciderStopped(model, goal, run, before))
+            else if (decided is not null && EstateModel.BodyString(decided, "status") == "known-failure" && !DeciderStopped(model, goal, run, decided, before))
             {
-                outcomes.Add((at, run.Latest, true, [run.Latest]));
+                outcomes.Add((at, decided, true, [run.Latest]));
             }
-            else if (run.Status == "observed-success" && !tied && Seen(model, run, settlement, chain, before) is not null)
+            else if (admitted is not null)
             {
-                outcomes.Add((at, run.Latest, false, [run.Latest]));
+                outcomes.Add((at, admitted, true, [run.Latest]));
+            }
+            else if (!tied && EstateModel.BodyString(decided!, "status") == "observed-success" && Seen(model, run, decided!, chain, before) is not null)
+            {
+                outcomes.Add((at, decided!, false, [run.Latest]));
             }
         }
 
@@ -900,11 +917,12 @@ internal static class StandingAgents
     /// goal revision then names, when a person, or a principal holding the operator role then (goal pause --stop-runs, goal stop, an
     /// operator's run stop). A stop anyone else requested, the dispatcher that started the run included, and the worker's for a cap the
     /// run reached, leave its known failure the agent's; and from FIX-155 so does a stop first recorded in a revision a principal tied to
-    /// the goal wrote, whoever it names, judged before a record by the ties written before it.
+    /// the goal wrote, whoever it names, judged before a record by the ties written before it. The stop is the one the settlement read
+    /// (<paramref name="settled"/>) names.
     /// </summary>
-    private static bool DeciderStopped(EstateModel model, RecordEnvelope goal, AgentRuns.Run run, RecordEnvelope? before)
+    private static bool DeciderStopped(EstateModel model, RecordEnvelope goal, AgentRuns.Run run, RecordEnvelope settled, RecordEnvelope? before)
     {
-        if (TJson.Text(TJson.Object(run.Latest.Body, "stop"), "requestedBy") is not string by || by == "worker"
+        if (TJson.Text(TJson.Object(settled.Body, "stop"), "requestedBy") is not string by || by == "worker"
             || run.Revisions.FirstOrDefault(r => TJson.Text(TJson.Object(r.Body, "stop"), "requestedBy") == by) is not RecordEnvelope stopped
             || StandingOutputs.Tied(model, goal, stopped.By, before))
         {
