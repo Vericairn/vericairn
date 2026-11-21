@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -296,11 +298,7 @@ public sealed class EstateSession : IDisposable
     internal (EstateModel Model, IReadOnlyList<RecordFile> Files) LoadWithFiles()
     {
         Loads++;
-        if (readOnly)
-        {
-            IReadOnlyList<RecordFile> read = ReadFiles();
-            return (EstateLoader.Load(Root, read, null, objects: ObjectReader, context: Judgments), read);
-        }
+        if (readOnly) return ReadOnlyJudgment();
 
         // The lock is asked of this session itself, so a load under it is fresh from any caller (design/performance.md § 3.2).
         bool keeping = keepsJudgment && writeLock?.Entered != true;
@@ -319,6 +317,8 @@ public sealed class EstateSession : IDisposable
 
         kept = null;
         if (writeLock?.Entered == true) LockedJudgments++;
+        // What a client operation stopped at its request limit names as being judged (FIX-152).
+        using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
         if (Profile == "repository-synced")
         {
             Live.SyncFromDirectory(Root);
@@ -330,6 +330,7 @@ public sealed class EstateSession : IDisposable
             parseCache.Retain(files.ByPath);
             loadedFiles = files;
         }
+        ClientOperationActivity.Report(JudgingStage(files.Files.Count));
         EstateModel model = EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments);
         Live.SetMeta("lastLoadedAt", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
         if (keeping && writeLock?.Entered != true) kept = new Kept(stamp, Writes, files, model);
@@ -345,12 +346,8 @@ public sealed class EstateSession : IDisposable
     /// </summary>
     internal (EstateModel Model, IReadOnlyList<RecordFile> Files) JudgeAfresh()
     {
-        if (readOnly)
-        {
-            IReadOnlyList<RecordFile> read = ReadFiles();
-            return (EstateLoader.Load(Root, read, null, objects: ObjectReader, context: Judgments), read);
-        }
-
+        if (readOnly) return ReadOnlyJudgment();
+        using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
         if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
         LiveStore.FileSnapshot files = Live.Snapshot();
         if (!ReferenceEquals(files, loadedFiles))
@@ -360,8 +357,23 @@ public sealed class EstateSession : IDisposable
             kept = null;
         }
 
+        ClientOperationActivity.Report(JudgingStage(files.Files.Count));
         return (EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments), files.Files);
     }
+
+    private (EstateModel Model, IReadOnlyList<RecordFile> Files) ReadOnlyJudgment()
+    {
+        using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
+        IReadOnlyList<RecordFile> read = ReadFiles();
+        ClientOperationActivity.Report(JudgingStage(read.Count));
+        return (EstateLoader.Load(Root, read, null, objects: ObjectReader, context: Judgments), read);
+    }
+
+    // The stages of a judgment as a client operation stopped at its request limit names them (FIX-152).
+    private const string ReadingStage = "judging the estate: reading its record files";
+
+    private static string JudgingStage(int files) =>
+        string.Create(CultureInfo.InvariantCulture, $"judging the estate: verifying and validating its {files:N0} record files");
 
     /// <summary>Told each model <see cref="Load"/> judges, once it is judged: what cost tests count the passes over (FIX-136).</summary>
     internal Action<EstateModel>? Judged { get; set; }

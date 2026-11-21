@@ -5,9 +5,17 @@ using Vericairn.Protocol;
 
 namespace Vericairn.Runtime.Service;
 
-public sealed partial class EstateService : IClientOperationLifetime
+public sealed partial class EstateService : IClientOperationLifetime, IClientOperationClock
 {
     private readonly object lifetimeGate = new();
+
+    /// <summary>
+    /// From 0.9.4 (FIX-152): the clock this runtime's embedded client operations measure their request limits on; a test's stand-in stops
+    /// a read at its limit without waiting. The system's clock in every host.
+    /// </summary>
+    internal TimeProvider OperationClock { get; set; } = TimeProvider.System;
+
+    TimeProvider IClientOperationClock.OperationClock => OperationClock;
     private int clientOperations;
     private bool closeRequested;
     private bool resourcesClosed;

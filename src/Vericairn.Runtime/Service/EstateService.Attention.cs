@@ -63,8 +63,12 @@ public sealed partial class EstateService
             ? new("denied", "A device can acknowledge and read attention only for its own principal.", []) : null;
     }
 
+    // The stage a client operation stopped at its request limit names while attention is derived (FIX-152).
+    private const string AttentionStage = "deriving the required attention";
+
     private AttentionResponse AttentionLocked(EstateModel model, string principal)
     {
+        using IDisposable stage = ClientOperationActivity.Stage(AttentionStage);
         string at = RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow());
         // One derivation of the checks and the progress projection serves a command's status and attention alike (FIX-152).
         FindingList checks = SharedRepositoryChecks(model);

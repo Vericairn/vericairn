@@ -9,41 +9,43 @@ namespace Vericairn.Runtime.Service;
 
 public sealed partial class EstateService
 {
-    // The derivation a command's calls share while it runs, and how many command scopes are open; both under the gate (FIX-152).
-    private CommandDerivation? command;
-    private int commands;
+    // The command scope of the calling flow (FIX-152): the command line opens one on its thread before its calls, and every call it makes
+    // there, or on a task it starts, reads it; a request a daemon serves has none. It is the flow's, not the runtime's, so ending it waits
+    // for nothing (a read stopped at its request limit may still hold the gate), and a call that outlives its command, as such a read
+    // does, never reaches the next command's derivation.
+    private static readonly AsyncLocal<CommandScope?> CurrentCommand = new();
 
     /// <summary>
     /// From 0.9.4 (FIX-152; design/performance.md § 3.5): opens the scope of one command, within which human status's calls (status,
     /// communication, attention) and progress share one derivation of the repository checks, the policy sections and the progress
     /// projection for one judged model. The derivation reads the working tree (the repository walk, the writing scan) and the clock, which
     /// no stamp covers, so it is never kept with the model: it ends with the scope, and a call outside any scope, such as each request a
-    /// daemon serves, derives its own. Disposing the result ends the scope.
+    /// daemon serves, derives its own. Disposing the result ends the scope; a scope opened within this runtime's open scope on the same
+    /// flow is that scope.
     /// </summary>
     internal IDisposable Command()
     {
-        lock (gate)
-        {
-            if (commands++ == 0) command = new CommandDerivation();
-        }
-
-        return new CommandScope(this);
+        if (ScopeOf(CurrentCommand.Value) is not null) return NestedCommand.Instance;
+        var scope = new CommandScope(this, CurrentCommand.Value);
+        CurrentCommand.Value = scope;
+        return scope;
     }
 
-    private void EndCommand()
+    // This runtime's open scope among the calling flow's, if it has one; an ended scope shares nothing, so a call that outlives its
+    // command derives its own from then on.
+    private CommandScope? ScopeOf(CommandScope? scope)
     {
-        lock (gate)
-        {
-            if (commands > 0 && --commands == 0) command = null;
-        }
+        while (scope is not null && (scope.Ended || !ReferenceEquals(scope.Owner, this))) scope = scope.Outer;
+        return scope;
     }
 
-    // The open command's derivation for this model: a model judged afresh within the command starts it again. Caller holds the gate.
+    // The calling flow's derivation for this model: a model judged afresh within the command starts it again. Caller holds the gate, which
+    // guards the derivation and its contents.
     private CommandDerivation? DerivationOf(EstateModel model)
     {
-        if (command is null) return null;
-        if (!ReferenceEquals(command.Model, model)) command = new CommandDerivation { Model = model };
-        return command;
+        if (ScopeOf(CurrentCommand.Value) is not { } scope) return null;
+        if (!ReferenceEquals(scope.Derivation.Model, model)) scope.Derivation = new CommandDerivation { Model = model };
+        return scope.Derivation;
     }
 
     /// <summary>The repository checks of a judged model, run once in an open command and copied to each caller, which may add to them.</summary>
@@ -84,10 +86,29 @@ public sealed partial class EstateService
         internal ProgressResponse? Progress { get; set; }
     }
 
-    private sealed class CommandScope(EstateService service) : IDisposable
+    private sealed class CommandScope(EstateService owner, CommandScope? outer) : IDisposable
     {
-        private EstateService? owner = service;
+        private int ended;
 
-        public void Dispose() => Interlocked.Exchange(ref owner, null)?.EndCommand();
+        internal bool Ended => Volatile.Read(ref ended) != 0;
+
+        internal EstateService Owner { get; } = owner;
+
+        internal CommandScope? Outer { get; } = outer;
+
+        internal CommandDerivation Derivation { get; set; } = new();
+
+        // Ends the scope on the flow that opened it, restoring the scope it was opened within.
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref ended, 1) == 0 && ReferenceEquals(CurrentCommand.Value, this)) CurrentCommand.Value = Outer;
+        }
+    }
+
+    private sealed class NestedCommand : IDisposable
+    {
+        internal static readonly NestedCommand Instance = new();
+
+        public void Dispose() { }
     }
 }

@@ -155,6 +155,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     {
         lock (gate)
         {
+            using IDisposable stage = ClientOperationActivity.Stage("deriving status");
             EstateModel model = MeasureStatus("load-and-validate", session.Load, observe);
             PolicySections sections = SharedPolicySections(model, observe);
             FindingList checks = MeasureStatus("repository-and-section-checks", () => SectionChecks(model, ChecksWithBatches(model), sections), observe);
@@ -181,12 +182,26 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private static T MeasureStatus<T>(string phase, Func<T> action, Action<string, TimeSpan>? observe)
     {
+        // From 0.9.4 (FIX-152) each phase is also the stage a client operation stopped at its request limit names, where it has its own.
+        using IDisposable stage = ClientOperationActivity.Stage(StatusStage(phase));
         if (observe is null) return action();
         long start = System.Diagnostics.Stopwatch.GetTimestamp();
         T result = action();
         observe(phase, System.Diagnostics.Stopwatch.GetElapsedTime(start));
         return result;
     }
+
+    // The status phases that are stages of their own; the others are named by what they call (the judgment, the repository checks,
+    // the required attention) or by the call around them.
+    private static string? StatusStage(string phase) => phase switch
+    {
+        "policy-snapshot" => "reading the estate's policy basis",
+        "policy-evaluation" => "evaluating the estate's policies",
+        "writing-evaluation" => "evaluating the estate's writing rules and exceptions",
+        "policy-views" => "presenting the policies, writing exceptions and operator duties",
+        "status-json" or "status-text-and-response" => "rendering status",
+        _ => null,
+    };
 
     /// <inheritdoc />
     public ProgressResponse Progress()
@@ -203,6 +218,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private ProgressResponse ProgressCore(EstateModel model, FindingList checks)
     {
+        using IDisposable stage = ClientOperationActivity.Stage("deriving progress");
         PolicySections sections = SharedPolicySections(model);
         checks = SectionChecks(model, checks, sections);
         JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
@@ -233,6 +249,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     // Use the already loaded model for all exact record references in this refresh. No per-item store reloads.
     private IReadOnlyList<CommunicationAttention> RequiredAttention(EstateModel model, Func<ProgressResponse> progress, bool includeLocalObservations = true, string? recipient = null, Func<RunsResponse>? runs = null, DateTimeOffset? requestsAt = null)
     {
+        using IDisposable stage = ClientOperationActivity.Stage(AttentionStage);
         var cache = new Dictionary<string, RecordResponse>(StringComparer.Ordinal);
         RecordResponse Response(RecordEnvelope record)
         {
@@ -3021,6 +3038,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     // Each pass is counted in the runtime's context (FIX-152), so a test shows how many a command runs.
     private FindingList RepositoryChecks(EstateModel model)
     {
+        using IDisposable stage = ClientOperationActivity.Stage("running the repository checks (the working tree walk and the writing scan)");
         session.Judgments.CheckedRepository();
         return EstateChecks.Run(model, Providers.Source("git")?.IgnoredEstateEntries(model.Root));
     }

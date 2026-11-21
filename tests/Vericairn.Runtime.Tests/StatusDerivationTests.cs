@@ -62,6 +62,51 @@ public sealed class StatusDerivationTests
         }
     }
 
+    [Fact]
+    public void ACommandEndsWhileItsCallStillHoldsTheGateAndThatCallNeverReachesTheNextCommand()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        // One-shot, as the command line opens it, so the command's calls read one judged model and share its derivation.
+        using Vericairn.Runtime.Service.EstateService service = Vericairn.Runtime.Service.EstateService.Open(run.Estate.Root, null, null, oneShot: true,
+            judgments: new Vericairn.Records.Estate.JudgmentContext(new Vericairn.Records.Signing.SignatureTables()));
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        Thread? outliving = null;
+        // The first command's status call waits at its load, under the gate, as a read stopped at its request limit goes on running.
+        service.Session.Loaded = _ =>
+        {
+            if (Thread.CurrentThread != outliving) return;
+            held.Set();
+            release.Wait(TimeSpan.FromMinutes(2));
+        };
+        IDisposable first = service.Command();
+        outliving = new Thread(() => service.Status());
+        outliving.Start();
+        try
+        {
+            Assert.True(held.Wait(TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken), "The status call did not reach its load.");
+            long before = service.Session.Judgments.RepositoryCheckPasses;
+            // Ending the command takes nothing the call holds, so it returns at once.
+            first.Dispose();
+            using (service.Command())
+            {
+                release.Set();
+                Assert.True(outliving.Join(TimeSpan.FromMinutes(2)));
+                // The call that outlived its command derived its own checks; the second command derives once for status and attention.
+                Assert.Equal(before + 1, service.Session.Judgments.RepositoryCheckPasses);
+                _ = service.Status();
+                _ = service.AttentionGet();
+                Assert.Equal(before + 2, service.Session.Judgments.RepositoryCheckPasses);
+            }
+        }
+        finally
+        {
+            release.Set();
+            outliving.Join(TimeSpan.FromMinutes(2));
+            service.Session.Loaded = null;
+        }
+    }
+
     // One human status command's calls in one command scope, as the command line makes them.
     private static string Read(Vericairn.Runtime.Service.EstateService service)
     {
