@@ -20,7 +20,8 @@
       "in progress",
       "awaiting review",
       "accepted",
-      "accepted (earlier revision)"
+      "accepted (earlier revision)",
+      "displaced"
     ],
     "ask": [
       "open",

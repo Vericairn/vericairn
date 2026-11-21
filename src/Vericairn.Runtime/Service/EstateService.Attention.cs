@@ -139,6 +139,9 @@ public sealed partial class EstateService
         // From 0.9.4 (ID-16): a refusal that ended a presence session here, kept in this runtime's memory (presence.outside-list).
         foreach (var refusal in PresenceAttention(principal))
             Add(refusal.Kind, refusal.Subject, refusal.Why, refusal.State, refusal.Next, refusal.Type, refusal.Id, refusal.Hash, refusal.At, refusal.Target, refusal.Basis);
+        // From 0.9.4 (ID-11): a lapsed agent session holding work, a local observation kept in this runtime's live store.
+        foreach (var lapse in LeaseAttention(model, principal))
+            Add(lapse.Kind, lapse.Subject, lapse.Why, lapse.State, lapse.Next, lapse.Type, lapse.Id, lapse.Hash, lapse.At, lapse.Target, lapse.Basis);
         notices.AddRange(PolicyNotices(progress, principal));
         Dictionary<string, AttentionAcknowledgment> kept = ReadAcknowledgments(principal);
         // Several findings can concern the same kind and subject. Keep every reason in that notice.

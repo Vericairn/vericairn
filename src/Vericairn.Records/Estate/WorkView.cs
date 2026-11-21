@@ -21,7 +21,7 @@ public static class WorkView
     /// <param name="Attempts">Number of current attempts.</param>
     /// <param name="LatestResultId">The current result of the latest attempt, if any.</param>
     /// <param name="Outcome">That result's outcome, or "none".</param>
-    /// <param name="State">no attempt, in progress, awaiting review, accepted, accepted (earlier revision).</param>
+    /// <param name="State">no attempt, in progress, awaiting review, accepted, accepted (earlier revision), or from 0.9.4 displaced: its result awaits no review, since a later assignment holds its step.</param>
     public sealed record AssignmentItem(string Key, string AssignmentId, string ContributorId, string ContributorName, int Attempts, string? LatestResultId, string Outcome, string State);
 
     /// <summary>Finds the current work order with a key, or the latest revision of the work order with an id.</summary>
@@ -109,6 +109,9 @@ public static class WorkView
         return acceptance is null ? "awaiting review" : "accepted (earlier revision)";
     }
 
+    /// <summary>From 0.9.4 (ID-11): the state of an assignment whose result awaits no review, since a later assignment holds its step.</summary>
+    public const string Displaced = "displaced";
+
     /// <summary>Every current assignment with its derived state, ordered by work-order key then assignment id.</summary>
     public static IReadOnlyList<AssignmentItem> AssignmentItems(EstateModel model)
     {
@@ -123,6 +126,13 @@ public static class WorkView
             RecordEnvelope? latestAttempt = attempts.Count == 0 ? null : attempts[attempts.Count - 1];
             RecordEnvelope? result = latestAttempt is null ? null : ResultOf(model, latestAttempt);
             string state = latestAttempt is null ? "no attempt" : result is null ? "in progress" : ResultState(model, result);
+            // From 0.9.4 (ID-11): a result on an assignment that no longer holds its step, recorded by another runtime before the
+            // hand-over reached it, is labeled displaced, and review routing skips it: only the current holder's work counts.
+            if (state == "awaiting review" && Routing.Displaced(model, assignment))
+            {
+                state = Displaced;
+            }
+
             items.Add(new AssignmentItem(key, assignment.Id, contributor, PrincipalName(model, contributor), attempts.Count, result?.Id, result is null ? "none" : EstateModel.BodyString(result, "outcome") ?? "?", state));
         }
 
@@ -301,7 +311,14 @@ public static class WorkView
                     continue;
                 }
 
-                text.Append("      result ").Append(result.Id).Append(' ').Append(EstateModel.BodyString(result, "outcome")).Append(", ").Append(ResultState(model, result)).Append(": ").Append(EstateModel.BodyString(result, "summary")).Append('\n');
+                string resultState = ResultState(model, result);
+                // From 0.9.4 (ID-11): a displaced holder's result awaits no review; the step's current holder is named.
+                if (resultState == "awaiting review" && Routing.DisplacedBy(model, assignment) is RecordEnvelope holder)
+                {
+                    resultState = $"{Displaced}: assignment {holder.Id} holds the step, so review routing skips it";
+                }
+
+                text.Append("      result ").Append(result.Id).Append(' ').Append(EstateModel.BodyString(result, "outcome")).Append(", ").Append(resultState).Append(": ").Append(EstateModel.BodyString(result, "summary")).Append('\n');
                 AppendResultDetails(text, result, "        ");
                 foreach (RecordEnvelope review in model.About(result.Id, "review").Where(model.IsCurrent).OrderBy(r => r.Id, StringComparer.Ordinal))
                 {

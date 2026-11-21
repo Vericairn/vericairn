@@ -393,6 +393,86 @@ public static class Routing
     }
 
     /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): the current assignment that holds the step an assignment carries, the
+    /// last of the current assignments of its work order, by any revision, that carry the same step: for a run's work order the same
+    /// flow step and item (and for a review before hand-off the same reviewed subject and items), for a standing agent's the same
+    /// occurrence, and for any other work order the work order itself. Null when none holds it, as when routing stored the only one
+    /// without the record it was routed with.
+    /// </summary>
+    public static RecordEnvelope? HolderOf(EstateModel model, RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (WorkView.OrderOfAssignment(model, assignment) is not RecordEnvelope order)
+        {
+            return null;
+        }
+
+        RecordEnvelope latest = model.Latest(assignment);
+        FlowRuns.StepRef? step = FlowRuns.StepOf(latest);
+        string? occurrence = StandingAgents.KeyOf(latest);
+        FlowRuns.ReviewRef? review = FlowRuns.ReviewOf(latest);
+        return Assignments(model, order, step).LastOrDefault(a => StandingAgents.KeyOf(a) == occurrence && SameReview(FlowRuns.ReviewOf(a), review));
+
+        static bool SameReview(FlowRuns.ReviewRef? one, FlowRuns.ReviewRef? other) =>
+            one is null ? other is null
+            : other is not null && one.Subject.Id == other.Subject.Id && one.Items.Order(StringComparer.Ordinal).SequenceEqual(other.Items.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): the assignment that displaced an assignment, or null while it holds its
+    /// step: the step's current holder (<see cref="HolderOf"/>) when that is a later assignment of the same step to another principal, as a
+    /// hand-over is. A later assignment of the step to the same principal keeps that principal the holder, so it displaces nothing.
+    /// </summary>
+    public static RecordEnvelope? DisplacedBy(EstateModel model, RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (HolderOf(model, assignment) is not RecordEnvelope holder || model.Chain(model.Latest(assignment)).Contains(holder.Id))
+        {
+            return null;
+        }
+
+        string? Identity(RecordEnvelope record) =>
+            EstateModel.BodyString(record, "contributor") is string contributor && model.CurrentPrincipal(contributor) is { } principal ? model.Chain(principal)[0] : EstateModel.BodyString(record, "contributor");
+        return Identity(holder) == Identity(model.Latest(assignment)) ? null : holder;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): true when an assignment no longer holds its step because a later assignment
+    /// of the same step to another principal holds it (<see cref="DisplacedBy"/>): a hand-over, or any later assignment of that step to
+    /// someone else. Only the step's current holder acts: the runtime refuses an attempt, progress claim or result on a displaced assignment
+    /// whatever time it states, and a result another runtime recorded on one before the hand-over reached it is labeled displaced, and
+    /// review routing skips it.
+    /// </summary>
+    public static bool Displaced(EstateModel model, RecordEnvelope assignment) => DisplacedBy(model, assignment) is not null;
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md §§ 8 and 12): how long a lapsed session holding a step of a goal stays lapsed
+    /// before the runtime asks about reassignment: the goal's limits.watch.reassignAfterSeconds, else its roster's (the roster the goal
+    /// names, or the estate's), else 600 seconds. Without a goal, the estate's roster's, else 600.
+    /// </summary>
+    public static int ReassignAfterSeconds(EstateModel model, RecordEnvelope? goal)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        if (goal is not null && ReassignAfter(model.Latest(goal).Body) is int own)
+        {
+            return own;
+        }
+
+        RecordEnvelope? roster = goal is not null && EstateModel.BodyString(model.Latest(goal), "roster") is string named && model.ById.TryGetValue(named, out RecordEnvelope? record) && record.Type == "roster"
+            ? model.Latest(record)
+            : model.Current("roster").OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+        return roster is not null && ReassignAfter(roster.Body) is int inherited ? inherited : 600;
+
+        static int? ReassignAfter(JsonElement body) =>
+            body.TryGetProperty("limits", out JsonElement limits) && limits.ValueKind == JsonValueKind.Object
+            && limits.TryGetProperty("watch", out JsonElement watch) && watch.ValueKind == JsonValueKind.Object
+            && watch.TryGetProperty("reassignAfterSeconds", out JsonElement seconds) && seconds.ValueKind == JsonValueKind.Number && seconds.TryGetInt32(out int value)
+            && value is >= 60 and <= 86_400 ? value : null;
+    }
+
+    /// <summary>
     /// True when routing stored an assignment without the record it was routed with: one whose routedWith is run has no agent-run
     /// intent on it, and one whose routedWith is ask has no ask that names it; judged as the records stand, or as they stood when a
     /// later record was written. Such an assignment holds nothing of its step, so a store interrupted between the two never holds a

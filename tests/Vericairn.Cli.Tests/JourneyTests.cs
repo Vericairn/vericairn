@@ -61,7 +61,8 @@ public class JourneyTests
             JsonElement statusB = CliHarness.Ok("--estate", b, "--json", "status").Json;
             Dictionary<string, (string Outcome, string State)> assignments = statusB.GetProperty("assignments").EnumerateArray().ToDictionary(x => x.GetProperty("contributor").GetString()!, x => (x.GetProperty("outcome").GetString()!, x.GetProperty("state").GetString()!));
             Assert.Equal(("completed", "accepted"), assignments[agentTwo]);
-            Assert.Equal(("partial", "awaiting review"), assignments[agentOne]);
+            // From 0.9.4 (ID-11) only the current holder's work counts: agent one's result no longer awaits review once agent two holds the step.
+            Assert.Equal(("partial", "displaced"), assignments[agentOne]);
 
             // Merging the clone back is a pure file addition, and both repositories then render the same status.
             Assert.True(CliHarness.MergeRecords(b, a) >= 3);
@@ -70,7 +71,7 @@ public class JourneyTests
             CliHarness.Outcome check = CliHarness.Run("--estate", a, "estate", "check");
             Assert.True(check.Code == 0, check.Out);
             Assert.Equal(CliHarness.Ok("--estate", b, "--json", "status").Out, CliHarness.Ok("--estate", a, "--json", "status").Out);
-            Assert.Contains("partial, awaiting review", CliHarness.Ok("--estate", a, "work", "observe", "W-1").Out, StringComparison.Ordinal);
+            Assert.Contains($"partial, displaced: assignment {assignmentTwo} holds the step, so review routing skips it", CliHarness.Ok("--estate", a, "work", "observe", "W-1").Out, StringComparison.Ordinal);
             Assert.Equal([".vericairn", "docs", "estate", "records"], Directory.EnumerateDirectories(a).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());
         }
         finally

@@ -64,6 +64,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         bool write = signing?.Mode != DeviceSigningMode.Prepare && HttpMethods.IsPost(context.HttpContext.Request.Method) &&
             !operation.Equals("POST /v1/resources/read", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/events/select", StringComparison.OrdinalIgnoreCase) &&
+            // From 0.9.4 (ID-11): a presence lease is runtime state, never a record, and asks no signer on this machine.
+            !operation.Equals("POST /v1/presence", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/presence/{lease}/heartbeat", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/templates/render", StringComparison.OrdinalIgnoreCase) &&
@@ -275,6 +278,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/events/{key}"] = null,
         ["POST /v1/events/select"] = typeof(EventSelectRequest),
         ["POST /v1/presence/prompts"] = typeof(PresencePromptsRequest),
+        ["POST /v1/presence"] = typeof(PresenceRegisterRequest),
+        ["POST /v1/presence/{lease}/heartbeat"] = null,
+        ["DELETE /v1/presence/{lease}"] = null,
+        ["GET /v1/presence"] = null,
         ["GET /v1/operator/actions"] = null,
         ["GET /v1/operator/requests"] = null,
         ["POST /v1/operator/requests"] = typeof(OperatorRequestWriteRequest),
@@ -386,6 +393,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(OverlapPreviewRequest)] = (_, _, _) => null,
         // A selecting read (MCP-05) reads for the device's own principal; the route refuses another and judges every delivery again.
         [typeof(EventSelectRequest)] = (_, r, d) => Optional(((EventSelectRequest)r).Principal, d),
+        // From 0.9.4 (ID-11): a device registers presence for its own principal; its lease answers only that device.
+        [typeof(PresenceRegisterRequest)] = (_, r, d) => Optional(((PresenceRegisterRequest)r).Principal, d),
         // From 0.9.3 (FIX-124): presence notices name what the person at the runtime's machine is asked to sign there; no device reads them.
         [typeof(PresencePromptsRequest)] = (_, _, _) => "Presence notices belong to the person at the runtime's machine and are read over its local socket only.",
         // A search, or a package, may be asked for a principal only to narrow what it reads: a device's request names its own or none.

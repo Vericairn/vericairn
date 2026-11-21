@@ -1,0 +1,397 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Text.Json;
+using Vericairn.Protocol;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
+using Vericairn.Runtime.Events;
+using Vericairn.Runtime.Service;
+using Vericairn.Sdk;
+
+namespace Vericairn.Runtime.Tests;
+
+/// <summary>
+/// ID-11's exit question (design/events-and-presence.md §§ 8 and 10): a silent session holding work is noticed and asked about, and
+/// after a hand-over only the current holder's work counts. Every wait is a controlled clock moved by hand and a sweep run in the test;
+/// nothing sleeps.
+/// </summary>
+[Collection("home")]
+public sealed class PresenceLeaseTests
+{
+    private const string ResultBody = """{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}""";
+
+    [Fact]
+    public void ALeaseIsRenewedByItsHolderAndAPersonIsNeverTracked()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        SteppedClock clock = Present(run);
+        string builder = run.Estate.BuilderId;
+
+        PresenceLeaseResponse registered = run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "a builder session", ["builder"]));
+        Assert.True(registered.Ok, registered.Message);
+        PresenceLease lease = registered.Lease!;
+        Assert.Equal((builder, PresenceVocabulary.DefaultLeaseSeconds, 30, 1), (lease.Principal, lease.LeaseSeconds, lease.HeartbeatSeconds, lease.Capacity));
+        Assert.Equal(At(clock, 90), lease.ExpiresAt);
+
+        // Its transport renews it: the lease runs a full lease from each heartbeat.
+        clock.Advance(TimeSpan.FromSeconds(60));
+        PresenceLeaseResponse renewed = run.Service.PresenceHeartbeat(lease.Lease);
+        Assert.True(renewed.Ok, renewed.Message);
+        Assert.Equal(At(clock, 90), renewed.Lease!.ExpiresAt);
+        clock.Advance(TimeSpan.FromSeconds(60));
+        run.Service.SweepPresence();
+        PresenceEntry entry = Assert.Single(run.Service.Presence().Sessions);
+        Assert.Equal((lease.Session, "live", "a builder session"), (entry.Session, entry.State, entry.Label));
+
+        // No listing names the lease identity, and the live store keeps only its digest.
+        Assert.DoesNotContain(lease.Lease, JsonSerializer.Serialize(run.Service.Presence(), ProtocolJson.Options), StringComparison.Ordinal);
+        Assert.DoesNotContain(lease.Lease, run.Service.Session.Live.Meta("presence:leases")!, StringComparison.Ordinal);
+
+        // A person is never tracked by a connection, a label names no path, and an unknown lease identity renews nothing.
+        Assert.Equal("refused", run.Service.PresenceRegister(new PresenceRegisterRequest(run.Estate.OperatorId, "the operator")).Problem!.Code);
+        Assert.Equal("refused", run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "/home/someone/clone")).Problem!.Code);
+        Assert.Equal("refused", run.Service.PresenceRegister(new PresenceRegisterRequest(builder, LeaseSeconds: 10)).Problem!.Code);
+        Assert.Equal("not-found", run.Service.PresenceHeartbeat(PresenceLeaseState.NewLease()).Problem!.Code);
+
+        // A release ends the session, and is no lapse.
+        Assert.True(run.Service.PresenceRelease(lease.Lease).Ok);
+        Assert.Empty(run.Service.Presence().Sessions);
+        Assert.Equal("not-found", run.Service.PresenceHeartbeat(lease.Lease).Problem!.Code);
+    }
+
+    [Fact]
+    public void ASilentSessionHoldingWorkIsNoticedThenAskedAboutAndAHeartbeatWithdrawsTheAsk()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        SteppedClock clock = Present(run);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        (EventSubscription presence, IDisposable listening) = Follow(run, "presence");
+        using IDisposable _ = listening;
+        PresenceLease lease = run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "a builder session")).Lease!;
+
+        // The session records an attempt on its assignment through the runtime, so it holds the assignment.
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Build the widget.")));
+        run.Service.SweepPresence();
+        Assert.Equal([run.Assignment], Assert.Single(run.Service.Presence().Sessions).Holds);
+        Assert.Null(Lapse(run, op));
+
+        // Silence past its lease: a presence event and attention, labeled a local observation, and no ask yet.
+        clock.Advance(TimeSpan.FromSeconds(91));
+        run.Service.SweepPresence();
+        PresenceEntry lapsed = Assert.Single(run.Service.Presence().Sessions);
+        Assert.Equal(("lapsed", At(clock, -1)), (lapsed.State, lapsed.ExpiresAt));
+        AttentionNotice noticed = Lapse(run, op)!;
+        Assert.Equal(("incident", "lapsed"), (noticed.Kind, noticed.State));
+        Assert.Contains("A local observation of this runtime", noticed.Why, StringComparison.Ordinal);
+        EventEnvelope raised = Assert.Single(Read(run, presence));
+        Assert.Equal(("presence", "raised", "session", op, "incident"), (raised.Kind, raised.Change, raised.Subject.Type, raised.To, raised.Category));
+        Assert.Contains(raised.Sources, s => s.Id == run.Assignment);
+        Assert.Empty(run.Service.Records("ask"));
+
+        // Still lapsed one second short of reassignAfterSeconds, nothing is asked; at it, the goal's accountable principal is asked.
+        clock.Advance(TimeSpan.FromSeconds(PresenceVocabulary.DefaultReassignAfterSeconds - 2));
+        run.Service.SweepPresence();
+        Assert.Empty(run.Service.Records("ask"));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        run.Service.SweepPresence();
+        RecordEnvelope ask = run.Estate.Load().ById[Assert.Single(run.Service.Records("ask")).Id];
+        Assert.Equal((op, run.Goal, "open"), (EstateModel.BodyString(ask, "to"), EstateModel.BodyString(ask, "goal"), EstateModel.BodyString(ask, "state")));
+        Assert.Equal(("assignment", run.Assignment), (ask.Subject!.Type, ask.Subject.Id));
+        Assert.Contains("Hand the step to another principal of its role?", EstateModel.BodyString(ask, "question"), StringComparison.Ordinal);
+        Assert.Equal("asked", Lapse(run, op)!.State);
+        Assert.Equal([ask.Id], Assert.Single(run.Service.Presence().Sessions).Asks);
+        Assert.Equal("changed", Assert.Single(Read(run, presence)).Change);
+
+        // A heartbeat first restores the lease, and the next sweep withdraws the ask by its asker; the lapse's event clears.
+        PresenceLeaseResponse restored = run.Service.PresenceHeartbeat(lease.Lease);
+        Assert.True(restored.Ok, restored.Message);
+        Assert.Contains("live again", restored.Message, StringComparison.Ordinal);
+        run.Service.SweepPresence();
+        EstateModel model = run.Estate.Load();
+        Assert.Equal("withdrawn", Asks.State(model, model.ById[ask.Id]).State);
+        Assert.Null(Lapse(run, op));
+        Assert.Equal("cleared", Assert.Single(Read(run, presence)).Change);
+        Assert.Equal("live", Assert.Single(run.Service.Presence().Sessions).State);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void TheRosterSetsHowLongALapseStandsBeforeItIsAskedAboutAndOnlyFromRecordFormatThree()
+    {
+        static JsonElement Roster(string builder, int seconds) =>
+            RunEstate.Json($$$$"""{"roles":[{"role":"builder","principals":["{{{{builder}}}}"]}],"limits":{"watch":{"reassignAfterSeconds":{{{{seconds}}}}}}}""");
+        using (var older = new RunEstate())
+        {
+            WriteOutcome refused = older.Service.NewRecord(new NewRecordRequest("roster", older.Estate.OperatorId, Roster(older.Estate.BuilderId, 120)));
+            Assert.Contains(refused.Problem!.Findings, f => f.Code == "body.format" && f.Message.Contains("'reassignAfterSeconds' belongs to record format 3", StringComparison.Ordinal));
+        }
+
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        Assert.Contains(run.Service.NewRecord(new NewRecordRequest("roster", run.Estate.OperatorId, Roster(run.Estate.BuilderId, 59))).Problem!.Findings,
+            f => f.Location.EndsWith("reassignAfterSeconds", StringComparison.Ordinal));
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("roster", run.Estate.OperatorId, Roster(run.Estate.BuilderId, 120))));
+        Assert.Equal(120, Routing.ReassignAfterSeconds(run.Estate.Load(), run.Estate.Load().ById[run.Goal]));
+
+        SteppedClock clock = Present(run);
+        run.Service.PresenceRegister(new PresenceRegisterRequest(run.Estate.BuilderId, "a builder session"));
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, run.Estate.BuilderId, "widget, a work branch", "Build the widget.")));
+        clock.Advance(TimeSpan.FromSeconds(90 + 119));
+        run.Service.SweepPresence();
+        Assert.Empty(run.Service.Records("ask"));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        run.Service.SweepPresence();
+        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AfterAHandOverTheDisplacedHoldersWritesAreRefusedWhateverTheirDateAndOnlyTheCurrentHoldersCount()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        SteppedClock clock = Present(run);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        PresenceLease lease = run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "a builder session")).Lease!;
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Build the widget."))).Id;
+        Assert.True(run.Service.WorkProgress(new WorkProgressRequest(attempt, builder, "build", "Building.")).Ok);
+        clock.Advance(TimeSpan.FromSeconds(91 + PresenceVocabulary.DefaultReassignAfterSeconds));
+        run.Service.SweepPresence();
+        string ask = Assert.Single(run.Service.Records("ask")).Id;
+
+        // The operator takes the step over: the hand-over displaces the builder's assignment.
+        TakeoverResponse taken = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op));
+        Assert.True(taken.Ok, taken.Message);
+        string handover = taken.Assignment!.Id;
+        EstateModel model = run.Estate.Load();
+        Assert.True(Routing.Displaced(model, model.ById[run.Assignment]));
+        Assert.Equal(handover, Routing.HolderOf(model, model.ById[run.Assignment])!.Id);
+
+        // The woken session's late attempt, progress claim and result are refused and nothing is written, whatever time they state.
+        int records = run.Estate.Load().Records.Count;
+        string backdated = RecordParser.FormatTimestamp(run.Estate.Load().ById[run.Assignment].AtTime);
+        WriteOutcome lateAttempt = run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Carry on."));
+        WriteOutcome backdatedAttempt = run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Carry on.", backdated));
+        WorkProgressResponse lateProgress = run.Service.WorkProgress(new WorkProgressRequest(attempt, builder, "build", "Still building."));
+        WriteOutcome lateResult = run.Service.Result(new ResultRequest(attempt, builder, RunEstate.Json(ResultBody)));
+        WriteOutcome backdatedResult = run.Service.NewRecord(new NewRecordRequest("result", builder, RunEstate.Json(ResultBody), $"attempt:{attempt}:{model.ById[attempt].ComputedHash}", At: backdated));
+        foreach (Problem? refused in new[] { lateAttempt.Problem, backdatedAttempt.Problem, lateProgress.Problem, lateResult.Problem, backdatedResult.Problem })
+        {
+            Assert.NotNull(refused);
+            Assert.Contains($"Assignment {run.Assignment} no longer holds its step of W-1: assignment {handover} of Test Operator holds it now.", refused.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(records, run.Estate.Load().Records.Count);
+
+        // The current holder's attempt and result count; its result awaits review as the step's.
+        string current = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(handover, op, "widget, a work branch", "Finish it."))).Id;
+        string result = RunEstate.Ok(run.Service.Result(new ResultRequest(current, op, RunEstate.Json(ResultBody)))).Id;
+        WorkView.AssignmentItem item = Assert.Single(WorkView.AssignmentItems(run.Estate.Load()), i => i.AssignmentId == handover);
+        Assert.Equal((result, "awaiting review"), (item.LatestResultId, item.State));
+
+        // The step was handed over, so the lapse ask is withdrawn and the lapsed session holds nothing.
+        run.Service.SweepPresence();
+        model = run.Estate.Load();
+        Assert.Equal("withdrawn", Asks.State(model, model.ById[ask]).State);
+        Assert.Empty(Assert.Single(run.Service.Presence().Sessions).Holds);
+        Assert.Equal("not-found", run.Service.PresenceHeartbeat(PresenceLeaseState.NewLease()).Problem!.Code);
+        Assert.True(run.Service.PresenceHeartbeat(lease.Lease).Ok);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AResultAnotherRuntimeRecordedBeforeTheHandOverReachedItIsLabeledDisplacedAndReviewRoutingSkipsIt()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Build the widget."))).Id;
+        TakeoverResponse taken = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op));
+        Assert.True(taken.Ok, taken.Message);
+
+        // The builder's own runtime recorded its result before the hand-over reached it; a pull brings it here, dated earlier.
+        RecordEnvelope recorded = run.Estate.Load().ById[attempt];
+        var signer = new StoreSigner(new FileKeyStore(VericairnHome.Path()), run.BuilderDevice);
+        run.Estate.SetClock(recorded.AtTime.AddSeconds(-1));
+        RecordEnvelope pulled = run.Estate.Add("result", builder, ResultBody, recorded.Reference, signer: signer);
+        Assert.DoesNotContain(run.Estate.Load().Findings, f => f.Location.Contains(pulled.Id, StringComparison.Ordinal) && f.Severity == Severity.Error);
+        Assert.True(pulled.AtTime <= run.Estate.Load().ById[taken.Assignment!.Id].AtTime);
+
+        // It is labeled displaced, never awaiting review: no review is asked of the operator, and the step stays with its holder.
+        EstateModel model = run.Estate.Load();
+        WorkView.AssignmentItem item = Assert.Single(WorkView.AssignmentItems(model), i => i.AssignmentId == run.Assignment);
+        Assert.Equal((pulled.Id, WorkView.Displaced), (item.LatestResultId, item.State));
+        Assert.DoesNotContain(run.Service.AttentionGet(op).Items, i => i.SubjectId == pulled.Id);
+        Assert.Contains($"displaced: assignment {taken.Assignment!.Id} holds the step, so review routing skips it", WorkView.RenderObserve(model, WorkView.OrderOfAssignment(model, model.ById[run.Assignment])!), StringComparison.Ordinal);
+        JsonElement route = Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == "W-1").GetProperty("route");
+        Assert.Equal(("assigned", op), (route.GetProperty("state").GetString(), route.GetProperty("principal").GetString()));
+    }
+
+    [Fact]
+    public async Task TheTransportRenewsTheLeaseOnItsIntervalRegistersAgainWhenItIsGoneAndReleasesItAtTheEnd()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        using var clock = new TimerClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        run.Service.EnableEvents(Path.Combine(run.Scratch, "live"), clock);
+        var answers = new System.Collections.Concurrent.BlockingCollection<PresenceLeaseResponse>();
+        PresenceLease first;
+        await using (var keeper = new PresenceKeeper(run.Service, new PresenceRegisterRequest(run.Estate.BuilderId, "a kept session"), clock))
+        {
+            keeper.Answered += answers.Add;
+            PresenceLeaseResponse registered = await keeper.StartAsync(TestContext.Current.CancellationToken);
+            Assert.True(registered.Ok, registered.Message);
+            first = Take(answers).Lease!;
+
+            // The keeper waits one heartbeat interval, a third of the lease, on the controlled clock; then it renews.
+            await clock.WhenWaiting(TimeSpan.FromSeconds(first.HeartbeatSeconds));
+            clock.Advance(TimeSpan.FromSeconds(first.HeartbeatSeconds));
+            PresenceLeaseResponse renewed = Take(answers);
+            Assert.Equal((first.Session, RecordParser.FormatTimestamp(clock.GetUtcNow().AddSeconds(first.LeaseSeconds))), (renewed.Lease!.Session, renewed.Lease.ExpiresAt));
+
+            // A lease the runtime no longer keeps is registered again at the next interval.
+            Assert.True(run.Service.PresenceRelease(first.Lease).Ok);
+            await clock.WhenWaiting(TimeSpan.FromSeconds(first.HeartbeatSeconds));
+            clock.Advance(TimeSpan.FromSeconds(first.HeartbeatSeconds));
+            PresenceLeaseResponse again = Take(answers);
+            Assert.True(again.Ok, again.Message);
+            Assert.NotEqual(first.Session, again.Lease!.Session);
+            Assert.Equal(again.Lease.Session, Assert.Single(run.Service.Presence().Sessions).Session);
+        }
+
+        // Disposal releases the lease: the session's end is no lapse.
+        Assert.Empty(run.Service.Presence().Sessions);
+    }
+
+    /// <summary>Keeps presence on the service as the daemon does, beside an event journal, judged by a clock the test moves.</summary>
+    private static SteppedClock Present(RunEstate run)
+    {
+        var clock = new SteppedClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        run.Service.EnableEvents(Path.Combine(run.Scratch, "live"), clock);
+        return clock;
+    }
+
+    private static string At(TimeProvider clock, int seconds) => RecordParser.FormatTimestamp(clock.GetUtcNow().AddSeconds(seconds));
+
+    private static AttentionNotice? Lapse(RunEstate run, string principal) =>
+        run.Service.AttentionGet(principal).Items.SingleOrDefault(i => i.Kind == "incident" && i.SubjectType == "assignment" && i.SubjectId == run.Assignment);
+
+    /// <summary>A subscription that listens, so each derivation pass covers its kind.</summary>
+    private static (EventSubscription Subscription, IDisposable Listening) Follow(RunEstate run, string kind)
+    {
+        (EventSubscription? subscription, Problem? problem) = run.Service.OpenEvents(null, new EventFilter(Kinds: [kind]), run.Estate.OperatorId);
+        Assert.Null(problem);
+        return (subscription!, run.Service.ListenEvents(subscription!));
+    }
+
+    private static IReadOnlyList<EventEnvelope> Read(RunEstate run, EventSubscription subscription)
+    {
+        run.Service.DeriveEvents();
+        return subscription.Read().Events;
+    }
+
+    private static PresenceLeaseResponse Take(System.Collections.Concurrent.BlockingCollection<PresenceLeaseResponse> answers)
+    {
+        Assert.True(answers.TryTake(out PresenceLeaseResponse? answer, TestTiming.HangTimeoutMilliseconds, TestContext.Current.CancellationToken), "the keeper did not answer");
+        return answer!;
+    }
+
+    /// <summary>A clock whose timers fire only when the test moves it, and which says when a timer of a given length waits.</summary>
+    private sealed class TimerClock(DateTimeOffset start) : TimeProvider, IDisposable
+    {
+        private readonly object sync = new();
+        private readonly List<Timer> timers = [];
+        private readonly SemaphoreSlim created = new(0);
+        private long ticks;
+
+        public override DateTimeOffset GetUtcNow() => start + TimeSpan.FromTicks(Interlocked.Read(ref ticks));
+
+        public override long GetTimestamp() => Interlocked.Read(ref ticks);
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new Timer(this, callback, state);
+            timer.Change(dueTime, period);
+            created.Release();
+            return timer;
+        }
+
+        /// <summary>Waits until a timer of that length is set to fire.</summary>
+        public async Task WhenWaiting(TimeSpan length)
+        {
+            while (true)
+            {
+                lock (sync)
+                {
+                    if (timers.Any(t => t.Due == GetTimestamp() + length.Ticks))
+                    {
+                        return;
+                    }
+                }
+
+                Assert.True(await created.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken), "no timer was set");
+            }
+        }
+
+        public void Dispose() => created.Dispose();
+
+        public void Advance(TimeSpan by)
+        {
+            Interlocked.Add(ref ticks, by.Ticks);
+            Timer[] due;
+            lock (sync)
+            {
+                due = [.. timers.Where(t => t.Due <= GetTimestamp())];
+                foreach (Timer timer in due)
+                {
+                    timer.Due = null;
+                    timers.Remove(timer);
+                }
+            }
+
+            foreach (Timer timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        private sealed class Timer(TimerClock clock, TimerCallback callback, object? state) : ITimer
+        {
+            public long? Due { get; set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (clock.sync)
+                {
+                    clock.timers.Remove(this);
+                    Due = dueTime == Timeout.InfiniteTimeSpan ? null : clock.GetTimestamp() + dueTime.Ticks;
+                    if (Due is not null)
+                    {
+                        clock.timers.Add(this);
+                    }
+                }
+
+                return true;
+            }
+
+            public void Fire() => callback(state);
+
+            public void Dispose()
+            {
+                lock (clock.sync)
+                {
+                    clock.timers.Remove(this);
+                }
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+}
