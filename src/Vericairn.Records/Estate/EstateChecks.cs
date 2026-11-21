@@ -550,7 +550,10 @@ public static partial class EstateChecks
             }
             if (actual != hash)
             {
-                findings.Error("document.drift", path, $"The file changed after revision record {revision.Id} pinned it ({actual}). Record a new document-revision that supersedes it.");
+                // Both values are labeled: the one the revision pinned and the one the file has now. An authored-content pin hashes
+                // the file without its generated revision history, so its message says what the two digests cover.
+                string covers = RevisionLines.IsAuthored(revision) ? " Both digests cover the authored content, not the generated revision history." : "";
+                findings.Error("document.drift", path, $"The file changed after revision record {revision.Id} pinned it. The revision pinned {hash}; the file now has {actual}.{covers} Record a new document-revision that supersedes it.");
             }
         }
     }

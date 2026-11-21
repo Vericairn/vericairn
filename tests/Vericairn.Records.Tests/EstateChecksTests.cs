@@ -239,7 +239,36 @@ public class EstateChecksTests
         estate.Add("document-revision", estate.BuilderId, $$"""{"path":"design/master.md","title":"Master","hash":"{{hash}}","bytes":9,"mediaType":"text/markdown","revision":1,"summary":"First."}""");
         Assert.DoesNotContain(EstateChecks.Run(estate.Load()), f => f.Code == "document.drift");
         estate.WriteFile("design/master.md", "# Master (edited)\n");
-        Assert.Contains(EstateChecks.Run(estate.Load()), f => f.Code == "document.drift");
+        string now = ContentHash.Sha256File(Path.Combine(estate.Root, "design", "master.md"));
+        RecordEnvelope pin = Assert.Single(estate.Load().Current("document-revision"));
+        Finding drift = Assert.Single(EstateChecks.Run(estate.Load()), f => f.Code == "document.drift");
+        Assert.Equal(Severity.Error, drift.Severity);
+        Assert.Equal("design/master.md", drift.Location);
+        Assert.Equal($"The file changed after revision record {pin.Id} pinned it. The revision pinned {hash}; the file now has {now}. "
+            + "Record a new document-revision that supersedes it.", drift.Message);
+    }
+
+    [Fact]
+    public void AnAuthoredContentDriftSaysBothDigestsCoverTheAuthoredContent()
+    {
+        // FIX-157: a document whose revision history is generated pins its authored content, so the finding says what the two
+        // labeled digests cover; neither is the digest of the whole file.
+        using TestEstate estate = RevisionConversionHistoryTests.RecordedFixture();
+        const string path = "design/example.md";
+        string full = Path.Combine(estate.Root, path);
+        estate.WriteFile(path, File.ReadAllText(full).Replace("Body.", "Changed body.", StringComparison.Ordinal));
+        EstateModel model = estate.Load();
+        RecordEnvelope pin = Assert.Single(model.Current("document-revision"));
+        Assert.True(RevisionLines.IsAuthored(pin));
+        string pinned = EstateModel.BodyString(pin, "hash")!;
+        string now = ContentHash.Sha256(RevisionLines.AuthoredContent(File.ReadAllBytes(full)));
+        Assert.NotEqual(ContentHash.Sha256File(full), now);
+        Finding drift = Assert.Single(EstateChecks.Run(model), f => f.Code == "document.drift");
+        Assert.Equal(Severity.Error, drift.Severity);
+        Assert.Equal(path, drift.Location);
+        Assert.Equal($"The file changed after revision record {pin.Id} pinned it. The revision pinned {pinned}; the file now has {now}. "
+            + "Both digests cover the authored content, not the generated revision history. "
+            + "Record a new document-revision that supersedes it.", drift.Message);
     }
 
     [Fact]

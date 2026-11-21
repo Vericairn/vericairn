@@ -121,6 +121,18 @@ line leaves the authored hash alone, but makes `docs living` due and produces a
 their records. A missing, repeated or misplaced marker is a failure, never an
 instruction to hash the whole file instead.
 
+From 0.9.4 (FIX-157), the `document.drift` error that `estate check` reports for
+a pinned file that no longer matches its pin names both digests, each labeled: the
+digest the revision pinned and the digest the file has now. Before 0.9.4 it showed
+only the current digest, right after "pinned it". For an authored-content pin, the
+message adds that both digests cover the authored content, not the generated
+revision history, so neither is the digest of the whole file. The code, location
+and guidance are unchanged:
+
+```text
+ERROR document.drift docs/guide.md: The file changed after revision record 01M7Z7031YJ03ZBM1GFWN3998T pinned it. The revision pinned sha256:0a8500668ad06e3eec553899611bf4ffdf37c09d6b4f666f85522a889e85c45a; the file now has sha256:113e0be308c76fc8107b9594dd94b35eac326816e424722297ce0a840d5c677c. Record a new document-revision that supersedes it.
+```
+
 Estate files use the working tree, including uncommitted changes. Other repositories
 use their registered clone's HEAD, or the latest clearing review's commit when Git
 proves that HEAD is its ancestor. A newer or divergent HEAD with changed content
