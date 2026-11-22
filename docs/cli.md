@@ -145,7 +145,9 @@ exit questions, result summaries, passing-review summaries and independence, and
 From 0.9.4 (FIX-141), a result an acceptance of its work order's current revision was recorded
 after, before the estate's first acceptance of a result by an operator, counts as accepted and is
 not listed, so `--all` never signs that work again; a result recorded after such an acceptance is
-listed ([details](operator-actions.md#close-finished-steps-in-one-action)).
+listed ([details](operator-actions.md#close-finished-steps-in-one-action)). From 0.9.4 (OPS-24), a result is listed only when
+every current review of it passes; one with a failed review or findings beside a passing review is not. From 0.9.4 (FIX-159), an
+estate that reports an error refuses the closing, naming the finding.
 
 | Option | Meaning |
 |---|---|
@@ -166,6 +168,70 @@ sessions are on, up to 16 acceptances are listed by exact hash and signed under 
 1 a selection or record refusal, and 2 invalid arguments or a client failure. The
 [operator actions guide](operator-actions.md#close-finished-steps-in-one-action) describes saved
 listings, API/SDK counterparts and recovery after interrupted storage.
+
+## `vericairn operator answer` (0.9.4)
+
+From 0.9.4 (OPS-16), the operator answers open asks with their recommendations in one signed act. Without a
+selection the command lists every ask waiting on an operator, or on `--by`, each by its exact revision and hash with its
+recommendation and that recommendation's SHA-256 first, then its question, the consequence of leaving it unanswered and its
+options. It writes nothing.
+
+| Option | Meaning |
+|---|---|
+| `--select <ask-id>` | Answer that ask with its recommendation; repeat for several asks. |
+| `--all` | Answer every ask waiting on `--by`; cannot be combined with `--select`. |
+| `--by <operator-id>` | Required with a selection: the operator the asks are put to, a person, acting on their own admitted device. Narrows the listing. |
+| `--stake <stake>` | Each decision's stake: `low` (the default), `medium`, `high` or `critical`. |
+| `--from <file>` | Use a saved `operator answer --json` listing with a selection; `-` reads standard input. |
+| `--json` | Print one typed response. The act is shown on standard error before signing. |
+| `--estate <root>`, `-e <root>` | Select the estate. |
+
+Each selected ask gets its own decision, signed by the operator's device and naming the act in its `act` member, with
+`decidedAt` the act's time; all are stored together. A changed ask or recommendation, an ask answered, withdrawn or carried in
+the meantime, a changed membership with `--all`, an agent or anyone but the operator the asks are put to refuses the whole act
+without a decision. Where presence sessions are on, up to 16 decisions are listed by exact hash and signed under one presence
+check, a list for each 16 ([presence sessions on standard error](#presence-sessions-on-standard-error-094)). Exit 0 means every
+selected ask was answered, 1 a refusal, and 2 invalid arguments or a client failure. The
+[operator actions guide](operator-actions.md#answer-open-asks-with-their-recommendations-in-one-act-094) describes the
+decisions, the API and SDK counterparts and Remote.
+
+## `vericairn operator act --ready` (0.9.4)
+
+From 0.9.4 (OPS-24), the operator signs every ready item in one reviewed act. With `--ready` alone the command lists every
+operator item whose command is ready for `--by`, or the root operator: acceptances of reviewed results, answers with their
+recommendations, a goal's acceptance, a release candidate's, a milestone's and a milestone result's acceptance whose exact revision
+has only passing reviews, and action requests' closes, each with what its signature records, its exact subject and basis, and an
+acceptance's reviews. It writes nothing.
+
+| Option | Meaning |
+|---|---|
+| `--ready` | Required: list, or act on, the items whose command is ready. |
+| `--all` | Sign every listed item except those skipped or dismissed; refuses if the list changes. Cannot be combined with `--select`. |
+| `--select <item>` | Sign that item; repeat for several. Every other item waits. |
+| `--skip <item>` | With `--all`, leave that item waiting; repeatable. |
+| `--dismiss <item>=<reason>` | Dismiss that request with your reason; repeatable. Only a request is dismissed. |
+| `--by <operator-id>` | Required to act: the operator, a person, acting on their own admitted device. |
+| `--stake <stake>` | Each answer's decision stake: `low` (the default), `medium`, `high` or `critical`. |
+| `--from <file>` | The saved `operator act --ready --json` listing you read; `-` reads standard input. Required to act unless you type `yes` in a terminal to the listing shown. |
+| `--json` | Print one typed response. The reviewed act is shown on standard error before signing. |
+| `--estate <root>`, `-e <root>` | Select the estate. |
+
+A chosen item that changed or is no longer ready, a changed list with `--all` since the listing you read, a dismissal of an item that
+is not a request, an act without `--from` and without a terminal, an agent or anyone but the acting operator refuses the whole act
+without a record. Where presence sessions are on, the act's records sign under one presence check, under the session action
+`operator act`, whose announced list names each, up to 16 to a list, a list for each 16
+([presence sessions on standard error](#presence-sessions-on-standard-error-094)). Exit 0 means every chosen record was stored, 1 a
+refusal, and 2 invalid arguments or a client failure. See the
+[operator actions guide](operator-actions.md#sign-every-ready-item-in-one-reviewed-act-094).
+
+## `vericairn operator fetch` (0.9.4)
+
+From 0.9.4 (OPS-22), `vericairn operator fetch <request-revision> --to <folder>` writes the current request's pinned files, under
+their names, read from the estate's objects and checked against their hashes, and its guide, `guide.md`, into the folder, created
+when missing. It refuses, writing nothing, when an object is missing or does not match its hash, a name is not a plain file name or
+is the guide's, a file it would write exists already, or the revision is superseded. It signs and records nothing. `--json` prints
+the request, its hash, the guide's name and each file's name, hash and size. Exit 0 means the kit was written, 1 a refusal, and 2
+invalid arguments or a client failure. See [optional requests](operator-requests.md#optional-requests-possible-todos-094).
 
 ## `vericairn decisions new`
 

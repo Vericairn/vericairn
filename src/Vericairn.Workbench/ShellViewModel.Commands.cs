@@ -248,6 +248,7 @@ public sealed partial class ShellViewModel
                     case ReleaseWorkspace release: release.Status = failure.Message; break;
                     case LivingDocumentsWorkspace document: document.Status = failure.Message; break;
                     case CommunicationDocument communicationPage: communicationPage.Note = failure.Message; break;
+                    case OperatorActDocument act: act.Note = failure.Message; break;
                 }
                 throw;
             }
@@ -259,6 +260,7 @@ public sealed partial class ShellViewModel
                 LivingDocumentsWorkspace document => document.Status,
                 CommunicationDocument communicationPage => communicationPage.Note,
                 HandoffDocument handoff => handoff.Note,
+                OperatorActDocument act => act.Note,
                 _ => string.Empty,
             };
             Status = outcome;

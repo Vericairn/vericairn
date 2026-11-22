@@ -51,6 +51,7 @@ public sealed class DecisionType : IRecordType
         new("changeSet", "object", false, "Guided change: baseCommit, observed head and exact document pins (path, id, hash), matching documents.", 2),
         new("policies", "object[]", false, "Keyed declare/revise/retire requirements: policy key or identity, priorHash for changes, change and optional exact definitionHash. A requirement does not grant authority.", 3),
         new("releaseReview", "object", false, "Approved release review: exact candidate and workOrder references, scope (full|focused), focus and probes string arrays. Focused reviews require a focus; full reviews leave it empty.", 3),
+        new("act", "object", false, "From 0.9.4, the operator's act that answered this ask with its recommendation: id (the act's ULID, which each of its decisions names), ask and hash (the exact ask revision answers names), recommendation (the SHA-256 of that revision's recommendation as UTF-8) and count (how many asks the act set out to answer: those it showed and the operator chose before its first signature; an act that stops part-way writes fewer decisions, never more). Recorded by the operator who decides, a person, signed by their device, with decidedAt the act's time; it carries no answer, changeSet, documents, obligations, policies, releaseReview or promptUse.", 3),
     ];
 
     /// <inheritdoc />
@@ -91,6 +92,12 @@ public sealed class DecisionType : IRecordType
         IReadOnlyList<string>? answers = body.Since(2, "answers") ? body.StringArray("answers", false, allowEmpty: false, maxItemLength: Identity.Ulid.Length) : null;
         IReadOnlyList<BodyReader>? obligations = body.Since(2, "obligations") ? body.NestedArray("obligations", false, allowEmpty: false) : null;
         IReadOnlyList<string>? documents = body.Since(2, "documents") ? body.StringArray("documents", false, allowEmpty: false, maxItemLength: 500) : null;
+        // From 0.9.4 (OPS-16): the operator's act answering asks with their recommendations, one decision for each ask.
+        if (body.Since(3, "act") && body.Nested("act", false) is BodyReader act)
+        {
+            OperatorAnswers.ValidateDecision(context, act, answers, decidedBy, decidedAt);
+        }
+
         GuidedDecision.Validate(context, answers, documents, decisionAfterRecord: time is not null);
         SavedPrompts.ValidateUse(context);
         body.NoOtherKeys();

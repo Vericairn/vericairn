@@ -152,6 +152,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
             OperatorRecordResponse { Record: RecordWritten record } => record,
             OperatorCloseResponse close => close.Written.Count == 0 ? null : close.Written[^1],
+            // From 0.9.4 (OPS-16, OPS-24): an act names its last stored record, as operator close does.
+            OperatorAnswerResponse answers => answers.Written.Count == 0 ? null : answers.Written[^1],
+            OperatorActResponse act => act.Written.Count == 0 ? null : act.Written[^1].Record,
             DocumentPassAssignResponse pass => pass.Written.Count == 0 ? null : pass.Written[^1],
             PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
             SecurityReportsResponse reports => reports.Triage,
@@ -162,7 +165,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
         bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false } and not SecurityReportsResponse { Ok: false };
-        if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
+        if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or OperatorAnswerResponse { Ok: false } or OperatorActResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -284,6 +287,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/operator/record"] = typeof(OperatorRecordRequest),
         ["GET /v1/operator/unfinished"] = null,
         ["POST /v1/operator/unfinished"] = typeof(OperatorFinishRequest),
+        ["GET /v1/operator/answers"] = null,
+        ["POST /v1/operator/answers"] = typeof(OperatorAnswerRequest),
+        ["GET /v1/operator/act"] = null,
+        ["POST /v1/operator/act"] = typeof(OperatorActRequest),
         ["GET /v1/operator/close"] = null,
         ["POST /v1/operator/close"] = typeof(OperatorCloseRequest),
         ["GET /v1/goals"] = null,
@@ -403,6 +410,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(OperatorRecordRequest)] = (_, r, d) => Acting(((OperatorRecordRequest)r).By, d) ?? DeviceRecord(((OperatorRecordRequest)r).Type, d),
         [typeof(OperatorFinishRequest)] = (_, r, d) => Acting(((OperatorFinishRequest)r).By, d),
         [typeof(OperatorCloseRequest)] = (_, r, d) => Acting(((OperatorCloseRequest)r).By, d),
+        [typeof(OperatorAnswerRequest)] = (_, r, d) => Acting(((OperatorAnswerRequest)r).By, d),
+        [typeof(OperatorActRequest)] = (_, r, d) => Acting(((OperatorActRequest)r).By, d),
         [typeof(OperatorRequestWriteRequest)] = (_, r, d) => Acting(((OperatorRequestWriteRequest)r).By, d),
         [typeof(OperatorRequestCarryRequest)] = (_, r, d) => Acting(((OperatorRequestCarryRequest)r).By, d),
         [typeof(OperatorRequestCloseRequest)] = (_, r, d) => Acting(((OperatorRequestCloseRequest)r).By, d),

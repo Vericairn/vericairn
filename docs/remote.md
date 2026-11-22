@@ -4,8 +4,8 @@ Remote is Vericairn's phone companion for iOS and Android: a client of an estate
 of one and never a separate estate. It uses the same presentation, state language and SDK as Workbench.
 
 This guide describes Remote's pairing, attention, work, decision and policy views, added in 0.9.0 with REMOTE-01 to REMOTE-03
-and POLICY-05, with the estate's history line and the stops of its runs from 0.9.2, and the presence key that alone signs a
-decision on the phone (REMOTE-11). It is a **developer build**: it is not in an app
+and POLICY-05, with the estate's history line and the stops of its runs from 0.9.2, the presence key that alone signs a
+decision on the phone (REMOTE-11), from 0.9.4 answering asks with their recommendations in one act (OPS-16), and signing every ready item in one reviewed act (OPS-24). It is a **developer build**: it is not in an app
 store, and no real-device qualification is recorded for it.
 
 ## What this build does
@@ -24,6 +24,9 @@ store, and no real-device qualification is recorded for it.
     them, the operator's next reserved step among them, as canonical status gives them, as of the estate's newest record and
     without its command, which a live read shows. Remote carries none of them out;
     a reserved act stays the operator's ([stops](operator-guide.md#stops-and-their-surfaces-092)).
+    From 0.9.4 (OPS-22), below them, the possible todos: the optional operator requests status shows in their own section, each
+    with its recommendation, destination, guide and the commands that fetch its kit and close it on a machine with the estate; they
+    hold nothing, and Remote closes none of them in this build.
     From 0.9.4, below them, the due times of the runs' timed steps, each step with when it is due and why, its timing, zone,
     deadline and a missed-time rule it took, as canonical status gives them, before the step runs; Remote starts none of them.
     From 0.9.4 (PROC-19), below them, the decisions of the runs' decision steps: who decided each path, a rule, its default, a
@@ -111,6 +114,44 @@ write ledger names the request device that sent it.
 **Defer** acknowledges only the original notice's attention state. It answers or accepts nothing. **Request changes** explains
 the desktop route; this phone flow has no suitable change-request record and sends no substitute. Preparing handoffs for these
 decision drafts remains a later step; the draft stays on this phone.
+
+## Answering asks with their recommendations (0.9.4)
+
+From 0.9.4 (OPS-16), an operator answers the asks waiting on them with their recommendations in one act from the phone. In
+Attention, open **Answer asks with their recommendations** and choose **Read the asks waiting on me**: each ask is listed by its
+exact revision and hash with its recommendation's SHA-256 and recommendation first, then the question and what happens while it
+stays unanswered. Every ask starts selected; clear any you do not answer this way. Choose each decision's stake, read the act as
+it will be signed, confirm that you reviewed it, then choose **Sign the act**. Reading answers nothing.
+
+Before the first signature Remote reads the asks again, and the act refuses whole, signing and sending nothing, if any selected
+ask or recommendation changed or no longer waits on you. Each ask then gets its own decision naming the act, with `decidedAt`
+the act's time, signed by the phone's presence key, which asks for Face ID, Touch ID, a fingerprint or the device passcode at
+each signature, as every phone signature does: a phone keeps one presence check per decision. Each decision is prepared by the
+runtime, checked against the request and the ask as shown immediately before the presence key asks and again before its
+signature leaves, and written as its own record; the runtime checks the ask and recommendation again when it writes. A change
+during the act stops it before the next signature: the decisions already written stand as answers of the act, the message says
+how many of how many were written, and an ask once answered is never answered again, so nothing is answered twice. Each decision's
+`act.count`, and its synthesis, say how many asks the act set out to answer, the ones you chose before its first signature; after a
+stop, fewer decisions name the act than its count, and those that do are the ones written. The act's
+outcome is shown until the app closes; unlike a single decision's draft it is not kept in app storage, and the asks the act
+answered no longer wait on you. A phone without its presence key signs no act.
+
+## Ready items in one reviewed act (0.9.4)
+
+From 0.9.4 (OPS-24), Remote offers the same reviewed list as `vericairn operator act --ready`. In Attention, open **Ready items:
+one reviewed act** and choose **Read my ready items**: every operator item whose command is ready for you is listed with what its
+signature records, its exact subject and basis, an acceptance's reviews (who reviewed, the outcome, the independence and the exact
+hash reviewed), and an ask's recommendation by hash. An answer or a request starts chosen to sign; an acceptance starts waiting until
+you choose **sign**; choose **wait** to leave an item waiting, or, for a request, **dismiss** with your reason. Read the act as it will be signed, confirm it, then choose **Sign
+the act**. Reading signs nothing.
+
+Before the first signature Remote reads the list again, and the act refuses whole, signing and sending nothing, if any item changed
+or the list changed. Each chosen record is the one the runtime's act would sign, prepared by the runtime and signed by the phone's
+presence key, one presence check each, as every phone signature is; it is checked against the item as shown immediately before the
+presence key asks and again before its signature leaves, and the runtime checks it against the estate when it writes. A change during
+the act stops it before the next signature: the records already written stand, the message says how many of how many were written,
+and an item already signed is no longer ready, so nothing is signed twice. Nothing outside the reviewed list is signed. As with
+answers, the act's outcome is shown until the app closes and is not kept in app storage.
 
 ## Drafts and observed outcomes
 

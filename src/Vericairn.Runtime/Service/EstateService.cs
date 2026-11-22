@@ -2835,6 +2835,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
+        // From 0.9.4 (OPS-16): a decision naming an operator's act answers the current ask with the recommendation the act showed.
+        if (ActWriteRefusal(draft, current) is string actRefusal) return (null, actRefusal);
+        // From 0.9.4 (OPS-22): a request pins only files the estate's objects hold.
+        if (RequestFileRefusal(draft) is string fileRefusal) return (null, fileRefusal);
         if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
             return (null, templateRefusal);
         if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)
