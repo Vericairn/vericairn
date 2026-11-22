@@ -448,7 +448,7 @@ public sealed record GoalStepRequest(string By, string? Repository = null, IRead
 
 /// <summary>What taking a goal's next step did: what was recorded and started, never more. A problem means nothing was dispatched.</summary>
 /// <param name="Goal">The goal's current revision.</param>
-/// <param name="Outcome">run (an agent's run started), ask (an ask recorded, with an assignment for a person), request (an operator request recorded for a run's reserved act, from 0.9.2), or none (nothing to dispatch).</param>
+/// <param name="Outcome">run (an agent's run started), ask (an ask recorded, with an assignment for a person), request (an operator request recorded for a run's reserved act, from 0.9.2), session (from 0.9.4, an assignment given to an agent's live session), or none (nothing to dispatch).</param>
 /// <param name="Message">What happened and what follows, in words.</param>
 /// <param name="Ok">Whether the step was taken as routed, or there was nothing to take.</param>
 /// <param name="Step">The step taken: its work order's key.</param>
@@ -476,12 +476,23 @@ public sealed record GoalStepResponse(string Goal, string Outcome, string Messag
     public IReadOnlyList<string>? Notices { get; init; }
 }
 
-/// <summary>Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming its assignment.</summary>
+/// <summary>
+/// Take over a step an agent holds: the hand-over is a new assignment of the step, carrying the agent's brief and naming its assignment.
+/// From 0.9.4 (GOAL-11) a person may hand the step to any principal the roster names for its role, citing the lapse ask.
+/// </summary>
 /// <param name="Assignment">The agent's assignment, which holds the step.</param>
 /// <param name="By">The person recording the hand-over: the one taking over, the goal's sponsor or an operator; never an agent. A device-signed request names its device's principal.</param>
-/// <param name="Contributor">The person who takes the step over; the recording principal when omitted.</param>
+/// <param name="Contributor">Who takes the step over: the recording principal when omitted; from 0.9.4 any principal the roster names for the step's role.</param>
 /// <param name="Note">Why; a sentence naming the hand-over when omitted.</param>
-public sealed record TakeoverRequest(string Assignment, string By, string? Contributor = null, string? Note = null);
+public sealed record TakeoverRequest(string Assignment, string By, string? Contributor = null, string? Note = null)
+{
+    /// <summary>
+    /// From 0.9.4 (GOAL-11): the lapse ask the hand-over answers, an ask about the agent's assignment, recorded in the hand-over as its
+    /// basis. Required when the step goes to anyone but a person; a person taking a step over needs none.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Basis { get; init; }
+}
 
 /// <summary>What a hand-over did: the assignment written, and the stop asked of every run of the agent's assignment still in flight.</summary>
 /// <param name="Message">What happened, in words.</param>
@@ -934,6 +945,9 @@ public sealed record UpgradeRequest(string Version, string? By, bool Check)
 
     /// <summary>The invoking command line's full build identity, checked against the runtime before observing a dependency.</summary>
     public string? ClientBuild { get; init; }
+
+    /// <summary>From 0.9.4 (FIX-145): the explicit confirmation of a one-way upgrade, which the previous release cannot read after; refused without it.</summary>
+    public bool OneWay { get; init; }
 }
 
 /// <summary>An upgrade plan, and whether it was applied.</summary>
@@ -964,6 +978,13 @@ public sealed record UpgradeResponse(string FromPin, string ToPin, long FromForm
     /// exactly what an earlier implementation of its generator wrote for the same sources. A member edited by hand is never listed or rewritten.
     /// </summary>
     public IReadOnlyList<string> Regenerated { get; init; } = [];
+
+    /// <summary>
+    /// From 0.9.4 (FIX-145): whether the release the estate was pinned to before can still read it after, and how to return to that release,
+    /// with the restore point an applied upgrade recorded. Absent from older runtimes.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpgradeReturn? Return { get; init; }
 }
 
 /// <summary>A reconcile task.</summary>

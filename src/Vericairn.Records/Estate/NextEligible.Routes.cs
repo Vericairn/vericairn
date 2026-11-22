@@ -81,6 +81,9 @@ public static partial class NextEligible
             Exception = this.Exception;
         }
 
+        /// <summary>From 0.9.4 (GOAL-11): for an agent's route through a live session rather than a launcher, the session's identity.</summary>
+        public string? Session { get; init; }
+
         /// <summary>True when the one-step operation acts on it.</summary>
         public bool Dispatches => Dispatching.IndexOf(State) >= 0;
 
@@ -134,7 +137,8 @@ public static partial class NextEligible
         foreach (RecordEnvelope order in GoalRules.Work(model, current))
         {
             string state = statuses.GetValueOrDefault(order.Id) ?? "planned";
-            IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(model, order);
+            // From 0.9.4 (ID-11) the step's holder is the holder rule's; its history is every assignment.
+            IReadOnlyList<RecordEnvelope> assignments = Routing.Holding(model, order);
             RecordEnvelope? holder = assignments.Count == 0 ? null : assignments[^1];
             if (state != "planned")
             {
@@ -154,7 +158,8 @@ public static partial class NextEligible
     private static Route RouteOf(EstateModel model, RecordEnvelope goal, string status, AgentRuns.Ledger ledger, RecordEnvelope order, IReadOnlyList<RecordEnvelope> assignments, List<AgentRuns.Run> runs, Routing.Machine machine)
     {
         string role = Routing.RoleOf(order);
-        return RouteOf(model, goal, status, ledger, role, Routing.ReservedAction(role), assignments, Routing.AsksAbout(model, goal, order), runs, machine, null);
+        return RouteOf(model, goal, status, ledger, role, Routing.ReservedAction(role), assignments, Routing.AsksAbout(model, goal, order), runs, machine, null,
+            sessionExposure: Routing.SessionExposure(model, goal, order, Routing.StepRecords(model, Routing.Assignments(model, order))));
     }
 
     /// <summary>
@@ -163,7 +168,7 @@ public static partial class NextEligible
     /// </summary>
     private static Route RouteOf(EstateModel model, RecordEnvelope goal, string status, AgentRuns.Ledger ledger, string role, string? reserved, IReadOnlyList<RecordEnvelope> assignments,
         IReadOnlyList<RecordEnvelope> asks, List<AgentRuns.Run> runs, Routing.Machine machine, Func<Routing.Candidate, Routing.Candidate>? admit, (IReadOnlyList<string> Principals, Routing.Source Source)? named = null,
-        bool resultGoesOn = false)
+        bool resultGoesOn = false, IReadOnlyList<string>? sessionExposure = null)
     {
         admit ??= candidate => candidate;
         (IReadOnlyList<string> principals, Routing.Source source) = named ?? Routing.Principals(model, goal, role);
@@ -182,7 +187,7 @@ public static partial class NextEligible
         string holderKind = contributor is not null && model.CurrentPrincipal(contributor) is RecordEnvelope who ? EstateModel.BodyString(who, "kind") ?? "?" : "missing";
         if (holder is not null && holderKind == "human")
         {
-            return Held("assigned", contributor, $"assigned to {Routing.NameOf(model, contributor)} by assignment {holder.Id}{TakesOver(model, holder)}");
+            return Held("assigned", contributor, $"assigned to {Routing.NameOf(model, contributor)} by assignment {holder.Id}{TakesOver(model, holder)}{Away(contributor)}");
         }
 
         // An agent's result goes to review; a review that finds what to change sends the step back to the agent for another attempt.
@@ -197,20 +202,26 @@ public static partial class NextEligible
         if (waiting is not null)
         {
             string? asked = EstateModel.BodyString(model.Latest(waiting), "to");
-            return Held("asked", asked, $"ask {waiting.Id} to {Routing.NameOf(model, asked)} about it waits for an answer, and the step waits with it");
+            return Held("asked", asked, $"ask {waiting.Id} to {Routing.NameOf(model, asked)} about it waits for an answer, and the step waits with it{Away(asked)}");
+        }
+
+        // From 0.9.4 (GOAL-11): a live session that holds the step's assignment carries it, as a run in flight does.
+        if (holder is not null && machine.Sessions.FirstOrDefault(s => s.Assignments.Contains(model.Chain(holder)[0], StringComparer.Ordinal)) is Routing.LiveSession carrying)
+        {
+            return Held("assigned", contributor, $"{Routing.NameOf(model, contributor)}'s live session {carrying.Label ?? carrying.Session} holds it by assignment {holder.Id}");
         }
 
         if (holder is not null)
         {
             // The step stays with the agent that holds it: an assignment to another agent would start its attempts afresh.
-            Routing.Candidate going = admit(Routing.Evaluate(model, goal, ledger, contributor!, role, holder, machine));
+            Routing.Candidate going = admit(Routing.Evaluate(model, goal, ledger, contributor!, role, holder, machine, sessionExposure));
             string again = findings is null ? "goes on with another run" : $"goes on with another attempt, since review {findings.Id} found what to change in its result {result!.Id}";
             return going.Available
                 ? Agent(going, holder, [going], $"{going.Name} holds it by assignment {holder.Id} and {again}")
                 : Unavailable([going], $"{going.Name} holds it by assignment {holder.Id} and cannot go on from here ({string.Join("; ", going.Reasons)}); it is never given to another contributor without the sponsor");
         }
 
-        List<Routing.Candidate> candidates = principals.Select(p => admit(Routing.Evaluate(model, goal, ledger, p, role, null, machine))).ToList();
+        List<Routing.Candidate> candidates = principals.Select(p => admit(Routing.Evaluate(model, goal, ledger, p, role, null, machine, sessionExposure))).ToList();
         if (candidates.FirstOrDefault(c => c.Available) is Routing.Candidate first)
         {
             if (first.IsAgent)
@@ -224,9 +235,19 @@ public static partial class NextEligible
             return new Route(role, reserved, source, candidates, reserved is null ? "person" : "reserved", first.Principal, null, null, latestAsk, null, fence, [], why);
         }
 
+        // From 0.9.4 (GOAL-11): with no other principal available, a person who is only away still carries the step, and is asked:
+        // what only they can answer waits for them, shown as away until their return, and never goes to someone the roster does not name.
+        if (candidates.FirstOrDefault(c => c.IsPerson && c.AwayUntil is not null && c.Reasons.Count == 1) is Routing.Candidate away)
+        {
+            return new Route(role, reserved, source, candidates, reserved is null ? "person" : "reserved", away.Principal, null, null, latestAsk, null, fence, [],
+                $"no other principal of the {role} role is available here, from {source.Description}, and {away.Name} is away until {away.AwayUntil}: the step is still assigned to them and asked, shown as away until their return");
+        }
+
         return Unavailable(candidates, candidates.Count == 0
             ? $"{source.Description} names no principal for the {role} role"
             : $"no principal of the {role} role is available here, from {source.Description}");
+
+        string Away(string? person) => Routing.AwayUntil(model, person, machine.Now) is string back ? $"; {Routing.NameOf(model, person)} is away until {back}" : string.Empty;
 
         Route Held(string state, string? principal, string reason, AgentRuns.Run? run = null) =>
             new(role, reserved, source, [], state, principal, null, holder, latestAsk, run, fence, [], reason);
@@ -236,7 +257,10 @@ public static partial class NextEligible
             IReadOnlyList<string> budget = AgentRuns.StartRefusals(model, goal, assignment?.Id, Element(AgentRuns.CapFor(ledger))).Select(r => r.Message).ToList();
             IReadOnlyList<string> custody = machine.Custody(goal, agent.Principal);
             RecordEnvelope? exception = custody.Count == 0 ? null : CustodyExceptions.InForce(model, goal, machine.Now);
-            return new Route(role, reserved, source, evaluated, "agent", agent.Principal, agent.Launcher, assignment, latestAsk, null, budget, custody, reason, exception);
+            // From 0.9.4 (GOAL-11): through a live session the runtime launches nothing, so the custody guard over launches does not apply.
+            return agent.Session is string session
+                ? new Route(role, reserved, source, evaluated, "agent", agent.Principal, null, assignment, latestAsk, null, budget, [], $"{reason}, through its live session {session}") { Session = session }
+                : new Route(role, reserved, source, evaluated, "agent", agent.Principal, agent.Launcher, assignment, latestAsk, null, budget, custody, reason, exception);
         }
 
         Route Unavailable(IReadOnlyList<Routing.Candidate> evaluated, string reason)
@@ -371,8 +395,8 @@ public static partial class NextEligible
         };
     }
 
-    /// <summary>A route as the next-eligible view's JSON gives it, or null.</summary>
-    private static JsonObject? RouteJson(EstateModel model, Route? route) => route is null ? null : new JsonObject
+    /// <summary>A route as the next-eligible view's JSON gives it, or null; from 0.9.4 with its session when it goes through one.</summary>
+    private static JsonObject? RouteJson(EstateModel model, Route? route) => route is null ? null : WithSession(route, new JsonObject
             {
                 ["state"] = route.State,
                 ["dispatches"] = route.Dispatches,
@@ -391,8 +415,36 @@ public static partial class NextEligible
                     ["refusals"] = Strings(route.Custody),
                     ["exception"] = route.Exception is RecordEnvelope exception ? new JsonObject { ["id"] = exception.Id, ["by"] = exception.By, ["expires"] = EstateModel.BodyString(exception, "expires"), ["reason"] = EstateModel.BodyString(exception, "reason") } : null,
                 } : null,
-                ["candidates"] = new JsonArray(route.Candidates.Select(c => (JsonNode)new JsonObject { ["principal"] = c.Principal, ["name"] = c.Name, ["kind"] = c.Kind, ["available"] = c.Available, ["launcher"] = c.Launcher, ["reasons"] = Strings(c.Reasons) }).ToArray()),
-            };
+                ["candidates"] = new JsonArray(route.Candidates.Select(c => (JsonNode)CandidateJson(c)).ToArray()),
+            });
+
+    /// <summary>A route's JSON, adding the live session it goes through when it does (from 0.9.4).</summary>
+    private static JsonObject WithSession(Route route, JsonObject json)
+    {
+        if (route.Session is string session)
+        {
+            json["session"] = session;
+        }
+
+        return json;
+    }
+
+    /// <summary>A candidate as a route's JSON lists it; from 0.9.4 with when an away person is back and the session an agent is reached through.</summary>
+    private static JsonObject CandidateJson(Routing.Candidate candidate)
+    {
+        var json = new JsonObject { ["principal"] = candidate.Principal, ["name"] = candidate.Name, ["kind"] = candidate.Kind, ["available"] = candidate.Available, ["launcher"] = candidate.Launcher, ["reasons"] = Strings(candidate.Reasons) };
+        if (candidate.AwayUntil is string away)
+        {
+            json["awayUntil"] = away;
+        }
+
+        if (candidate.Session is string session)
+        {
+            json["session"] = session;
+        }
+
+        return json;
+    }
 
     private static JsonObject AskJson(EstateModel model, RecordEnvelope ask)
     {

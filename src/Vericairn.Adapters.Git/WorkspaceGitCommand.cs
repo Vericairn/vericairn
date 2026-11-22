@@ -19,47 +19,24 @@ internal static class WorkspaceGitCommand
     internal static int Run(string directory, out string output, TimeSpan deadline, params string[] arguments)
         => RunWithInput(directory, out output, deadline, null, arguments);
 
-    /// <summary>Runs Git with isolated configuration, writing <paramref name="input"/> to its standard input when given.</summary>
+    /// <summary>Runs Git with isolated configuration (<see cref="GitHardening"/>), writing <paramref name="input"/> to its standard input when given.</summary>
     internal static int RunWithInput(string directory, out string output, TimeSpan deadline, string? input, params string[] arguments)
     {
         if (deadline <= TimeSpan.Zero) throw new ProviderRefusedException("Git's observation deadline expired.");
-        string control = Path.Combine(Path.GetTempPath(), "vericairn-git-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(control);
+        GitHardening hardening = GitHardening.Create();
         try
         {
-            File.WriteAllText(Path.Combine(control, "config"), string.Empty);
             var info = new ProcessStartInfo("git")
             {
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = input is not null,
                 CreateNoWindow = true, WorkingDirectory = directory,
             };
-            info.ArgumentList.Add("--no-pager");
-            foreach (string setting in new[]
-            {
-                "core.hooksPath=" + Path.Combine(control, "hooks"), "core.fsmonitor=false", "core.pager=",
-                "core.sshCommand=", "core.alternateRefsCommand=", "diff.external=", "diff.trustExitCode=false",
-                "protocol.allow=never", "protocol.file.allow=always", "gc.auto=0", "maintenance.auto=false",
-                "fetch.writeCommitGraph=false", "submodule.recurse=false",
-                // Configuration isolation cannot inherit a Windows installation's long-path opt-in. Staging refs can
-                // exceed MAX_PATH even when the published workspace fits; keep this non-executing option explicit.
-                "core.longpaths=true",
-            })
-            {
-                info.ArgumentList.Add("-c");
-                info.ArgumentList.Add(setting);
-            }
-            foreach (string argument in arguments) info.ArgumentList.Add(argument);
             if (input is not null) info.StandardInputEncoding = new UTF8Encoding(false);
             info.Environment.Clear();
             foreach ((string name, string value) in WorkerEnvironment.Build(WorkerEnvironment.Current(), []))
                 info.Environment[name] = value;
-            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            info.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(control, "config");
-            info.Environment["GIT_ATTR_NOSYSTEM"] = "1";
-            info.Environment["GIT_TERMINAL_PROMPT"] = "0";
-            info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-            info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
-            info.Environment["GIT_NO_LAZY_FETCH"] = "1";
+            // Worker transfers are local: only the file protocol is allowed back after the shared hardening refuses every transport.
+            hardening.Apply(info, ["-c", "protocol.file.allow=always", .. arguments]);
             using Process process = ProgramPath.Start(info) ?? throw new ProviderRefusedException("Git did not start.");
             Task<string> standardOutput = WorkspaceGitScope.ReadAsync(process.StandardOutput);
             Task<string> standardError = WorkspaceGitScope.ReadAsync(process.StandardError);
@@ -99,7 +76,7 @@ internal static class WorkspaceGitCommand
         }
         finally
         {
-            WorkspaceCleanup.Delete(control);
+            hardening.Dispose();
         }
     }
 

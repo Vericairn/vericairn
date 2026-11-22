@@ -29,6 +29,13 @@ internal static class WatchLimits
             watch.Error("watch.limits", "loopStop", "Watching limits must satisfy loopWarning < loopStop <= loopWindow; omitted fields are checked after inheritance before launch.");
         }
 
+        // From 0.9.4 (ID-11), additive in record format 3: how long a lapsed session holding a step stays lapsed before the runtime asks
+        // about reassignment. A reader before 0.9.4 refuses it as an unknown key, and a format-2 record cannot carry it.
+        if (watch.Since(3, "reassignAfterSeconds"))
+        {
+            watch.Number("reassignAfterSeconds", false, 60, 86_400);
+        }
+
         watch.NoOtherKeys();
     }
 }

@@ -208,7 +208,32 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(157, synchronous.Length);
+        Assert.Equal(170, synchronous.Length);
+        // From 0.9.4 (ID-11) presence leases, each with its default and its cancellable counterpart.
+        foreach (string name in new[] { nameof(IEstateApi.PresenceRegister), nameof(IEstateApi.PresenceHeartbeat), nameof(IEstateApi.PresenceRelease), nameof(IEstateApi.Presence) })
+        {
+            Assert.Single(synchronous, method => method.Name == name);
+            Assert.False(typeof(IEstateApi).GetMethod(name)!.IsAbstract);
+            Assert.False(typeof(IEstateApi).GetMethod(name + "Async")!.IsAbstract);
+        }
+
+        // From 0.9.4 (OPS-21) the timed stop drill, with its default and its cancellable counterpart.
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.StopDrill));
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.StopDrill))!.IsAbstract);
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.StopDrillAsync))!.IsAbstract);
+        // From 0.9.4 (OPS-20) the observers declared on this machine, with their defaults and cancellable counterparts.
+        foreach (string name in new[] { nameof(IEstateApi.Observers), nameof(IEstateApi.ObserverDeclare), nameof(IEstateApi.ObserverReport), nameof(IEstateApi.ObserverWithdraw) })
+        {
+            Assert.Single(synchronous, method => method.Name == name);
+            Assert.False(typeof(IEstateApi).GetMethod(name)!.IsAbstract);
+            Assert.False(typeof(IEstateApi).GetMethod(name + "Async")!.IsAbstract);
+        }
+
+        // From 0.9.4 answering asks with their recommendations in one act (OPS-16) and one reviewed act over every ready item (OPS-24), each
+        // with its default and its cancellable counterpart.
+        foreach (string name in new[] { nameof(IEstateApi.OperatorAnswerCandidates), nameof(IEstateApi.OperatorAnswer), nameof(IEstateApi.OperatorAnswerCandidatesAsync), nameof(IEstateApi.OperatorAnswerAsync),
+            nameof(IEstateApi.OperatorActItems), nameof(IEstateApi.OperatorAct), nameof(IEstateApi.OperatorActItemsAsync), nameof(IEstateApi.OperatorActAsync) })
+            Assert.False(typeof(IEstateApi).GetMethod(name)!.IsAbstract);
         // From 0.9.4 (GOAL-08) a standing agent's outputs, with its default and its cancellable counterpart.
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.StandingOutput));
         Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.StandingOutput))!.IsAbstract);

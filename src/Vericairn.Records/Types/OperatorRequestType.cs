@@ -39,6 +39,7 @@ public sealed class OperatorRequestType : IRecordType
         new("sourceAsk", "ulid", false, "The exact original ask carried over; the ask remains readable and is not answered by this request.", 3),
         new("sourceAskHash", "hash", false, "The exact carried ask's hash; required with sourceAsk.", 3),
         new("flowStep", "object", false, "The reserved step of a run the request waits on: goal (the run's first revision), key and, for a step that runs over a list, instance. Its subject is the run's work order and its content one command item; it is delivered only while the step waits on the operator with that exact command, and it grants nothing.", 3),
+        new("optional", "boolean", false, "From 0.9.4, true marks the request optional: a possible todo the operator may never do, shown in its own section with its guide, recommendation and commands. It never holds a release's closing or a goal's evaluation, and closes, done or dismissed, whenever the operator chooses, on their word. Its requester may create it optional; a required request becomes optional only by a revision of the operator it is put to, a person, changing nothing else. A run's reserved step is never optional here: its step says whether it is required.", 3),
         new("raisedBy", "object", false, "From 0.9.4, a standing agent's words outside the estate: goal (its goal's first revision), occurrence, assignment and, for an agent, run, as a possibility's. A publication request pinning the agent's work order, put to an operator other than its author, its exact text labeled the agent's draft, which the operator approves; it dispatches nothing. Every revision keeps raisedBy as the first revision names it and stays a publication request, and only an operator who is a person closes it, directly: anyone else's close closes nothing.", 3),
     ];
 
@@ -76,6 +77,9 @@ public sealed class OperatorRequestType : IRecordType
         }
 
         StandingOutputs.RaisedBy? raised = StandingOutputs.ValidateRaisedBy(context, body.Nested("raisedBy", false));
+        // From 0.9.4 (OPS-22): an optional request is a possible todo; a run's reserved step is required or not by its step alone.
+        if (body.Flag("optional", false) is true && flowStep is not null)
+            context.Error("operator-request.optional", "A step's request is not marked optional: its step says whether it is required.");
         body.NoOtherKeys();
         StandingOutputs.ValidateOperatorRequest(context, raised);
         context.RequireReference("to", to, "principal");
@@ -90,16 +94,26 @@ public sealed class OperatorRequestType : IRecordType
         RecordEnvelope? previous = context.Find(context.Record.Supersedes);
         if (previous is { Type: "operator-request" })
         {
-            if (previous.By != context.Record.By || previous.Subject != context.Record.Subject ||
+            // From 0.9.4 (OPS-22): besides its author, the operator a request is put to, a person, may revise it to change its optional mark
+            // alone, on their word; the author's own revision never turns a required request optional.
+            string author = context.Model.ById.TryGetValue(context.Model.Chain(previous)[0], out RecordEnvelope? original) ? original.By : previous.By;
+            bool marking = context.Record.By != author && context.Record.By == to && OptionalMarkOnly(previous, context.Record);
+            if (context.Record.By != author && !marking || previous.Subject != context.Record.Subject ||
                 IdentityFields.Any(f => EstateModel.BodyString(previous, f) != EstateModel.BodyString(context.Record, f)) ||
                 Raw(previous, "flowStep") != Raw(context.Record, "flowStep"))
-                context.Error("operator-request.revision", "A revision keeps its author, original requester, operator, source ask, subject and step.");
+                context.Error("operator-request.revision", "A revision keeps its author, original requester, operator, source ask, subject and step; the operator it is put to may revise only its optional mark.");
+            if (marking && (context.Principal(to) is not { } addressed || EstateModel.BodyString(addressed, "kind") != "human" || !context.HasRole(to, Roles.Operator)))
+                context.Error("operator-request.optional", "Only the operator a request is put to, a person, revises its optional mark.");
+            if (context.Record.By == author && !Optional(previous) && Optional(context.Record))
+                context.Error("operator-request.optional", "A required request is marked optional only by the operator it is put to, on their word; its requester may create a request optional, never turn its own required request optional.");
             if (OperatorRequests.Closures(context.Model, previous).Any())
                 context.Error("operator-request.closed", "A closed request cannot be revised; a new action needs a new request.");
         }
         if (source is null)
         {
-            if (sourceHash is not null || askedBy != context.Record.By)
+            // The requester is the author of the request's first revision, whoever wrote this one (the operator may revise its mark).
+            string requester = previous is { Type: "operator-request" } && context.Model.ById.TryGetValue(context.Model.Chain(previous)[0], out RecordEnvelope? opened) ? opened.By : context.Record.By;
+            if (sourceHash is not null || askedBy != requester)
                 context.Error("operator-request.requester", "Without a source ask, askedBy is the author and sourceAskHash is absent.");
             return;
         }
@@ -169,6 +183,17 @@ public sealed class OperatorRequestType : IRecordType
             context.Error("operator-request.flow-step", $"Step {key} runs once for each of the run's {declared.Each}; the request names one of them as its instance.");
         else if (declared.Each is null && instance is not null)
             context.Error("operator-request.flow-step", $"Step {key} runs once; its request names no instance.");
+    }
+
+    /// <summary>Whether a record states optional true.</summary>
+    internal static bool Optional(RecordEnvelope record) => record.Body.ValueKind == JsonValueKind.Object && record.Body.TryGetProperty("optional", out JsonElement value) && value.ValueKind == JsonValueKind.True;
+
+    // Whether a revision differs from the revision it supersedes in its optional mark alone.
+    private static bool OptionalMarkOnly(RecordEnvelope previous, RecordEnvelope revision)
+    {
+        if (Optional(previous) == Optional(revision) || previous.Body.ValueKind != JsonValueKind.Object || revision.Body.ValueKind != JsonValueKind.Object) return false;
+        static string Rest(JsonElement body) => string.Join("\n", body.EnumerateObject().Where(p => p.Name != "optional").OrderBy(p => p.Name, StringComparer.Ordinal).Select(p => p.Name + "=" + p.Value.GetRawText()));
+        return Rest(previous.Body) == Rest(revision.Body);
     }
 
     private static string? Raw(RecordEnvelope record, string name) =>

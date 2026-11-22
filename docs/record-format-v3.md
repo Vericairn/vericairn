@@ -805,6 +805,55 @@ keeps every machine on a release that reads them. A format-2 estate refuses them
 `records describe possibility`, `records describe ask` and `records describe
 operator-request` include this contract.
 
+## Events and presence (0.9.4)
+
+ID-11 and GOAL-11 add fields within format 3 and no record type; each is optional:
+
+- `goal` and `roster`: `limits.watch.reassignAfterSeconds`, 60 to 86,400, how long a lapsed session holding a step stays lapsed
+  before the runtime asks about reassignment (600 when neither sets it).
+- `communication-setting`, person scope only: `values.availability` (`state` `available`, or `away` with `until` and an optional
+  earlier `from`) and `values.quietHours` (`zone`, an IANA time zone; `windows`, 1 to 14 of `days`, `start` and `end` as `HH:MM`;
+  `breakthrough`, attention categories).
+- `assignment`: `routedWith` `session` (routing gave the step to a live session; stored alone, it holds its step at once) and
+  `basis`, the lapse ask a hand-over answers, recorded by a person and about an assignment of the same step.
+
+A format-2 record cannot carry them. A reader of format 3 that predates them refuses each as an unknown key or value, as any later
+format-3 field, so the estate's pin keeps every machine on a release that reads them. The generic record reader advances to
+`vericairn.records/readers/12`, which carries `basis` and the session value. See [events and presence](events-and-presence.md).
+
+## Answering asks in one act (0.9.4)
+
+OPS-16 adds one optional field to `decision` within format 3, and no record type. A decision without `act` behaves as before.
+
+| Type | Field |
+| --- | --- |
+| `decision` | Optional `act: {id, ask, hash, recommendation, count}` names the operator's act that answered this ask with its recommendation: `id`, the act's ULID, which each of its decisions names; `ask` and `hash`, the exact ask revision `answers` names; `recommendation`, the SHA-256 of that revision's recommendation as UTF-8; and `count`, 1 to 256, how many asks the act set out to answer: those it showed and the operator chose before its first signature. An act that stops part-way, as a phone's may, writes fewer decisions than its count, never more. `decidedAt` is the act's time. |
+
+Validation refuses an `act` whose `answers` is not exactly its ask, whose hash is not that revision's or whose recommendation
+hash is not that revision's recommendation's; one recorded by anyone but its `decidedBy`, or whose decider is not a person; an
+unsigned one; one carrying `answer`, `changeSet`, `documents`, `obligations`, `policies`, `releaseReview` or `promptUse`; decisions
+of one act that differ in `decidedBy`, `decidedAt` or `count`, answer one ask twice or number more than `count`; and `act` in an
+earlier format. That the ask revision is still the current one and still waits on its operator is the runtime's to check when it
+writes the decision. A reader before 0.9.4 refuses a decision carrying `act`, since a decision admits no other member, so an estate
+records an act only after every writer upgrades.
+
+## Optional requests (0.9.4)
+
+OPS-22 adds one optional field to `operator-request` within format 3, and no record type. A request without `optional` behaves as
+before.
+
+| Type | Field |
+| --- | --- |
+| `operator-request` | Optional `optional: true` marks the request a possible todo: shown in its own section, never holding a release's closing or a goal's evaluation, closed, done or dismissed, whenever the operator chooses. Its requester may create it optional; a required request becomes optional only by a revision the operator it is put to, a person, writes, changing nothing but the mark. |
+
+Validation refuses `optional: true` on a run's step request (`flowStep`), whose step says whether it is required, and a value that
+is not a boolean; a revision by the requester that turns a required request optional; and a revision by the operator it is put to
+that changes anything but the mark, or by an operator who is not a person. Reading counts a turn to optional only when that operator
+wrote it, so a refused mark holds nothing back; a revision back to required always counts. That every file a request pins is held
+by the estate's objects is the runtime's to check when it writes the request. A reader before 0.9.4 refuses a request carrying
+`optional`, since a request admits no other member, so an estate marks requests optional only after every writer upgrades. See
+[operator requests](operator-requests.md#optional-requests-possible-todos-094).
+
 ## Identifiers more than one record carries (0.9.4)
 
 A record's identifier is its own: the write boundary refuses a record whose
@@ -838,7 +887,11 @@ line. A record counts only when it counts in the reading that leaves the unread
 records out and in every such reading. One of those readings is the estate as it
 was before the copies were written, so whatever it refused stays refused, by every
 reading, check and write; and since the reading that leaves them out is among them,
-a copy can only take counting away. The records that count for nothing only for
+a copy can only take counting away. That reading is the earlier estate exactly only
+for the files that share an identifier: a new file with an identifier of its own
+that joins an unread line, as one superseding a record of it does, is in every
+reading, and it gains nothing its writer could not gain by writing it without a
+duplicate. The records that count for nothing only for
 this reason are reported once (`record.duplicate-refused`, a warning). Past 16
 readings which records a reading would refuse is not established, and no record
 counts (`record.duplicate-unsettled`, an error) until all but one record carrying
@@ -882,11 +935,12 @@ What holds while records are unread:
   outputs are not established;
 - nothing acts: release submission, every record a device signs on the runtime's
   machine or that is prepared for a device elsewhere to sign, a pairing code, run
-  admission, preparation and launch, and a standing agent's goal step refuse
-  before they act, naming the finding, and so does every MCP tool and daemon route
-  that reaches them. While the estate reports any other error, release submission,
-  run admission and launch and a standing agent's goal step refuse the same way,
-  and a record is judged by the write boundary with the estate as it would be with
+  admission, preparation and launch, a goal's step by any route and a repository
+  operation (a checked push, opening or merge, or its observation) refuse before
+  they act, naming the finding, and so does every MCP tool and daemon route that
+  reaches them. While the estate reports any other error, release submission, run
+  admission and launch, a goal's step and a repository operation refuse the same
+  way, and a record is judged by the write boundary with the estate as it would be with
   the record, as before, and stored only when it clears every error, so that an
   estate can still be repaired by its records. Stopping a run is never refused.
 

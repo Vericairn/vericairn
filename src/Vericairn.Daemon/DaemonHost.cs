@@ -67,6 +67,9 @@ public sealed record DaemonOptions
     /// <summary>How often the event journal derives what time changed while a reader listens (0.9.2); tests shorten it.</summary>
     internal TimeSpan EventTick { get; init; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>From 0.9.4 (ID-11): how often presence leases are swept for lapses; tests shorten it.</summary>
+    internal TimeSpan PresenceTick { get; init; } = TimeSpan.FromSeconds(5);
+
     /// <summary>The most events the journal keeps; tests lower it to reach the bound.</summary>
     internal int EventCapacity { get; init; } = 100_000;
 
@@ -103,6 +106,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private Task? scheduled;
     private Task? securityReports;
     private Task? deriving;
+    private Task? leasing;
     private Task? sweeping;
     private Task? stopping;
     private ListenOptions? loopbackListener;
@@ -413,6 +417,7 @@ public sealed class DaemonHost : IAsyncDisposable
         }
 
         host.deriving = Task.Run(() => service.RunEventDerivationAsync(options.EventTick, host.Log, host.schedule.Token), CancellationToken.None);
+        host.leasing = Task.Run(() => service.RunPresenceSweepAsync(options.PresenceTick, host.Log, host.schedule.Token), CancellationToken.None);
         host.securityReports = Task.Run(() => host.RunSecurityReportsAsync(host.schedule.Token), CancellationToken.None);
         if (host.Mcp.Enabled)
         {
@@ -928,6 +933,19 @@ public sealed class DaemonHost : IAsyncDisposable
             if (securityReports is not null)
             {
                 await securityReports.ConfigureAwait(false);
+            }
+
+            if (leasing is not null)
+            {
+                try
+                {
+                    await leasing.ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    // Presence never stops the daemon from stopping cleanly.
+                    Log($"the presence sweep ended with {exception.GetType().Name}: {exception.Message}");
+                }
             }
         }
         finally

@@ -585,6 +585,7 @@ public static partial class FlowPosition
         private readonly Dictionary<string, FlowTiming> timings = new(StringComparer.Ordinal);
         private readonly Dictionary<FlowRuns.StepRef, StepInstance> derived = [];
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> held;
+        private readonly Dictionary<FlowRuns.StepRef, RecordEnvelope> holders;
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> reviewing;
         private readonly Dictionary<FlowRuns.StepRef, Failure> failures = [];
         private readonly List<Return> returns;
@@ -608,6 +609,9 @@ public static partial class FlowPosition
             List<(FlowRuns.StepRef Ref, RecordEnvelope Assignment)> stepped = work is null ? []
                 : Routing.Assignments(model, work).Where(a => FlowRuns.StepOf(a) is not null).Select(a => (FlowRuns.StepOf(a)!, a)).ToList();
             held = stepped.Where(s => !s.Ref.Review).GroupBy(s => s.Ref).ToDictionary(g => g.Key, g => g.Select(s => s.Assignment).ToList());
+            // From 0.9.4 (ID-11): who holds each step now is the holder rule's; held keeps every assignment, for authorship and history.
+            holders = work is null ? [] : Routing.Holding(model, work).Where(a => FlowRuns.StepOf(a) is { Review: false }).GroupBy(a => FlowRuns.StepOf(a)!)
+                .ToDictionary(g => g.Key, g => g.Last());
             reviewing = stepped.Where(s => s.Ref.Review).GroupBy(s => s.Ref.Work).ToDictionary(g => g.Key, g => g.Select(s => s.Assignment).ToList());
             ledger = AgentRuns.Of(model, goal);
             runs = AgentRuns.All(model).Where(r => r.Assignment is not null).ToList();
@@ -945,7 +949,7 @@ public static partial class FlowPosition
             var reference = new FlowRuns.StepRef(step.Key, item);
             List<RecordEnvelope> assignments = held.GetValueOrDefault(reference) ?? [];
             List<RecordEnvelope> reviews = reviewing.GetValueOrDefault(reference) ?? [];
-            RecordEnvelope? holder = assignments.Count == 0 ? null : assignments[^1];
+            RecordEnvelope? holder = holders.GetValueOrDefault(reference);
             RecordEnvelope? result = holder is null ? null : LatestResult(holder);
             // A reserved act's done predicates count only the records of a principal who holds it, the operator (design/flow.md § 8).
             Func<RecordEnvelope, bool>? admit = Admit(step);
@@ -1838,7 +1842,7 @@ public static partial class FlowPosition
         private Failure? FailureOf(FlowStep step, string? item)
         {
             List<RecordEnvelope> assignments = held.GetValueOrDefault(new FlowRuns.StepRef(step.Key, item)) ?? [];
-            RecordEnvelope? holder = assignments.Count == 0 ? null : assignments[^1];
+            RecordEnvelope? holder = holders.GetValueOrDefault(new FlowRuns.StepRef(step.Key, item));
             RecordEnvelope? result = holder is null ? null : LatestResult(holder);
             if (result is null)
             {

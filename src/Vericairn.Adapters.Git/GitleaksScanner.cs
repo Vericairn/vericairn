@@ -79,29 +79,35 @@ public sealed partial class GitleaksScanner : ISecretScanner
         ArgumentNullException.ThrowIfNull(plan);
         if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head))
             throw new ProviderRefusedException("The scan requires two exact commit ids.");
-        ProcessResult version = Invoke(directory, "version");
-        string number = version.StandardOutput.Trim();
-        Match parsed = VersionPattern().Match(number);
-        if (version.Outcome != ProcessOutcome.Exited || version.ExitCode != 0 || !parsed.Success)
-            return new("gitleaks", "unknown", plan.Range, "unavailable", null);
-        if (new Version(int.Parse(parsed.Groups["major"].Value, CultureInfo.InvariantCulture), int.Parse(parsed.Groups["minor"].Value, CultureInfo.InvariantCulture),
-                int.Parse(parsed.Groups["patch"].Value, CultureInfo.InvariantCulture)) < Minimum)
-            return new("gitleaks", number, plan.Range, "unavailable", null);
-        bool inventories = OnlyInventoriesHoldInventoryLines(directory, plan.Range);
-        byte[] rules = inventories ? Configuration : ConfigurationWithoutInventories;
-        number += "; rules " + (inventories ? ConfigurationHash : ConfigurationWithoutInventoriesHash);
-        int? commits = Count(directory, plan.Range);
-        if (commits is null) return new("gitleaks", number, plan.Range, "incomplete", null);
-        // Gitleaks reports no finding when git log -p stops early, at an unreadable or corrupt object, and still exits 0. Before it runs,
-        // every commit, tree and blob the push carries is read and checked against its id, and the range's patches are read exactly as
-        // gitleaks reads them, parents' sides included; a read that fails or stops early leaves the scan incomplete (FIX-150).
-        if (!Reads(directory, "rev-list", "--objects", "--verify-objects", "--quiet", plan.Range)
-            || !Reads(directory, ["log", "-p", "-U0", plan.Range, .. LogOptions, "--output=" + NullDevice]))
-            return new("gitleaks", number, plan.Range, "incomplete", null);
+        // The scan's own folder holds the rules, the ignore file and the report it writes, beside the empty folder in which every process
+        // of the scan runs (FIX-160, ScanFolder).
         string temporary = Path.Combine(Path.GetTempPath(), "vericairn-scan-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(temporary);
+        string number = "unknown";
+        using GitHardening hardening = Harden();
         try
         {
+            var folder = new ScanFolder(Path.Combine(temporary, "source"), null, hardening);
+            Directory.CreateDirectory(folder.Source);
+            ProcessResult version = run(Start("gitleaks", folder, ["version"]));
+            number = version.StandardOutput.Trim();
+            Match parsed = VersionPattern().Match(number);
+            if (version.Outcome != ProcessOutcome.Exited || version.ExitCode != 0 || !parsed.Success)
+                return new("gitleaks", "unknown", plan.Range, "unavailable", null);
+            if (new Version(int.Parse(parsed.Groups["major"].Value, CultureInfo.InvariantCulture), int.Parse(parsed.Groups["minor"].Value, CultureInfo.InvariantCulture),
+                    int.Parse(parsed.Groups["patch"].Value, CultureInfo.InvariantCulture)) < Minimum)
+                return new("gitleaks", number, plan.Range, "unavailable", null);
+            folder = folder with { GitDirectory = GitDirectory(folder, directory) };
+            bool inventories = folder.GitDirectory is not null && OnlyInventoriesHoldInventoryLines(folder, plan.Range);
+            byte[] rules = inventories ? Configuration : ConfigurationWithoutInventories;
+            number += "; rules " + (inventories ? ConfigurationHash : ConfigurationWithoutInventoriesHash);
+            int? commits = folder.GitDirectory is null ? null : Count(folder, plan.Range);
+            if (commits is null) return new("gitleaks", number, plan.Range, "incomplete", null);
+            // Gitleaks reports no finding when git log -p stops early, at an unreadable or corrupt object, and still exits 0. Before it runs,
+            // every commit, tree and blob the push carries is read and checked against its id, and the range's patches are read exactly as
+            // gitleaks reads them, parents' sides included; a read that fails or stops early leaves the scan incomplete (FIX-150).
+            if (!Reads(folder, "rev-list", "--objects", "--verify-objects", "--quiet", plan.Range)
+                || !Reads(folder, ["log", "-p", "-U0", plan.Range, .. LogOptions, "--output=" + NullDevice]))
+                return new("gitleaks", number, plan.Range, "incomplete", null);
             string template = Path.Combine(temporary, "count.tmpl");
             string report = Path.Combine(temporary, "count.txt");
             File.WriteAllText(template, "{{ len . }}");
@@ -109,15 +115,17 @@ public sealed partial class GitleaksScanner : ISecretScanner
             string ignored = Path.Combine(temporary, "ignore.txt");
             File.WriteAllBytes(configuration, rules);
             File.WriteAllText(ignored, string.Empty);
+            // Gitleaks' source is still the empty folder the scan created, so nothing gitleaks reads from it is the clone's.
+            if (Directory.EnumerateFileSystemEntries(folder.Source).Any()) return new("gitleaks", number, plan.Range, "incomplete", null);
             // Gitleaks writes only the aggregate count to disk, even for a finding. No JSON findings report is created or read.
-            ProcessResult result = Invoke(directory, "git", "--redact=100", "--no-banner", "--log-level=error", "--ignore-gitleaks-allow",
+            ProcessResult result = run(Start("gitleaks", folder, ["git", "--redact=100", "--no-banner", "--log-level=error", "--ignore-gitleaks-allow",
                 "--config=" + configuration, "--gitleaks-ignore-path=" + ignored,
                 "--log-opts=" + plan.Range + " " + string.Join(' ', LogOptions),
-                "--report-format=template", "--report-template=" + template, "--report-path=" + report, ".");
+                "--report-format=template", "--report-template=" + template, "--report-path=" + report, folder.Source]));
             if (result.Outcome != ProcessOutcome.Exited || result.ExitCode is not (0 or 1) || !File.Exists(report) || new FileInfo(report).Length > 16
                 || !int.TryParse(File.ReadAllText(report).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int count) || count < 0)
                 return new("gitleaks", number, plan.Range, "incomplete", null);
-            if (Count(directory, plan.Range) != commits) return new("gitleaks", number, plan.Range, "incomplete", null);
+            if (Count(folder, plan.Range) != commits) return new("gitleaks", number, plan.Range, "incomplete", null);
             if (count > 0) return new("gitleaks", number, plan.Range, "findings", count);
             // Gitleaks logs at error level, the only level asked for, when its own read of the history fails or stops early: it relays git's
             // standard error and stops reading, and still exits 0. Such a scan saw only part of the range. Its words never enter the record.
@@ -134,12 +142,42 @@ public sealed partial class GitleaksScanner : ISecretScanner
         }
     }
 
-    private ProcessResult Invoke(string directory, params string[] arguments)
+    // Gitleaks takes an ignore list from the folder it scans as well as from its ignore path, and its rules from GITLEAKS_CONFIG,
+    // GITLEAKS_CONFIG_TOML or that folder's .gitleaks.toml when no --config is given; its own git inherits its environment. The scan gives
+    // it nothing but what the scan writes (FIX-160). Every process of the scan, gitleaks and git alike, runs in an empty folder the scan
+    // creates for itself, which is gitleaks' source; once git has named the clone's git directory from the clone, each reads it through
+    // GIT_DIR alone, with that empty folder as its work tree, so no file of the clone's working tree is read and no file in the git
+    // directory is taken for gitleaks' own; and none inherits a GITLEAKS_ or git variable (Isolate).
+    // Each also runs with the hardening of every git process on a repository Vericairn did not create (FIX-147): a git process takes it on
+    // its command line and, as gitleaks' own git does, through git's configuration environment (Isolate). The scan's one hardening outlives
+    // its last process.
+    private sealed record ScanFolder(string Source, string? GitDirectory, GitHardening Hardening);
+
+    private static ProcessStartInfo Start(string file, ScanFolder folder, IEnumerable<string> arguments)
     {
-        var info = new ProcessStartInfo("gitleaks") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        Isolate(info);
-        return run(info);
+        var info = new ProcessStartInfo(file) { WorkingDirectory = folder.Source, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        if (file == "git") folder.Hardening.Apply(info, arguments);
+        else foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        Isolate(info, folder.Hardening);
+        if (folder.GitDirectory is not null)
+        {
+            info.Environment["GIT_DIR"] = folder.GitDirectory;
+            info.Environment["GIT_WORK_TREE"] = folder.Source;
+        }
+        return info;
+    }
+
+    // The clone's git directory as git finds it from the clone, the repository the push reads; null unless git names an existing directory
+    // by an absolute path.
+    private string? GitDirectory(ScanFolder folder, string directory)
+    {
+        string clone;
+        try { clone = Path.GetFullPath(directory); }
+        catch (ArgumentException) { return null; }
+        ProcessResult found = run(Start("git", folder, ["-C", clone, "rev-parse", "--absolute-git-dir"]));
+        if (found.Outcome != ProcessOutcome.Exited || found.ExitCode != 0) return null;
+        string path = found.StandardOutput.TrimEnd('\r', '\n');
+        return path.Length > 0 && !path.Contains('\n', StringComparison.Ordinal) && Path.IsPathFullyQualified(path) && Directory.Exists(path) ? path : null;
     }
 
     // A clone's info/grafts, replace objects and derived object caches (the commit-graph, reachability bitmaps and the multi-pack-index)
@@ -160,22 +198,25 @@ public sealed partial class GitleaksScanner : ISecretScanner
 
     // The scan reads the history the push carries: its processes drop every routing variable the push adapter's drop, from the same list,
     // since a shallow file, another repository or another object store named in the environment would show git a shorter or another
-    // history than the push sends; then every other configuration variable, keeping only the settings forced here, and git's trace
-    // variables (FIX-150).
-    internal static void Isolate(ProcessStartInfo info)
+    // history than the push sends; then every configuration variable, keeping only the settings forced here, and git's trace variables
+    // (FIX-150); and every other inherited git variable, such as those choosing a diff's context, an external diff, notes or attributes,
+    // and every GITLEAKS_ variable (FIX-160), so that the environment the scan was started in changes nothing it reads. No process of the
+    // scan fetches a missing object either, whatever remote the clone's configuration names for one, as none of the push adapter's does:
+    // a read that meets one fails, and the scan is incomplete (FIX-160). The settings forced here are the hardening of every git process
+    // on a repository Vericairn did not create (GitHardening: no system or global configuration, an empty hooks directory, and the clone's
+    // own program settings overridden; FIX-147), followed by the read settings above, all carried through git's configuration environment,
+    // which every git process the scan starts reads, gitleaks' own included. The hardening's directory must outlive the process.
+    internal static void Isolate(ProcessStartInfo info, GitHardening hardening)
     {
+        ArgumentNullException.ThrowIfNull(hardening);
         GitRouting.Remove(info);
-        foreach (string name in info.Environment.Keys.Where(n => n.StartsWith("GIT_CONFIG", StringComparison.OrdinalIgnoreCase)
-            || n.StartsWith("GIT_TRACE", StringComparison.OrdinalIgnoreCase)).ToArray())
+        foreach (string name in info.Environment.Keys.Where(n => n.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)
+            || n.StartsWith("GITLEAKS_", StringComparison.OrdinalIgnoreCase)).ToArray())
             info.Environment.Remove(name);
+        hardening.ApplyEnvironment(info, ReadSettings.Select(s => s.Key + "=" + s.Value));
         info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
+        info.Environment["GIT_NO_LAZY_FETCH"] = "1";
         info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
-        info.Environment["GIT_CONFIG_COUNT"] = ReadSettings.Length.ToString(CultureInfo.InvariantCulture);
-        for (int i = 0; i < ReadSettings.Length; i++)
-        {
-            info.Environment["GIT_CONFIG_KEY_" + i.ToString(CultureInfo.InvariantCulture)] = ReadSettings[i].Key;
-            info.Environment["GIT_CONFIG_VALUE_" + i.ToString(CultureInfo.InvariantCulture)] = ReadSettings[i].Value;
-        }
     }
 
     /// <summary>
@@ -184,10 +225,10 @@ public sealed partial class GitleaksScanner : ISecretScanner
     /// does. The scanner cannot tell from the commits which objects a checkpoint names, so a file that mixes inventory lines with any
     /// other line, or a range whose files cannot be read, is scanned without the allowance. Only file names are read back, never contents.
     /// </summary>
-    private bool OnlyInventoriesHoldInventoryLines(string directory, string range)
+    private bool OnlyInventoriesHoldInventoryLines(ScanFolder folder, string range)
     {
         // The same commits and parent diffs gitleaks reads: --full-history, -m and --no-renames, every change but a deletion.
-        ProcessResult changed = InventoryGit(directory, "log", "--no-show-signature", "--format=commit %H", "--name-only", "--root", "--no-renames", "--full-history", "-m",
+        ProcessResult changed = InventoryGit(folder, "log", "--no-show-signature", "--format=commit %H", "--name-only", "--root", "--no-renames", "--full-history", "-m",
             "--diff-filter=d", "--no-relative", "--no-ext-diff", "--no-textconv", range, "--", ":(top)objects");
         if (changed.Outcome != ProcessOutcome.Exited || changed.ExitCode != 0) return false;
         var files = new SortedDictionary<string, SortedSet<string>>(StringComparer.Ordinal);
@@ -213,8 +254,8 @@ public sealed partial class GitleaksScanner : ISecretScanner
             foreach (string[] chunk in paths.Chunk(PathsPerGrep))
             {
                 // A file can hold an inventory's lines and another line only if it is listed by both searches.
-                if (FilesWithLines(directory, at, chunk, matching: true) is not { } shaped
-                    || FilesWithLines(directory, at, chunk, matching: false) is not { } other) return false;
+                if (FilesWithLines(folder, at, chunk, matching: true) is not { } shaped
+                    || FilesWithLines(folder, at, chunk, matching: false) is not { } other) return false;
                 if (shaped.Overlaps(other)) return false;
             }
         }
@@ -223,13 +264,13 @@ public sealed partial class GitleaksScanner : ISecretScanner
     }
 
     // The files of the commit's tree among the paths that hold a line of an inventory's shape, or a line of any other; null when unread.
-    private HashSet<string>? FilesWithLines(string directory, string commit, string[] paths, bool matching)
+    private HashSet<string>? FilesWithLines(ScanFolder folder, string commit, string[] paths, bool matching)
     {
         var arguments = new List<string> { "grep", "--no-textconv", "--full-name", "--text", "--files-with-matches", "--extended-regexp" };
         if (!matching) arguments.Add("--invert-match");
         arguments.AddRange(["-e", "^" + InventoryLine + "$", commit, "--"]);
         arguments.AddRange(paths.Select(p => ":(top)" + p));
-        ProcessResult result = InventoryGit(directory, [.. arguments]);
+        ProcessResult result = InventoryGit(folder, [.. arguments]);
         if (result.Outcome != ProcessOutcome.Exited || result.ExitCode is not (0 or 1)) return null;
         var found = new HashSet<string>(StringComparer.Ordinal);
         foreach (string entry in result.StandardOutput.Split('\n'))
@@ -243,15 +284,11 @@ public sealed partial class GitleaksScanner : ISecretScanner
         return result.ExitCode == 1 && found.Count > 0 ? null : found;
     }
 
-    private ProcessResult InventoryGit(string directory, params string[] arguments)
+    private ProcessResult InventoryGit(ScanFolder folder, params string[] arguments)
     {
-        var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        info.ArgumentList.Add("--no-replace-objects");
-        foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        Isolate(info);
-        // Character ranges in the line's shape read as bytes, and pathspecs keep their magic whatever the environment asks.
+        ProcessStartInfo info = Start("git", folder, ["--no-replace-objects", .. arguments]);
+        // Character ranges in the line's shape read as bytes; pathspecs keep their magic, since no inherited git variable reaches git.
         info.Environment["LC_ALL"] = "C";
-        foreach (string name in new[] { "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS" }) info.Environment.Remove(name);
         return run(info);
     }
 
@@ -265,26 +302,31 @@ public sealed partial class GitleaksScanner : ISecretScanner
     }
 
     // Whether a git read of the range completed: it exited 0, having read everything it was asked to. Its output is not retained.
-    private bool Reads(string directory, params string[] arguments)
+    private bool Reads(ScanFolder folder, params string[] arguments)
     {
-        var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        info.ArgumentList.Add("--no-replace-objects");
-        foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        Isolate(info);
-        ProcessResult result = run(info);
+        ProcessResult result = run(Start("git", folder, ["--no-replace-objects", .. arguments]));
         return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0;
     }
 
-    private int? Count(string directory, string range)
+    private int? Count(ScanFolder folder, string range)
     {
         // Gitleaks can report zero findings when git cannot read a range. Establish readability independently,
         // before and after scanning, without asking git for patches or retaining any source text.
-        var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (string argument in new[] { "--no-replace-objects", "rev-list", "--count", range }) info.ArgumentList.Add(argument);
-        Isolate(info);
-        ProcessResult result = run(info);
+        ProcessResult result = run(Start("git", folder, ["--no-replace-objects", "rev-list", "--count", range]));
         return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0
             && int.TryParse(result.StandardOutput.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int count) && count >= 0 ? count : null;
+    }
+
+    private static GitHardening Harden()
+    {
+        try
+        {
+            return GitHardening.Create();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new ProviderRefusedException("git cannot run isolated: a temporary directory could not be created; nothing was scanned.", error);
+        }
     }
 
     private static byte[] ReadConfiguration()

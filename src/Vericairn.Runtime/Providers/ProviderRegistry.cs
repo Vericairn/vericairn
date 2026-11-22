@@ -23,6 +23,38 @@ public sealed class ProviderRegistry
     private readonly Dictionary<string, IPullRequestProvider> pullRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IPackageRegistryProvider> packages = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ISecurityAdvisoryReader> advisories = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IProgressTargetAdapter> progressTargets = new(StringComparer.Ordinal);
+
+    /// <summary>From 0.9.4 (WATCH-06): registers a progress-target adapter and returns its predecessor.</summary>
+    public IProgressTargetAdapter? Register(IProgressTargetAdapter adapter)
+    {
+        ArgumentNullException.ThrowIfNull(adapter);
+        lock (gate)
+        {
+            IProgressTargetAdapter? previous = progressTargets.GetValueOrDefault(adapter.Adapter);
+            progressTargets[adapter.Adapter] = adapter;
+            return previous;
+        }
+    }
+
+    /// <summary>From 0.9.4 (WATCH-06): registers a progress-target adapter unless its id is already served.</summary>
+    public bool RegisterIfAbsent(IProgressTargetAdapter adapter)
+    {
+        ArgumentNullException.ThrowIfNull(adapter);
+        lock (gate) return progressTargets.TryAdd(adapter.Adapter, adapter);
+    }
+
+    /// <summary>From 0.9.4 (WATCH-06): the adapter registered for exactly this id, or null; no other adapter is ever selected.</summary>
+    public IProgressTargetAdapter? ProgressTarget(string adapter)
+    {
+        lock (gate) return progressTargets.GetValueOrDefault(adapter);
+    }
+
+    /// <summary>From 0.9.4 (WATCH-06): the registered progress-target adapters, ordered by id.</summary>
+    public IReadOnlyList<IProgressTargetAdapter> ProgressTargetAdapters
+    {
+        get { lock (gate) return progressTargets.Values.OrderBy(a => a.Adapter, StringComparer.Ordinal).ToArray(); }
+    }
 
     /// <summary>Registers a security advisory reader and returns its predecessor.</summary>
     public ISecurityAdvisoryReader? Register(ISecurityAdvisoryReader reader)

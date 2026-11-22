@@ -138,7 +138,7 @@ public sealed partial class GitCommandAdapter
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException) { return null; }
     }
 
-    /// <summary>Runs git against the estate's own repository with both directories pinned and ambient overrides, alternate indexes and configuration discarded.</summary>
+    /// <summary>Runs git against the estate's own repository with both directories pinned, ambient overrides, alternate indexes and configuration discarded, and no fsmonitor or signature program.</summary>
     private ProcessResult Observe(string root, string git, params string[] arguments)
     {
         var info = new ProcessStartInfo("git")
@@ -158,7 +158,7 @@ public sealed partial class GitCommandAdapter
             "--no-pager", "--no-replace-objects",
             "--git-dir=" + Path.GetFullPath(git), "--work-tree=" + Path.GetFullPath(root),
             "-c", "core.excludesFile=", "-c", "core.fsmonitor=false",
-            "-c", "core.untrackedCache=false", "-c", "protocol.allow=never",
+            "-c", "core.untrackedCache=false", "-c", "protocol.allow=never", "-c", "log.showSignature=false",
         }) info.ArgumentList.Add(argument);
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
         return run(info);

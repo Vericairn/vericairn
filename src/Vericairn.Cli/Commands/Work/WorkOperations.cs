@@ -41,10 +41,10 @@ internal sealed partial class WorkOperations(CommandContext context)
     public int WorkAmend(string root, string assignmentId, string by, string bodyPath, bool json) =>
         context.WithBody(bodyPath, body => context.WithApi(root, api => context.ReportOutcome(api.Amend(new AmendRequest(assignmentId, by, body)), json)));
 
-    /// <summary>Hands a step an agent holds over to a person, and prints the stops asked of the agent's runs in flight.</summary>
-    public int WorkTakeover(string root, string assignment, string by, string? contributor, string? note, bool json) => context.WithApi(root, api =>
+    /// <summary>Hands a step an agent holds over to a person, or from 0.9.4 to a principal of its role citing the lapse ask, and prints the stops asked of the agent's runs in flight.</summary>
+    public int WorkTakeover(string root, string assignment, string by, string? contributor, string? note, bool json, string? basis = null) => context.WithApi(root, api =>
     {
-        TakeoverResponse taken = api.WorkTakeover(new TakeoverRequest(assignment, by, contributor, note));
+        TakeoverResponse taken = api.WorkTakeover(new TakeoverRequest(assignment, by, contributor, note) { Basis = basis });
         if (!taken.Ok)
         {
             return taken.Problem is { Code: "rejected", Findings.Count: > 0 } rejected ? context.ReportOutcome(WriteOutcome.Fail(rejected), json) : context.Fail(taken.Message);

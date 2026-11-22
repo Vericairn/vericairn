@@ -97,6 +97,35 @@ public class StandingAgentTests
     }
 
     [Fact]
+    public void AnOccurrenceIsHeldAndRoutedByTheAssignmentThatHoldsItNotByALaterOneThatHoldsNothing()
+    {
+        // From 0.9.4 (ID-11): the operator assigns an occurrence to the builder; the builder, under local-engineering, then records by hand
+        // an assignment of it to the operator, which an agent may not hand over and which holds nothing by the holder rule, though it is the
+        // latest by time. The occurrence stays the builder's by the operator's assignment: due, and routed as the builder's by it.
+        using var fixture = new StandingFixture();
+        RecordEnvelope grant = fixture.Estate.Add("decision", fixture.Estate.OperatorId, $$"""{"title":"A grant","statement":"Grant local-engineering.","summary":"A grant.","synthesis":"A grant of local-engineering.","effects":["local-engineering"],"affects":[],"decidedBy":"{{fixture.Estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"medium","notAuthorized":[]}""");
+        fixture.Estate.Add("authority", fixture.Estate.OperatorId, $$"""{"grantee":"{{fixture.Estate.BuilderId}}","scope":["local-engineering"],"reserved":[],"conditions":[],"basis":"{{grant.Id}}"}""");
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope held = fixture.Assign(occurrence);
+        RecordEnvelope later = fixture.Add("assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.OperatorId), builder: true, subject: fixture.Work.Reference);
+        EstateModel model = fixture.Estate.Load();
+        Assert.True(GoalRules.Before(held, later));
+        Assert.Equal(held.Id, Routing.HolderOf(model, later)!.Id);
+
+        StandingAgents.Agent agent = StandingAgents.Derive(model, fixture.Goal, fixture.Estate.Clock);
+        StandingAgents.OccurrenceState state = Assert.Single(agent.Occurrences);
+        Assert.Equal(("due", held.Id), (state.State, state.Assignment!.Id));
+        Assert.Contains($"assignment {held.Id} holds it", state.Reason, StringComparison.Ordinal);
+
+        NextEligible.OccurrenceRoute routed = Assert.Single(NextEligible.Standing(model, agent, new Routing.Machine([], _ => false, (_, _) => [], fixture.Estate.Clock)).Occurrences);
+        // No launcher here starts the builder's harness, so the builder cannot go on from here and its sponsor is asked; it is never given
+        // to the operator by the assignment that holds nothing.
+        Assert.Equal("unavailable", routed.Route!.State);
+        Assert.Contains($"{Routing.NameOf(model, fixture.Estate.BuilderId)} holds it by assignment {held.Id}", routed.Route.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain(later.Id, routed.Route.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnOccurrenceNamesTheKeyItsGoalTriggerRevisionAndItemMakeAndIsNeverCarriedBeforeItIsDue()
     {
         using var fixture = new StandingFixture();

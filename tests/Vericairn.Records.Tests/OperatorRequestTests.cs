@@ -58,6 +58,10 @@ public sealed class OperatorRequestTests
         }, builder: true, subject: request.Reference);
         RecordEnvelope observed = f.Add("operator-request", Body(f.Estate, 2), builder: true, subject: work.Reference);
         f.Add("observation", Observation(f.Estate), builder: true, subject: observed.Reference);
+        // From 0.9.4 (OPS-22) a request may be marked optional: a possible todo that holds nothing.
+        JsonObject optional = Body(f.Estate, 3);
+        optional["optional"] = true;
+        f.Add("operator-request", optional, builder: true, subject: work.Reference);
         return f;
     }
 

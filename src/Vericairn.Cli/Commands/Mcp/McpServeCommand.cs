@@ -50,10 +50,43 @@ internal sealed class McpServeCommand : Command, ITextOutputCommand
             Subscriptions = new McpResourceWatch(new McpApiEventSource(api, actingAs)),
         };
         context.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
+        // From 0.9.4 (ID-11): an agent session acting for a principal registers its presence with the daemon, and this server, its
+        // transport, renews the lease while the process lives, never the model. A worker's run is the worker's to watch.
+        using PresenceKeeper? presence = run is null && !string.IsNullOrWhiteSpace(actingAs) ? KeepPresence(context, api, new PresenceRegisterRequest(actingAs, "mcp serve")) : null;
         server.RunAsync(Console.In, context.Output, context.Error, context.CancellationToken).GetAwaiter().GetResult();
         return Clean;
     // A server answers calls until it is stopped, so its runtime judges at every call rather than keeping one command's judgment (FIX-148).
     }, readOnly: false, upgrade: false, presence: false, longLived: true);
+
+    /// <summary>
+    /// Registers this session's presence and keeps its lease, or null when the runtime keeps none (the embedded runtime) or refuses it
+    /// (a person); any other failure is told on standard error, and the session is served either way.
+    /// </summary>
+    private static PresenceKeeper? KeepPresence(CommandContext context, IEstateApi api, PresenceRegisterRequest request)
+    {
+        var keeper = new PresenceKeeper(api, request, log: message => context.Error.WriteLine("vericairn mcp: " + message));
+        try
+        {
+            PresenceLeaseResponse registered = keeper.StartAsync(context.CancellationToken).GetAwaiter().GetResult();
+            if (registered.Lease is not null)
+            {
+                return keeper;
+            }
+
+            // An embedded runtime keeps no presence, and a person is never tracked by a connection: neither is worth a word.
+            if (registered.Problem?.Code is not ("unavailable" or "refused"))
+            {
+                context.Error.WriteLine("vericairn mcp: presence was not registered: " + registered.Message);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or NotSupportedException || exception is IClientOperationFailure)
+        {
+            context.Error.WriteLine("vericairn mcp: presence was not registered: " + exception.Message);
+        }
+
+        keeper.Dispose();
+        return null;
+    }
 
     /// <summary>
     /// Serves a remote estate's network MCP to a local client (MCP-03): each message is forwarded to its /mcp over the paired
@@ -88,6 +121,9 @@ internal sealed class McpServeCommand : Command, ITextOutputCommand
             using HttpClient http = VericairnClient.SignedHttp(connection, signer);
             using var bridge = new McpBridge(http, connection.Principal, digest => signer.Sign(digest), context.Error);
             context.Error.WriteLine($"vericairn mcp: bridging to {connection.EstateName ?? connection.Estate} at {connection.Address} as device {connection.Device} of {connection.PrincipalName ?? connection.Principal}");
+            // From 0.9.4 (ID-11): the bridge, this session's transport, keeps the paired device's principal present at the remote runtime.
+            using VericairnClient remote = connections.Connect(connection);
+            using PresenceKeeper? presence = KeepPresence(context, remote, new PresenceRegisterRequest(Label: "mcp serve over a connection"));
             bridge.RunAsync(Console.In, context.Output, context.CancellationToken).GetAwaiter().GetResult();
             return Clean;
         }

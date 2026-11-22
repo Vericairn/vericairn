@@ -104,8 +104,9 @@ public class ApiJourneyTests
         Dictionary<string, (string Outcome, string State)> assignments = api.Status().Json.GetProperty("assignments").EnumerateArray()
             .ToDictionary(x => x.GetProperty("contributor").GetString()!, x => (x.GetProperty("outcome").GetString()!, x.GetProperty("state").GetString()!));
         Assert.Equal(("completed", "accepted"), assignments[agentTwo]);
-        Assert.Equal(("partial", "awaiting review"), assignments[agentOne]);
-        Assert.Contains("partial, awaiting review", api.Observe("W-1")!.Text, StringComparison.Ordinal);
+        // From 0.9.4 (ID-11) only the current holder's work counts: agent one's result no longer awaits review once agent two holds the step.
+        Assert.Equal(("partial", "displaced"), assignments[agentOne]);
+        Assert.Contains($"partial, displaced: assignment {assignmentTwo} holds the step, so review routing skips it", api.Observe("W-1")!.Text, StringComparison.Ordinal);
         Assert.Equal(0, api.Check().Errors);
     }
 

@@ -1261,6 +1261,30 @@ does not watch the stop file needs escalation. Files and keychains accessible to
 remain accessible to the harness; use a dedicated user for credential isolation. The process boundaries and managed
 configuration limitations below apply. No MCP tool launches or stops a run.
 
+### Who can stop a run, and the timed stop drill (0.9.4)
+
+Only an operator, whoever decides for the run's goal (its sponsor when a person, or an operator for a goal an agent sponsors) and
+the principal who started the run may stop it, on every profile; anyone else is refused before anything is asked of the run.
+They stop it in one of these ways, each of which asks the run to stop through the worker that observes it:
+
+| Command | What it stops |
+|---|---|
+| `vericairn worker stop <run> --by <principal> [--grace <seconds>]` | One run. |
+| `vericairn goal pause <goal> --by <sponsor> --stop-runs` | Every run of the goal in flight, and the goal starts no new run. |
+| `vericairn goal pause --standing --by <sponsor> --stop-runs` | Every run of every standing agent the principal may pause. |
+| `vericairn goal stop <goal> --by <sponsor>` | A standing agent's runs in flight, as it ends the agent; another goal's runs need `worker stop`. |
+
+A stop is contained only once the worker observes the run's whole boundary exited, at most the grace plus a few heartbeats after
+the request when the worker on that machine observes it, however the harness behaves.
+
+From 0.9.4 (OPS-21), that time is measured before the carrier runs work unattended, and monthly after, by a recurring duty
+whose proof is a `stop-drill` verification: `vericairn worker drill --by <principal>` starts a scratch run on the runtime's machine
+that ignores the stop it is sent, as an unresponsive agent would, asks it to stop as `worker stop` does and records the
+milliseconds from the stop to the observed containment and to the run's last write. A run not contained within the drill's limit
+(60 seconds by default) fails the drill, and a failed `stop-drill` verification is required attention until a later drill on the
+same machine passes ([CLI](cli.md#vericairn-worker-drill-094)). The drill measures the worker of one machine; a run another
+machine's worker observes is measured by a drill there.
+
 ### Launch accounting and containment
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
