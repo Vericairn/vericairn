@@ -208,14 +208,24 @@ never by the times records state across kinds of writer:
 So a dispatching agent or service, under `local-engineering` or a dispatch grant, can give a step its first
 assignment and re-assign a step to the principal that already holds it, but it can no longer move a held
 step to another principal, nor take back a step a person took over: the runtime refuses such an
-assignment, and one written by hand takes nothing and holds nothing. A lapse ask does not change this,
-since only a person records a hand-over citing one; moving a lapsed step for a carrier is planned with
-`GOAL-10`. An assignment that holds nothing never makes its author or contributor the holder. Existing
-records are read by the same rule: an earlier reassignment an agent recorded to another agent holds
-nothing now, and if its result is not accepted it reads displaced.
+assignment. A lapse ask does not change this, since only a person records a hand-over citing one; moving
+a lapsed step for a carrier is planned with `GOAL-10`. An assignment that holds nothing never makes its
+author or contributor the holder. Existing records are read by the same rule: an earlier reassignment an
+agent recorded to another agent holds nothing now, and if its result is not accepted it reads displaced.
 
-The runtime also refuses a new assignment that states a time before the step's latest assignment, so no
-assignment it writes is backdated.
+The runtime refuses a new assignment that states a time before the step's latest assignment, so no
+assignment it writes is backdated. A record written by hand outside the runtime is not refused, and what
+it can do is exactly this: once a person has assigned a step, an agent's or a service's assignment written
+by hand takes nothing from it, whatever time it states; but among the assignments of a step no person has
+assigned, stated time decides, so an agent's or a service's assignment written by hand and dated before
+the others comes first and holds the step, as a dispatching agent could take a step from the agent it
+dispatched. A person's assignment of the step always takes it back.
+
+Holding and history are kept apart. Who holds a step now follows the rule above; the step's history keeps
+every assignment, holding or not. An agent or a service that was assigned a step, or recorded an attempt
+or a result on it, stays one of the authors of its work after it is displaced, so it is never the
+independent reviewer of that work, and a hand-over's basis is found by the assignment its lapse ask names,
+whoever recorded that assignment.
 
 From 0.9.4 the runtime refuses an attempt on an assignment that does not hold its step, and a progress
 claim or result on an attempt of one, whatever time the record states. The refusal is judged against the
