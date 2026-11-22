@@ -19,8 +19,8 @@ store, and no real-device qualification is recorded for it.
   witness, the unwitnessed tail and the standing problems ([history checkpoints](operator-guide.md#history-checkpoints-092)):
   - **Attention:** what waits on the signed-in principal, from status and required communication attention, most urgent first.
     Each notice shows its subject, reason, work state, attention state, freshness and next action. Policy conditions and recurring
-    duties retain their policy, rule, subject, level, owner and evaluation basis; each duty occurrence remains separate. From
-    0.9.2, below the notices, the stops of the estate's runs: each step that waits on a person, why, on whom and how it reaches
+    duties retain their policy, rule, subject, level, owner and evaluation basis; each duty occurrence remains separate.
+    From 0.9.2, below the notices, the stops of the estate's runs: each step that waits on a person, why, on whom and how it reaches
     them, the operator's next reserved step among them, as canonical status gives them, as of the estate's newest record and
     without its command, which a live read shows. Remote carries none of them out;
     a reserved act stays the operator's ([stops](operator-guide.md#stops-and-their-surfaces-092)).

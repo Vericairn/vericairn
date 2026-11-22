@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 44, November 22, 2026. Describe 0.9.4's command additions as released commands rather than development builds.
+
 Revision 43, November 21, 2026. Add availability and quiet hours to `communication set` (`--availability`, `--away-until`, `--away-from`, `--quiet-hours`) and their state to `communication show`, `--basis` on `work takeover`, which hands a lapsed step to another principal of its role, the session route of `goal step`, presence leases kept by `mcp serve`, and `presence` events in `events watch`, in the development build.
 
 Revision 42, November 21, 2026. `estate upgrade` says whether the previous release can read the estate after it, refuses a one-way upgrade without `--one-way`, records a restore point and states the way back, in the development build.
@@ -470,10 +472,13 @@ worker runs in the workspace before each such run, outside the agent's sandbox.
 `--setup-timeout <seconds>` sets its deadline, 1 through 600 and 300 when
 omitted. The command runs work-branch content as you; from 0.9.2 it receives
 the environment a harness would, without credential or loader variables, and
-`--setup-variable <name>`, repeatable, passes a named variable besides.
-`--clear-setup` removes it; `--repository` alone shows it, and
-`worker configure` with no choices shows every setup command beside the
-workspace root. See [Preparing a workspace before the agent
+`--setup-variable <name>`, repeatable, passes a named variable besides. From
+0.9.4 (FIX-161) a relative executable with a directory part names the
+workspace's file, a bare name is found in an absolute directory of `PATH`, and
+an executable that can never be started is refused here and reported unreadable
+where it was stored earlier. `--clear-setup` removes it; `--repository` alone
+shows it, and `worker configure` with no choices shows every setup command
+beside the workspace root. See [Preparing a workspace before the agent
 starts](software.md#coding-agents-the-worker-and-its-launchers) for the checks
 that follow setup and what the run records.
 
@@ -756,7 +761,7 @@ read completely, or an advisory holds, `release submit` and its `--check` refuse
 state, or an unknown state) holds until a triage names its current revision, and a closed or withdrawn advisory until a triage
 names it at any revision; a published advisory holds nothing and needs no triage. Both commands are the
 operator's alone; any other principal is refused with the same answer whatever exists. See the
-[operator's guide](operator-guide.md#security-reports-hold-a-release-092).
+[operator's guide](operator-guide.md#security-reports-hold-releases-092).
 
 ```sh
 vericairn security-reports poll --by <operator-id>
@@ -974,8 +979,9 @@ a plain file, `docs/` beside `docs/releases/documents.json` by default (`--guide
   `current`; just after `From`, `since`, `in`, `until`, `before`, `after`, `fixed in` and the like; before `or earlier`; in a link
   to a versioned page or set; and on a `Revision` line. A document whose name carries a version, such as
   `api-compatibility-0.9.1.md`, is read for preparation wording only;
-- preparation wording, such as notes that are a placeholder, `under preparation`, `not yet rendered`, `pre-build`,
-  `the builder must`, `TODO` or `TBD`.
+- preparation wording, the phrases only a set still being prepared uses: notes called a placeholder or left unrendered, a set
+  said to be in preparation or before its build, a note of what the builder still has to do, and the two capital-letter markers
+  of unfinished work.
 
 From 0.9.3 (FIX-125), a mention of an earlier release counts only where it names that release as the current one. A mention
 as a source or predecessor passes: the value of `--from` or `--previous`, as in `docs notes --from 0.9.1`, and a token just
@@ -1039,7 +1045,7 @@ such as the version, the tool's version line, the estate's path, the default cus
 | Field | States |
 |---|---|
 | `version`, `runtime`, `custody`, `records` | `present` |
-| `git`, `dotnet` | `present`, or `missing` when the tool is not on `PATH` |
+| `git`, `dotnet` | `present`, or `missing` when no absolute directory of `PATH` holds the tool; from 0.9.4 (FIX-161) a copy in the current directory or a relative `PATH` entry is not used |
 | `estate` | `present`, or `missing` for a path that is not an estate root; `value` is the path either way |
 | `enclave` | `present` or `unavailable` on macOS, with the reason in `detail`; `not-applicable` elsewhere |
 | `search` | `present`, or `unavailable` with the reason |
@@ -1122,7 +1128,7 @@ after a warning. A renewal is shown the same way, with the runtime's reason on a
 ends early, at a screen lock, sleep or its limit, says so on a `runtime:` line. Before it hands terms to the helper the runtime waits up
 to two seconds until every client following the notices has read them, so each can show the fingerprint. Where no daemon serves the estate the command line runs the runtime in its own process, so what it prints is not
 independent of that runtime; the dialog's own text is. Sessions open only with a release build's signed helper on a macOS version the
-release lists as qualified, which `vericairn doctor` reports; elsewhere every signature keeps its own check, shown as above for 0.9.3.
+release lists as qualified, which `vericairn doctor` reports; elsewhere every signature keeps its own check, shown as above, as up to 0.9.3.
 The [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093) states the guarantee and lists each step's checks.
 
 ## `vericairn devices presence` (0.9.4)
@@ -1191,7 +1197,9 @@ compares a snapshot of the records without holding its other operations. `--json
 `leftOut`, `after`, `active`, `state`, `labels`, `result` and, for a result that names one, `change` with its `integration`
 (`merged`, `reachable`, `not-integrated`, `mismatched` or `unknown`), the `mainLine` it was compared with, the `problem` that makes
 it `mismatched`, and its `paths`, each `path` with its `change` (`added`, `modified` or `removed`), read from this machine's
-registered clone by name without rename detection, or `pathsUnavailable` when a commit is missing there; `overlaps`, each with
+registered clone by name without rename detection, with the clone's own program settings overridden (FIX-147), or
+`pathsUnavailable` when they cannot be read there, for example when a commit is missing from that clone or no clone of the
+repository is registered on this machine; `overlaps`, each with
 `first` and `second`, `repository`, `determined`,
 `witnesses`, `witnessKind` (`tracked` or `possible`), `branch`, `resolution` (`none` or `sequence`), `held`, `policies` and
 `labels`; and, for a preview, `draft`.

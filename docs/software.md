@@ -104,15 +104,15 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Read-only display of the effective settings in a developer build; no real-device or communication qualification claimed ([Remote](remote.md)) |
 
-This document describes 0.9.3: 0.8.0's estate policies and duties, readable companions,
-checked changes, operator actions and cancellable client operations, with 0.8.2's, 0.8.3's, 0.8.4's, 0.9.0's, 0.9.1's, 0.9.2's and 0.9.3's corrections and
-additions described with their owning flows below; 0.8.4's templates, saved prompts, operator close and operator requests, 0.9.0's [Remote](remote.md), [community build guides](community-build-guides.md) and [efficiency adapter](efficiency-adapter.md), and 0.9.2's [flows](templates.md#flows-092) and [large private artifacts](large-artifacts.md), and 0.9.3's [enrollment troubleshooting](enrollment-troubleshooting.md), have their own guides. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
+This document describes 0.9.4: 0.8.0's estate policies and duties, readable companions,
+checked changes, operator actions and cancellable client operations, with the corrections and additions of every release since 0.8.2
+described with their owning flows below; 0.8.4's templates, saved prompts, operator close and operator requests, 0.9.0's [Remote](remote.md), [community build guides](community-build-guides.md) and [efficiency adapter](efficiency-adapter.md), the [flows](templates.md#flows-092) and [large private artifacts](large-artifacts.md) added in 0.9.2, the [enrollment troubleshooting](enrollment-troubleshooting.md) added in 0.9.3, and 0.9.4's [events and presence](events-and-presence.md), [presence session qualification](presence-session-qualification.md), [automated observers](observers.md) and [progress targets](progress-targets.md), have their own guides. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
 repositories, UPDATE-01's newer-release notice, FIX-20's command-audit corrections,
 FIX-21's concurrent TLS handshake correction and FIX-22's current required attention.
 The [API guide](api-v1.md#transports) describes certificate preparation and handshake diagnostics.
 Earlier guides retain the behavior of their own releases.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12, and the withdrawn 0.8.1 candidate's ship in 0.8.2 with FIX-53 and FIX-54; earlier sets remain frozen.
-0.9.3 retains the existing hand-over, watching, communication, measured context and explicit qualified
+0.9.4 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts, and 0.7.2's corrections to identifier ordering, release gates and dispatch, notes and
 attention, export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
 All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
@@ -281,9 +281,10 @@ says whether a path is inside a repository with at least one commit; `Inspect` r
 branch, the origin remote, the root commit, whether the working tree is clean with modified and untracked
 counts, the tags and the ten most recent commits, with an as-of time. The adapter never fetches, commits,
 pushes or changes the index; a repository without commits is refused with the next step rather than
-invented. Two implementations satisfy one conformance suite: `GitCommandAdapter` runs the git command on the
-PATH (in `Vericairn.Adapters.Git`), and `RecordedSourceAdapter` (beside the contract in the runtime) replays
-recorded observations for offline fixtures and tests; the recorded one qualifies no real repository.
+invented. Two implementations satisfy one conformance suite: `GitCommandAdapter` (in
+`Vericairn.Adapters.Git`) runs the git command found in an absolute directory of `PATH` (from 0.9.4,
+FIX-161), each process hardened as the operator guide's section 7 describes (FIX-147), and `RecordedSourceAdapter` (beside the contract in the runtime) replays recorded observations for
+offline fixtures and tests; the recorded one qualifies no real repository.
 
 Commands:
 
@@ -309,6 +310,9 @@ object, and writes a `verification` of the resource at the exact commit the work
 platform and runtime as environment. The exit status of the command itself is in the record; `check run`
 exits 0 once the record is written, because recording a failed check is the point. A check that does not
 finish within `--timeout` is stopped and recorded as `unknown`.
+
+From 0.9.4 (FIX-161), the command's program is started by its absolute path: a bare name found in an absolute directory of `PATH`,
+or an absolute path. A relative path is refused; give the script's absolute path instead.
 
 `vericairn check observe --resource <id> --run <id> [--workflow ci.yml] [--repository <destination>] [--provider <id>] --by <id>`
 asks the host for the run's status, conclusion and commit and writes a verification in the `automation`
@@ -381,7 +385,7 @@ archive is documentation, and a draft is complete when its checksum file names e
 0.9.4 (FIX-140), with or without declared artifacts, a draft is complete only when it also attaches every file
 its checksum file names: a reader can download each listed file from the release itself.
 
-Before submitting, 0.9.3 offers the whole admission gate without an effect:
+Before submitting, 0.9.4 offers the whole admission gate without an effect:
 
 ```sh
 vericairn release submit --check --product <id> --version X --by <id> --commit <exact-commit> --expected <product-hash>
@@ -512,9 +516,9 @@ The "Milestone and release acceptances" section includes each operator acceptanc
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
 including a builder's acceptance of its own ordinary work, stay out of that section.
 
-To render the 0.9.3 notes from the estate's records, use
-`vericairn docs notes --from 0.9.2 --to 0.9.3 --out docs/releases/0.9.3`.
-The exclusive start follows 0.9.2's recorded end; the command writes its exact window to the manifest.
+To render the 0.9.4 notes from the estate's records, use
+`vericairn docs notes --from 0.9.3 --to 0.9.4 --out docs/releases/0.9.4`.
+The exclusive start follows 0.9.3's recorded end; the command writes its exact window to the manifest.
 The earlier set keeps its approved Security section on F-01 and its original notes window.
 
 The product's CLI test suite checks every file of each frozen set against
@@ -924,6 +928,22 @@ The `command` setting of each launcher names another executable, or a JSON array
 its leading arguments. Native qualification refuses leading option flags in that setting: the launcher supplies every
 harness option. Positional wrapper arguments and entry-file content have inventory identities, and local command
 bindings are rechecked before dispatch. No launcher reads a price, so a cap in currency is charged in full.
+
+From 0.9.4 (FIX-161), every program Vericairn starts is started by one absolute path, chosen before the start: a launcher's
+`command`, a workspace setup command, a `check run` command, git, gitleaks, gh and the platform tools the daemon installer runs.
+A bare name is looked up only in the absolute directories of `PATH`, in order; an empty or relative `PATH` entry and the current
+directory are not used for that lookup, whatever directory the command line or the daemon runs in. An absolute path is used as
+given. On Windows a bare name is found as a program `PATHEXT` lists, `.exe` or `.com`, in an absolute directory of `PATH`,
+directory by directory and in `PATHEXT`'s order within each; a script (`.cmd`, `.bat`) is started only when it is named with its
+extension (`codex.cmd`) or by its absolute path, as before. A relative path (`./build.sh`, `bin\tool.exe`) is refused with a message
+saying so, except a workspace setup command's (below).
+
+The program then receives `PATH` without its empty and relative entries, its absolute entries kept as written and in order, so a
+program that starts another by name, as git, a harness or a setup script does, finds it in an absolute directory as well. With no
+absolute entry left, `PATH` is removed. This is the `PATH` Vericairn hands over; a program that sets its own search path, or reads
+another, decides for itself what it then starts.
+
+The launch binding records the hash of the file the start runs, found by the same lookup.
 
 `vericairn worker run <assignment> --launcher <id> --agent <principal> --by <principal> --repository <resource> [--goal <id>] [--branch <name>] [--base <ref>] [--wall-minutes <n>] [--setting name=value]... [--prepare-only] [--detach]`:
 
@@ -2055,6 +2075,13 @@ It never enters a record or reaches a harness. A file that cannot be read refuse
 and nothing is used in its place. A worker run refuses to configure one, since the command runs outside the agent's
 sandbox.
 
+From 0.9.4 (FIX-161), a setup command's executable given as a relative path with a directory part (`./scripts/setup.sh`,
+`scripts\setup.cmd`) is the workspace's file, started by its absolute path; a bare name is found in an absolute directory of `PATH`;
+an absolute path is used as given. `worker configure --setup-command` refuses an executable that can never be started, with the
+reason: one that names nothing or a directory, and on Windows a path rooted only on the current drive (`\tools\setup.cmd`) or relative
+to a drive's current directory (`C:setup.cmd`). A setup configuration stored earlier with such an executable is reported as
+unreadable, and refuses runs, until it is replaced or cleared.
+
 Record credential checks exclude only encoding values validated by the record rules: a device body's
 `publicKey` and an envelope's `signatures[].signature`. The same credential-shaped text in any other field,
 including a nested field with the same name, is still scanned. Invalid encodings receive no exemption.
@@ -2260,10 +2287,12 @@ instruction-file links are permitted. Refusals name discovered configuration usi
 The operator's `RunEnvironmentPolicy` must still exactly match the established inventory; observing it does not grant
 permission to admit it. The worker records its components, canonical `inventoryHash` and harness version in the intent.
 It repeats the entire preflight immediately before dispatch. Native preflight also checks that its evidence did not
-change while probing. The additive `RunPreflight.LocalBindingHash` compares command arguments, entry files, explicit
-MCP content and environment values locally; it is never copied into the intent or any other record. Thus machine
-bindings cannot silently change while the portable inventory remains the same. Any difference after intent refuses
-dispatch and records an unstarted, zero-charge failure.
+change while probing. The additive `RunPreflight.LocalBindingHash` compares command arguments, the files the harness
+command and Vericairn's MCP server start as, entry files, explicit MCP content and environment values locally; from
+0.9.4 (FIX-161) those two files are found by the lookup every start uses, an absolute path as given or a bare name in
+the absolute directories of `PATH`. It is never copied into the intent or any other record. Thus machine bindings
+cannot silently change while the portable inventory remains the same. Any difference after intent refuses dispatch and
+records an unstarted, zero-charge failure.
 
 This is a qualification of the launcher inventory protocol using stand-in executables, not a live-agent or sign-in
 qualification. The live observations below cover only the reported runs; other provider/account-dependent behavior

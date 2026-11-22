@@ -1,6 +1,6 @@
-# Record formats, Vericairn 0.9.3
+# Record formats, Vericairn 0.9.4
 
-Vericairn 0.9.3 reads record formats 1, 2 and 3. It writes an estate's own format,
+Vericairn 0.9.4 reads record formats 1, 2 and 3. It writes an estate's own format,
 at most 3; new estates start at 3. API version 1 remains the transport contract.
 Context, hand-over, reference inventories and readable renditions have their own
 artifact contracts and are not additional record formats.
@@ -209,8 +209,8 @@ every write surface. The root operator's own principal record names itself and i
 record already in the estate keeps its reading, whether historical, superseded or imported: `estate
 check` and `records validate` report each unresolved author as information, and no record is rewritten.
 
-What an unsigned `by` establishes is limited. Without a signature, `by` is the author's claim. From
-0.9.2 it names a principal the estate holds, but it does not establish that this principal wrote the
+What an unsigned `by` establishes is limited. Without a signature, `by` is the author's claim.
+From 0.9.2 it names a principal the estate holds, but it does not establish that this principal wrote the
 record, nor that the principal was recorded by the time the record's `at` states: anyone able to add
 records to a copy of the estate can write any principal's id and any time. Records that carry authority,
 such as acceptances, admissions, authority grants and principal records, also check the claimed author's

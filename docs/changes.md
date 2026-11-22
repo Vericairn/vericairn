@@ -191,19 +191,36 @@ failed, which it does without changing its exit status, the scan is incomplete
 and the push refuses. Before 0.9.4 such an object stopped gitleaks' read with no
 finding, and the scan passed even when an older commit of the range held a
 secret. Every git process of the scan ignores the clone's color, root commit,
-signature and merge display settings and git's trace variables, each of which
-changes what gitleaks reads. It also drops every git variable that the push's
-own git processes drop, taken from the same list: those naming another
-repository, work tree, index, object store, shallow file, grafts file or
-replacement references, those limiting where git looks for a repository, and on
-Windows those redirecting git's standard streams; and every configuration
-variable, keeping only the settings the scan forces. Before 0.9.4 a shallow file
-or another repository named in the pushing process's environment could show git
-a shorter history than the push carries, so that a commit of the push went
-unscanned. The report contains only a finding count. The recorded scan
-contains the tool, version, range, verdict and count, never matched text, findings
-or process output. Findings, an unavailable scanner, a timeout, an unreadable
-range or an incomplete report refuse the push.
+signature, merge and submodule display settings and git's trace variables, each of
+which changes what gitleaks reads, and, as every git process on a repository
+Vericairn did not create does (FIX-147), runs without the system configuration, with
+an empty global configuration and a hooks path of its own, and with the clone's
+fsmonitor, pager and other program settings overridden. It also drops every git
+variable that the push's own git processes drop, taken from the same list: those
+naming another repository, work tree, index, object store, shallow file, grafts file
+or replacement references, those limiting where git looks for a repository, and on
+Windows those redirecting git's standard streams; and every configuration variable,
+keeping only the settings the scan forces. Before 0.9.4 a shallow file or another
+repository named in the pushing process's environment could show git a shorter
+history than the push carries, so that a commit of the push went unscanned. From
+0.9.4 (FIX-160), every process of the scan, gitleaks and git alike, runs in an empty
+folder the scan creates for itself in the temporary directory, and that folder is
+gitleaks' source. Git names the clone's git directory from the clone once; every
+later process reads that directory through `GIT_DIR` alone, with the empty folder as
+its work tree. Gitleaks applies only the rules and the empty ignore file the scan
+writes: no `.gitleaksignore` or `.gitleaks.toml` in the clone's working tree,
+committed or not, or in its git directory, and no `GITLEAKS_CONFIG` or
+`GITLEAKS_CONFIG_TOML` in the runtime's environment, changes what it reports. The
+scan's processes also drop every `GITLEAKS_` variable and every inherited git
+variable besides the settings the scan forces. Before 0.9.4 gitleaks scanned the
+clone's working tree and applied a `.gitleaksignore` found there, so a file naming a
+finding's fingerprint, committed or not, let a checked push that carried the secret
+pass with no finding. A clone used with `changes push` or `operator record` before
+0.9.4 can be checked for a `.gitleaksignore` at its root, now or in the history it
+pushed, and each range pushed from it scanned again. The report contains only a
+finding count. The recorded scan contains the tool, version, range, verdict and
+count, never matched text, findings or process output. Findings, an unavailable
+scanner, a timeout, an unreadable range or an incomplete report refuse the push.
 
 Before pushing, the adapter rechecks the local head, remote head and range. It
 pushes only the pinned commit to the named branch, with an explicit remote-head
@@ -225,10 +242,14 @@ settings and hooks never apply. Only the remote's own protocol is allowed:
 https for GitHub, or a repository on this machine. From the user's system and
 global configuration, git takes only the credential helpers and the TLS trust
 settings (`http.sslBackend`, `http.sslCAInfo`, `http.sslCAPath` and the
-Schannel options); a proxy comes from the environment, such as `HTTPS_PROXY`.
-gh uses the user's own configuration and login. The runtime has no token
-parameter, does not request a token, and does not retain authentication
-output.
+Schannel options), for the remote access alone; a proxy comes from the
+environment, such as `HTTPS_PROXY`. From 0.9.4 (FIX-147), the adapter's reads
+of the clone start as every git process on a repository Vericairn did not
+create does: with an empty global configuration and a hooks path of their own,
+the clone's fsmonitor, pager and other program settings overridden, and no
+missing object fetched. gh uses the user's own configuration and login. The
+runtime has no token parameter, does not request a token, and does not retain
+authentication output.
 
 From 0.9.4 (CODE-81), every git process of a checked push, the adapter's reads
 and pushes and the secret scan's reads, gitleaks' own git included, reads

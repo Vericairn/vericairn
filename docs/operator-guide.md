@@ -1,42 +1,51 @@
-# The operator's guide, Vericairn 0.9.3
+# The operator's guide, Vericairn 0.9.4
 
-This guide walks the journeys an operator and the agents working for them perform with the 0.9.3 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption; sections 30 and 31 cover durable operator requests and the support bundle.
+This guide walks the journeys an operator and the agents working for them perform with the 0.9.4 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption; sections 30 and 31 cover durable operator requests and the support bundle.
 
-0.9.3 is the release after 0.9.2. It corrects what the estates running 0.9.2 reported and readies the release
-flow for the next release. Export and restore keep each file's executable mode (FIX-112), a timestamp in the
-wrong form is refused with the form required (FIX-114), `doctor --json` returns one documented result and every
-command that takes `--json` writes JSON (FIX-119), document reviews, pins and checks say what they declare, need
-and found (FIX-113, FIX-120 and FIX-122), an operation keeps its intent and target in every revision (FIX-109),
-a goal is recorded impossible only after its evaluator's verdict (FIX-116), and work proposed for a goal waits
-for its sponsor's approval (FIX-117). Every operator action announces and counts its presence prompts (FIX-124),
-release steps sign only what they store (FIX-130), and the work-order key check, key closings and admissions are
-judged in near-linear time (FIX-107, FIX-121 and FIX-131). A change merges through a required merge queue with
-its outcome recorded (CODE-71), an operator action's push and merge trail reaches the estate (FIX-126), and a
-work order whose current result is accepted reads as accepted (FIX-128), with FIX-125 and FIX-127, so a release
-can run on its declared flow. `vericairn estate first-authority` names an estate's first authority (CODE-72),
-guides cover enrollment's presence prompts and a cold recovery's inventories (DOCS-33 and DOCS-32), an estate's
-root can hold its owner's agent instruction files (CODE-70), and main's push run skips a commit the merge queue
-already tested (CI-07), with FIX-118 and FIX-133. Every distributable is still built with SDK 10.0.404 and
-embeds the .NET and ASP.NET Core 10.0.15 runtimes. 0.9.3 reads a key only in the form Vericairn makes
-(FIX-132), as its release notes' Security section describes.
-0.9.2 added declared flows: a goal can run a template of kind `flow` whose steps are routed to their roles one
-step per command, with each step's position, hand-offs and reviews derived from the records, stops where a
-person holds the role, and the software pack's release and upgrade flows (PROC-05, PROC-06, PROC-07 and
-PROC-10). It added the event journal clients follow through the API stream, MCP notifications and `events_read`
-(WATCH-05 and MCP-05), signed history with checkpoints, closings and authority read as it stood at a record's
-time (ID-05, ID-06, OPS-07, FIX-108 and DOCS-15), MCP's Streamable HTTP transport (MCP-03), keyword search for
-an agent's context (CONTEXT-02), security reports that hold a release until they are triaged (OPS-11), the
-runtime step of an upgrade (OPS-05), the documentation-set tooling (DOCS-11), the guide to large private
-artifacts (DOCS-29) and the merge queue (CI-06), with FIX-85, FIX-89, FIX-93 to FIX-101, FIX-103 and FIX-123.
-It moved every distributable to SDK 10.0.404 and the .NET and ASP.NET Core 10.0.15 runtimes (FIX-115), and it
-hardened how admissions and the root of trust are read, per-user state, held-term matching, request
-authentication, and authority and policy records (FIX-102, FIX-104, FIX-105, FIX-106, FIX-110 and FIX-111), as
-its release notes' Security section describes. Earlier published releases, and the withdrawn candidates 0.5.0,
-0.5.1, 0.6.0, 0.7.0 and 0.8.1, are recorded in their own frozen sets.
-0.9.3 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
-upgrades from 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1 or 0.9.2 without a format step. The format-3 upgrade
+0.9.4 is the release after 0.9.3. It readies an estate for work that goes on between the commands a person runs. A
+standing agent carries each occurrence its triggers make due, within its caps, and every output it raises lands as a
+possibility, question or publication request that another principal disposes of; the duty carrier, researcher and bug
+hunter ship as built-in standing roles (GOAL-07, GOAL-08 and PROC-08, with FIX-155). A flow's step takes its timing and a
+decision among named paths (PROC-18 and PROC-19). Concurrent assignments are compared by their permitted paths, and a
+concurrent-paths policy holds an unresolved overlap (CODE-73 and POLICY-08). The daemon keeps presence leases for agent
+sessions, with a person's availability and quiet hours and a hand-over when a session lapses (ID-11, GOAL-11 and
+DOCS-25); the dispatcher's scope and role closings are recorded and checked (ID-07 and ID-14); and a run's record shows
+what it could reach, with public retrieval for research runs (CODE-82 and RUN-04). An operator action may ask one
+presence check for a list of signatures it announces first (ID-15, ID-16, CODE-80 and DOCS-37), the operator answers
+asks with their recommendations and signs every ready item in one reviewed act (OPS-16 and OPS-24), optional requests
+become possible todos (OPS-22), an observer that stops reporting becomes attention (OPS-20), a timed stop drill measures
+stopping a run (OPS-21), progress is kept at a target such as a GitHub discussion (WATCH-06), and an upgrade has a
+restore point and a stated way back (FIX-145). Status and the other reads judge the estate once per command (FIX-136,
+FIX-148 and FIX-152), progress counts a release's placed work (FIX-149), an acceptance of a work order's current revision
+accepts its current result (FIX-141), export and restore carry the owner's agent instruction files, which the estate
+check reads for hooks, automatic approvals and secret-like values (FIX-135 and FIX-139), the held guides take their
+changes as fragments (OPS-17), each documentation set carries `llms.txt` and `llms-full.txt` (DOCS-38), and MCP tools
+carry behavior annotations (MCP-07), with CODE-81, FIX-134, FIX-137, FIX-138, FIX-140, FIX-142 to FIX-144, FIX-146,
+FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. It runs git on
+a repository it did not create without letting that repository's configuration start a program (FIX-147), gives the
+secret scan of a checked push only the inputs it writes itself (FIX-160) and starts every program by its resolved
+absolute path (FIX-161), as its release notes' Security section describes. Every distributable is still built with SDK
+10.0.404 and embeds the .NET and ASP.NET Core 10.0.15 runtimes.
+In 0.9.3 Vericairn corrected what the estates reported in 0.9.2 and readied the release flow for the next release.
+Export and restore kept each file's executable mode (FIX-112), a timestamp in the wrong form was refused with the form
+required (FIX-114), `doctor --json` returned one documented result and every command that takes `--json` wrote JSON
+(FIX-119), document reviews, pins and checks said what they declare, need and found (FIX-113, FIX-120 and FIX-122), an
+operation kept its intent and target in every revision (FIX-109), a goal was recorded impossible only after its
+evaluator's verdict (FIX-116), and work proposed for a goal waited for its sponsor's approval (FIX-117). Every operator
+action announced and counted its presence prompts (FIX-124), release steps signed only what they store (FIX-130), and
+the work-order key check, key closings and admissions were judged in near-linear time (FIX-107, FIX-121 and FIX-131). A
+change merged through a required merge queue with its outcome recorded (CODE-71), an operator action's push and merge
+trail reached the estate (FIX-126), and a work order whose current result is accepted read as accepted (FIX-128), with
+FIX-125 and FIX-127, so a release could run on its declared flow. `vericairn estate first-authority` named an estate's
+first authority (CODE-72), guides covered enrollment's presence prompts and a cold recovery's inventories (DOCS-33 and
+DOCS-32), an estate's root could hold its owner's agent instruction files (CODE-70), and main's push run skipped a
+commit the merge queue already tested (CI-07), with FIX-118 and FIX-133. It read a key only in the form Vericairn makes
+(FIX-132), as its release notes' Security section describes. Earlier published releases, and the withdrawn candidates
+0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1, are recorded in their own frozen sets.
+0.9.4 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
+upgrades from 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1, 0.9.2 or 0.9.3 without a format step. The format-3 upgrade
 from 0.7.3 preserves historical records and requires explicit adoption afterwards. The features and corrections
-of 0.8.0 through 0.9.2 remain. Earlier sets stay frozen.
+of 0.8.0 through 0.9.3 remain. Earlier sets stay frozen.
 
 NuGet availability follows publication and a successful package workflow. The remaining limits are in
 `limitations-and-platforms.md`.
@@ -82,7 +91,7 @@ without a recorded commit requires this option; omitting it refuses before any m
 are written. The default comes from the build's version metadata, so the estate's Git history does
 not choose the pin.
 
-`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.9.3 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
+`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.9.4 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
 
 Expected observation: `status` shows the estate's name, the operator principal, no work orders yet, and `estate check` reports `2 records: 0 errors, 0 warnings`. The manifest is not a third record.
 
@@ -175,7 +184,17 @@ vericairn devices admit <device id> --by <operator id> --note "The operator's wo
 
 That admission, signed by the device it admits, is the estate's first authority: the root operator's first device admitting itself. It is accepted once in an estate's history. At record format 2 or 3 every other admission, and every revocation, counts only when signed by an already admitted device, whatever the charter's signature policy, or when an operator's signed migration to format 2 anchored an existing unsigned admission (section 9), or, from 0.9.2, when an anchoring history checkpoint lists it ([history checkpoints](#history-checkpoints-092)). A refused admission explains which admitted device or recovery key could sign it.
 
-From 0.9.2, every admission and revocation is judged from that first authority outward: one counts only when the device that signed it was admitted, at that time, through admissions that count in turn, only when its signature verifies, and only when its author may admit then: you, another operator, or a person you granted `administer`, read from your principal records and grants as they stood at the admission's time, as every other rule reads them, and not through a grant a closing closed before it. A person you granted `administer` must be described as a person by a principal record that is signed or that a checkpoint anchored. A record written later restores no earlier admission. The judgment is the same whatever order the records are read in and whichever was written first; of two devices admitted at the same remove from the first authority that revoke each other as of before either revocation, neither revocation counts. A revocation that would unseat what its own signature or its author's authority rests on, such as one stated as of a time before the admission of the device that signs it, counts for nothing and revokes nothing. An admission that does not count admits and revokes nothing and is reported with its finding, such as `signature.unadmitted`, `signature.invalid`, `admission.author` or `admission.unseats-support`. The root operator is read from the charter your estate's manifest names, which is the charter `estate init` wrote, and the first authority from the admission the manifest names as `firstAuthority`: the runtime writes it when your first device admits itself, and an upgrade to 0.9.2 or later writes it for an estate whose manifest names none. A second charter that supersedes nothing, or a second device admitting itself for you, takes the place of neither, whatever date it states; one that comes with history checkpoints of its own leaves the copy unsettled, with no record counting, until it is removed. When the manifest names no first authority and the estate holds more than one such self-admission, the estate check reports `manifest.first-authority`, listing each with its device, and no device's admission counts until you name yours in the manifest. From 0.9.3 you name it with `vericairn estate first-authority` rather than by editing the manifest ([the command](cli.md#vericairn-estate-first-authority-093)): without options it lists every self-admission with its evidence, the device's custody and presence, whether that device stands revoked, how many devices rest on it and how many records it signed; with `--device` or `--admission` and `--check` it shows the change to `estate/manifest.json` and a plan hash; with `--expect-plan <plan> --by <operator id>` it writes it. It names only one of your own devices whose self-admission's signature verifies under that device's key, never an agent's, another person's or a recovery device, nor a self-admission whose signature does not verify, which anyone able to add a file can write; a revoked device stays nameable, since your first device is the root revoked or not. It lists and names nothing while `estate/manifest.json` does not read cleanly. It refuses when the estate's first authority already works, named by the manifest or settled by adopted history, when the copy reads unsettled, and when history checkpoints witness a self-admission first when it is read as the first authority, since such history could have come into the copy with it: compare the copy with a head you know first (`vericairn estate check --expect <checkpoint>`). Nothing signs the manifest, so the command is yours at the runtime's machine, as the hand edit was; no device-signed request reaches it. Naming it makes your devices' admissions count again, but every other self-admission still reads `signature.self-admission`, an error, which the command lists and never removes, so `vericairn estate upgrade`, which refuses any estate with errors, proceeds only once you have also removed those records from the copy. The manifest is a plain file that nothing signs: until your estate adopts history checkpoints, someone who can edit both your records and `estate/manifest.json` in a copy can point it at another charter or first authority. Adopting checkpoints narrows that: from adoption on, a manifest naming another charter or first authority than the ones your checkpoints witnessed leaves the copy unsettled (`history.root-ambiguous`, `history.manifest-root`) instead of moving either, whether it names another charter, another first authority or both. This is one more reason to adopt checkpoints soon after upgrading to 0.9.2.
+From 0.9.2, every admission and revocation is judged from that first authority outward: one counts only when the device that signed it was admitted, at that time, through admissions that count in turn, only when its signature verifies, and only when its author may admit then: you, another operator, or a person you granted `administer`, read from your principal records and grants as they stood at the admission's time, as every other rule reads them, and not through a grant a closing closed before it. A person you granted `administer` must be described as a person by a principal record that is signed or that a checkpoint anchored. A record written later restores no earlier admission. The judgment is the same whatever order the records are read in and whichever was written first; of two devices admitted at the same remove from the first authority that revoke each other as of before either revocation, neither revocation counts. A revocation that would unseat what its own signature or its author's authority rests on, such as one stated as of a time before the admission of the device that signs it, counts for nothing and revokes nothing. An admission that does not count admits and revokes nothing and is reported with its finding, such as `signature.unadmitted`, `signature.invalid`, `admission.author` or `admission.unseats-support`. The root operator is read from the charter your estate's manifest names, which is the charter `estate init` wrote, and the first authority from the admission the manifest names as `firstAuthority`: the runtime writes it when your first device admits itself, and an upgrade to 0.9.2 or later writes it for an estate whose manifest names none. A second charter that supersedes nothing, or a second device admitting itself for you, takes the place of neither, whatever date it states; one that comes with history checkpoints of its own leaves the copy unsettled, with no record counting, until it is removed. When the manifest names no first authority and the estate holds more than one such self-admission, the estate check reports `manifest.first-authority`, listing each with its device, and no device's admission counts until you name yours in the manifest. From 0.9.3 you name it with `vericairn estate first-authority` rather than by editing the manifest ([the command](cli.md#vericairn-estate-first-authority-093)): without options it lists every self-admission with its evidence, the device's custody and presence, whether that device stands revoked, how many devices rest on it and how many records it signed; with `--device` or `--admission` and `--check` it shows the change to `estate/manifest.json` and a plan hash; with `--expect-plan <plan> --by <operator id>` it writes it. It names only one of your own devices whose self-admission's signature verifies under that device's key, never an agent's, another person's or a recovery device, nor a self-admission whose signature does not verify, which anyone able to add a file can write; a revoked device stays nameable, since your first device is the root revoked or not. It lists and names nothing while `estate/manifest.json` does not read cleanly. It refuses when the estate's first authority already works, named by the manifest or settled by adopted history, when the copy reads unsettled, and when history checkpoints witness a self-admission first when it is read as the first authority, since such history could have come into the copy with it: compare the copy with a head you know first (`vericairn estate check --expect <checkpoint>`). Nothing signs the manifest, so the command is yours at the runtime's machine, as the hand edit was; no device-signed request reaches it. Naming it makes your devices' admissions count again, but every other self-admission still reads `signature.self-admission`, an error, which the command lists and never removes, so `vericairn estate upgrade`, which refuses any estate with errors, proceeds only once you have also removed those records from the copy. The manifest is a plain file that nothing signs: until your estate adopts history checkpoints, someone who can edit both your records and `estate/manifest.json` in a copy can point it at another charter or first authority. Adopting checkpoints narrows that: from adoption on, a manifest naming another charter or first authority than the ones your checkpoints witnessed leaves the copy unsettled (`history.root-ambiguous`, `history.manifest-root`) instead of moving either, whether it names another charter, another first authority or both. This is one more reason to adopt checkpoints soon after upgrading to 0.9.2 or later.
+
+From 0.9.4 (FIX-134), the first authority counts only when its own signature verifies: read as the first authority, its content
+has the hash its envelope declares, and every signature on it verifies as the estate verifies every signature, under its device's
+key at its stated time and by a device of its author. A self-admission whose signature names your device without verifying under
+its key is one anyone able to add a file can write. When the manifest names such an admission, or it is the only one and the
+manifest names none, the estate reads no first authority: `vericairn estate check` reports `manifest.first-authority` naming it
+and why its signature fails, no admission counts, and nothing signed under it counts, until the manifest names a self-admission
+that verifies. `vericairn estate first-authority` lists each candidate with whether its signature verifies and names the one that
+does; it never names one that does not. Before 0.9.4 such an admission was read as the first authority, flagged only by its own
+`signature.invalid`.
 
 Add a principal for a builder agent (or a second human) with a record, create its device on the machine it works from, and admit it from yours:
 
@@ -198,7 +217,17 @@ with `builder.json`:
 
 **Custody.** A new device gets the strongest custody its machine offers unless `--custody` names one: `cng`, the platform key store, on Windows; `secure-enclave` on a Mac with a Secure Enclave and the `vericairn-enclave` helper beside the command line, where the key is generated inside the enclave and kept as an enclave-wrapped blob that signs nothing on any other Mac; `secret-service` on Linux where a secret service runs and `secret-tool` is installed; otherwise `file`, a file in per-user state. Unix file permissions are owner-only; Windows files inherit their directory ACLs. In an estate still at record format 1 the default is the strongest custody format 1 can name, and the Secure Enclave and presence wait for the upgrade to format 2 (section 9). Each custody's strength is recorded with it: a key in an owner-only file can be used by any process of the same operating-system user, a secret-service key is readable by them while the keyring is unlocked, and CNG and Secure Enclave keys cannot be exported.
 
-**Presence.** A person's device needs its owner's presence at every signature wherever its custody enforces it, which on a desktop only Secure Enclave custody does (Touch ID or the login password); `--presence false` declines it. From 0.9.0 a phone paired with Remote holds a second device, its presence key, in `ios-secure-enclave` or `android-keystore` custody with presence required, and only that key signs the phone's decisions ([Remote](remote.md#keys-and-custody)); the phone's request key states presence none. An agent's or a service's device signs unattended and never claims presence, and no custody claims presence it cannot enforce. Presence on Windows is not built yet, so a Windows device states presence none. Tests without an interactive desktop do not qualify the presence prompt; consult the estate's platform qualifications for observations on the intended machine.
+**Presence.** A person's device needs its owner's presence wherever its custody enforces it, which on a desktop only Secure Enclave
+custody does (Touch ID or the login password); `--presence false` declines it. Each signature with such a key is covered by a
+presence check at the key's machine: up to 0.9.3 its own, one prompt for every signature; from 0.9.4 its own or a presence session's,
+one check over a list of an operator action's signatures that the action announces before the check
+([presence sessions](#presence-sessions-094)). From 0.9.0 a phone paired with Remote holds a second device, its presence key, in
+`ios-secure-enclave` or `android-keystore` custody with presence required, and only that key signs the phone's decisions, one check
+each ([Remote](remote.md#keys-and-custody)); the phone's request key states presence none. An agent's or a service's device signs
+unattended and never claims presence, and no custody claims presence it cannot enforce. Presence on Windows is not built yet, so a
+Windows device states presence none. Nothing binds a presence key to Vericairn's helper: a program running as you can use the key
+itself, so refuse a dialog you did not expect. Tests without an interactive desktop do not qualify the presence prompt; consult the
+estate's platform qualifications for observations on the intended machine.
 
 **Rename and rotate.** From record format 2 a device keeps its identity, its first record, across renames and key rotations, made on the machine that holds its key:
 
@@ -226,13 +255,22 @@ Rules the tool enforces here: only the root operator or a principal granted `adm
 
 ### Presence prompts, announced and counted (0.9.3)
 
-A device that needs its owner's presence asks once for every record it signs; one prompt never covers two signatures. From
-0.9.3 (FIX-124), an operator action, a release step or a single write that signs with such a device announces every record it
-will sign before the first prompt, each with its type, the key you know it by and what signing it authorizes. At each prompt the
-command line prints `Signature k of n: <what it signs>` on standard error, Workbench writes the same line to its status and
-activity log, and the system dialog's reason, which the `vericairn-enclave` helper passes to macOS, says the same in one bounded
-sentence that carries no secret or machine path. When the action ends it says how many it signed (`Signed 4 of 4.`). A command
-that signs nothing with presence prints nothing of this.
+Up to 0.9.3 a device that needs its owner's presence asks once for every record it signs. From 0.9.4 an operator action may instead
+ask one check for a list of its signatures it announces first, a presence session ([presence sessions](#presence-sessions-094)), where
+the release build's helper and your macOS version allow it; everything below holds for each signature that keeps its own check.
+From 0.9.3 (FIX-124), an operator action, a release step or a single write that signs with such a device announces every record it will
+sign before the first prompt, each with its type, the key you know it by and what signing it authorizes. At each prompt the command
+line prints `Signature k of n: <what it signs>` on standard error, from 0.9.4 followed by the record's short hash, the first twelve
+hexadecimal digits of its content hash; Workbench writes the same line to its status and activity log. From 0.9.4 every such line,
+since its words are the runtime's, begins with `runtime:` (and Workbench shows it in a style of its own), with control characters
+shown escaped and runs of spaces made one space; the command line folds a line longer than the terminal (80 columns when its output
+goes to a file or a pipe) into rows that each begin with `runtime:`, so no soft wrap starts a row of the runtime's words without the
+mark, and it cannot pass for a line the command line or Workbench derived itself. The system dialog's reason,
+which the `vericairn-enclave` helper passes to macOS, says the same in one bounded sentence that carries no secret or machine path.
+From 0.9.4 the release build's helper reads the record before it signs it and opens the dialog's text with its own label,
+`sign Vericairn record <type> <short hash>:`, before the action's sentence; a digest it cannot read as a record, such as a request's,
+opens with `sign an unread Vericairn digest:`. When the action ends it says how many it signed (`runtime: Signed 4 of 4.`). A command that signs
+nothing with presence prints nothing of this.
 
 The count stays true for what the action signs. When it must sign more than it announced, for example observing a pull request
 again because its checks are still running, it announces the addition, with why, before the first of the added prompts. When its
@@ -250,26 +288,159 @@ signed the intent is still the submitting principal's admitted device whose key 
 whose key is no longer held here, dispatches no build, and neither does another device of the principal that signed nothing in the
 submission; the intent then stays unsettled for you to reconcile, and nothing more is asked.
 
-| Step (release flow step) | Prompts |
-| --- | --- |
-| `release submit` (`submit`) | 3 in an estate that has adopted history checkpoints: the release gate's history checkpoint, the intent and the dispatch receipt. One fewer before adoption (no checkpoint). An admission that changes before dispatch replaces the receipt with the intent's cancellation, 3 in all, or records the reserved intent again first, 4 in all; when no device here may sign the cancellation, it asks for nothing more. |
-| `release observe` of a finished build (`candidate`) | 2: the operation's revision, then the candidate. The revision alone when the build failed or a candidate is already recorded. An intent without a receipt is recorded as uncertain first (1 more, 3 in all), and is announced with the rest; while the build still runs, the observation signs that alone. |
-| `release observe` of the publication (`publish`) | 1: the published revision. |
-| `release observe --cancel` | 1: the intent's cancellation. |
-| `release observe --withdrawal` | 1: the withdrawn draft's observed absence, recorded under its deletion intent. |
-| The operator's acceptance of a candidate or of finished work (`accept`, `close`) with `records new` or Workbench | 1. |
-| The same acceptance with `operator record` | 22 for a new action: the record, 6 for the push (its intent, its dispatch, the 3 records of observing the pushed branch and its outcome), 3 for the opening, 3 for the first observation of the pull request's checks, and 9 for the merge (its intent, 3 for observing the pull request, its dispatch, its outcome and 3 for observing the target branch's run at the merge commit). Each further observation while the checks or that run are still running adds 3, announced before it asks. A resumed action leaves out what its records show done; finishing an earlier merged action first adds 3. |
-| `operator close` (`close`) | 1 per selected step's acceptance. |
-| `operator unfinished --finish` | 3 per observation of the target branch's run. |
-| `goal activate`, `goal accept` | 1 each. |
-| `goal step` | 2 for a person's step (the assignment and the ask) or an agent's step routed now (the assignment and the run's intent); 1 for an ask alone. |
+| Step (release flow step) | One check per signature (up to 0.9.3, and every setting, build and macOS version without sessions) | With presence sessions (0.9.4) |
+| --- | --- | --- |
+| `release submit` (`submit`) | 3 in an estate that has adopted history checkpoints: the release gate's history checkpoint, the intent and the dispatch receipt. One fewer before adoption (no checkpoint). An admission that changes before dispatch replaces the receipt with the intent's cancellation, 3 in all, or records the reserved intent again first, 4 in all; when no device here may sign the cancellation, it asks for nothing more. | 1 for the list of the checkpoint and the release build's records, bound to the provider, the release's repository, the version, the product, the commit and the workflow its dispatch names. A submission whose ref is no commit, or whose workflow is outside letters, digits and `._/-` (at most 100 characters), keeps one check per signature. |
+| `release observe` of a finished build (`candidate`) | 2: the operation's revision, then the candidate. The revision alone when the build failed or a candidate is already recorded. An intent without a receipt is recorded as uncertain first (1 more, 3 in all), and is announced with the rest; while the build still runs, the observation signs that alone. | 1 where it signs two or more; a single signature keeps its own check. |
+| `release observe` of the publication (`publish`) | 1: the published revision. | 1, its own. |
+| `release observe --cancel` | 1: the intent's cancellation. | 1, its own. |
+| `release observe --withdrawal` | 1: the withdrawn draft's observed absence, recorded under its deletion intent. | 1, its own. |
+| The operator's acceptance of a candidate or of finished work (`accept`, `close`) with `records new` or Workbench | 1. | 1: a single write is never a session. |
+| The same acceptance with `operator record` | 22 for a new action: the record, 6 for the push (its intent, its dispatch, the 3 records of observing the pushed branch and its outcome), 3 for the opening, 3 for the first observation of the pull request's checks, and 9 for the merge (its intent, 3 for observing the pull request, its dispatch, its outcome and 3 for observing the target branch's run at the merge commit). Each further observation while the checks or that run are still running adds 3, announced before it asks. A resumed action leaves out what its records show done; finishing an earlier merged action first adds 3. | 1 in the best case, when the action finishes within the session's limit: the record by exact hash, and its branch's push, opening, observations and merge by kind. It waits up to 120 seconds by default for each of its two check phases, so on a real repository it usually renews once or twice, each renewal announced with what remains (inferred from those bounds, not measured). |
+| `operator close` (`close`) | 1 per selected step's acceptance. | 1 per list of up to 16 acceptances, each list announced just before its own check; 1 per acceptance while an agent run this machine's worker started is unsettled under your user. |
+| `operator act --ready` | 1 per chosen record. | 1 per list of up to 16 chosen records, the dialog naming `operator act`. |
+| `operator unfinished --finish` | 3 per observation of the target branch's run. | 1 for its observations, and 1 more for each renewal beyond the repetitions its wait allows. |
+| `goal activate`, `goal accept` | 1 each. | 1 each. |
+| `goal step` | 2 for a person's step (the assignment and the ask) or an agent's step routed now (the assignment and the run's intent); 1 for an ask alone. | 1 for a person's step (its assignment and ask, by exact hash); 2 for an agent's step, whose run's intent the worker writes after its preflight; 1 for an ask alone. |
+| `decisions new` from an ask, `docs pass assign`, `work move-plan` | 1 per record. | 1 per list of up to 16 records you judge, where the action signs two or more. |
+| `changes push`, `open`, `merge`, `observe` | 6 for a push (its intent, its dispatch, the 3 records of observing the pushed branch and its outcome), 3 for an opening, 9 for a merge (its observations included), 3 for an observation. | 1 per command's list, renewed before an effect when fewer than three minutes of the session remain and the session's limit is at least three minutes; with a shorter limit the effect is dispatched under the session and its receipt signed under a renewal. |
 
 Any other write asks once for its record, and once more for a history checkpoint or closing it carries, such as a charter
-revision's; the interval checkpoint is never asked of a person's device that needs presence ([history checkpoints](#history-checkpoints-092)).
+revision's, with or without sessions; the interval checkpoint is never asked of a person's device that needs presence
+([history checkpoints](#history-checkpoints-092)). Until a release build's signed helper has qualified your macOS version, the
+second column is what you see on every Mac.
 
 When a prompt expires, is refused or the command times out while you enroll a device, [enrollment troubleshooting](enrollment-troubleshooting.md)
 tells those endings apart from what the command prints, and reconciles from what the estate holds without replaying the
 enrollment: an authenticated prompt is no receipt, and only the stored record says what happened.
+
+From 0.9.4 (DOCS-45), when a signed command fails at once, before any dialog appears, as one run from a sandboxed agent process,
+a container or a remote shell can, [a signed command that fails at once](enrollment-troubleshooting.md#a-signed-command-that-fails-at-once-094)
+tells a capability unavailable to that process apart from a missing `vericairn-enclave` helper and from a refused or expired
+prompt, by what the command printed, whether a dialog appeared and `vericairn doctor`'s `enclave` line run from the same context.
+A working `status` or a device that reads `heldHere` does not qualify a process to sign. Keep the failed command and its output,
+inspect and reconcile before anything runs again, and make any authorized retry once, from a context where `doctor` reports the
+enclave available.
+
+#### Presence sessions (0.9.4)
+
+**The guarantee.** From 0.9.4 each signature with a presence key is covered by a presence check at its key's machine: its own, or a
+presence session's whose announced list, shown before the check, names it by exact hash or by kind. Records you judge (acceptances,
+reviews, decisions, asks, assignments, document revisions and reviews, work orders and work statuses, operator requests and their
+closes, a withdrawn release) are named by exact hash, at most 16 to a check. Acts on the root of trust and on policy keep their own
+check. Per-signature presence stays available, to the device's owner and to the estate. What was already true stays true: nothing binds
+a presence key to the helper's code, so code running as you can use the key after one approval of a dialog it wrote, and refusing a
+dialog you did not expect is the control against it, with sessions as without them. Binding the key to the release helper's code
+identity is future work. The residual risks are listed in [limitations and platforms](limitations-and-platforms.md#key-custody-and-records).
+
+| | Up to 0.9.3 (FIX-124 and FIX-130), and every signature that keeps its own check | With presence sessions |
+| --- | --- | --- |
+| Checks | One per signature; one prompt never covers two signatures | One per announced list of at most 128 signatures and 16 exact entries, for one action and at most 300 seconds, with the release helper on a qualified macOS release; one per signature where the owner or the estate asks |
+| What one check allows a caller of the release helper | One signature over a digest the helper cannot read | Signatures only on records the helper reads and matches to the list |
+| Whom the helper's checks bind | A caller of the release helper gets one signature per prompt | A caller of the release helper, such as a runtime with a defect or a confined compromise, signs only listed records |
+| A record you judge | Signed after a prompt that names it in the runtime's words | Listed by its type and exact hash before the check, 16 at most to a check, each alone while the runtime's own unattended agent runs are under way |
+| A record written later | Each signed after its own prompt, named in the runtime's words | Signed under the check when its kind, fixed fields, identity, references, status, count and time match a kind entry of the closed set |
+| Acts on the root of trust and on policy | One check each | Unchanged, as is every type outside the allow-list |
+| The dialog's text | The runtime's sentence | The helper's: fingerprint, action, count and limit, then the breakdown; a per-signature prompt begins with the helper's label |
+| Arbitrary code running as you | It can load the key blob itself, write any dialog text and, after one approval, sign any digest without limit; the only control is refusing a dialog you did not expect | Unchanged |
+| Another process during a session | Its own prompt | Its own prompt; the helper's context is not exported and is reached only through the runtime's pipes (qualified) |
+
+**Where sessions apply.** A session opens only for a person's device whose key is in the Mac's Secure Enclave with presence required;
+only for a command the command line runs on its own embedded runtime or sends to the daemon over its local socket (a request from any
+other profile, a paired device or MCP never opens one); only with the release build's own helper, signed with Vericairn's Developer ID
+and the hardened runtime and checked before each session, on a macOS major version that release lists as qualified; and only for the
+actions `operator close`, `operator record`, `operator unfinished --finish`, `changes push`, `open`, `merge` and `observe`,
+`release submit`, `release observe`, `release withdraw`, `decisions new` (a decision from an ask), `docs pass assign`,
+`work move-plan` and `goal step`, when the action signs two or more records the list admits; a single signature keeps its own check.
+`goal step` lists a step routed to a person: its assignment and its ask, both by exact hash, under one check; every other route keeps
+one check per signature: an agent's assignment and its run's intent, which the worker writes only after its preflight; a rule's
+decision, a flow-decision observation; and the single write of a sponsor's ask, an attention ask or an operator request. `goal decide`
+is not an action of the list, so its records each keep their own check. The Developer ID signing is planned with `DIST-21`, and a
+release lists a macOS version only once its candidate's signed helper passes the
+[qualification](presence-session-qualification.md) on it; a development build, a build from source and a release on a macOS version
+it does not list keep one check per signature everywhere, and `vericairn doctor` prints a `presence` line saying whether sessions are
+on and, when they are off, why.
+
+From 0.9.4, `operator act --ready` signs its chosen records under the session action `operator act` (decision
+`01M8001M0T9XRGF7SKHW3B45KF`): up to 16 records by exact hash to a check, a list for each 16. `operator answer` signs under
+`decision from ask`.
+
+**What one check covers.** Before the check the action prints its list on standard error: each record it holds now by its type and the
+first twelve digits of its exact hash, each record its mechanics write later by kind (push, opening, merge, observation, release build,
+release record, the release gate's checkpoint) with the branch, pull request or version it is bound to and how many, and under every
+entry what that record changes. An acceptance whose basis holds a review by the same agent harness that authored the work, or such a
+review itself, is flagged; a harness is read as routing reads an agent's product, so its name and its launcher's id (or the id's form of
+its name) are one harness. A release build is bound to the provider, the release's repository, the version, the product, the commit it
+builds and the workflow its dispatch names (its `workflow` setting, which the GitHub release provider defaults to `release.yml`), and the
+helper signs no dispatch record whose workflow differs. The command line and Workbench read the list from the terms the runtime hands
+the helper: they name the action as the terms name it, count the list and summarize each entry themselves, with the recorded records a
+kind entry may supersede or observe, and show every word of the runtime's (its description of each entry and what it changes, its own
+name for the action where that differs, a renewal's reason) on lines that begin with `runtime:`, with control characters shown escaped,
+since only the terms are what the helper enforces. Row by row, a line without that mark is one the command line or Workbench derived
+itself: the command line folds each line of the runtime's to the terminal's width, with the mark on every row, and a notice it cannot
+check is shown whole as the runtime's, after a warning. A problem the runtime reports to a command whose action asks for presence is
+shown the same way. At most 16 records you judge share one check, so `operator close` of more
+steps announces a list for each 16, each just before its own check. While an agent run this machine's worker started is unsettled under
+your own operating-system user, each judgment asks its own check and only the mechanics share one. Acts on the root of trust and on
+policy (the charter, principals, devices, admissions, grants, policies, migrations, goals and the history checkpoints other than the
+release gate's) always ask their own check, as does every type and action not on the allow-list, a single signature, a phone, and every
+request from another device or over MCP.
+
+**The check.** The next line is the command line's own, naming the action as the terms do: `Presence check for <action>: the system
+dialog should show fingerprint XXXX-XXXX-XXXX, computed here from the list above and the check's nonce`. The fingerprint is computed by the command line (or Workbench,
+in its status line) from the list's terms and the helper's nonce, and only for a list it received before the nonce; if the list reached
+it only with the nonce or after it, it prints a warning in place of a fingerprint, and then you decline the dialog unless you asked for
+exactly this action. The dialog's text is the helper's own, beginning `open Vericairn session` with the fingerprint, the action, the
+count and the limit, then the breakdown. Approve it only when the fingerprints match and the list is what you asked for. Where the
+command line runs the runtime in its own process, as it does when no daemon serves the estate, the list it prints is computed in the
+same process, so the dialog's own text is what stands apart from it.
+
+**Each signature.** Each signature then prints the runtime's line, `runtime: Signature k of up to n, under the session's check: <what it
+signs> (<short hash>)`, and, when its short hash is an exact entry's, the command line's own line naming that entry of the list; for a
+record written after the check, the short hash is an audit trail, not something to compare before approving. The end says how many
+checks the action took (`runtime: Signed 22 of 22 with one presence check.`).
+
+**The limit and renewals.** A session lasts at most 300 seconds from the check, or the shorter limit the device's owner sets, never under
+60, and ends when the action ends, the screen locks, the user session switches or the Mac sleeps. Anything the list does not cover asks
+again: the command line shows `<action> renews its presence session and asks once more` with the remaining list read from its new
+terms and the runtime's reason on a `runtime:` line, and asks one more check; so does a session that ended that way, or reached its
+limit, before the action is done, so a lock during a wait for checks asks again rather than stopping the action. Before a record that
+dispatches a push, an opening, a merge or a release build, a session with fewer seconds left than the effect's two-minute bound and a
+minute, three minutes, is renewed first, when a fresh session's limit is at least those three minutes; under a shorter limit, such as
+the 120 seconds of `--limit 120` below, the effect is dispatched under the current session and its receipt or outcome is signed under a
+renewal, as one check per signature would sign it, so no renewal repeats without progress. A renewal you do not answer within 300
+seconds dispatches nothing, and the intent stays as recorded, to be observed before any retry. A declined or unanswered check signs nothing
+and the action stops, as a declined prompt stops it; it never falls back to asking once per signature. One check for a whole
+`operator record` is the best case; with its checks waiting their default 120 seconds per phase it usually renews once or twice.
+
+**The stricter setting.** One check per signature stays available at two levels, and the stricter wins. The estate's charter may set
+`policies.presence` to `per-signature` (record format 3; releases before 0.9.4 refuse the field, so set it once every writer has
+upgraded), for every person's device in the estate; under required signatures only a charter revision the root operator signs changes
+it. The device's owner may ask the same on the machine holding the key, and may shorten the session's limit:
+
+```sh
+vericairn devices presence <device> --per-signature
+vericairn devices presence <device> --per-action --limit 120
+vericairn devices presence <device>
+```
+
+The setting is kept owner-only in `presence.json` under the Vericairn home, never in a record; without a choice the command shows it
+with the charter's. A setting that cannot be read, a Vericairn home that cannot be searched included, and a charter value that is
+neither `per-signature` nor `per-action` each count as per-signature, and `devices presence` refuses to write over a settings file
+that cannot be read, saying which file it is: repair it, or remove it to return every device on the machine to the default and set
+each again. Neither setting is enforced by the hardware: a process of your
+operating-system user can change the machine's setting. Under per-signature presence everything is as it was up to 0.9.3, with the helper's
+label at each prompt.
+
+**When the helper refuses.** If the helper refuses a record the runtime's own checks admitted, nothing is signed, the session ends, the
+action stops and attention `presence.outside-list` names the record's type, key and hash: a defect or an attack, to inspect before
+running the action again.
+
+**The ledger.** `vericairn devices sessions [<device>]` lists the sessions this machine's runtime opened or tried to open for the
+estate, from `presence-sessions.jsonl` beside the estate's live store: each session's action, device, terms, nonce and fingerprint,
+when and why it opened and ended, the records signed under it by id and hash, and each refusal. It is owner-only machine state, a
+diagnostic that a process of your operating-system user could alter; it is never a record, and no export or support bundle carries
+it.
 
 ### History checkpoints (0.9.2)
 
@@ -314,10 +485,46 @@ An act is refused as well when it states a time, as `records new --at` can, more
 - **An act without a closing.** A revocation, rotation or narrowing that arrives as a file without its closing, merged from a copy that had not adopted yet or added by hand, takes effect all the same, and `estate check` warns `history.closing-missing` on it: no closing names its device, key or grant, so a record that target signs with an earlier date still counts. Write the closing with `records new history-checkpoint`, its `closes` naming the target, signed by one who may perform the act; from it on the target accounts only for what the closing witnesses. Acts your adoption checkpoint witnessed carry no warning.
 - **Authority is read as it stood.** Roles and grants are read at each record's time: a later grant authorizes nothing written before it, and a later narrowing withdraws nothing already written. Records your adoption checkpoint witnessed keep the reading they had at adoption. In every read, a grant or principal revision counts for nothing when it is dated before the nearest record below it in its line that counts; a record below that does not count, unsigned or refused, is skipped, and a revision written on top of one follows the line there.
 - **The strongest acts read more strictly.** Anchoring, acknowledging a removal, rooting an adoption and signing a device's or a grant's closing need the signer's operator role or `administer` grant to stand at the checkpoint's time and still stand. They read a grant or principal revision as written when you wrote it, or an operator who held the role at the revision's time and still holds it; as a removal, whatever it says, when its author had been given the operator role by then but had lost it by then or no longer holds it; and not at all when its author had never been given the role. The role is given by you or by someone given it earlier, so a circle of appointments gives nothing. A revision read as a removal reads as written, except that it gives no operator role, or no `administer` for a grant, and that on top of a revision read below it, it describes a human only where that revision does too. So one saying the person is not human takes that away, and one with no revision read below it, such as the first record of a person's line, describes a human when it says so. A revision a closing refuses is not read for anchoring, for your adoption or for the closings that follow that closing.
-- **Removing a role.** A role has no closing (role closings are planned), so a former operator or administrator could otherwise write records dated into the time the role stood; when you remove a person's operator role or `administer` grant, close and revoke their devices yourself. Removing the operator role also ends the person's policy authority at once, for every record no checkpoint by you or a standing operator places before the removal. Write the removal through the runtime with your device on its machine, with `records new`, which `operator record` names when it refuses a removal. In an estate that has adopted checkpoints it writes a checkpoint first, following every checkpoint before it, so the policies, grants, exceptions and writing entries the person recorded keep counting. In an estate that has not, it refuses a removal that would make any record fail and names those records, the person's decisions and the policies they approved among them; adopt checkpoints first, then remove the role. Taking `administer` away is judged the same way, for the principals the person admitted. Your closing refuses what the person signs with that device after it, whatever date it states, in every read, for anchoring and your adoption and for every closing that follows yours, so a removal of another operator they write afterwards, whatever its date, changes none of those; an adoption rooted by an administrator also holds against a narrowing of that grant they write after your closing. A closing written before yours is judged without it. So once you have removed a person and closed and revoked their device, they can still write, at any time and repeatedly, a removal of another operator or a narrowing of an administrator's grant, dated any time from their own appointment until their device's revocation. Every closing that does not follow yours then closes nothing if that operator or administrator wrote it, or anyone whose operator role or `administer` rests on that operator's appointments or grants, directly or through others', and records it alone refused count again. Closing again does not undo this, since the new closing witnesses those records. Removing those records does, with an anchoring checkpoint that acknowledges their removal when a checkpoint witnesses them. Writing the operator's role again gives back the closings of those whose role or `administer` rests on that operator's appointments or grants, and the operator's own earlier closings only when it is dated after the removal and before them. Either holds only until the person writes more such records, among them a removal on top of the role written again or forking the line below it. Your own closings cannot be reopened this way, so write yourself a closing that must hold; role closings, which are planned, are meant to end this. A closing by another operator does not protect that operator the same way, since no closing is read against itself: if the person later writes a removal of that operator, dated any time from their own appointment on, that operator's closing closes nothing. You settle it by closing the device and writing the operator's role again; the closings that operator writes after yours act.
-- **What removing a role takes.** Removing an operator's role also takes, for anchoring and closings, what that person appointed, granted and closed: their appointments and grants read as removals, and their closings stop acting. Those they appointed keep the operator role in ordinary reads, and a removal they write still counts for these acts: write their appointments again, or close their devices so that what they sign afterwards counts for nothing. Before you remove the role, write again the grants and appointments that should stay and close again what the person closed, or have another standing operator do it; an adoption whose rooting rested on that person's grant must be rooted again. `estate check` warns `history.revision-author` on each grant giving `administer`, or principal record giving the operator role or describing a human, that these acts read as a removal because its author's role is removed or disputed. A removal the person wrote keeps counting. Two operators other than you who remove each other both lose these acts, the closing either writes of the other's device included, until you settle it: close the device of the one who should go and write the other's role again.
+- **Removing a role.** From 0.9.4 (ID-14), in an estate that has adopted checkpoints, removing the operator role from a person's
+  principal record writes a role closing for that person first, in the same batch: a checkpoint with trigger
+  `closing` and `closes` `{"kind": "role", "id": <the person's principal revision>}`, signed by your device or another standing
+  operator's, printed after the revision. Write the removal through the runtime with your device on its machine, with
+  `records new principal --supersedes <revision>`, which `operator record` names when it refuses a removal; a removal signed
+  elsewhere, or that comes without its closing, is refused with nothing written. From the closing on, anything the person writes
+  that the closing does not witness counts for nothing, whatever date it states and whatever device signs it
+  (`history.after-closing`): a decision, a grant, a revision of their own or anyone else's principal record, an admission or a
+  closing, and it stays so if they are given a role back: what they write counts only once anchored. Only removing the operator
+  role writes a role closing (decision 01M7JSJSHTTX86F10007GDQ238): removing any other role, such as reviewer or builder, from a
+  person writes none, and that role is read at each record's time, so a person who keeps the operator role keeps writing as an
+  operator. So a removal of another operator, or a narrowing of an administrator's grant, that the person writes afterwards takes
+  nothing from anyone, for anchoring, adoption and every closing, the closings written before yours included. You no longer close
+  and revoke the person's devices to bound what they write, though you still revoke a device that may be lost. If the person is
+  to write again, anchor what they write after reading it. Only you or another standing operator signs a role closing, so a person
+  holding `administer` but not the operator role never writes one; they remove another role from a person they admitted as before,
+  with no closing, and the operator role, which only an operator gives, is yours to take away. An operator whose own role rests on the person's appointment cannot close that person's role with its
+  removal either: you, or an operator whose role does not rest on the person, write it. Removing a role from an agent's or a
+  service's record, and from yours, writes no role closing. In an estate that has not adopted nothing changes: a role has no
+  closing there, so when you remove a person's operator role or `administer` grant, close and revoke their devices yourself;
+  removing the operator role also ends the person's policy authority at once, for every record no checkpoint by you or a standing
+  operator places before the removal, and the runtime refuses a removal that would make any record fail and names those records,
+  the person's decisions and the policies they approved among them; adopt checkpoints first, then remove the role. Taking
+  `administer` away is judged the same way, for the principals the person admitted.
+- **What removing a role takes.** With a role closing (0.9.4), removing an operator's role takes nothing the person gave before
+  it: their appointments, grants and closings that the closing witnesses keep counting for anchoring, adoption and the closings, as
+  they did when the person wrote them, and so do yours and any other operator's closings when you are removed later with your own
+  role closing. Without one, as in an estate that has not adopted or for a removal written without it (`history.closing-missing`),
+  removing an operator's role also takes, for anchoring and closings, what that person appointed, granted and closed: their
+  appointments and grants read as removals, and their closings stop acting. Those they appointed keep the operator role in ordinary
+  reads, and a removal they write still counts for these acts: write their appointments again, or close their devices so that what
+  they sign afterwards counts for nothing. Before you remove the role there, write again the grants and appointments that should
+  stay and close again what the person closed, or have another standing operator do it; an adoption whose rooting rested on that
+  person's grant must be rooted again. `estate check` warns `history.revision-author` on each grant giving `administer`, or
+  principal record giving the operator role or describing a human, that these acts read as a removal because its author's role is
+  removed or disputed. Two operators other than you who remove each other at the same time both lose these acts, the closing either
+  writes of the other included, until you settle it: close the role of the one who should go and write the other's role again.
 - **Dates a checkpoint questions.** A signed record dated more than five minutes after a checkpoint that witnesses it is the warning `history.dated-after-witness`; a record your adoption checkpoint witnesses is not questioned. In every estate, the runtime refuses `records new --at` and `work attempt --at` more than five minutes past its own clock.
-- **What a date still decides.** A record's date still places it: its path month, order, release-notes windows, progress, ages and duty sequence follow it, and its signature verifies against the key and admission of its date. In an estate that has adopted, a date no longer makes an unsigned record count under required signatures and carries nothing past a closing that does not witness the record, and roles and grants are read as they stood at it, or at the adoption for a record it witnesses, bounded by grant closings; policy authority also needs the role to still stand, or a checkpoint to place the record before its removal; anchoring, acknowledging a removal, rooting an adoption and signing a device's or a grant's closing also need the role or grant to still stand. No checkpoint questions an earlier date: a signed record in the unwitnessed tail may state a time before the newest checkpoint, and is read at that time unless a closing refuses it. `records new` refuses `--at` and an explicit id for a history checkpoint, a principal record and an authority record, which the runtime dates itself. A role has no closing (above).
+- **What a date still decides.** A record's date still places it: its path month, order, release-notes windows, progress, ages and duty sequence follow it, and its signature verifies against the key and admission of its date. In an estate that has adopted, a date no longer makes an unsigned record count under required signatures and carries nothing past a closing that does not witness the record, and roles and grants are read as they stood at it, or at the adoption for a record it witnesses, bounded by grant closings; policy authority also needs the role to still stand, or a checkpoint to place the record before its removal; anchoring, acknowledging a removal, rooting an adoption and signing a device's or a grant's closing also need the role or grant to still stand, except what the person's own role closing witnesses, which keeps the role they held when writing it (0.9.4). No checkpoint questions an earlier date: a signed record in the unwitnessed tail may state a time before the newest checkpoint, and is read at that time unless a closing refuses it. `records new` refuses `--at` and an explicit id for a history checkpoint, a principal record and an authority record, which the runtime dates itself. From 0.9.4 a date carries nothing past a person's role closing either: it refuses everything the person writes that it does not
+witness, whatever its date (above).
 
 When a key may have leaked, revoke its device, which closes it, rather than rotating the key: whoever holds the old key could sign a rotation of their own, and the device follows the lowest-id rotation. A closing written on a fork, after any checkpoint back to the adoption, acts too; if one was written by mistake or by a key that should not have closed anything, remove it, and if a checkpoint witnesses it, acknowledge its removal in an anchoring checkpoint. A closing you write yourself as any checkpoint, with `records new history-checkpoint`, ahead of an act, closes too; the act still carries its own.
 
@@ -366,6 +573,123 @@ Until configurable writing rules are defined, decision prose is checked case-ins
 
 Standing permission is an authority record based on a decision: a grantee, scopes (`local-engineering`, `repository-write`, `self-accept-ordinary-work`, `accept-work`, `administer`, or free text), the actions reserved to the operator regardless, and conditions. A builder with `self-accept-ordinary-work` may accept its own ordinary work orders; milestones and releases always need the operator. From format 2 a grant may carry an `expires` time: authority is judged at the time each record was authored, so a record authored after the grant expired cannot rely on it. For ordinary scopes the current grants are otherwise used: a later grant or removal can change their derived authority. Format-3 policy scopes use the cited grant at the action's authoring time; a future grant cannot authorize an earlier policy action. Exact signed definition approval remains separate.
 
+From 0.9.4 (ID-07), unattended dispatch has its own principal and scope. A dispatcher is a service principal whose only role is
+`service` (`{"kind": "service", "name": "Dispatcher", "roles": ["service"]}`), with its own admitted device, and it holds no other
+authority. You grant it `dispatch` alone, in a signed authority record with no conditions, an `expires` no more than 30 days after
+the grant, and one typed bound:
+
+```json
+{"scope": "dispatch", "goals": ["<goal id>", "..."], "maxAssignmentsPerDay": 20, "reassign": true}
+```
+
+`goals` names the goals and standing agents it carries, each by the id of its first revision; `maxAssignmentsPerDay` caps the
+assignments it records in a UTC day, refused ones included; `reassign`, false when omitted, lets it reassign a step another
+assignment still holds, as the carrier does after a lapse: never a step a person holds, and only to a principal the goal's roster
+names for the step's role, never to the holder it replaces, to a person, or in a role the roster gives a person. Grant dispatch only
+to a new service principal: a dispatch grant is refused when the principal has a history before it, a grant of any scope that its
+author may write or an assignment to it by anyone else who may assign, dated before the grant, unless it renews a valid dispatch
+grant. A record its author had no authority to write, such as an agent's assignment or grant to the dispatcher, is no history: it
+neither voids the grant nor frees what the dispatcher dated before it. The estate check refuses a dispatch
+grant of any other shape, any other grant to a dispatcher, during its grant's term or after it expires, and a dispatch grant to a
+principal that holds another. A dispatcher's assignment counts only for a step of a goal a valid grant in force names at the
+assignment's time, within the day's cap, in a role that is no reserved action (publisher and decider stay with people), and to a
+principal the goal's roster names for the step's role, as `goal step` routes it, never the dispatcher itself or a person; otherwise
+it is `assignment.dispatch` and counts for nothing. The roster, whether a principal is a person and the step's role are read as
+they stood at the assignment's time. A dispatcher never works a step: an attempt, progress claim or result it writes is
+`dispatch.work` and counts for nothing.
+
+A record's stated time decides nothing in a dispatcher's favour. Once a principal holds a valid dispatch grant, it is a dispatcher
+for everything it writes at any date: an assignment it dates before the grant is outside any dispatch grant in force then, and work
+it dates before the grant is a dispatcher's work, so neither counts. A dispatch grant refused for an earlier history, whether that
+history was there before the grant or another principal dated a grant or an assignment back before it afterwards, gives no authority
+to assign and still confines what the principal writes from the grant's date on; what the principal wrote dated before it keeps its
+reading, and a record it dates back into an earlier grant's term is read as any principal's record dated into an expired grant's
+term. A dispatcher may take a step of a named goal with `goal step` and may record a flow's rule decision there, which the write
+boundary evaluates again, except a step whose role the roster gives a person (below). Renew the grant before it expires; a
+narrowing revision is written after its closing like any other.
+
+A grant of another scope to a former dispatcher written by hand, or merged from another copy, is reported (`authority.dispatch`)
+and the runtime refuses to write one, but like any grant the estate check flags, it still gives its scope in ordinary reads until it
+is revoked; revoke it.
+
+For GOAL-10's design: a dispatcher never gives a fresh step to a person, which is stricter than the designs: `goal step` routes a
+person's step with an assignment to that person and an ask, and the designs bound only reassignment after a lapse ("never a
+person's step"). Unattended dispatch therefore leaves every person's step to an operator or the goal's sponsor until GOAL-10's
+design says whether the carrier asks persons.
+
+### Answer open asks with their recommendations in one act (0.9.4)
+
+From 0.9.4 (OPS-16), when your answer to the asks waiting on you is their recommendations, you give it in one act signed by
+your own device instead of answering each in chat for the builder to record:
+
+```sh
+vericairn operator answer                                    # read-only: each ask and its recommendation, by hash first
+vericairn operator answer --all --by <operator id>           # every ask waiting on you, each with its recommendation
+vericairn operator answer --select <ask id> --select <ask id> --by <operator id> --stake medium
+```
+
+The listing shows each ask by its exact revision and hash, its recommendation and that recommendation's SHA-256 first, then the
+question, what happens while it stays unanswered and its options. A selection shows the act the same way before anything is
+signed. If any selected ask changed since (revised, answered, withdrawn or carried into a request), or its recommendation is not
+the one shown, or, with `--all`, another ask arrived, the whole act is refused and nothing is written.
+
+Each ask gets its own decision: the act's statement ("Take the recommendation: answered in one signed act after inspecting the
+exact ask and its recommendation."), the recommendation as its summary and effect, `--stake` as its stake (default `low`), and
+`decidedAt` the act's time, the same for every decision of the act. Its `act` member names the act (`id`), the exact ask revision
+(`ask`, `hash`), the recommendation's SHA-256 (`recommendation`) and `count`, how many asks the act set out to answer: those it showed
+and you chose before its first signature. From the command line, Workbench or the API an act stores all its decisions or none; on
+Remote an act that stops part-way writes fewer than its count, never more. Only you, the
+operator the asks are put to, perform the act, never an agent, and never through MCP; the records refuse a decision naming an act
+that its decider did not record and sign, and one that carries anything beyond the recommendation (a guided answer, change set,
+documents, obligations, policy requirements, a release review or a prompt use). Any ask can still be answered alone, in your own
+words; an ask you answer in chat is still recorded by the builder.
+
+With presence sessions on, the act lists up to 16 decisions by exact hash under one presence check (`decision from ask`), a list
+for each 16; while an agent run this machine's worker started is unsettled under your user, each decision asks its own check.
+From Remote, open **Answer asks with their recommendations** in Attention: the phone's presence key signs each decision, one check
+each, and the act refuses before any signature if an ask changed, and stops before the next signature if one changes during it.
+
+### Sign every ready item in one reviewed act (0.9.4)
+
+From 0.9.4 (OPS-24), one reviewed act signs every operator item whose command is ready and that you select, instead of one command
+for each. Save the listing, read it, and act on the listing you read:
+
+```sh
+vericairn operator act --ready --by <operator id> --json > listing.json      # read-only: every ready item and what its signature records
+vericairn operator act --ready --by <operator id> --from listing.json --all
+vericairn operator act --ready --by <operator id> --from listing.json --all --skip <item> --dismiss "<request item>=No longer needed."
+vericairn operator act --ready --by <operator id> --from listing.json --select <item>
+```
+
+Without `--from` the act shows the listing it read and asks you to type `yes` in a terminal; with no terminal it signs nothing.
+
+The list holds the steps `operator close` lists (an acceptance of each exact result on its reviews; from 0.9.4 a step is listed only
+when every current review of its result passes, so a passing self-review beside a failed independent review leaves it out, in
+`operator close` too), the asks waiting on you
+(each answered with its recommendation, as `operator answer` records it), a goal ready for your acceptance (relying on its current
+evaluation), a release candidate, a milestone or a milestone's result whose acceptance `operator list` offers you and whose exact
+revision has only passing reviews, at least one, a result completed, and the action requests put to you (a close as done). A
+candidate, milestone or result with a failed review, findings, no review or a result not completed is not listed: accept it with
+its own command. A run's reserved step and a publication's close are not listed either: their own commands complete them. Each item
+shows its id, what its signature records, its exact subject and basis, an acceptance's reviews (who reviewed, the outcome, the
+independence and the exact hash reviewed) and an ask's recommendation by hash.
+
+Leave any item waiting (`--skip` with `--all`, or simply not selecting it), or dismiss a request with your reason (`--dismiss`); only
+a request is dismissed. The act refuses whole if any chosen item changed or is no longer ready, or, with `--all`, if another item
+became ready since the listing you read, both when it starts and again after signing, before anything is stored. The rest are
+authored completely and signed together; nothing outside the list is signed. In Workbench and Remote an acceptance starts waiting and
+is signed only when you choose it.
+
+With presence sessions on, the act asks one presence check for a list that names each record by type and exact hash. Decision
+`01M8001M0T9XRGF7SKHW3B45KF` adds `operator act` to the closed vocabulary of session actions, so the dialog reads "open Vericairn
+session", the fingerprint, "operator act", the count and the limit, then the records by type ("2 acceptances; 1 release acceptance;
+3 decisions; 1 operator request closing"). Refuse a dialog that names `operator act` when you did not run one. A list holds at most 16
+exact entries and 128 signatures, and each record of the act is an exact entry, so an act of more than 16 records announces one list
+for each 16, in the order shown, each just before its own check: 40 ready items ask three checks (16, 16 and 8). While an agent run
+this machine's worker started is unsettled under your user, each record asks its own check. Workbench (Work → Operator act: ready
+items) and Remote (Attention → Ready items: one reviewed act) show the same list; on Remote the phone's presence key signs each record
+with its own check.
+
 ## 5. The work loop: order, brief, assignment, attempt, result
 
 A work order states intent, scope, deliverables and the one question whose honest yes closes it.
@@ -411,6 +735,59 @@ vericairn work assign W-1 --contributor <builder id> --by <operator id> --brief 
 ```json
 {"outcome": "What exists when the work is done.", "sources": [{"type": "work-order", "id": "<order id>"}], "permittedChanges": ["widget.txt"], "prohibitedEffects": ["no publication", "no spending"], "workspace": ["a repository and branch, named without machine paths"], "limits": ["continuous integration within the included minutes"], "expectedOutputs": ["widget.txt"], "reviewCriteria": ["tests pass on three platforms"], "recovery": "What a successor does with this brief and the latest result."}
 ```
+
+From 0.9.4 (CODE-73), a brief names the repository its work changes, and concurrent assignments are compared by their permitted
+paths before they start. `repository` is the estate's own repository (its identity, or `estate` on the command line) or a repository
+resource. A new assignment whose `permittedChanges` hold a path pattern (an entry with the `path:` prefix, or with no whitespace) and
+name no repository is refused at the write boundary (`assignment.repository-required`), so name it in the brief or with
+`work assign --repository <resource id or estate>`. Without either, the repository the work order's other assignments, or their
+runs, name fills it when there is exactly one, and the estate's own repository fills it when the estate names no repository resource.
+Two optional fields narrow a brief: `excludedChanges`, patterns in the grammar of `permittedChanges` that the work leaves out (prose
+excludes nothing and is refused), and `after`, at most 20 assignment ids whose work this one waits for.
+
+```json
+{"outcome": "...", "permittedChanges": ["path:docs/**"], "excludedChanges": ["path:docs/operator-guide.md"], "after": ["<assignment id>"], "repository": "<resource id>", "...": "..."}
+```
+
+An assignment's effective paths are its patterns less its exclusions, and in the estate's own repository less `records/` and
+`objects/`. It is active while it is current and its work order is neither accepted nor retired, until it is released: its current
+result is abandoned; it is completed and names a `change` that is integrated; it is completed and its brief holds no path pattern,
+whatever change it names; or it was completed before the overlap check, labeled. A result names its change as `change: {repository, base, head, target}`; the
+assignment is released once a `change-merge` operation is observed at that head, or the head is reachable from the main line of this
+machine's registered clone (origin's `HEAD`, else `main`, else `master`), which the view labels as observed here. The branch a result
+names as its `target` shows nothing, and a change releases only its own assignment's work: it is in the repository the brief names,
+and where the clone shows them, its base is a proper ancestor of its head and one of the paths it changed is in the assignment's
+effective paths. A reachable head needs the clone to show both; a head a `change-merge` operation merged stands as the records show
+it where no clone shows otherwise. A change in another repository, with the same commit as base and head, whose base is no ancestor
+of its head, or that changed none of the assignment's paths keeps the assignment active, and so does a main line an agent run worked
+on. A completed result whose brief holds a path pattern and that names no change keeps its assignment active until acceptance. The
+write prints a warning when the records alone show the result keeps its assignment active: it names no change, or a change in another
+repository, with the same commit as base and head, or for an older brief that names no repository and whose runs named none; a change
+only the clone shows mismatched is shown so by `work overlap`, without a warning.
+
+`vericairn work overlap` lists the active assignments by repository and every overlap of two of them, with their patterns,
+witnesses (tracked paths at the registered clone's main line, else the shortest path either could create) and resolution;
+`--brief <file>` previews a draft brief before it is recorded, once it passes the checks a recorded brief's fields pass. Resolve an overlap by sequence, recording the later assignment with
+`after` naming the earlier, or by one owner, every other brief excluding the shared paths. A new attempt and a run of an assignment
+wait while one it names in `after` is not released, a run works in the repository its brief names and is refused in another, and an
+assignment's repository, permitted changes, exclusions and `after` change only once no run of it is in flight. Register a repository before you assign work in it,
+so that the brief can name it. Narrowing needs no amendment, since it grants less. `work assign`, `work attempt`, `worker run` and `goal step` print each
+overlap on standard error; `status` and `progress` show the open ones under the work.
+
+From 0.9.4 (RUN-04), a brief can permit its runs to retrieve public sources: `"retrieval": "public"`. Nothing else permits it. Such
+a run is a research run: on the `claude-code` launcher its harness gets `WebFetch` and `WebSearch`, and each result is kept as an
+untrusted original in the run's own directory and recorded at settlement by address or query, time, content hash and size
+(`sourcesObserved`). The `codex` launcher refuses a retrieval run. Until a launcher qualifies confined reads, a retrieval run is
+refused, before anything is recorded, unless the records show the workspace's repository resource and the estate's own repository
+resource public and none of the run's records, its context package or its searches names a credential reference; record a
+repository resource for the estate's own repository, by its `github` location or `url` (with its `rootCommit`, if recorded,
+matching), or by `rootCommit` alone for a repository with no remote, so that the check can find it. Retrieved text is outside text: read
+what a run cites from its retained original, and never act on instructions it contains without an amendment.
+
+From 0.9.4 (DOCS-46), `records describe assignment` and the record reference list each member of a brief with its kind,
+whether it is required, whether an array may be empty and its limits, and [record formats](record-format.md#writing-an-assignment-brief-094)
+gives a minimal complete brief for `work assign` and for `records new assignment`. There is no dry-run: a proposed record that
+would leave the estate invalid is refused with every finding and nothing is written.
 
 The contributor starts an attempt, works, and submits a result, a claim to inspect:
 
@@ -471,9 +848,12 @@ vericairn operator close --all --by <operator id>
 
 The selection displays its evidence before signing one acceptance per result. Each acceptance
 names that exact result and all displayed passing reviews. Changed evidence or a non-operator
-refuses the entire action without acceptances. Custody checks presence once per acceptance; from
-0.9.3 the selection's acceptances are announced before the first prompt, and each prompt says which
-of them it signs ([presence prompts](#presence-prompts-announced-and-counted-093)). `--all` covers every eligible step in the estate; use `--select` to close only
+refuses the entire action without acceptances. Custody checks presence once per acceptance; from 0.9.3 the selection's
+acceptances are announced before the first prompt, and each prompt says which of them it signs
+([presence prompts](#presence-prompts-announced-and-counted-093)). From 0.9.4 `operator close`
+authors every acceptance it will sign before the first, so with presence sessions on, up to 16 of them are listed by exact hash and
+signed under one presence check, a list for each 16, each announced just before its own check; while an agent run this machine's worker
+started is unsettled under your user, each acceptance asks its own check ([presence sessions](#presence-sessions-094)). `--all` covers every eligible step in the estate; use `--select` to close only
 the steps you inspected for a release. See [Operator actions](operator-actions.md#close-finished-steps-in-one-action)
 for saved listings with `--from`, API/SDK use and interrupted-storage recovery.
 
@@ -481,6 +861,15 @@ From 0.9.3 (FIX-128), an ordinary work order whose current result is accepted th
 predicates, flows, required attention and Workbench, so ordinary work closed with `operator close` since 0.8.4 now reads as
 accepted where it read `planned` before. An acceptance of an earlier result, or one recorded before the work order changed other
 than in its placement, reads `accepted (earlier revision)`. A milestone still needs its own acceptance
+([details](operator-actions.md#close-finished-steps-in-one-action)).
+
+From 0.9.4 (FIX-141), an acceptance of a work order's current revision accepts its current result too when it was recorded after
+that result and before acceptances named a result's exact hash, which the records date at the estate's first acceptance of a result
+by an operator: `operator close` no longer lists such a result, `--all` never signs that work again, and status, the progress
+report, goal views, Workbench's result inbox and Remote read the result as `accepted`. The acceptance must still stand, and its
+author must have been able to accept that result directly. A result recorded after the acceptance still needs its own, and stays
+listed; no acceptance of a work order made after the first operator acceptance of a result, a milestone's among them, accepts a
+result. Work accepted that way leaves the listing; nothing is signed again. Status also reads only acceptances that stand
 ([details](operator-actions.md#close-finished-steps-in-one-action)).
 
 ## 7. Repositories and checks as evidence
@@ -493,6 +882,18 @@ vericairn sources adopt <path> --by <id> --name "widget" --role "the product's s
 vericairn sources observe <path> --resource <resource id> --by <id>
 ```
 
+From 0.9.4 (FIX-147), Vericairn reads a repository it did not create without letting that repository's configuration run
+anything. Each git process ignores your system and global git configuration, receives an empty global configuration and hooks
+directory of its own, and turns off the fsmonitor, pagers, external diff, signature display, transports, missing-object fetches
+and automatic maintenance. Inspection and release admission read the working tree through a git directory Vericairn writes for
+the purpose, holding the observed commit, the repository's objects and index, copies of its exclude, attribute and
+sparse-checkout files and Vericairn's own configuration, so that read never opens the repository's configuration and runs no
+filter driver. When git cannot read the working tree completely, the observation is refused instead of being recorded as clean.
+The overrides also apply to the clones you register with `sources clone`, which release admission, policies, living documents
+and the overlap check read, to a checked push's own reads of the clone, and to the clone the secret scan reads before a checked
+push, whose history reads show a submodule's change as its two commit ids. What this changes for the repository's own settings
+and yours is listed in the [limitations guide](limitations-and-platforms.md#reading-repositories-vericairn-did-not-create-094).
+
 A check runs a command in a repository and records a verification of the exact commit (command, environment, exit code, duration, output as an object):
 
 ```sh
@@ -501,6 +902,10 @@ vericairn check observe --resource <resource id> --repository owner/name --run <
 ```
 
 `check observe` records a workflow run at GitHub as automation's verification of the commit it built, through your `gh` login. Results cite verifications as evidence.
+
+From 0.9.4 (FIX-161), git, gitleaks and gh must be in an absolute directory of `PATH` (as an installer puts them). A copy in the
+current directory, an estate root or a clone is not used, and `vericairn doctor` reports git as missing when only such a copy
+exists.
 
 ## 8. Releases
 
@@ -582,15 +987,15 @@ publishes a release automatically.
 From 0.9.2 a release can run as a goal on the software pack's release flow, which orders the steps below and checks the traps of
 earlier releases before each ([the software release and upgrade flows](#the-software-release-and-upgrade-flows-092)).
 
-A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.3 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
+A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.4 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
 
 A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. From 0.9.4 (FIX-140) a draft is complete only when it also attaches every file its checksum file names; once its run has succeeded, a draft that leaves one out is observed as a known failure naming each missing file, no candidate is recorded, and `release submit --check` names those files until the retry gives a reconciliation. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.
 
 ```sh
 vericairn release providers
-vericairn release submit --check --product <product id> --version 0.9.3 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
-vericairn release submit --product <product id> --version 0.9.3 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
-vericairn release observe --version 0.9.3 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
+vericairn release submit --check --product <product id> --version 0.9.4 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
+vericairn release submit --product <product id> --version 0.9.4 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
+vericairn release observe --version 0.9.4 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
 ```
 
 From 0.8.3, `release submit --check` uses the intended submission's options and reports
@@ -692,8 +1097,8 @@ The operator accepts the exact candidate before publishing:
 
 ```sh
 vericairn records new acceptance --by <operator id> --subject release:<candidate id>:<candidate hash> --body accept-release.json
-gh release edit v0.9.3 -R owner/name --draft=false --latest
-vericairn release observe --version 0.9.3 --product <product id> --by <builder id>
+gh release edit v0.9.4 -R owner/name --draft=false --latest
+vericairn release observe --version 0.9.4 --product <product id> --by <builder id>
 vericairn release list
 ```
 
@@ -704,7 +1109,7 @@ against the repository's full-SHA allow-list. The NuGet pull-request job builds 
 symbols with the publication verifier, without a login, token permission or upload. This does not verify
 the organization's live Actions settings or bind the published draft to estate acceptance.
 
-### Security reports hold a release (0.9.2)
+### Security reports hold releases (0.9.2)
 
 From 0.9.2 (OPS-11), the security advisories filed against a product's repositories reach you as required attention within minutes, and a security report you have not triaged holds every release. GitHub raises no issue, discussion or notification for a draft advisory or a private vulnerability report, so Vericairn reads them itself.
 
@@ -736,6 +1141,28 @@ vericairn security-reports triage <GHSA identifier> --repository <owner/name> --
 The disposition is `security` (a vulnerability to fix), `duplicate`, or `no-action`, which needs `--reason`. The triage is an `observation` of kind `security-triage` that pins the repository resource and names the advisory only by identifier, repository and content hash, with the disposition and your reason. Write the reason in your own words, never the report's text. Any later change to a report in `triage` or `draft` state, such as a new severity or edited text, is a new revision that needs triage again. Publishing it ends the hold without another triage, and so does closing or withdrawing a report you have triaged. You may also triage a published advisory, which clears its information notice, but it is never required. Only the operator triages a security report, since no security role exists yet.
 
 **Limits.** Observations belong to the machine that read them, and another machine reads for itself before it releases. A triage record names the advisory's identifier, so in an estate whose records are public it shows that a report existed and when it was triaged: declare security reports only where the estate's records are private. The estate's GitHub App replaces this reader in a later release.
+
+### Observers that stop reporting (0.9.4)
+
+A quiet system does not prove that a check succeeded. From 0.9.4 (OPS-20), you declare each automated observer on the machine
+its reports reach, with the interval it reports at and the grace its silence is allowed, and each of its runs reports what it
+saw. CI on the main line, a scheduled workflow, the intake watcher and the status refresher are the first ones to declare:
+
+```sh
+vericairn observers declare ci-main --kind ci --interval PT1H --grace PT15M --by <operator>
+vericairn observers declare nightly --kind scheduled-workflow --interval P1D --grace PT6H --by <operator>
+vericairn observers declare intake --kind intake --interval PT5M --grace PT10M --by <operator>
+vericairn observers declare status --kind status-refresh --interval PT1H --by <operator>
+```
+
+Each observer, or the script that watches it, ends each run with `vericairn observers report <name> --outcome passed|failed
+--by <principal>`, or with `--outcome not-observing --reason quota-exhausted|schedule-disabled|unavailable` when it could not
+observe. Silence past the interval plus the grace, a failed report and a report that it could not observe are each a failed check
+in your attention; not observing is never a pass, and only a recent passing report clears it. `vericairn status` ends with
+`Observers (this machine):`, each observer's state and latest report. Withdraw an observer you retired with
+`vericairn observers withdraw <name> --reason <why> --by <operator>`, or its silence stays attention. Declarations and reports are
+this machine's, beside the clone's live store; another machine sees none of them, and nothing is recorded. See
+[automated observers](observers.md).
 
 ### Withdrawal and moving planned work (0.8.3)
 
@@ -894,6 +1321,24 @@ its independently reviewed conversion; changing the manifest alone does not conv
 See [record format 3](record-format-v3.md), [policy adoption](policy-adoption.md) and
 [the adoption proposals](policy-adoption-proposals.md).
 
+### The restore point and the way back (0.9.4)
+
+From 0.9.4 (FIX-145), run the check first, and read its last lines: `vericairn estate upgrade --to <version> --check` says whether the
+release you are pinned to now can still read the estate after the upgrade.
+
+- `readable`: the previous release reads the manifest and every record after the upgrade, so you can return to it.
+- `one-way`: the upgrade moves the record format, or adds something the previous release predates, such as the manifest's first
+  authority (read from 0.9.2); each reason is named. The upgrade is refused until you confirm it with `--one-way`.
+- `unconfirmed`: you are pinned to a source build whose release is unknown, so whether it reads what the upgrade adds cannot be said.
+
+When you apply it, the upgrade first records a restore point: the estate repository's commit and an export of this machine's local
+state for the clone, its live store included, beside the live store under your Vericairn home. The migration record names it by id,
+commit and inventory hash. The output ends with the way back, with this machine's paths: stop the runtime, return the estate's files
+to the commit with their exact bytes (`git -c core.autocrlf=false stash --include-untracked` before you commit the upgrade, `git -c core.autocrlf=false revert` of its commit after, so no line ending changes on Windows), copy the exported state
+back beside the live store, and start the previous release with `./bootstrap runtime start`. After a one-way upgrade, the way back
+leaves every record written since the upgrade behind. Commit or stash your own changes before upgrading: the restore point's commit
+holds only what was committed, and the output says when the working tree was not clean.
+
 ### The serving runtime after an upgrade (0.9.2)
 
 From 0.9.2 (OPS-05), no runtime of an older release keeps serving an estate on its machine after an
@@ -950,6 +1395,12 @@ signed by the device of the principal `--by` names, and prints it after the migr
 written there is reported as a warning and the upgrade is applied. An upgrade whose migrations rewrite record files writes
 none, and the next checkpoint witnesses them. A new estate adopts at birth and needs none of this.
 
+From 0.9.4 the check also lists the records by a person whose operator role was removed since, each with the roles removed: such a
+removal written before adoption has no role closing, so the person could still have written records dated into the time the role
+stood. Another role removed is read at each record's time and never has a closing, so it is not listed.
+Read them before you adopt; adoption keeps for each record it witnesses the reading it has then. The list is advisory and the
+plan hash does not cover it.
+
 
 ## 10. Export, restore, recovery and divergence
 
@@ -962,6 +1413,32 @@ vericairn estate reconcile
 ```
 
 An export carries records, objects, manifest and documents with an inventory, and no keys or authority; a restore verifies the inventory and produces a repository-synced estate without importing a private key. A device already admitted in those records can sign when its key is held locally; otherwise signed authoring requires a new device and admission. Optional-signature policy may still permit unsigned records. `recover inspect` says what this copy holds, which devices can author from here, work in progress and unresolved effects; `recover compare` lists records only in this copy, only in the other, or (never expected) differing. Two copies that both added records merge in git as file additions; what cannot merge by itself, divergent revisions of one record, duplicate keys, duplicate results, is listed by `estate reconcile` and settled with a reconciliation record.
+
+From 0.9.4, when two record files carry one identifier, the estate reads neither of them, whatever their dates, paths or contents,
+and none of the records of their line: every record joined to either through `supersedes`. The runtime refuses such a record when
+it is written, so two copies only meet when one was written by hand or a file was copied and the original left behind. Before 0.9.4
+the first of them in path order was read, so a copy dated in an earlier month was read in place of the record it copied. The estate
+check reports each copy (`record.duplicate-id`, an error that `estate reconcile` and `status` list) and notes each other record of
+the line (`record.duplicate-line`), every write is refused while they stand, and a standing agent that one of them names is held
+(section 18). Compare the copies' files, and their history in git, and remove the one you did not write: once a single record
+carries the identifier, the line reads again. Two new files sharing a fresh identifier that supersede a record take its line out in
+the same way. A record that is not read never makes another count: while records are not read, a record counts only when it counts with them left
+out and with them read each way they can be (each record carrying the identifier, or none of them), so an unsigned record in your
+name stays refused when a copy leaves the charter's signature requirement unread, and what a closed device signed stays refused when a
+copy leaves its closing unread. The estate check reports the records refused this way once (`record.duplicate-refused`); when the
+copies can be read more than 16 ways, no record counts at all (`record.duplicate-unsettled`). A device, admission, principal or grant
+that is not read leaves the records resting on it counting for nothing, so a copy of a device's identifier leaves everything that
+device signed uncounted, and a copy of the charter's leaves nothing signed counting. While a copy stands nothing acts: `release
+submit`, every command that signs a record, a checkpoint or a pairing code, `worker run` and `goal step` refuse before they act,
+naming the copy, and so do the MCP tools and API routes that reach them. Outside counting, a record that is not read restricts nothing
+in the readings, a goal status or a review among them, as if its file had been removed. Remove the copy before relying on any reading
+of the estate.
+
+From 0.9.4, `release submit`, `worker run` and a standing agent's `goal step` also refuse while the estate reports any other error,
+naming it, before any presence prompt, checkpoint, workspace, record or provider call; `release submit` lists the submission check's
+objections beside it. A record you write while the estate reports an error is judged as before, with the estate as it would be with
+the record, and stored only when it clears every error, so a reconciliation or an acknowledgement still repairs the estate. Stopping a
+run is never refused.
 
 FIX-14 (F-01) binds each restored file to the export inventory. Verification refuses duplicate inventory
 paths or archive members (including metadata), unsafe relative paths and file/directory or normalized-name
@@ -983,7 +1460,7 @@ restored `bootstrap` runs as `./bootstrap` with no permission repair. Records an
 executable. On Linux and macOS a file is executable when its owner may execute it; Windows keeps no
 such permission, so an export made there records the POSIX `bootstrap` script as executable and every
 other file as not. On Linux and macOS a restore creates an executable member with execute permission,
-filtered by the umask like every file it creates, and an ordinary member as before; on Windows it
+filtered by the umask like every file it creates, and an ordinary member without it, as the next paragraph shows; on Windows it
 applies no mode. The verified inventory alone decides the mode, never the archive entry's attributes.
 A mode other than those two, such as a link's, a directory's or one with setuid, refuses the export
 with `export.entry-mode` before anything is written, so a restore still creates only regular files
@@ -991,6 +1468,37 @@ within the destination. An export written by an earlier release records no mode 
 always did. A copy restored by an earlier release has lost `bootstrap`'s executable permission: run
 `vericairn --estate <restored copy> estate bootstrap` there, which reports `unchanged` for identical
 bytes and restores the permission ([section 2](#2-create-an-estate)).
+
+An export carries no other permission bit. Its inventory records `100755` for an executable file and `100644` for every other
+file, records and objects included, so who may read or write a file (its owner, its group or every other account) is not in the
+export. On Linux and macOS a restore creates every file new, under the umask of the shell that runs `estate restore`: an ordinary
+file as `0666` less the umask's bits, an executable file as `0777` less them, and each directory it creates, the destination
+included when it does not exist yet, as `0777` less them. The restored permissions therefore follow the destination's umask, not
+the permissions the files had where the export was made, as a Git checkout's do; `umask` prints the shell's value. For example,
+an estate holds `docs/private.json` at `0600` and `docs/public.json` at `0644`. Both are exported as `100644`, and every file
+restores with identical bytes:
+
+| Restored under | `docs/private.json` | `docs/public.json` | `bootstrap` | `docs/` |
+| --- | --- | --- | --- | --- |
+| `umask 022` | `0644`, `-rw-r--r--` | `0644`, `-rw-r--r--` | `0755`, `-rwxr-xr-x` | `0755`, `drwxr-xr-x` |
+| `umask 077` | `0600`, `-rw-------` | `0600`, `-rw-------` | `0700`, `-rwx------` | `0700`, `drwx------` |
+
+Under `umask 022` the private file becomes readable by every account on the machine; under `umask 077` the public file and
+`bootstrap` become usable by their owner alone. An executable file likewise keeps only its executable mode: one at `0700`
+restores as `0755` under `umask 022`.
+
+When exact permissions matter, such as a file that must stay readable by its owner alone or a group's shared access, keep your
+own mode inventory: each file's path and exact mode, taken when the export is made. Keep it apart from the export and protect it
+as you protect the supplemental capture ([The three inventories of a cold
+recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery)): the export's inventory does not establish who produced
+it, and a list carried in or beside the archive would establish no more. To use it, restore under a umask at least as strict as
+the strictest mode it lists, such as `(umask 077 && vericairn estate restore --from my-estate.zip --to <empty directory>)`, so
+that no file is readable more widely than intended in the meantime; verify the restore, then apply the listed modes before
+anything else writes to the copy.
+
+On Windows a restore applies no mode: each file and folder it creates takes the access control its parent folder passes on to new
+items, as any file created there does. An export made on Windows records the POSIX `bootstrap` script as `100755` and every other
+file as `100644`, whatever the files' access control lists allow, so no Windows permission travels in an export either.
 
 FIX-16 judges single records against the proposed estate, including content checks, before publication,
 as grouped records already are. A validation failure publishes nothing; repository records are staged
@@ -1013,7 +1521,16 @@ Objects are content-addressed bytes beside the records: `objects put <file>`, `o
 
 An object holds at most 8 MiB (8,388,608 bytes), and an export carries nothing held outside the estate repository. From 0.9.2, [Large private artifacts](large-artifacts.md) shows how to keep a private artifact above that limit in a private store with exact-byte custody, using existing records, and how to prove a cold recovery by reading its bytes back.
 
-An export also leaves out the housekeeping that native operations write under `.vericairn/`, such as `.vericairn/record-staging/.gitignore`, and it doesn't carry your agent instruction files at the root yet. A restored copy therefore holds three inventories: the exported payload, which `export/inventory.json` lists; supplemental private or external sources, which you restore from your own capture; and the housekeeping that writes add once you use the copy. [The three inventories of a cold recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery) lists the housekeeping exactly and shows how to classify every restored file before anything writes to it, and how to reconcile a file that fits no class without skipping or deleting it.
+An export also leaves out the housekeeping that native operations write under `.vericairn/`, such as
+`.vericairn/record-staging/.gitignore`. From 0.9.4 (FIX-135) it carries your agent instruction files at the root, each one
+present with its bytes and mode, and the restore writes them back exactly; an export refuses an estate where a link, a FIFO
+or anything else that is not a regular file stands in place of one of them, and writes nothing. An export written before 0.9.4 lacks them, so keep them with your own capture
+while you keep such an export. A restored copy therefore holds three inventories: the exported payload, which
+`export/inventory.json` lists; supplemental private or external sources, which you restore from your own capture; and the
+housekeeping that writes add once you use the copy. [The three inventories of a cold
+recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery) lists the housekeeping exactly and shows how to
+classify every restored file before anything writes to it, and how to reconcile a file that fits no class without skipping
+or deleting it.
 
 ### A damaged live store (0.9.2)
 
@@ -1040,7 +1557,7 @@ A local-only estate's database is never moved, deleted or rebuilt as a cache, an
 
 From 0.9.2 (FIX-99), one writer at a time writes a working tree. Every runtime that writes records takes an exclusive write lock in the working tree's own `.vericairn/write-lock/` directory, whether it is a daemon or an embedded command and whatever its Vericairn home. It holds the lock from judging the write against the tree's current record files until the records and their companions are stored. A second writer therefore judges against the records the first one stored, and the ordinary rules refuse it before it writes anything, for example with `operation.duplicate-identity`. A writer that cannot take the lock within 30 seconds is refused with a `conflict` that names the holder: its process id, host, a digest of its Vericairn home and when it took the lock. The holder records these beside the lock in `holder.json`, never as a path. The operating system releases the lock when its process ends, so a stopped command leaves no lock behind. A local-only estate keeps its records in the live store under the Vericairn home, so its writers take the same lock beside that store instead.
 
-The lock covers one working tree on one machine. It is separate from the per-home `live.lock`, which guards a cache rebuild, and it makes no claim across clones or machines. Two clones still meet at merge, where duplicates are reported for reconciliation. Keep to one writer anyway: route writes through one daemon per working tree, or run embedded commands from one home, and do not edit record files while a writer runs. A runtime of a release before 0.9.2 takes no lock, so do not run one beside 0.9.3 on the same tree.
+The lock covers one working tree on one machine. It is separate from the per-home `live.lock`, which guards a cache rebuild, and it makes no claim across clones or machines. Two clones still meet at merge, where duplicates are reported for reconciliation. Keep to one writer anyway: route writes through one daemon per working tree, or run embedded commands from one home, and do not edit record files while a writer runs. A runtime of a release before 0.9.2 takes no lock, so do not run one beside 0.9.4 on the same tree.
 
 Duplicates written before this rule, by two writers of an earlier release or by two merged clones, are never repaired automatically. While such an error stands, the runtime refuses further writes. To recover:
 
@@ -1115,11 +1632,77 @@ socket keeps two more for itself, so paired devices never lock out the runtime m
 `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092).
 
+From 0.9.4 the journal also carries `presence` events: an agent session holding work lapsed, the runtime asked about it, or the
+lapse is over. A `presence` event names the session by an opaque digest and the assignment and ask among its sources. See
+[events and presence](events-and-presence.md) for the whole picture, built and planned.
+
+From 0.9.4 `vericairn progress target follow` is such a follower: it reads only the kinds its target's triggers name, reads each
+event's subject from the records before acting, keeps its cursor on this machine and resumes there.
+
+### Presence, availability and reassignment (0.9.4)
+
+From 0.9.4 the daemon knows which agent sessions can be reached (`ID-11`). `vericairn mcp serve --as <agent>` registers its
+session and renews a 90-second lease while it runs; `mcp serve --connection` does the same at a remote runtime. A worker's runs
+register nothing, since the worker watches them, and the embedded runtime keeps no presence. People are never tracked by their
+connections.
+
+A session holds the assignments its agent records attempts or progress on while it is live, and those routing gives it. When its
+lease lapses while it holds unsettled work, you see an `incident` in attention, labeled a local observation of this runtime and
+naming the session, the assignment and when the lease lapsed; who decides for the step's goal sees it too. Still lapsed after
+`limits.watch.reassignAfterSeconds` (600 by default; set it on the goal or the roster, 60 to 86,400, record format 3), the runtime
+records an ask to the goal's accountable principal recommending a hand-over. A heartbeat from the session withdraws the ask, and so
+does the step being handed over or settled.
+
+To hand the step on, take it over yourself, or give it to another principal the roster names for its role, citing the ask:
+
+```sh
+vericairn work takeover <assignment> --by <your id>
+vericairn work takeover <assignment> --by <your id> --contributor <principal of its role> --basis <lapse ask>
+```
+
+The hand-over asks the old assignment's runs to stop, and from then on the runtime refuses that assignment's attempts, progress
+claims and results, whatever time they state. A result the old holder's runtime recorded before the hand-over reached it arrives
+with a pull labeled `displaced`, and no review is asked for it.
+
+A person declares availability and quiet hours on their own communication setting (`GOAL-11`, record format 3):
+
+```sh
+vericairn communication set --as <person> --availability away --away-until 2026-12-02T09:00:00Z
+vericairn communication set --as <person> --quiet-hours quiet.json
+vericairn communication show --recipient <person>
+```
+
+Routing passes over an away person to the next available principal of the role; when no other is available the step is still
+given to them and asked, shown as away until their return. Quiet hours change delivery only, and this build delivers no
+notifications; Remote's notifications in 0.9.5 apply them. When no launcher here starts an agent's harness, `goal step` can give
+a step to the agent's live session (`routedWith: session`), unless the step's exposure reads; a step the session records no
+attempt on within five minutes counts as a lapse. As a run is neither admitted nor launched while the estate reports an error,
+no step is given to a session then either. See [events and presence](events-and-presence.md#routing-and-reassignment-094).
+
 ## 12. Reading the estate
 
 `vericairn status` renders the work orders with their kinds and states, the releases, the assignments with their attempts and outcomes, the living documents that are due and why (section 16), and counts of decisions, document revisions, resources and verifications; record-derived state agrees for the same records. Living-document checks also read covered files and installed contributions, so those findings can differ by machine. `vericairn decisions` lists decisions; `records describe` explains any record type and marks the format that introduced each field; `records validate` parses and validates everything; `estate check` adds the repository checks, living documents due at `warn` or `refuse`, generated regions edited by hand, and records a recovery device signed that no operator has reviewed; `doctor` checks the machine. Through the API, `GET /v1/records?type=<type>` lists the current records of one type, which is how Workbench reads products, operations and reviews and how the MCP tool `records_list` answers an agent; `GET /v1/documents` lists the living documents.
 
 `vericairn progress` is the report of where the estate stands, work orders by state, published releases and their contents, planned releases, eligible work and what waits on the operator. `--json` gives `vericairn.progress/1`. Record-derived lines name their supporting records; latest local progress claims and worker observations are labelled separately and can differ by machine. The normal report includes repository-check findings; the generated document region omits those checks. Reading a report records and accepts nothing. `status --observe --by <person>` explicitly records a person's observation; ordinary status reads do not (section 21).
+
+From 0.9.4 (WATCH-06) the same progress can be kept at a target where you already read, such as a pinned GitHub discussion, through
+the adapter the target's configuration on this machine chooses; GitHub Discussions is the first. Configure a target once, then let
+one command keep it equal:
+
+```sh
+vericairn progress target set status --adapter github-discussions \
+  --setting repository=<owner>/<estate repository> --setting category=Announcements --form private
+vericairn progress target refresh status --dry-run
+vericairn progress target follow status
+```
+
+`follow` needs the daemon, which keeps the event journal: once its stream is open it refreshes the target, then refreshes it on a
+release's state change, a merged work order, a recorded result or acceptance and a step that waits on a person, and adds a comment,
+which notifies, only for a step that waits on the operator or a release's state change; `--refresh` and `--comment` name other
+events. The first refresh creates the discussion; pin it yourself. A target whose destination anyone may read, such as a public
+repository, always takes the public form, which leaves out every work order held from disclosure, names no principal or record and
+counts the operator's asks and possible todos without their text. Vericairn composes and checks every text; the adapter only places it. See
+[Progress targets](progress-targets.md).
 
 The release contents shown by progress and release notes omit superseded results. A current result is listed as accepted work when a current acceptance pins its exact hash or its work order's current revision and hash. An acceptance of an earlier work-order revision does not count; accepting the work order does not create an acceptance of each result record. Classification uses the estate's current records, including acceptances recorded after a release window.
 
@@ -1186,7 +1769,19 @@ and how to reach it. Regenerate that directory with
 
 Your `CLAUDE.md` and `GEMINI.md` at the root can say only "Read `AGENTS.md`." [The MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) describes the arrangement.
 
-`estate export` doesn't carry your three instruction files at the root yet, so keep them with the supplemental capture a cold recovery restores from ([section 10](#10-export-restore-recovery-and-divergence)).
+From 0.9.4 (FIX-139), `estate check` also reads your three files at the root for content an agent tool may act on without
+asking, and warns about each line where it finds one, naming the file, the line and the kind and never the text: a hook
+definition (`instructions.hook`), an automatic approval (`instructions.approval`) or a value that looks like a secret
+(`instructions.secret`). The warnings ask for your review and refuse nothing, and the check is a heuristic that cannot
+recognize every form. A file the check itself fails to read gets `instructions.unreadable`, and the rest of the check goes on.
+A repository's own instruction files are untrusted input: for each of the estate's repositories whose clone is registered on
+this machine, `estate check` warns `instructions.repository` about each such file at the clone's root, and reads nothing in
+it. [The MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) lists exactly what the check reads.
+
+From 0.9.4, `estate export` carries your three instruction files at the root, each one present, and `estate restore` writes
+them back with their bytes and mode; a link, a FIFO or anything else that is not a regular file in place of one refuses the
+export. From an export written before 0.9.4, a cold
+recovery restores them from your supplemental capture ([section 10](#10-export-restore-recovery-and-divergence)).
 
 ### An agent on another machine: network MCP (0.9.2)
 
@@ -1257,10 +1852,10 @@ dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool
 
 The manifest names the exact reference build commit, distinct from the later documentation or release commit. Comparison checks version, record formats, public inventories, complete reference bytes and retained companion inputs. A later documentation-only commit can retain that build pin only when the build sources agree; both commits must be locally available. A structural docs check does not judge prose, note completeness or release acceptance. FIX-09's frozen-set checksum guard detects changed, missing or added files in earlier sets, including withdrawn 0.7.0; never repair an earlier set in place.
 
-The notes command renders the estate's records from 0.9.2 to 0.9.3:
+The notes command renders the estate's records from 0.9.3 to 0.9.4:
 
 ```sh
-vericairn --estate <root> docs notes --from 0.9.2 --to 0.9.3 --out docs/releases/0.9.3
+vericairn --estate <root> docs notes --from 0.9.3 --to 0.9.4 --out docs/releases/0.9.4
 ```
 
 `docs notes` writes the exact window to the manifest. Its exclusive start follows 0.9.2's recorded end.
@@ -1290,7 +1885,7 @@ that differ from its commit, as `generate` always has, and a set whose directory
 
 ```sh
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- assemble --out docs/releases/0.9.3 --documents docs/releases/documents.json --overview overview.md
-vericairn --estate <root> docs notes --from 0.9.2 --to 0.9.3 --out docs/releases/0.9.3
+vericairn --estate <root> docs notes --from 0.9.3 --to 0.9.4 --out docs/releases/0.9.4
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- insert docs/releases/0.9.3 --section security.md --expected-hash sha256:<hex>
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- llms docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.3
@@ -1384,7 +1979,9 @@ vericairn docs living
 vericairn docs review docs/guide.md --by <principal id> --outcome current --summary "Read against the widget as built."
 ```
 
-`docs living` lists each declared document as current, due with every reason, or unavailable. A review's outcome is `current` (the reviewer judges that the current exact bytes hold, whoever revised them), `revised` (the reviewer declares that it revised the content itself, which counts as self review) or `needs-change` (it is stale and stays due). After a builder pins a revision of a document declared `independent`, a separate reviewer clears those exact bytes with `vericairn docs review <path> --by <reviewer id> --outcome current --summary "..."`; the review records `independent-agent` or `operator`. From 0.9.3 (FIX-113), a separate reviewer's `revised` on such a document is refused with `document.cleared-by`, which names that outcome as the cause and points to `current`; the [living-documents guide](living-documents.md#what-each-outcome-declares) gives the example. The runtime, not the reviewer, states the content's hash, the covered paths' identity, the triggers the review answers and the reviewer's independence, and runs the declared checks: `names-version` (the document names the version of each release the review answers), `links-resolve` (every relative link resolves within the repository) and `matches-generator` (generated content equals a fresh generation). A failed check refuses the clearance. From 0.9.3 (FIX-122), the refusal names what each failed check found, and its `document.check-detail` child findings name, for `links-resolve`, every link that does not resolve at the document's path with its line and column and the reason ([living documents](living-documents.md#when-a-declared-check-fails)). For a file of the estate's own repository, a new `document-revision` record pinning it also counts as a clearance when its author meets the declaration's `clearedBy` and the declared checks pass; a pin never clears a document declared `independent`, and `covers` is cleared only by a review.
+`docs living` lists each declared document as current, due with every reason, or unavailable. A review's outcome is `current` (the reviewer judges that the current exact bytes hold, whoever revised them), `revised` (the reviewer declares that it revised the content itself, which counts as self review) or `needs-change` (it is stale and stays due). After a builder pins a revision of a document declared `independent`, a separate reviewer clears those exact bytes with `vericairn docs review <path> --by <reviewer id> --outcome current --summary "..."`; the review records `independent-agent` or `operator`. From 0.9.3 (FIX-113), a separate reviewer's `revised` on such a document is refused with `document.cleared-by`, which names that outcome as the cause and points to `current`; the [living-documents guide](living-documents.md#what-each-outcome-declares) gives the example. The runtime, not the reviewer, states the content's hash, the covered paths' identity, the triggers the review answers and the reviewer's independence, and runs the declared checks: `names-version` (the document names the version of each release the review answers), `links-resolve` (every relative link resolves within the repository) and `matches-generator` (generated content equals a fresh generation). A failed check refuses the clearance. From 0.9.3 (FIX-122), the refusal names what each failed check found, and its `document.check-detail` child findings name, for `links-resolve`, every link that does not resolve at the document's path with its line and column and the reason ([living documents](living-documents.md#when-a-declared-check-fails)). From 0.9.4 (FIX-138), `links-resolve` passes over a link written inside a fenced or indented code block or an inline code
+span, which shows Markdown rather than linking, so a guide may show an example such as an owner's `AGENTS.md` with its
+links; a broken relative link outside code is still refused, at the line and column it always had. For a file of the estate's own repository, a new `document-revision` record pinning it also counts as a clearance when its author meets the declaration's `clearedBy` and the declared checks pass; a pin never clears a document declared `independent`, and `covers` is cleared only by a review.
 
 A generated region is the content between `<!-- vericairn:generated <id> -->` and `<!-- vericairn:end <id> -->`, each on its own line, declared in `regions` with its generator. `estate check` regenerates every region of the estate's own files whose generator is installed and refuses a hand edit or lost markers (`document.generated-edited`); `vericairn docs regenerate <path>` rewrites them and nothing outside the markers. The foundation's generator `vericairn.records/releases` tabulates the published releases of the products its inputs name, newest first. `vericairn.records/progress` embeds the progress report without repository checks, so regenerating a document does not recursively read itself.
 
@@ -1404,6 +2001,9 @@ snapshot of all estate state at the release commit.
 ## 17. Goals, predicates and evaluation
 
 A goal states an objective, completion conditions, constraints, its sponsor and a budget. A proposal authorizes no work or spending. Conditions are record predicates, evaluated by the runtime, or evidence statements, evaluated by an independent principal from records it names. A predicate counts current matching records; `state` uses the derived state, while `fields` matches stored values. For example, an ask answered by a decision still has its original stored state, so use `state` to ask whether it is open. A condition involving an unavailable living-document source can be unknown on this machine. See `record-format-v2.md` for the complete predicate language.
+
+From 0.9.4 a stewardship goal whose plan carries `standing` is a standing agent ([Standing agents](#standing-agents-094)); its
+completion conditions state what it holds, such as "no occurrence of these duty rules is missed", and it is accepted as any goal is.
 
 ```sh
 vericairn goal propose --by <proposer> --sponsor <person> --title "Deliver the widget" \
@@ -1456,7 +2056,29 @@ vericairn goal next <goal>
 vericairn ask --to <principal>
 ```
 
-`goal step` takes the first eligible route that can act, one step per call. An operator, the sponsor when a person, or a principal with `local-engineering` records it. An agent's assignment is validated with its run intent and stored only after the worker's preflight; a person's assignment is validated with its ask. Storage of the pair is journaled but not atomic: a stranded assignment holds no step, and `estate reconcile` reports an incomplete pair. An existing agent result goes to review; a different principal's review with findings or failure returns it for another attempt. Asks are answered by a decision of the principal asked, with the ask id in `answers`, not by reading them, dismissing attention or waiting.
+`goal step` takes the first eligible route that can act, one step per call. An operator, the sponsor when a person, or a principal with `local-engineering` records it. From 0.9.4 a dispatcher whose valid dispatch grant in force names the goal may record it too, each assignment judged against that grant, except for a step whose role the roster gives a person, which dispatch never gives to a person (ID-07). An agent's assignment is validated with its run intent and stored only after the worker's preflight; a person's assignment is validated with its ask. Storage of the pair is journaled but not atomic: a stranded assignment holds no step, and `estate reconcile` reports an incomplete pair. An existing agent result goes to review; a different principal's review with findings or failure returns it for another attempt. Asks are answered by a decision of the principal asked, with the ask id in `answers`, not by reading them, dismissing attention or waiting.
+
+From 0.9.4 (CODE-73), routing names the repository in the brief it writes: the run's for an agent's step, and for a person's the one
+`--repository` names, else the one the work order's other assignments or runs name. Where a `vericairn.estate/concurrent-paths` policy
+at `refuse` on that repository holds the overlap of the new assignment with an active one, `goal step` records the new assignment with
+`after` naming the earlier; for an agent's step it records that assignment alone, without a run, so that it holds the step, and a later
+`goal step` starts the run once the earlier assignment is released. Every other overlap is reported and the work starts. `goal next`
+shows the overlaps of the goal's work and those a new assignment of its next step would have.
+
+From 0.9.4 (POLICY-08), an estate holds an unresolved overlap with a `vericairn.estate/concurrent-paths` policy on one repository,
+whose selectors say which shared paths count (see [Estate policies](policies.md#concurrent-paths-094)). Each pair of active
+assignments whose effective paths share a path within the selection is `satisfied` when one names the other in `after`, `unavailable`
+when an assignment names no repository and no run of it named one or the comparison was undetermined, and `unmet` otherwise; the
+estate check and status show each pair as a policy finding. At `refuse` the write boundary refuses a new assignment, a run admission
+and a new attempt that leave an unmet or unavailable pair (`assignment.concurrent-paths`, `attempt.concurrent-paths`), naming each
+pair and the remedies that apply to the write: record the later with `after` naming the earlier, or exclude the shared paths from
+every brief but the owner's, and, for an attempt or a run on assignments already recorded, an exception for the exact pair of an
+unmet one. A refused new assignment or revision is offered only the first two, since an exception pins revisions that already exist.
+A revision of an assignment is refused only for a pair its previous revision did not already leave unresolved or excepted. A
+selection no pair meets is satisfied with no subject. A concurrent-paths finding never holds a release submission, at any level:
+its pairs hold only assignment start, run admission and new attempts.
+An exception for an unmet pair pins its two exact assignment revisions in a `pair` target; a newer revision of either needs a fresh
+one, and an unavailable pair is resolved, never excepted.
 
 An ask is shown as answered when a current decision names any revision of it in `answers`.
 This is derived from the records, without writing another ask revision. If a decision is
@@ -1598,6 +2220,12 @@ vericairn goal custody-exception <goal> --by <sponsor or operator for an agent-s
 
 The exception covers this goal revision, appears in each run's intent, and is checked again immediately before launch. It grants no extra spending or publication authority. A revised goal needs a fresh exception.
 
+From 0.9.4, each run's record shows what outside files and hosts it could reach (`execution.reach`), and the machine that ran it
+keeps the secret-bearing paths its operating-system user could read, by path and kind, never content, in
+`estates/<estate>/reach/<run>.json` under the Vericairn home, outside the run's own directory. To reduce
+what a run can reach, run the worker as an operating-system user that cannot read those paths. See the
+[software guide](software.md#coding-agents-the-worker-and-its-launchers).
+
 With `--detach`, a serving daemon supervises the run after the command returns. Otherwise the command waits; Ctrl+C requests a stop. A foreground run must outlive its shell: when no daemon serves the estate, the command's own process supervises the run, and closing its terminal ends that supervision while the harness may run on. For a run that should outlive the shell, start the daemon with `vericairn runtime start` and launch with `--detach`. If a supervising process dies anyway, `worker stop` or `worker settle` settles the run as exited without observation once that process and the harness are gone and nothing was observed for longer than its stall limit: it is charged the usage observed up to its last heartbeat, never more than its cap, its branch is released and its workspace is kept for the next attempt (`software.md` has the rule). Stop or hand over explicitly:
 
 ```sh
@@ -1608,9 +2236,27 @@ vericairn work takeover <agent assignment> --by <person> --contributor <person> 
 
 A stop is allowed to an operator, the goal's accountable principal, or the principal that started the run. Request, transmission, acknowledgment, escalation and observed containment are separate facts. The command waits at most 30 seconds for observation and can return before containment; inspect `worker runs` again. A hand-over is recorded by a person: the person taking the step, its goal's sponsor, or an operator. It writes a new assignment carrying the brief and asks every in-flight run of the old assignment to stop. It does not certify those processes have stopped.
 
+From 0.9.4 (GOAL-11) a person (the one taking the step over, who decides for its goal, or an operator) may hand a step an agent
+holds to any principal the roster names for its role, citing the lapse ask with `--basis`; handing it to anyone but a person
+requires the basis, and an agent never records a hand-over. The hand-over records the ask as its `basis`.
+
 FIX-12 checks the current holder of the work order for every run, before workspace preparation and again under the write lock before intent. A new run on the old assignment is refused whether named explicitly by `worker run` or supplied by `goal step`, without an intent or budget charge. This closes the hand-over gap without treating a stop request as observed containment.
 
 Worker launch and `goal step` are refused over the local-network profile; stopping a run is available there under the same authority rules. The full launcher settings, credential isolation, containment and scope-audit limits are in `software.md`; the platform summary is in `limitations-and-platforms.md`. No MCP tool launches or stops a worker.
+
+### Who can stop a run, and the stop drill (0.9.4)
+
+You, as an operator, can stop any run; so can whoever decides for the run's goal and the principal who started it. Stop one run with
+`vericairn worker stop <run> --by <you> --reason <why>`, every run of a goal with `vericairn goal pause <goal> --by <you> --stop-runs`,
+and every standing agent's runs at once with `vericairn goal pause --standing --by <you> --stop-runs`. A stop is contained only when
+the worker observes the run's whole boundary exited.
+
+From 0.9.4 (OPS-21), you know how long that takes before the carrier runs your work unattended: `vericairn worker drill --by <you>`
+starts a scratch run on the runtime's machine that ignores the stop it is sent, stops it as `worker stop` does, and records the
+milliseconds from the stop to the observed containment and to the run's last write as a `stop-drill` verification of the estate. A
+run not contained within the drill's limit (60 seconds by default) fails the drill, and the failure stays in your attention until a
+later drill on the same machine passes. A recurring duty runs the drill before the carrier's unattended qualification and monthly
+after, and your attention shows each occurrence as it comes due. See [who can stop a run](software.md#who-can-stop-a-run-and-the-timed-stop-drill-094).
 
 ### Command audit and settlement in 0.8.0
 
@@ -1690,7 +2336,9 @@ its limit; `next` when an agent carries it; and `off` when the run's configurati
 leaves it out, or, from 0.9.4, when it is skipped: the operator dismissed the request of an optional reserved step, which
 reads `off` as skipped ([stops](#stops-and-their-surfaces-092)), and an optional step that takes its input from a skipped step
 is skipped with it; and, from 0.9.4, `unsettled` in a run its sponsor closed
-([closing a run](#closing-a-run-094)). From 0.9.4 (FIX-142) a step done by its done predicates alone, each a count of
+([closing a run](#closing-a-run-094)). From 0.9.4 (PROC-19) a step is also `off` when a decision did not take the path that leads to it, or into its branch, or took a
+path that ends the run, and every step that waits only on steps a decision turned off is off with them
+([decisions](#decision-transitions-094)); a step an estate policy requires and a required reserved step never are. From 0.9.4 (FIX-142) a step done by its done predicates alone, each a count of
 at most none, such as no living document due, counts only once every step it waits on is done: before then its predicates hold
 only because nothing is there yet to count, so it reads `blocked` and says so. The configuration is the flow's defaults, the estate's, the flow's domain's and the product's
 `template-defaults` for the exact flow pin, then the goal's options, the narrowest winning; the position names each value's
@@ -1929,6 +2577,238 @@ Closing is neither acceptance nor stopping. The goal's status is `closed`: it ma
 stopped, which abandons it, but it is never activated, paused or resumed again, and it is not closed twice; a revision of the
 goal starts a new run. The run of an achieved goal that was left incomplete can be closed too, to record why.
 
+### Decision transitions (0.9.4)
+
+A decision step may end in a decision among named paths (PROC-19, [templates](templates.md#decision-transitions-094)): each path
+leads to a later step, an earlier work or review step, the step itself, a branch, another flow or the end of the run, and one
+decision takes one path or, where the flow allows, several that meet at their join. The phase gate is one predefined set of
+paths: go, recycle, hold and kill.
+
+Who decides is declared by the flow, and a venture may choose another decider where the flow allows, by `decider.<step>` in
+`template-defaults` at the estate, domain or product or in the goal's options, the narrowest winning:
+
+- **A rule** decides from the records as they stood when the step was ready or due: the first rule whose record predicates all
+  hold takes its path, else the default path. The run shows that decision pending, with its path, and `goal step` records it,
+  signed by who takes the step, as an observation of kind `flow-decision` naming the path, the rule that matched and every
+  record it read by id and hash. The run and validation evaluate its rules again as of the round's start over only the records
+  it names, each at its hash: the rule it names must hold and no earlier one, and a default only where no rule does; one that
+  does not hold counts for nothing, and validation reports it. No later record changes a decision that holds. When it is
+  written, the runtime also refuses one that leaves out a record its rules read, or whose rules do not hold with the derived
+  states they name, such as a work order's status, read then; after that a change of such a state never invalidates it or
+  blocks another write. One written around the runtime that fails either counts for nothing: the round stays pending, and the
+  step names the record and why.
+- **The step's role**: `goal step` routes the step as any step, an agent routed and a person assigned and asked. The principal
+  holding the step's current assignment decides with `goal decide`, or an agent with the MCP `goal_decide` tool, which records
+  the result of that assignment with the paths, the reasons and the evidence by hash, signed by its own device:
+
+```sh
+vericairn goal step <goal> --by <sponsor>
+vericairn goal decide <goal> --by <approver> --step gate --path ship --reason "The lyrics passed their review." \
+  --evidence result:<result id>
+vericairn goal step <goal> --by <sponsor>
+```
+
+- **A rule, then the role**: the rule's decision is recorded when one of its rules holds; otherwise `goal step` records that no
+  rule held, an observation of kind `flow-decision` with the rule `none` and the records read, and then routes the step to its
+  role; no rule's default is taken. The round's kind is read from that record, never from the records as they are now. Until it
+  is recorded no principal's decision counts, and `goal decide`, reaching such a round, records it first in the same batch as
+  the decision.
+
+Each round takes one kind of decider: a rule's decision in a round in which a rule held when it began, a principal's otherwise,
+or the default a deadline takes; a decision of the other kind counts for nothing in the round, whenever it is dated. In each
+round the first decision that stands is final; a further one counts for nothing, and validation reports it. A new round
+begins only by the flow's own course: a path back once its step is done again, a hold, or what the step waits on done again. A
+decision under a displaced assignment counts for nothing. The decision is the step's item of kind decision, and it is distinct
+from the estate's decision records, which stay the operator's. A flow may require a person (`person: true`), a decision the
+operating-modes design never delegates (`undelegable`) is always a person's, and so is one in a role the flow marks a person's:
+routing passes over the role's agents, and an agent's assignment of the step and an agent's decision are refused. An agent's
+decision takes effect only once the review the transition names passes, by a principal the run names for the review's role;
+findings send it back to its decider, and the re-decided path counts once. A deadline under the step's timing takes the default
+path, recorded by `goal step`, or, under the `attention` rule, asks the sponsor, and a decision recorded after it, whatever path
+it takes, takes effect only once the sponsor answers. A decision only a person makes never takes a default at its deadline: the
+flow's contract refuses it, and the deadline only asks the sponsor. A deadline's default counts only when recorded at or after
+the deadline the run derives, so none replaces a decision that stood by the deadline. A path back to
+an earlier step returns the run there, and the return stays made: that step runs again from a fresh assignment, and the decision
+is asked again once it is done again; past the path's limit, counted by the decisions that took it, one a round, the sponsor is
+asked, and once the ask is answered the path is taken once more.
+
+Choosing a path performs nothing reserved, and it never turns off a step an estate policy requires or a required reserved step:
+`goal decide` refuses such a path (`flow.decision-protected`, naming the step), validation reports a recorded one, a rule's
+among them, and the step stays on; a flow whose rule or deadline could take a path away from a required reserved step is refused
+when its template is recorded. A
+reserved step a path leads to still stops for the operator with its exact command, whoever chose the path. `goal show`, the
+API's goal read, the SDK and MCP `goal_get` give each such step's `decision` (its state, `pending`, `held`, `in-review`,
+`taken`, `returning` or `attention`, the decider in the run, and once decided its paths, who decided and when, why and the
+evidence or the records read); status gives each run's decisions, and Workbench and Remote list them. In Community the chosen
+path is taken when `goal step` is called; the carrier that takes it unattended in Standard and Pro is GOAL-10 (0.9.6).
+
+### Standing agents (0.9.4)
+
+From 0.9.4 a standing agent keeps working on a subject between the runs you start. It is a stewardship goal whose plan carries
+`standing`: a flow that declares the trigger kinds it uses and one routed work step, the subject it binds, its triggers, its caps per
+period, an until time and, optionally, the runtime that dispatches it unattended. Each occurrence a trigger makes due is carried as
+one assignment of the goal's one ordinary work order, which names the occurrence. A flow, a trigger and a proposal grant nothing;
+your activation grants its budget, as for every goal.
+
+```sh
+vericairn goal propose --by <you> --kind stewardship --standing example/researcher@1.0.0 --work-order RES-1 \
+  --title "Research the widget" --objective "Keep researching the widget." --done '{"type":"work-order","fields":{"key":"RESEARCHED"}}' \
+  --subject topic="the widget" --budget wallMinutes=30 --budget attemptsPerStep=2 \
+  --trigger '{"key":"monthly","kind":"schedule","unit":"months","every":1,"firstAt":"2026-12-01T00:00:00Z"}' \
+  --trigger '{"key":"asked","kind":"request"}' --period runs=4 --period wallMinutes=120
+vericairn goal activate <goal> --by <you>
+vericairn goal due <goal>
+vericairn goal step <goal> --by <you> --repository <repository id>
+```
+
+Five trigger kinds make occurrences due: `schedule` (days of 86,400 seconds or calendar months from a UTC anchor; ticks missed while
+nothing carried them coalesce into the latest), `duty` (each occurrence of a recurring duty that its policy owes, under the duty's
+own identity, so that two agents never both carry one deadline; the duty stays due until its own evidence discharges it), `event`
+(each record of a type and filters recorded after the trigger was activated, never the agent's own), `condition` (once for each new
+set of records a predicate reads while it fails) and `request` (on demand, `goal step --occurrence request`). Each occurrence has a
+key: the goal's identity, the trigger's key, the trigger's revision and the item. A revision of the goal that keeps a trigger as it
+was keeps its keys, so renewing an agent never carries an occurrence twice; a changed trigger starts keys of its own.
+
+`goal due` lists what is due at an explicit time, this machine's clock by default, with each occurrence's state, the period's spend
+and what defers the rest. `goal step` evaluates again from the records, never at a time later than the runtime's clock, and carries
+one occurrence per command: the one you name with `--occurrence`, a request, or the oldest due one. An agent's run works on a branch
+of the occurrence's own; a person's occurrence is assigned and asked, as a step is. A script of yours may call `goal step` on any
+schedule: it acts with your principal's authority and under the same keys and caps, and stays Community; unattended dispatch is the
+carrier's.
+
+A key holds one assignment, whoever records it: a second assignment of the same occurrence, `records new assignment` included, is
+refused (`standing.duplicate`), unless a person takes the occurrence over with `work takeover`, and a revision of an assignment
+keeps its occurrence. Where two clones each recorded one, `status` lists both among its reconcile tasks: record a reconciliation
+that keeps one and withdraws the other. A reconciliation settles only such a duplicate, and a result on a withdrawn assignment
+still settles its occurrence. An occurrence is carried only as its trigger makes it, while the agent is active and before
+its until time: a duty's exact occurrence, a schedule's latest interval, an event record that is not the agent's own. A settled
+occurrence runs again only when a review returns its result, on the assignment that holds it; a blocked or abandoned result settles
+nothing, and the assignment goes on within its attempts. While three of its results await review (`--awaiting-review` sets
+another number), dispatch defers. The budget is each run's caps; `--period` caps what the runs
+started in each UTC-anchored period spend together, and when one of its caps is reached the occurrences defer to the next period and
+`goal step` asks you once in the period. The budget's concurrency, one when it states none, holds the runs in flight. After three
+failed runs in a row (the goal's `limits.consecutiveFailures` when it sets one) the agent is held: `goal step` asks you
+once, and nothing more is dispatched until your decision answers that ask. Each settled run counts once, in the order the runs
+settled: it succeeded when it settled as an observed success that names the completed or partial result its agent recorded while
+it ran; otherwise it failed when its agent recorded a blocked or abandoned result while it ran or before the next run of its
+assignment started, whatever a later result or a correction says, or when it settled as a known failure (a run you, as its sponsor,
+or an operator asked to stop, with `--stop-runs`, `goal stop` or `worker stop`, is not counted; a stop by anyone else is); any
+other run, one whose agent exited cleanly with no result included, counts for nothing. These caps hold at every run's
+intent, whatever starts it. Within three days of its until time (half its term when that is shorter) `goal step` asks you once
+whether to renew it, with the period's runs and minutes, its occurrences and the current evaluation. Past its until time the agent
+is lapsed and dispatches nothing, whatever `--now` says: renew it with a goal revision whose until time is later, which you
+activate again, or stop it. A second agent of one role over one subject is never activated.
+
+From 0.9.4 no agent ends its own failure pause by anything it records, whatever date the record claims. Only two things end
+failures. A run the runtime saw succeed, and whose result the worker saw at its exit, ends the failures before it while they are
+fewer than the limit, provided the principal that recorded the run (you, your builder, the script that called `goal step`) is not
+tied to the agent (below): the worker names in the run's settlement the completed or partial result its agent recorded during the
+run. A run whose agent exits cleanly having recorded no result ends nothing and leaves nothing to review, so the failures stand.
+Once the failures reach the limit, a success ends nothing, a run still in flight when they did included: only your answer to the
+pause's ask ends them, recorded by you or for you by a principal not tied to the agent. A completed result is the agent's claim,
+which you or your reviewer judge: it never makes a run succeed by itself, and one recorded after its run settled never does, so
+after three failed runs the agent's own attempt and completed result, through `work result`, `records new` or written by hand,
+leave the agent held at three failures. The result still waits for review and counts toward the awaiting-review cap. Each run is
+read from all of its records, on every branch, whatever a divergent record or a reconciliation makes current. Where you, the runtime
+or another principal not tied to the agent settled or canceled the run, nothing an agent tied to the standing
+agent records about the run counts: its revisions and divergent records take back no failure and turn no success into a failure. The
+latest records those principals wrote decide the run, each one that no other record of theirs follows on its own chain of revisions,
+however many records the agent put between them. As the runtime and `records new` write every revision on the run's latest, that is
+usually one record, the latest of theirs, so your own correction written on the settlement it corrects counts as you wrote it; where
+records of theirs on different branches read differently, the reading least favorable to the agent decides, a failure over nothing
+and nothing over a success, and no record's place in the run's history or its date ranks one above another. Only a run that
+no such principal settled or canceled, as the runs of an agent that steps its own standing goal under
+`local-engineering`, counts the agent's own known-failure settlement as its failure; such a run never succeeds, and a stop of it
+that agent records counts as its failure whoever it names.
+
+A record carrying another's identifier never lowers the agent's failures or frees its outputs, whatever its date or path (section 10):
+a run of the agent that cannot be read counts as failed, a run such a record names counts as its own records decide it or as failed,
+an output that cannot be read stays open and nobody adopts it, and an answer that cannot be read answers nothing. Because a record
+that is not read can be the device, admission, principal or grant other records rest on, while any record is not read a record that
+does not count is read against the agent and never for it: its blocked results and runs still count as failures and its outputs stay
+open. While any record is not read, `goal due` shows every standing agent held, naming that record, `goal step` refuses before it records
+or dispatches anything, and a run's intent is refused for the hold whatever its failures read, until you remove the copy. When the
+goal's own record is not read, `goal due` says its state, failures and open outputs are not established instead of reporting no such
+goal.
+
+`goal pause --standing --by <you>` pauses every active standing agent you may pause; `--stop-runs`, there or on one goal, also asks
+their runs in flight to stop. On resume, missed ticks coalesce and duty occurrences stay owed. `goal stop` on a standing agent
+records it abandoned, shown as stopped, asks each of its runs in flight to stop and retires its work order.
+
+`goal show`, `goal next`, `status` and `progress` show each standing agent's state, its next occurrence, its occurrences by state and
+its period's spend, and Workbench's home and goal workspace and Remote's home show the same from the same documents. Status,
+progress, Workbench and Remote read them as of the estate's newest record: an agent past its until time shows active there until
+a later record is written, while `goal due` and `goal show` read it at the clock.
+
+### Standing outputs (0.9.4)
+
+From 0.9.4 every output of a standing agent's occurrence lands as a record that another principal disposes of; no agent accepts,
+adopts, answers or publishes its own work. The agent carrying an occurrence records its outputs with three MCP tools,
+`standing_possibility`, `standing_question` and `standing_publication`, and the runtime names in each record's `raisedBy` the goal, the
+occurrence, the assignment and the agent's run, which must be in flight.
+
+- A recommendation is an open possibility with a fingerprint and its sources, and optionally evidence for and against, review
+  triggers and links to possibilities it duplicates or supersedes. There are no scores. A second open possibility of the agent with
+  the same fingerprint is refused; once you decline one, the agent raises it again only by naming it, with new evidence. The agent
+  may revise its own open possibility to add to it, keeping what raised it and its fingerprint; leaving `raisedBy` out of a revision
+  changes no rule, since a revision is judged by the record it revises.
+- Proposed work is a possibility with a draft work order. Adopt it with
+  `vericairn work new --from-possibility <possibility> --by <you> [--key <key>]`: the draft supplies the fields you leave out, the
+  possibility joins the work order's inputs, and its revision adopting the new work order is stored with it. Whoever raised a
+  possibility, its author does not adopt it, this way or by a possibility revision, and neither does an agent tied to the standing
+  agent (below). Decline or park one with a possibility revision (`records new possibility --supersedes <id>`), giving the reason.
+- A question is an ask to a person, you when you decide for the goal; your decision answers it, and the agent never withdraws it.
+  A decision the agent records on it, or one recorded by any agent tied to the standing agent, is refused and answers nothing,
+  whatever `decidedBy` it names. The same holds for the renewal, period-cap and failure-pause asks goal step puts to you about the
+  agent, so no agent ends its own failure pause. An agent is tied when any assignment of the agent's work has named it as
+  contributor, or any revision of the agent's role, in the goal's own roles or your roster, has named it, whatever date a record
+  claims and whatever the roster names now. Both only grow: taking an agent off the roster unties nothing, and naming or assigning
+  an agent that once recorded your answer makes that ask wait for you again, since its record no longer answers it; a roster or
+  assignment change never answers an ask. Your builder, or any other principal nothing ties to the standing agent, can still record
+  your decision for you, including on the renewal and failure-pause asks its own goal step wrote.
+- Words outside the estate are a publication request to you: the exact text, labeled the agent's draft. It dispatches nothing, and
+  you close it yourself (`vericairn operator done` or `operator dismiss`); no agent closes it, even citing your words.
+- A security finding carries `disclosure: held`; the Reviewer reviews it. No agent declines, parks or adopts it: a person disposes of
+  it, only an operator who is a person adopts it or ends its hold, and its work order from `work new --from-possibility` is held
+  from disclosure, so a public push carrying its key or text is refused until the release that carries it is published.
+
+From 0.9.4 a disposition is read as an answer is. A decline, park or adoption of a possibility that its agent, or any agent tied to
+the standing agent, records disposes of nothing, whatever date it claims: the possibility stays open and among the open outputs, the
+agent's next brief names it as open, and you or a principal not tied to the agent dispose of it as before, `work new
+--from-possibility` included. Such a record is an error of the estate when what ties its author was written first
+(`standing.own-output`), and otherwise a report (`standing.output-now`), which the runtime refuses for a new record; `records show`
+shows it as written, and nothing reads it as a disposition. In the same way, an agent's withdrawal of its own question leaves the
+question waiting on you, and a close or observation of its publication request by anyone but an operator who is a person closes
+nothing, so your own close is still taken.
+
+Each occurrence records at most five possibilities, three of them with a draft work order, and one summary possibility listing the
+rest; while ten of the agent's outputs stay open, its occurrences defer. `goal propose --outputs possibilities=,drafts=,open=`
+changes these caps; each output is judged against the caps in force when it was raised, so lowering them for a busy agent judges
+only what it raises afterwards. `goal due` and `status` show the open outputs, and each occurrence's brief names the agent's
+earlier open and declined possibilities.
+
+### The first standing roles (0.9.4)
+
+From 0.9.4 three standing roles ship with Vericairn as built-in flows, listed by `vericairn templates list` without copying a
+file: `vericairn.estate/duty-carrier` carries each due occurrence of a recurring duty, `vericairn.software/researcher` researches a
+product's subject on a schedule or when a release is published, and `vericairn.software/bug-hunter` hunts defects on a schedule or
+after a merge, on a branch of its own. To turn one on, name who fills its role in the roster and propose a standing agent of it:
+
+```sh
+vericairn goal propose --by <you> --kind stewardship --standing vericairn.software/researcher@1.0.0 --work-order RES-1 \
+  --title "Research the widget" --objective "Keep researching the widget." --done '{"type":"work-order","fields":{"key":"RESEARCHED"}}' \
+  --subject topic="the widget" --budget wallMinutes=30 --budget attemptsPerStep=2 \
+  --trigger '{"key":"monthly","kind":"schedule","unit":"months","every":1,"firstAt":"2026-12-01T00:00:00Z"}' \
+  --period runs=4 --period wallMinutes=120
+vericairn goal activate <goal> --by <you>
+```
+
+Each role's brief states what it records, its fingerprint rule and the authority each of its effects needs: the duty carrier only
+the duty's own scope, the researcher no credential and public retrieval only where its brief permits it, the bug hunter commits on
+its own branch only. Whatever no grant covers comes to you as an operator request, which you close yourself; every finding comes to
+you, or a planner, as a possibility to adopt, decline or park, a held security finding to a person only, within the caps of
+"Standing outputs".
+
 ### The software release and upgrade flows (0.9.2)
 
 From 0.9.2 (PROC-07) the software pack ships two flows as built-in template versions, so a release and an estate's upgrade run
@@ -1973,7 +2853,16 @@ cannot be made: `docs-set` waits on it and takes the check as its input, so a ne
 before the carrier's work closed, as 0.8.3's were, and an ask about the carrier, such as one approving a security section, that
 still waits, open or notified, hold the set. A withdrawn ask no longer holds it. The flow cannot prove an approval: whether a
 release needs a security section, what the deciding decision says and why an ask was withdrawn, the records do not tell, so the
-release manager asks whenever a fix is under a disclosure hold. A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
+release manager asks whenever a fix is under a disclosure hold. From 0.9.4 (FIX-137), the set can carry a held fix's guide text through a checked push only once you approve the Security
+section for that fix in the forms the push reads. The release manager asks you about the carrier with a question that begins
+exactly "Approve the Security section of <version>", the version ending there, such as "Approve the Security section of 9.9.9 as drafted, covering
+FIX-90?". Your decision answering it records, among its effects, exactly "The Security section of <version> is approved for
+<key>." for each held work order it covers, and names those work orders among the work orders it affects; it is made after each
+work order's current revision, with no ask about the carrier still waiting. If you decline the section, the decision records no
+such effect, and the release manager asks again with the revised section; ask again too if a held work order is revised after
+your answer. The set's push must carry nothing but documentation, a version change in `Directory.Build.props`, and the release's
+held fixes, whose commit subjects begin with their key and a colon; every other push that would add the held text stays refused
+until the release is published ([changes](changes.md#disclosure-holds-090)). A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
 withdrawn candidate's draft left at the provider stops `gate`, as do the objections `release submit --check` names, such as a
 client of another build than the serving runtime (0.8.4's stale daemon) or a clone without a default head (0.8.3). An uncertain
 submission stops `submit` until a reconciliation reads the release record. The publication command is computed only once the
@@ -2261,8 +3150,8 @@ by the person asked and accepts no work.
 ## 24. Release notices and upgrades
 
 After installing an upgrade, restart a serving daemon as well as running workers. Follow the stop/start
-commands and coordination steps in section 9 before using the upgraded CLI against that estate. From
-0.9.2 `estate upgrade` itself replaces a daemon of an older release than the new pin, or says exactly
+commands and coordination steps in section 9 before using the upgraded CLI against that estate.
+From 0.9.2 `estate upgrade` itself replaces a daemon of an older release than the new pin, or says exactly
 what to run when it cannot.
 
 `vericairn version`, `vericairn doctor`, `vericairn status` and Workbench disclose a release check
@@ -2373,7 +3262,7 @@ Canonical status JSON derives attention from records alone and is identical on m
 records. Progress also reads this runtime's worker observations; human status, progress and Workbench
 label additional concerns `Local worker observations`. From 0.9.2, the operator's attention in human status,
 Workbench and Remote also shows this machine's security-report observations, which canonical status leaves out
-([security reports](#security-reports-hold-a-release-092)). No reader can infer another machine's unrecorded
+([security reports](#security-reports-hold-releases-092)). No reader can infer another machine's unrecorded
 facts. The estate observation's existing status-hash contract is unchanged; these API v1 projections add
 no record fields, CLI commands or permissions.
 
@@ -2454,6 +3343,10 @@ From 0.9.3 the action announces every record it signs with a device that needs
 presence before the first prompt, 22 for a new action, and each observation it
 repeats while checks run before that observation asks
 ([presence prompts](#presence-prompts-announced-and-counted-093)).
+From 0.9.4, with presence sessions on, one check covers the record by exact hash and its branch's push, opening, observations and
+merge by kind; the action renews, announcing what remains, when its waits for checks outlast the session or an observation repeats
+beyond what the list allows, so a real run usually asks two or three checks rather than 22 (inferred from its default 120-second wait
+for each check phase, not measured) ([presence sessions](#presence-sessions-094)).
 [Operator actions](operator-actions.md) explains recovery with the same
 body and identity, presence, authority and the action's push and merge trail.
 
@@ -2485,10 +3378,19 @@ many trail records wait
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
 The push scans the exact complete commit range using installed Gitleaks 8.25.0 or
 later and Vericairn's own rules, which keep none of gitleaks' built-in allowlists;
-missing history, scanner or a complete report refuses it. Merges require a recorded
+missing history, scanner or a complete report refuses it.
+From 0.9.4 (FIX-150), a history checkpoint's inventory no longer refuses the push when a record id it lists spells a key word:
+the scan allows exactly an inventory line in the estate's `objects/` files that hold nothing else, passing only the value in
+its hash position, and scans every other byte as before ([changes](changes.md#push-and-open)). Before 0.9.4 such a
+checkpoint push needed your word to push it unchecked after the finding was read. A push whose history the scan cannot read
+completely, such as one carrying a corrupt object, is refused with an incomplete scan: repair or replace the clone and push
+again; do not push it unchecked. Merges require a recorded
 scanned push of the pinned head, and every declared check and every reported check
 to pass at that head; missing, skipped,
-pending or stale checks refuse. The provider performs a synchronous merge with
+pending or stale checks refuse.
+From 0.9.4 a push covers every commit its target does not hold, from the branch's last complete recorded push that the remote
+branch still holds or else the merge base, a push to the declared target branch is refused (`change.target-push`), and a merge
+requires a complete recorded push of the pinned head ([coverage](changes.md#coverage-094)). The provider performs a synchronous merge with
 an atomic head condition, then observes target checks at that merge commit.
 Pending or failed target checks remain incomplete even after a confirmed merge.
 Fork pull requests are unsupported. From 0.9.3, where the target branch requires
@@ -2501,6 +3403,15 @@ uncertain. `operator record` waits in the queue as it waits for checks
 ([required merge queues](changes.md#required-merge-queues-093)). No retry can bypass an
 uncertain effect. [Checked changes](changes.md) gives the complete reconciliation
 rules; passing checks supply neither acceptance nor publication authority.
+From 0.9.4 each of these commands, run on its own, lists its operation's records by kind under one presence check where sessions are on,
+renewing before the effect when fewer than three minutes of the session remain and the session's limit is at least three minutes.
+
+From 0.9.4 (CODE-81), declare the names of the models your agents run on as [blocked terms](policies.md#blocked-terms-090), and
+a checked push refuses a commit whose message names one, trailers included, before anything is pushed; a checked merge refuses
+a pull request whose title would put one in the merge commit, or, through a merge queue, whose description would. To require an exact trailer line on every pushed commit, such as
+the attribution line your agents are told to end their commits with, add a `vericairn.estate/commit-messages` rule with
+`trailer` ([commit messages](policies.md#commit-messages-094)); a commit whose harness replaced or altered that line is refused.
+Set `blockedTerms` to `warn` in the same kind of rule only to let such commits through with a warning while you clean up.
 
 ## 29. Cancelling client observation
 
@@ -2526,6 +3437,16 @@ oldest three open requests with their recommendation first and identify the rest
 in order. `operator done <request-revision> --by <operator-id>` records completion;
 `operator dismiss <request-revision> --by <operator-id> --reason "No longer needed."`
 records dismissal. Each is one signed step, with the original request retained.
+
+From 0.9.4 (OPS-22), a request may be marked `optional`: a possible todo, an action you may or may not do, such as a post you might
+make. `vericairn operator list`, status, progress and Remote show optional requests in their own section, **Possible todos**, each with its
+recommendation, destination, guide and the commands that fetch its kit and close it; they are not among the delivered requests,
+raise no required attention, and never hold a release's closing or a goal's evaluation (a goal's predicate over requests counts
+none). Close one, done or dismissed, whenever you choose, with `operator done` or `operator dismiss`. A requester may record a
+request optional; a required request becomes optional only by your own revision of its mark, never by its requester's. On any machine with a copy of
+the estate, `vericairn operator fetch <request> --to <folder>` writes the files it pins, under their names, from the estate's
+objects, and its guide, `guide.md`, and refuses, writing nothing, when an object is missing. From 0.9.4 recording a request refuses
+a pinned file the estate's objects do not hold: store each file with `vericairn objects put <file>` first.
 
 The [operator request guide](operator-requests.md) explains exact draft hashes,
 publication intent and observed destinations, cited operator words for an agent's
