@@ -453,6 +453,36 @@ public class FlowDecisionTests
     }
 
     [Fact]
+    public void AnAgentsHandWrittenAssignmentThatHoldsNothingNeitherDecidesNorTakesTheDecisionFromTheHolder()
+    {
+        // From 0.9.4 (ID-11), the Reviewer's probe: the operator assigns the gate to a person; an agent of the role then records, by hand,
+        // an assignment of the gate to itself, which holds nothing by the holder rule. The agent's decision under it counts for nothing,
+        // and the true holder's later decision is valid and decides the gate, though the agent's assignment is the latest by time.
+        using var run = new FlowFixture(Gate(), rolesOf: f => new(FlowFixture.Role("writer", f.Estate.BuilderId), FlowFixture.Role("approver", f.Estate.OperatorId, f.Estate.BuilderId)));
+        RecordEnvelope grant = run.Estate.Add("decision", run.Estate.OperatorId, $$"""{"title":"A grant","statement":"Grant local-engineering.","summary":"A grant.","synthesis":"A grant of local-engineering.","effects":["local-engineering"],"affects":[],"decidedBy":"{{run.Estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"medium","notAuthorized":[]}""");
+        run.Estate.Add("authority", run.Estate.OperatorId, $$"""{"grantee":"{{run.Estate.BuilderId}}","scope":["local-engineering"],"reserved":[],"conditions":[],"basis":"{{grant.Id}}"}""");
+        RecordEnvelope lyrics = Draft(run);
+        RecordEnvelope held = run.Assign("gate", run.Estate.OperatorId);
+        RecordEnvelope taken = run.Add("assignment", FlowFixture.AssignmentBody("gate", run.Estate.BuilderId), builder: true, subject: run.Work.Reference);
+        Assert.True(GoalRules.Before(held, taken));
+        EstateModel model = run.Estate.Load();
+        Assert.Empty(Errors(model, taken));
+        Assert.True(Routing.Displaced(model, taken));
+        Assert.Equal(held.Id, Routing.HolderOf(model, taken)!.Id);
+
+        RecordEnvelope agents = Decide(run, taken, ["ship"], "From the assignment that holds nothing.", lyrics);
+        Assert.Contains(Errors(run.Estate.Load(), agents), f => f.Code == "result.decision" && f.Message.Contains($"holds nothing of step gate: assignment {held.Id} holds it", StringComparison.Ordinal));
+        Assert.Equal("pending", run.Step("gate").Decision!.State);
+        Assert.Equal("blocked", run.Step("release").State);
+
+        RecordEnvelope holders = Decide(run, held, ["ship"], "From the holder.", lyrics);
+        Assert.Empty(Errors(run.Estate.Load(), holders));
+        FlowPosition.StepInstance gate = run.Step("gate");
+        Assert.Equal(("done", "taken", run.Estate.OperatorId, holders.Id), (gate.State, gate.Decision!.State, gate.Decision.By, gate.Decision.Record!.Id));
+        Assert.NotEqual("blocked", run.Step("release").State);
+    }
+
+    [Fact]
     public void InTheCurrentRoundOnlyTheCurrentHoldersDecisionCountsABackdatedOneByADisplacedHolderIncluded()
     {
         // From 0.9.4 (ID-11): a person takes the gate over from the agent that held it; a decision the agent's device signed under its

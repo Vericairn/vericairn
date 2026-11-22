@@ -661,6 +661,13 @@ public static partial class Routing
         return [.. holding.OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)];
     }
 
+    /// <summary>
+    /// From 0.9.4 (ID-11): the holder rule over some of a work order's assignments, as a reading as of a record passes them, those recorded
+    /// before it: of them, those that hold their step, oldest first, the last of each step's holding it as of that record.
+    /// </summary>
+    internal static IReadOnlyList<RecordEnvelope> HoldingAmong(EstateModel model, IEnumerable<RecordEnvelope> assignments) =>
+        HoldingOf(model, assignments.OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal));
+
     /// <summary>The holding assignments of a step no person has assigned, in order: chronology among agents' and services' assignments.</summary>
     private static List<RecordEnvelope> AgentsHolding(EstateModel model, List<RecordEnvelope> ordered)
     {
