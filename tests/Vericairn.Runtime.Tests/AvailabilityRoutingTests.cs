@@ -235,6 +235,43 @@ public sealed class AvailabilityRoutingTests
     }
 
     [Fact]
+    public void AStepAnAgentDispatchedIsHandedOverCitingItsLapseAskAndTheDisplacedAgentStaysAnAuthor()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string helper = Agent(run, "Test Helper");
+        string third = Agent(run, "Test Third");
+        Roster(run, ("builder", [helper, third]));
+        Order(run, "W-2", "builder");
+        GrantLocalEngineering(run, builder);
+        var clock = new SteppedClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        run.Service.EnableEvents(Path.Combine(run.Scratch, "live"), clock);
+
+        // The builder, an agent under local-engineering, records the step's first assignment, to the helper, whose session lapses.
+        string dispatched = RunEstate.Ok(run.Service.Assign(new AssignRequest("W-2", helper, builder, RunEstate.Json(RunEstate.Brief)) { Repository = run.Resource })).Id;
+        run.Service.PresenceRegister(new PresenceRegisterRequest(helper, "a helper session"));
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(dispatched, helper, "widget, a work branch", "Build it."))).Id;
+        clock.Advance(TimeSpan.FromSeconds(90 + PresenceVocabulary.DefaultReassignAfterSeconds));
+        run.Service.SweepPresence();
+        RecordEnvelope ask = run.Estate.Load().ById[Assert.Single(run.Service.Records("ask")).Id];
+        Assert.Equal(builder, ask.By);
+
+        // The operator hands the step to the third agent of its role, citing the sweep's standing ask: recorded, and valid.
+        TakeoverResponse taken = run.Service.WorkTakeover(new TakeoverRequest(dispatched, op, third) { Basis = ask.Id });
+        Assert.True(taken.Ok, taken.Message);
+        EstateModel model = run.Estate.Load();
+        RecordEnvelope order = model.ById[model.ById[dispatched].Subject!.Id];
+        Assert.Equal(taken.Assignment!.Id, Routing.HolderOf(model, model.ById[dispatched])!.Id);
+        Assert.Contains("no longer holds its step", run.Service.Result(new ResultRequest(attempt, helper, RunEstate.Json("""{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}"""))).Problem!.Message, StringComparison.Ordinal);
+
+        // The step's history keeps the displaced assignment, so the helper, which recorded an attempt, is still an author of its work.
+        Assert.Equal([dispatched, taken.Assignment.Id], Routing.Assignments(model, order).Select(a => a.Id));
+        Assert.Contains(helper, FlowRuns.Authors(model, Routing.Assignments(model, order)));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void AnAskTheReceivingAgentWroteItselfIsNoBasisWithNoPresenceKept()
     {
         using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
@@ -332,6 +369,14 @@ public sealed class AvailabilityRoutingTests
         {
             roles = roles.Select(r => new { role = r.Role, principals = r.Principals }),
         })))));
+
+    /// <summary>The operator's grant of local-engineering to a principal, on a decision of the operator's.</summary>
+    private static void GrantLocalEngineering(RunEstate run, string grantee)
+    {
+        string op = run.Estate.OperatorId;
+        string decision = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, RunEstate.Json($$"""{"title":"A grant","statement":"Grant local-engineering.","summary":"A grant.","synthesis":"A grant of local-engineering.","effects":["local-engineering"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-15T12:00:00Z","stake":"medium","notAuthorized":[]}""")))).Id;
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("authority", op, RunEstate.Json($$"""{"grantee":"{{grantee}}","scope":["local-engineering"],"reserved":[],"conditions":[],"basis":"{{decision}}"}"""))));
+    }
 
     /// <summary>A service principal with an admitted device whose key this machine holds.</summary>
     private static string Service(RunEstate run, string name)

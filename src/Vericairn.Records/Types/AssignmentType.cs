@@ -286,12 +286,14 @@ public sealed class AssignmentType : IRecordType
                 context.Error("assignment.basis", "A hand-over citing a lapse ask is recorded by the person taking the step over, who decides for its goal or an operator.");
             }
 
-            string carried = Routing.HoldingKey(context.Record.Body);
-            RecordEnvelope? lapsed = order is null ? null
-                : Routing.Assignments(context.Model, order).LastOrDefault(a => a.Id != context.Record.Id && GoalRules.Before(a, context.Record) && Routing.HoldingKey(a.Body) == carried);
-            if (lapsed is null || !Routing.LapseAsk(context.Model, ask, lapsed, context.Record))
+            // The lapsed assignment is the one the ask is about, found by its id whoever recorded it and whatever it holds now; it carries
+            // the same step of the same work order.
+            RecordEnvelope? lapsed = ask.Subject is { Type: "assignment" } about && context.Find(about.Id) is { Type: "assignment" } cited ? context.Model.Latest(cited) : null;
+            bool sameStep = lapsed?.Subject is not null && order is not null && context.Model.Chain(context.Model.Latest(order)).Contains(lapsed.Subject.Id)
+                && Routing.HoldingKey(lapsed.Body) == Routing.HoldingKey(context.Record.Body);
+            if (lapsed is null || !sameStep || !Routing.LapseAsk(context.Model, ask, lapsed, context.Record))
             {
-                context.Error("assignment.basis", $"Ask {basis} is no standing lapse ask about the assignment this hand-over takes the step over from{(lapsed is null ? string.Empty : $" ({lapsed.Id})")}: a hand-over's basis is the ask the presence sweep recorded when the session holding that assignment lapsed, open when the hand-over is recorded, neither withdrawn nor answered.");
+                context.Error("assignment.basis", $"Ask {basis} is no standing lapse ask about an assignment of this step{(lapsed is null ? string.Empty : $" ({lapsed.Id})")}: a hand-over's basis is the ask the presence sweep recorded when the session holding that assignment lapsed, open when the hand-over is recorded, neither withdrawn nor answered.");
             }
         }
     }
