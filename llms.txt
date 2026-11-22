@@ -1,0 +1,11 @@
+# Vericairn
+
+> Vericairn's documentation, frozen with each release. The current set is 0.9.4's; the maintained guides in docs/ change between releases, and each set keeps the guides of its release.
+
+Links are relative to this file, at the root of the repository.
+
+## Documentation
+
+- [Vericairn 0.9.4](docs/releases/0.9.4/llms.txt): the current set's index, each guide and reference by title
+- [Vericairn 0.9.4, every document in one file](docs/releases/0.9.4/llms-full.txt)
+- [Every documentation set](docs/releases/README.md): each release's set, newest first
