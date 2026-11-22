@@ -979,6 +979,24 @@ one by any principal other than the operator, clears nothing. A reader that lack
 product's `securityReports` in an earlier format is refused as a later format's field. `records describe product` and
 `records describe observation` include these contracts, and `vericairn.records/readers/8` explains the product's new field.
 
+## Split objects (0.9.4)
+
+From 0.9.4 (FIX-163), content larger than the 8 MiB object limit can be kept under `objects/` as a split object, and a
+release basis past the limit is its first user. The content's bytes, in order, are stored as parts, each an object of at
+most 8 MiB, every part but the last of one length and the last at least one byte and no longer. A root object, the
+canonical JSON `{"bytes": <length>, "digest": "sha256:<hex>", "format": "vericairn.split-object/1", "parts": [<part hash>, ...]}`
+with at least two parts and no other member, names them, and the root's hash names the content wherever a record would name
+an object, such as an evidence `hash`. Content that fits one object is stored as that one object, as before, and its own
+hash names it. A reader reads every part, checks each against its hash and the parts' lengths against the layout, and checks
+the joined bytes against the root's length and digest; a missing, extra, reordered or altered part fails, and the content is
+then unreadable rather than partly read. The parts are stored before the root, so a root is only stored once every part it
+names is.
+
+No record field, record type or format number changes: a record names a root as it names any object, by hash. The estate
+check sees ordinary objects, each within the limit, so an estate holding split objects passes an earlier release's check; an
+earlier reader that expects the content takes the root for an object it does not support. `SplitObject` in
+`Vericairn.Records.Estate` writes and reads them.
+
 ## History checkpoints (0.9.2)
 
 ID-05 adds the `history-checkpoint` type within format 3, as 0.8.4 added

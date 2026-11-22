@@ -56,6 +56,52 @@ public sealed class ReleaseBasisTests
         Assert.Equal(before, f.Api.Session.Load().Records.Count);
     }
 
+    // FIX-163: a basis past the object limit is retained as a split object; its root reads as the one basis its parts join to.
+    [Fact]
+    public async Task ABasisRetainedInPartsReadsAsItsOneObjectAcrossTheRuntimeSdkAndMcp()
+    {
+        using var f = new ReleaseBasisFixture();
+        (string root, IReadOnlyList<string> parts) = f.StoreInParts(1_000);
+        Assert.True(parts.Count > 1);
+        ReleaseBasisResponse single = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(f.Hash));
+
+        ReleaseBasisResponse response = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(root));
+
+        Assert.Null(response.Problem);
+        Assert.Equal(root, response.Hash);
+        string expected = JsonSerializer.Serialize(single with { Hash = root }, ProtocolJson.Options);
+        Assert.Equal(expected, JsonSerializer.Serialize(response, ProtocolJson.Options));
+        using var client = new VericairnClient(new HttpClient(new BasisHandler(response)) { BaseAddress = new Uri("http://fixture.invalid") });
+        Assert.Equal(expected, JsonSerializer.Serialize(client.ReleaseBasis(root), ProtocolJson.Options));
+        Assert.Equal(expected, JsonSerializer.Serialize(await new CancellationBoundApi(client, TestContext.Current.CancellationToken).ReleaseBasisAsync(root, TestContext.Current.CancellationToken), ProtocolJson.Options));
+        ToolCallResult read = await new ToolRegistry(f.Api, null).CallAsync("release_basis_get", new() { ["hash"] = root }, TestContext.Current.CancellationToken);
+        Assert.False(read.IsError);
+        Assert.Equal(expected, read.Text);
+
+        f.LoseObject(parts[1], corrupted: false);
+        ReleaseBasisResponse lost = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(root));
+        Assert.Null(lost.Evidence);
+        Assert.Equal($"Retained release basis {root} cannot resolve.", lost.Problem!.Message);
+        Assert.Equal(new FindingDto("error", "release-basis.missing", $"basis-part:2@{parts[1]}", "The basis part is missing."), Assert.Single(lost.Problem.Findings));
+        ToolCallResult unavailable = await new ToolRegistry(f.Api, null).CallAsync("release_basis_get", new() { ["hash"] = root }, TestContext.Current.CancellationToken);
+        Assert.True(unavailable.IsError);
+        Assert.Equal(JsonSerializer.Serialize(lost, ProtocolJson.Options), unavailable.Text);
+    }
+
+    [Fact]
+    public void ARootWhosePartsJoinToNoSupportedBasisIsInvalidNotAbsent()
+    {
+        using var f = new ReleaseBasisFixture();
+        byte[] other = System.Text.Encoding.UTF8.GetBytes("{\"format\":\"vericairn.release-basis/99\",\"padding\":\"" + new string('x', 2_000) + "\"}");
+        string root = f.StoreRoot(other.Length, ContentHash.Sha256(other),
+            [f.Api.Session.Objects.Put(other.AsSpan(0, 1_500)), f.Api.Session.Objects.Put(other.AsSpan(1_500))]);
+        ReleaseBasisResponse response = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(root));
+        Assert.Null(response.Evidence);
+        AssertFailure(Assert.Single(response.Problem!.Findings), "invalid", "basis:" + root);
+        string malformed = f.Api.Session.Objects.Put("{\"format\":\"vericairn.split-object/1\",\"parts\":[]}"u8);
+        AssertFailure(Assert.Single(f.Api.ReleaseBasis(malformed)!.Problem!.Findings), "invalid", "basis:" + malformed);
+    }
+
     [Fact]
     public void EveryFailedReferenceIsReportedIncludingSharedObjectsAndRecords()
     {

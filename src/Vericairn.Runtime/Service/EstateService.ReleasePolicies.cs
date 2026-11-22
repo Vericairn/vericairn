@@ -72,12 +72,26 @@ public sealed partial class EstateService
                 "The retained basis object's bytes do not match its hash.")]);
         }
         if (bytes is null) return null;
+        return ReadReleaseBasis(hash, bytes, parts: true);
+    }
+
+    // From 0.9.4 (FIX-163) a basis past the object limit is retained as a split object (SplitObject), its parts named by a root. The
+    // root reads under its own hash as the one basis its parts join to, each part and the whole checked against their hashes; a part
+    // missing, changed or out of the layout makes the basis unavailable, and joined bytes that are no single-object basis make it invalid.
+    private ReleaseBasisResponse? ReadReleaseBasis(string hash, byte[] bytes, bool parts)
+    {
         string? format = null;
         try
         {
             using JsonDocument document = JsonDocument.Parse(bytes);
             format = document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("format", out JsonElement value) &&
                 value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+            if (parts && format == SplitObject.Format)
+            {
+                SplitObjectContent joined = SplitObject.Join(bytes, BasisPart);
+                if (joined.Content is { } whole) return ReadReleaseBasis(hash, whole, parts: false) ?? InvalidBasis(hash);
+                return joined.Problems is [{ Fault: SplitObjectFault.Invalid, Part: 0 }] ? InvalidBasis(hash) : UnresolvedBasis(hash, [.. joined.Problems.Select(PartFailure)]);
+            }
             if (format is ReferencedBasisFormat or CommittedBasisFormat) return ResolveReleaseBasis(hash, bytes);
             if (format != CopiedBasisFormat) return null;
             ReleaseBasisEvidence? evidence = JsonSerializer.Deserialize<ReleaseBasisEvidence>(bytes, ProtocolJson.Options);
@@ -85,8 +99,30 @@ public sealed partial class EstateService
                 Records: not null, Repositories: not null, Objects: not null, Documents: not null, ExcludedOperationRevisions: not null }
                 ? new(hash, evidence) : InvalidBasis(hash);
         }
-        catch (JsonException) { return format is CommittedBasisFormat or ReferencedBasisFormat or CopiedBasisFormat ? InvalidBasis(hash) : null; }
+        catch (JsonException) { return format is CommittedBasisFormat or ReferencedBasisFormat or CopiedBasisFormat || !parts ? InvalidBasis(hash) : null; }
     }
+
+    // A part of a split basis as the store holds it; bytes that no longer match the part's hash are reported as altered.
+    private byte[]? BasisPart(string hash)
+    {
+        try { return ObjectGet(hash); }
+        catch (ObjectCorruptedException exception) { throw new InvalidDataException(exception.Message, exception); }
+    }
+
+    // A split basis's problem in the basis reader's terms: a part is named by its place and hash, the joined whole by its digest.
+    private static FindingDto PartFailure(SplitObjectProblem problem) => new("error", problem.Fault switch
+    {
+        SplitObjectFault.Missing => "release-basis.missing",
+        SplitObjectFault.Altered or SplitObjectFault.Mismatch => "release-basis.hash-mismatch",
+        SplitObjectFault.InvalidReference => "release-basis.invalid-reference",
+        _ => "release-basis.invalid",
+    }, problem.Part > 0 ? $"basis-part:{problem.Part}@{problem.Reference}" : "basis:" + problem.Reference, problem.Fault switch
+    {
+        SplitObjectFault.Missing => "The basis part is missing.",
+        SplitObjectFault.Altered => "The basis part's bytes do not match its hash.",
+        SplitObjectFault.Mismatch => "The basis parts, joined in order, do not match the retained basis's length and digest.",
+        _ => problem.Message,
+    });
 
     // A referenced basis resolves to the same evidence a copied one carries: every record from the estate's own records, every
     // file of a repository read at an exact commit from that repository's git objects at the commit, through its registered clone
@@ -273,8 +309,9 @@ public sealed partial class EstateService
 
     private static byte[] SerializeReleaseBasis(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, IReadOnlyList<RecordReference> excluded)
     {
-        // This exact serialization is measured by admission and retained by submission. It writes no source objects. Every file
-        // is named by path and hash; which of them the estate retains follows from its repository's revision (ReleaseBasisRetention).
+        // This exact serialization is measured by admission and retained by submission, in one object or, past the object limit,
+        // as a split object (SplitObject). It writes no source objects. Every file is named by path and hash; which of them the estate
+        // retains follows from its repository's revision (ReleaseBasisRetention).
         var repositories = assessment.Basis.Repositories.Select(repository => new
         {
             repository.Identity, repository.Revision, repository.Contract, repository.Complete,
@@ -292,16 +329,19 @@ public sealed partial class EstateService
 
     // Only files read from a working tree are retained as objects; a repository read at an exact commit keeps its bytes in its own
     // git objects, where a reader finds them again (FIX-95). Admission refuses a basis past the bound before anything is written.
+    // The basis itself is one object, or past the object limit its parts and then the root that names them, which the evidence
+    // names (FIX-163): a root is written only once every part it names is held.
     private string RetainReleaseBasis(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, IReadOnlyList<RecordReference> excluded)
     {
-        byte[] bytes = SerializeReleaseBasis(assessment, documents, excluded);
+        SplitObjectPlan basis = SplitObject.Plan(SerializeReleaseBasis(assessment, documents, excluded));
         (PolicyRepository Repository, PolicyFile File)[] retained = [.. ReleaseBasisRetention.Retained(assessment.Basis)];
-        if (bytes.Length > EstateLayout.MaxObjectBytes || retained.Any(r => r.File.Bytes.Length > EstateLayout.MaxObjectBytes))
+        if (basis.Refusal is not null || retained.Any(r => r.File.Bytes.Length > EstateLayout.MaxObjectBytes))
             throw new InvalidOperationException("The release basis exceeds the estate's object limit; reduce the source selection and check again.");
         long retainedBytes = retained.Sum(r => (long)r.File.Bytes.Length);
         if (retained.Length > ReleaseBasisRetention.MaximumFiles || retainedBytes > ReleaseBasisRetention.MaximumBytes)
             throw new InvalidOperationException(ReleaseBasisRetention.Exceeded(retained.Length, retainedBytes));
         foreach ((_, PolicyFile file) in retained) session.Objects.Put(file.Bytes.AsSpan());
-        return session.Objects.Put(bytes);
+        foreach (byte[] stored in basis.Objects) session.Objects.Put(stored);
+        return basis.Reference;
     }
 }

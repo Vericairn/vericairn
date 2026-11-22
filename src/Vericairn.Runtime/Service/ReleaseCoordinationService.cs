@@ -147,13 +147,16 @@ internal sealed partial class ReleaseCoordinationService(
         CheckBuild(model, request, objections);
         CheckSources(model, request, commit, provider, destination, assessment, objections);
         byte[] basis = serializeBasis(assessment, compared, excluded ?? []);
-        if (basis.LongLength > EstateLayout.MaxObjectBytes)
-            objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes; the object limit is {EstateLayout.MaxObjectBytes} bytes."));
+        // From 0.9.4 (FIX-163) a basis past the object limit is retained as a split object, its parts named by a root: what is judged
+        // is each object retention would write, and the evidence names the object it would name.
+        SplitObjectPlan retention = SplitObject.Plan(basis);
+        if (retention.Refusal is not null)
+            objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes. {retention.Refusal}"));
         objections.AddRange(ReleaseBasisRetention.Objections(assessment.Basis));
         if (probe)
         {
             JsonObject proposedBody = body.DeepClone().AsObject();
-            proposedBody["evidence"]!.AsArray().Add(BasisReference(assessment, ContentHash.Sha256(basis)));
+            proposedBody["evidence"]!.AsArray().Add(BasisReference(assessment, retention.Reference));
             AddDocuments(proposedBody, compared);
             objections.AddRange(recordAccess.CheckReleaseRecord(new("operation", request.By, Element(proposedBody), new("product", request.Product, null), previous, now()), model));
         }

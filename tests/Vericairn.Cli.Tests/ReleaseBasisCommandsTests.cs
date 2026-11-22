@@ -75,6 +75,31 @@ public sealed class ReleaseBasisCommandsTests
         Assert.Contains("release-basis.hash-mismatch object:" + f.ProofHash, outcome.Err, StringComparison.Ordinal);
     }
 
+    // FIX-163: a basis retained as a split object reads under its root's hash exactly as its one object does.
+    [Fact]
+    public void ABasisRetainedInPartsReadsAsBeforeAndALostPartIsNamed()
+    {
+        using var f = new ReleaseBasisFixture();
+        (string root, IReadOnlyList<string> parts) = f.StoreInParts(1_000);
+        ReleaseBasisResponse response = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(root));
+
+        CliHarness.Outcome json = Read(f, root, json: true);
+        CliHarness.Outcome human = Read(f, root, json: false);
+
+        Assert.Equal(0, json.Code);
+        Assert.Empty(json.Err);
+        Assert.Equal(JsonSerializer.Serialize(response, ProtocolJson.Options) + "\n", json.Out);
+        Assert.Equal("vericairn.release-basis/2", json.Json.GetProperty("evidence").GetProperty("format").GetString());
+        Assert.Equal(0, human.Code);
+        Assert.Equal(Read(f, f.Hash, json: false).Out.Replace(f.Hash, root, StringComparison.Ordinal), human.Out);
+
+        f.LoseObject(parts[0], corrupted: true);
+        CliHarness.Outcome lost = Read(f, root, json: false);
+        Assert.Equal(2, lost.Code);
+        Assert.Contains($"release-basis.hash-mismatch basis-part:1@{parts[0]}: The basis part's bytes do not match its hash.", lost.Err, StringComparison.Ordinal);
+        Assert.Contains($"Retained release basis {root} cannot resolve.", lost.Err, StringComparison.Ordinal);
+    }
+
     private static CliHarness.Outcome Read(ReleaseBasisFixture fixture, string hash, bool json)
     {
         List<string> arguments = ["--estate", fixture.Records.Estate.Root, "release", "basis", hash];
