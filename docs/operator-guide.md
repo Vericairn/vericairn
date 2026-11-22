@@ -1409,7 +1409,7 @@ restored `bootstrap` runs as `./bootstrap` with no permission repair. Records an
 executable. On Linux and macOS a file is executable when its owner may execute it; Windows keeps no
 such permission, so an export made there records the POSIX `bootstrap` script as executable and every
 other file as not. On Linux and macOS a restore creates an executable member with execute permission,
-filtered by the umask like every file it creates, and an ordinary member as before; on Windows it
+filtered by the umask like every file it creates, and an ordinary member without it, as the next paragraph shows; on Windows it
 applies no mode. The verified inventory alone decides the mode, never the archive entry's attributes.
 A mode other than those two, such as a link's, a directory's or one with setuid, refuses the export
 with `export.entry-mode` before anything is written, so a restore still creates only regular files
@@ -1417,6 +1417,37 @@ within the destination. An export written by an earlier release records no mode 
 always did. A copy restored by an earlier release has lost `bootstrap`'s executable permission: run
 `vericairn --estate <restored copy> estate bootstrap` there, which reports `unchanged` for identical
 bytes and restores the permission ([section 2](#2-create-an-estate)).
+
+An export carries no other permission bit. Its inventory records `100755` for an executable file and `100644` for every other
+file, records and objects included, so who may read or write a file (its owner, its group or every other account) is not in the
+export. On Linux and macOS a restore creates every file new, under the umask of the shell that runs `estate restore`: an ordinary
+file as `0666` less the umask's bits, an executable file as `0777` less them, and each directory it creates, the destination
+included when it does not exist yet, as `0777` less them. The restored permissions therefore follow the destination's umask, not
+the permissions the files had where the export was made, as a Git checkout's do; `umask` prints the shell's value. For example,
+an estate holds `docs/private.json` at `0600` and `docs/public.json` at `0644`. Both are exported as `100644`, and every file
+restores with identical bytes:
+
+| Restored under | `docs/private.json` | `docs/public.json` | `bootstrap` | `docs/` |
+| --- | --- | --- | --- | --- |
+| `umask 022` | `0644`, `-rw-r--r--` | `0644`, `-rw-r--r--` | `0755`, `-rwxr-xr-x` | `0755`, `drwxr-xr-x` |
+| `umask 077` | `0600`, `-rw-------` | `0600`, `-rw-------` | `0700`, `-rwx------` | `0700`, `drwx------` |
+
+Under `umask 022` the private file becomes readable by every account on the machine; under `umask 077` the public file and
+`bootstrap` become usable by their owner alone. An executable file likewise keeps only its executable mode: one at `0700`
+restores as `0755` under `umask 022`.
+
+When exact permissions matter, such as a file that must stay readable by its owner alone or a group's shared access, keep your
+own mode inventory: each file's path and exact mode, taken when the export is made. Keep it apart from the export and protect it
+as you protect the supplemental capture ([The three inventories of a cold
+recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery)): the export's inventory does not establish who produced
+it, and a list carried in or beside the archive would establish no more. To use it, restore under a umask at least as strict as
+the strictest mode it lists, such as `(umask 077 && vericairn estate restore --from my-estate.zip --to <empty directory>)`, so
+that no file is readable more widely than intended in the meantime; verify the restore, then apply the listed modes before
+anything else writes to the copy.
+
+On Windows a restore applies no mode: each file and folder it creates takes the access control its parent folder passes on to new
+items, as any file created there does. An export made on Windows records the POSIX `bootstrap` script as `100755` and every other
+file as `100644`, whatever the files' access control lists allow, so no Windows permission travels in an export either.
 
 FIX-16 judges single records against the proposed estate, including content checks, before publication,
 as grouped records already are. A validation failure publishes nothing; repository records are staged

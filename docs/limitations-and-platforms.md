@@ -510,6 +510,13 @@ while you keep such an export. An export leaves out the machine-local housekeepi
 housekeeping exactly and shows the [classification](large-artifacts.md#the-three-inventories-of-a-cold-recovery) as a
 tested example.
 
+An export carries no permission beyond the executable mode: its inventory records `100755` for an executable file and `100644`
+for every other file. On Linux and macOS a restore creates files and directories under the umask of the shell that runs it, so a
+file kept at `0600` restores as `0644` under `umask 022`; on Windows it applies no mode, and each file takes the access control
+its folder passes on. Exact permissions need a mode inventory of your own, protected apart from the export and applied after the
+restore; [the operator guide](operator-guide.md#10-export-restore-recovery-and-divergence) shows the umask's effect with a worked
+example.
+
 FIX-16 judges single records against the proposed estate, including content checks, before publication,
 as grouped records already are. A validation failure publishes nothing; repository records are staged
 outside the published tree and renamed only after judgment. The gate belongs to one `EstateService`
