@@ -63,8 +63,10 @@ public static partial class NextEligible
         bool person = flow.Role(step.Role)?.Holder == "person";
         foreach (StandingAgents.OccurrenceState occurrence in agent.Due)
         {
-            IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(model, order).Where(a => StandingAgents.KeyOf(a) == occurrence.Occurrence.Key).ToList();
-            var held = assignments.SelectMany(a => model.Chain(a)).ToHashSet(StringComparer.Ordinal);
+            // From 0.9.4 (ID-11) the occurrence's holder is the holder rule's; its history, every assignment of its key, names the asks.
+            IReadOnlyList<RecordEnvelope> history = Routing.Assignments(model, order).Where(a => StandingAgents.KeyOf(a) == occurrence.Occurrence.Key).ToList();
+            IReadOnlyList<RecordEnvelope> assignments = Routing.Holding(model, order).Where(a => StandingAgents.KeyOf(a) == occurrence.Occurrence.Key).ToList();
+            var held = history.SelectMany(a => model.Chain(a)).ToHashSet(StringComparer.Ordinal);
             // The asks that name the occurrence's assignments, and those about the work order that name none, which no principal being
             // available raised for every occurrence alike.
             List<RecordEnvelope> asks = model.Current("ask")
