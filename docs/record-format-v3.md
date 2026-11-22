@@ -838,7 +838,11 @@ line. A record counts only when it counts in the reading that leaves the unread
 records out and in every such reading. One of those readings is the estate as it
 was before the copies were written, so whatever it refused stays refused, by every
 reading, check and write; and since the reading that leaves them out is among them,
-a copy can only take counting away. The records that count for nothing only for
+a copy can only take counting away. That reading is the earlier estate exactly only
+for the files that share an identifier: a new file with an identifier of its own
+that joins an unread line, as one superseding a record of it does, is in every
+reading, and it gains nothing its writer could not gain by writing it without a
+duplicate. The records that count for nothing only for
 this reason are reported once (`record.duplicate-refused`, a warning). Past 16
 readings which records a reading would refuse is not established, and no record
 counts (`record.duplicate-unsettled`, an error) until all but one record carrying
@@ -882,11 +886,12 @@ What holds while records are unread:
   outputs are not established;
 - nothing acts: release submission, every record a device signs on the runtime's
   machine or that is prepared for a device elsewhere to sign, a pairing code, run
-  admission, preparation and launch, and a standing agent's goal step refuse
-  before they act, naming the finding, and so does every MCP tool and daemon route
-  that reaches them. While the estate reports any other error, release submission,
-  run admission and launch and a standing agent's goal step refuse the same way,
-  and a record is judged by the write boundary with the estate as it would be with
+  admission, preparation and launch, a goal's step by any route and a repository
+  operation (a checked push, opening or merge, or its observation) refuse before
+  they act, naming the finding, and so does every MCP tool and daemon route that
+  reaches them. While the estate reports any other error, release submission, run
+  admission and launch, a goal's step and a repository operation refuse the same
+  way, and a record is judged by the write boundary with the estate as it would be with
   the record, as before, and stored only when it clears every error, so that an
   estate can still be repaired by its records. Stopping a run is never refused.
 

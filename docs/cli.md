@@ -1379,9 +1379,9 @@ refused when the charter's requirement is unread, and a closed device's backdate
 (`record.duplicate-refused`; past 16 readings no record counts, `record.duplicate-unsettled`). A goal whose own line is unread is not
 reported missing: `goal due` says its state, failures and open outputs are not established, naming the duplicate, and exits 1. While records are unread `goal step` refuses before it records or dispatches,
 naming the finding, and an agent run's intent is refused for the hold whatever the failures read. `release submit`, every command
-that signs a record or a checkpoint, and `worker run` refuse the same way; while the estate reports any other error, `release
-submit`, `worker run` and a standing agent's `goal step` refuse too, and a record is written only when it clears every error, as
-before.
+that signs a record or a checkpoint, and `worker run` refuse the same way, and so do every goal's `goal step`, whatever its route, and
+`changes push`, `open`, `merge` and `observe`, naming the finding; while the estate reports any other error, `release submit`, `worker
+run`, `goal step` and the `changes` commands refuse too, and a record is written only when it clears every error, as before.
 
 ```sh
 vericairn goal pause --standing --by <sponsor> [--stop-runs]

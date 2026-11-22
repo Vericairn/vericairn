@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Packs.Software;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -15,10 +16,10 @@ namespace Vericairn.Runtime.Tests;
 
 /// <summary>
 /// From 0.9.4 (FIX-159): the one refusal every acting surface calls before it acts. While the estate reports a duplicate identifier, release
-/// submission, every record a device signs on this machine or is prepared for a device to sign, run admission and launch, and a standing agent's
-/// goal step refuse, naming the finding, before any presence prompt, signature, checkpoint, workspace or provider call; while it reports another
-/// error the surfaces with effects outside the records refuse as well, and a record is judged by the write boundary as before. An estate that
-/// reports no error acts as before.
+/// submission, every record a device signs on this machine or is prepared for a device to sign, run admission and launch, a goal's step and a
+/// repository operation refuse, naming the finding, before any presence prompt, signature, checkpoint, workspace or provider call; while it
+/// reports another error the surfaces with effects outside the records refuse as well, and a record is judged by the write boundary as before. An
+/// estate that reports no error acts as before.
 /// </summary>
 [Collection("home")]
 public sealed class ActingRefusalTests
@@ -89,6 +90,24 @@ public sealed class ActingRefusalTests
     }
 
     private static NewRecordRequest DecisionRequest(Fixture f) => new("decision", f.Estate.OperatorId, JsonSerializer.SerializeToElement(JsonNode.Parse(Decision(f.Estate.OperatorId))));
+
+    /// <summary>An unrelated decision and a second record carrying its identifier, written by hand in an earlier month.</summary>
+    private static RecordEnvelope Duplicate(TestEstate estate)
+    {
+        RecordEnvelope original = estate.Add("decision", estate.OperatorId, Decision(estate.OperatorId));
+        return CopyOf(estate, original);
+    }
+
+    private static RecordEnvelope CopyOf(TestEstate estate, RecordEnvelope original)
+    {
+        DateTimeOffset now = estate.Clock;
+        estate.SetClock(EarlierMonth);
+        RecordEnvelope copy = estate.Add("decision", estate.BuilderId, Decision(estate.OperatorId), id: original.Id);
+        estate.SetClock(now);
+        return copy;
+    }
+
+    private static string PathOf(TestEstate estate, RecordEnvelope record) => Path.Combine(estate.Root, record.ExpectedPath.Replace('/', Path.DirectorySeparatorChar));
 
     [Fact]
     public void NoReleaseIsSubmittedAndNoRecordSignedWhileTheEstateLeavesARecordUnread()
@@ -203,5 +222,87 @@ public sealed class ActingRefusalTests
         Assert.Contains("record.duplicate-id", stopped.Message, StringComparison.Ordinal);
         Assert.False(launched);
         Assert.False(File.Exists(run.Report("admission")));
+    }
+
+    [Fact]
+    public void ALaunchRefusedForADuplicateThatLandsAfterAdmissionSaysItsIntentStaysNotStarted()
+    {
+        // The duplicate lands when the worker asks the launcher for its command: after the intent is recorded and before the launch. The
+        // launch is refused, and so is the known failure that would settle the intent, so the message says the intent stays not-started.
+        using var run = new RunEstate();
+        RecordEnvelope original = run.Estate.Add("decision", run.Estate.OperatorId, Decision(run.Estate.OperatorId));
+        RecordEnvelope? copy = null;
+        run.Service.Providers.Register(new HookedLauncher(new ReportedLauncher(new GenericLauncher()), command: () => copy ??= CopyOf(run.Estate, original)));
+
+        RunResponse refused = run.Start("generic", "generic", run.Report("refused"));
+        Assert.NotNull(copy);
+        Assert.False(refused.Ok);
+        Assert.Equal("not-started", refused.Status);
+        Assert.Contains("Refused before launching the run: the estate reports ", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("record.duplicate-id", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("recorded as a known failure", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Its known failure could not be recorded either (", refused.Message, StringComparison.Ordinal);
+        Assert.EndsWith("so its intent stays not-started: nothing ran, and the run stays in flight, charged at its cap, until a revision settles it.", refused.Message, StringComparison.Ordinal);
+        Assert.Equal("not-started", run.Row(refused.Run).Status);
+        Assert.False(File.Exists(run.Report("refused")));
+    }
+
+    [Fact]
+    public void NoGoalStepIsTakenWhileTheEstateLeavesARecordUnread()
+    {
+        // An ordinary goal's step is refused right after the estate is loaded, by whatever route it would take: nothing is assigned, asked,
+        // signed, recorded or started, and no presence notice is raised, naming the finding.
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        RecordEnvelope copy = Duplicate(run.Estate);
+        int signatures = 0;
+        run.Service.BeforeSigningRecord = () => signatures++;
+        EstateModel before = run.Estate.Load();
+        long notices = run.Service.PresencePrompts(new()).Cursor;
+
+        GoalStepResponse refused = GoalStepTests.Step(run, "refused");
+        Assert.False(refused.Ok);
+        Assert.Equal(("none", "refused"), (refused.Outcome, refused.Problem!.Code));
+        Assert.StartsWith($"Refused before taking a step of goal {run.Goal}: the estate reports ", refused.Message, StringComparison.Ordinal);
+        Assert.Contains(refused.Problem.Findings, x => x.Code == "record.duplicate-id" && x.Severity == "error");
+        Assert.Null(refused.Step);
+        Assert.Null(refused.Assignment);
+        Assert.Null(refused.Run);
+        Assert.Equal(0, signatures);
+        EstateModel after = run.Estate.Load();
+        Assert.Equal(before.ById.Count, after.ById.Count);
+        Assert.Equal(before.OfType("operation").Count(), after.OfType("operation").Count());
+        Assert.Empty(run.Service.PresencePrompts(new(notices)).Notices);
+        Assert.False(File.Exists(run.Report("refused")));
+
+        // Removing the copy: the step held by the builder's assignment starts its run, as before.
+        File.Delete(PathOf(run.Estate, copy));
+        GoalStepResponse taken = GoalStepTests.Step(run, "taken");
+        Assert.True(taken.Ok, taken.Message);
+        Assert.Equal(("run", "W-1"), (taken.Outcome, taken.Step));
+        Assert.Equal("observed-success", run.Settled(taken.Run!.Run).Status);
+    }
+
+    [Fact]
+    public void NoRepositoryOperationIsAdmittedWhileTheEstateLeavesARecordUnread()
+    {
+        // A checked push is refused before its intent, scan, push or any provider call, naming the finding.
+        using var f = new ChangesFlowTests.Fixture();
+        RecordEnvelope copy = Duplicate(f.Estate);
+        f.Provider.BeforeRead = () => Assert.Fail("No provider observation is admitted.");
+
+        ChangeResponse refused = f.Service.ChangesPush(f.Push);
+        Assert.False(refused.Ok);
+        Assert.StartsWith("Refused before the repository operation: the estate reports ", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("record.duplicate-id", refused.Message, StringComparison.Ordinal);
+        Assert.Equal((0, 0, 0), (f.Adapter.Preparations, f.Adapter.Pushes, f.Provider.Calls));
+        Assert.Empty(f.Service.Session.Load().OfType("operation"));
+
+        // Removing the copy: the push goes, as before.
+        File.Delete(PathOf(f.Estate, copy));
+        f.Provider.BeforeRead = null;
+        ChangeResponse pushed = f.Service.ChangesPush(f.Push);
+        Assert.True(pushed.Ok, pushed.Message);
+        Assert.Equal(1, f.Adapter.Pushes);
     }
 }

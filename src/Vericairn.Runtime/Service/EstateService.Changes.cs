@@ -770,7 +770,8 @@ public sealed partial class EstateService
     {
         EstateModel model = session.Load();
         if (session.Manifest.RecordFormat < 2) throw new ProviderRefusedException("Repository changes require record format 2 so target failures can raise an operator ask.");
-        if (model.Findings.HasErrors) throw new ProviderRefusedException("The estate has validation errors; no repository operation is admitted.");
+        // From 0.9.4 (FIX-159): no repository operation is admitted while the estate reports an error, and the refusal names the finding.
+        if (ActingRefusal.BeforeActing(model, "the repository operation") is Problem invalid) throw new ProviderRefusedException(invalid.Message);
         DateTimeOffset at = DateTimeOffset.UtcNow;
         // Grants are read only from records their authors may write (EstateModel.Authority).
         bool granted = model.Authority.GrantLines.Select(model.Authority.Current).OfType<RecordEnvelope>().Any(a => a.AtTime <= at && !EstateModel.Expired(a, at)
