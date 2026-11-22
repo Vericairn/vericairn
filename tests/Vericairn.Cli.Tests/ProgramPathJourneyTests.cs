@@ -21,10 +21,11 @@ public sealed partial class ProgramPathJourneyTests
         TestPrerequisites.RequireGit();
         string directory = CliHarness.TempDirectory("program-path-doctor");
         string markers = CliHarness.TempDirectory("program-path-markers");
+        string home = QuietHome();
         try
         {
             string marker = StandIn(directory, markers);
-            (int _, string output, string error) = Cli(directory, null, "doctor", "--json");
+            (int _, string output, string error) = Cli(directory, null, home, "doctor", "--json");
             Assert.False(File.Exists(marker), "The git in the current directory ran.");
             using JsonDocument report = JsonDocument.Parse(output);
             JsonElement git = report.RootElement.GetProperty("git");
@@ -34,7 +35,7 @@ public sealed partial class ProgramPathJourneyTests
         }
         finally
         {
-            CliHarness.Delete(directory, markers);
+            CliHarness.Delete(directory, markers, home);
         }
     }
 
@@ -51,6 +52,7 @@ public sealed partial class ProgramPathJourneyTests
         string root = CliHarness.TempDirectory("program-path-estate");
         string elsewhere = CliHarness.TempDirectory("program-path-elsewhere");
         string markers = CliHarness.TempDirectory("program-path-markers");
+        string home = QuietHome();
         try
         {
             CliHarness.Ok("--estate", root, "estate", "init", "--name", "Example", "--slug", "example",
@@ -62,8 +64,8 @@ public sealed partial class ProgramPathJourneyTests
             string inEntry = StandIn(Directory.CreateDirectory(Path.Combine(root, "bin")).FullName, markers);
             string path = ":.:bin:" + Environment.GetEnvironmentVariable("PATH");
             (int code, string output, string error) = fromRoot
-                ? Cli(root, path, "estate", "check")
-                : Cli(elsewhere, path, "--estate", root, "estate", "check");
+                ? Cli(root, path, home, "estate", "check")
+                : Cli(elsewhere, path, home, "--estate", root, "estate", "check");
             Assert.False(File.Exists(atRoot), "The git in the estate's root ran.");
             Assert.False(File.Exists(inEntry), "The git of a relative PATH entry ran.");
             Assert.True(code == 0, output + error);
@@ -71,7 +73,7 @@ public sealed partial class ProgramPathJourneyTests
         }
         finally
         {
-            CliHarness.Delete(root, elsewhere, markers);
+            CliHarness.Delete(root, elsewhere, markers, home);
         }
     }
 
@@ -141,7 +143,16 @@ public sealed partial class ProgramPathJourneyTests
         return marker;
     }
 
-    private static (int Code, string Output, string Error) Cli(string workingDirectory, string? path, params string[] arguments)
+    // A Vericairn home of the command line's own with its release check off, so the commands these tests start make no request.
+    private static string QuietHome()
+    {
+        string home = CliHarness.TempDirectory("program-path-home");
+        (int code, string output, string error) = Cli(home, null, home, "updates", "configure", "--enabled", "false");
+        Assert.True(code == 0, output + error);
+        return home;
+    }
+
+    private static (int Code, string Output, string Error) Cli(string workingDirectory, string? path, string home, params string[] arguments)
     {
         var info = new ProcessStartInfo(CliHarness.BuiltExecutable)
         {
@@ -149,6 +160,7 @@ public sealed partial class ProgramPathJourneyTests
         };
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
         if (path is not null) info.Environment["PATH"] = path;
+        info.Environment["VERICAIRN_HOME"] = home;
         using Process process = Process.Start(info)!;
         Task<string> output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
