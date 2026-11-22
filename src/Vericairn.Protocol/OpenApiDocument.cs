@@ -111,6 +111,10 @@ public static class OpenApiDocument
         ("GET", "/v1/events/{key}"),
         ("POST", "/v1/events/select"),
         ("POST", "/v1/presence/prompts"),
+        ("POST", "/v1/presence"),
+        ("POST", "/v1/presence/{lease}/heartbeat"),
+        ("DELETE", "/v1/presence/{lease}"),
+        ("GET", "/v1/presence"),
         ("GET", "/v1/operator/actions"),
         ("GET", "/v1/operator/requests"),
         ("POST", "/v1/operator/requests"),
@@ -303,6 +307,14 @@ public static class OpenApiDocument
                     new JsonObject { ["name"] = "key", ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "An event's key, sha256:<64 hex digits>." },
                     new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = EventPrincipalDescription });
 
+            if (path is "/v1/presence/{lease}/heartbeat" or "/v1/presence/{lease}")
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "lease", ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" },
+                    ["description"] = "The lease identity registration returned, which only its holder knows." });
+
+            if (method == "GET" && path == "/v1/presence")
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" },
+                    ["description"] = "One principal's sessions; every principal's when omitted." });
+
             if (method == "GET" && path == "/v1/operator/act")
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "by", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The operator whose ready items are listed, by id; the root operator when omitted." });
 
@@ -349,7 +361,7 @@ public static class OpenApiDocument
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false,
                     ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The requesting principal; defaults to the device principal or local operator." });
 
-            if (method == "POST" && path != "/v1/shutdown")
+            if (method == "POST" && path is not ("/v1/shutdown" or "/v1/presence/{lease}/heartbeat"))
             {
                 operation["requestBody"] = new JsonObject
                 {
@@ -456,6 +468,19 @@ public static class OpenApiDocument
             responses["429"] = new JsonObject { ["description"] = "A device already holds four streams and long polls, or the runtime its limit (Problem). The local socket's reads wait their turn instead." };
             responses["501"] = new JsonObject { ["description"] = "The runtime keeps no event journal (Problem with code no-journal): a follower follows nothing here." };
             responses["503"] = new JsonObject { ["description"] = "The journal cannot be read now, or the runtime is stopping (Problem with code unavailable): read again later." };
+        }
+        else if (path is "/v1/presence" or "/v1/presence/{lease}/heartbeat" or "/v1/presence/{lease}")
+        {
+            bool listing = method == "GET";
+            responses["200"] = new JsonObject
+            {
+                ["description"] = listing
+                    ? "PresenceResponse: the sessions this runtime registered, live and lapsed, each with the assignments it holds and the asks its lapse raised; never a lease identity. A local observation, never a record."
+                    : "PresenceLeaseResponse: the lease after the operation, with its expiry and heartbeat interval (a third of the lease), or a problem: not-found for a lease the requester does not hold (lapsed and dropped, released or never made), which the transport answers by registering again; refused for a person, whom no connection tracks, or bounds outside their limits; unavailable when the runtime keeps no presence or holds its limit of sessions.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(listing ? "PresenceResponse" : "PresenceLeaseResponse") } },
+            };
+            responses.Remove("404");
+            responses["401"] = new JsonObject { ["description"] = "As every request on its profile; and a device naming a principal other than its own (Problem with code denied)." };
         }
         else if (path == "/v1/presence/prompts")
         {
@@ -980,6 +1005,11 @@ public static class OpenApiDocument
             ["EventSelectRequest"] = EventSelectRequestSchema(),
             ["EventSelectResponse"] = EventSelectResponseSchema(),
             ["PresencePromptsRequest"] = PresencePromptsRequestSchema(),
+            ["PresenceRegisterRequest"] = Object(("principal", "string"), ("label", "string"), ("roles", "array"), ("capacity", "integer"), ("leaseSeconds", "integer")),
+            ["PresenceLease"] = Object(("lease", "string"), ("session", "string"), ("principal", "string"), ("label", "string"), ("roles", "array"), ("capacity", "integer"), ("leaseSeconds", "integer"), ("heartbeatSeconds", "integer"), ("registeredAt", "string"), ("expiresAt", "string")),
+            ["PresenceLeaseResponse"] = Object(("lease", "object"), ("message", "string"), ("problem", "object"), ("ok", "boolean")),
+            ["PresenceEntry"] = Object(("session", "string"), ("principal", "string"), ("label", "string"), ("roles", "array"), ("capacity", "integer"), ("state", "string"), ("registeredAt", "string"), ("renewedAt", "string"), ("expiresAt", "string"), ("holds", "array"), ("asks", "array")),
+            ["PresenceResponse"] = Object(("sessions", "array"), ("asOf", "string"), ("problem", "object")),
             ["PresencePromptsResponse"] = PresencePromptsResponseSchema(),
             ["PresenceNotice"] = PresenceNoticeSchema(),
             ["PresenceSignature"] = Required(Object(("type", "string"), ("key", "string"), ("purpose", "string")), "type", "key", "purpose"),
@@ -1011,7 +1041,7 @@ public static class OpenApiDocument
             ["ResourceResponse"] = Object(("content", "string"), ("mimeType", "string"), ("hash", "string"), ("sourceHash", "string"), ("problem", "object")),
             ["PromptUseResponse"] = Object(("ok", "boolean"), ("text", "string"), ("written", "object"), ("run", "object"), ("problem", "object")),
             ["CommunicationDelegateRequest"] = Object(("by", "string"), ("recipient", "string"), ("grantee", "string"), ("scope", "string"), ("assignment", "string"), ("status", "string"), ("expected", "string"), ("expires", "string")),
-            ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string"), ("template", "object")),
+            ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string"), ("template", "object"), ("availability", "object"), ("quietHours", "object"), ("availabilityNow", "object")),
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["RecordPrepareResponse"] = Object(("ok", "boolean"), ("prepared", "object"), ("problem", "object")),
@@ -1113,7 +1143,7 @@ public static class OpenApiDocument
             ["GoalStepReason"] = Object(("step", "string"), ("reason", "string")),
             ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("occurrence", "string"), ("now", "string"))),
             ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object"), ("decision", "object"), ("notices", "array")),
-            ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string")),
+            ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string"), ("basis", "string")),
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
             ["ChangesPushRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
@@ -1251,6 +1281,7 @@ public static class OpenApiDocument
         "/v1/resources/read" => "ResourceRequest",
         "/v1/events/select" => "EventSelectRequest",
         "/v1/presence/prompts" => "PresencePromptsRequest",
+        "/v1/presence" => "PresenceRegisterRequest",
         "/v1/context/prepare" => "ContextRequest",
         "/v1/context/brief" => "BriefContextRequest",
         "/v1/search" => "SearchRequest",
@@ -1475,6 +1506,10 @@ public static class OpenApiDocument
         ("POST", "/v1/runs/{id}/settle") => "Settle an exited run from the worker's retained local observation, by whoever may stop it. Records observed usage and releases the branch. In-flight and already-settled runs are refused; missing, unreadable or insufficient observations remain unresolved with a reason.",
         ("POST", "/v1/releases/check") => "Evaluate every submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and requires no presence. A check grants no submission authority.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
+        ("POST", "/v1/presence") => "From 0.9.4 (ID-11): register an agent or service principal's session and return its lease (90 seconds by default, 30 to 900) and heartbeat interval, a third of the lease. Its transport renews it, never its model; a person is never tracked by a connection. A device registers only its own principal. Runtime state, never a record.",
+        ("POST", "/v1/presence/{lease}/heartbeat") => "From 0.9.4 (ID-11): renew a lease, by the principal and device that registered it only. A lapsed lease the runtime still keeps is restored, and the asks its lapse raised are withdrawn.",
+        ("DELETE", "/v1/presence/{lease}") => "From 0.9.4 (ID-11): release a lease when its session ends, by its holder only; a release is no lapse.",
+        ("GET", "/v1/presence") => "From 0.9.4 (ID-11): the sessions this runtime registered, live and lapsed, beside liveness and progress claims as a separate fact; never a lease identity. Reading writes nothing.",
         ("POST", "/v1/presence/prompts") => "From 0.9.3 (FIX-124): read the presence notices of operator actions on this machine after a position, waiting up to 25 seconds for one: each action's announcement of every record it will sign, \"Signature k of n\" with what each prompt signs, any signatures it adds and how many it signed. From 0.9.4 an action's presence session announces its terms before the check, then its nonce, each signature under it, any renewal and its end. Local socket only; writes nothing. Not exposed through MCP.",
         ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",
         ("GET", "/v1/operator/unfinished") => "Read this clone's unfinished operator action from its local checkpoint and its records: the signed record's id, type and subject, branch, head, pull request and stage, the recorded merge and latest target-run observation, whether its records alone can finish it, and what finishing it needs. Reading signs, observes and writes nothing. Not exposed through MCP.",

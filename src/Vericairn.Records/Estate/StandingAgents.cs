@@ -378,6 +378,9 @@ internal static partial class StandingAgents
         IReadOnlyList<Trigger> triggers = Triggers(model, current);
         List<RecordEnvelope> assignments = order is null ? [] : Routing.Assignments(model, order).Where(a => KeyOf(a) is not null).ToList();
         Dictionary<string, List<RecordEnvelope>> byKey = assignments.GroupBy(a => KeyOf(a)!, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+        // From 0.9.4 (ID-11) an occurrence's holder is the holder rule's, among its assignments, and its history every assignment of its key.
+        Dictionary<string, RecordEnvelope> holderOf = order is null ? [] : Routing.Holding(model, order).Where(a => KeyOf(a) is not null)
+            .GroupBy(a => KeyOf(a)!, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
         List<AgentRuns.Run> runs = AgentRuns.All(model).Where(r => r.Goal is not null && model.Chain(current).Contains(r.Goal)).ToList();
         HashSet<string> own = OwnAuthors(model, current, assignments, step);
 
@@ -454,7 +457,7 @@ internal static partial class StandingAgents
         var states = new List<OccurrenceState>();
         foreach (Occurrence occurrence in occurrences)
         {
-            states.Add(StateOf(model, ledger, occurrence, byKey.GetValueOrDefault(occurrence.Key), runs, state, reason, period, inFlight, awaiting, awaitingCap, open, openCap));
+            states.Add(StateOf(model, ledger, occurrence, byKey.GetValueOrDefault(occurrence.Key), holderOf.GetValueOrDefault(occurrence.Key), runs, state, reason, period, inFlight, awaiting, awaitingCap, open, openCap));
         }
 
         return new Agent(current, status, state, reason, asOf, flow, step, unavailable, order, until, TJson.Text(plan, "runsOn"), period, inFlight, ledger.Concurrency, failures, limit, failure, triggers, next, states)
@@ -620,10 +623,13 @@ internal static partial class StandingAgents
         return new Occurrence(Key(goal, trigger, ItemKey("request", item)!), trigger.Key, "request", trigger.Revision, item, at, [], $"a request by {by} at {RecordParser.FormatTimestamp(at)}");
     }
 
-    /// <summary>An occurrence's state from the assignment that holds its key, its runs and its result, then the agent's gates.</summary>
-    private static OccurrenceState StateOf(EstateModel model, AgentRuns.Ledger ledger, Occurrence occurrence, List<RecordEnvelope>? holders, List<AgentRuns.Run> runs, string agent, string agentReason, Period? period, int inFlight, int awaiting, int awaitingCap, int open, int openCap)
+    /// <summary>
+    /// An occurrence's state from the assignment that holds its key (from 0.9.4, ID-11, by the holder rule; before, the latest of them),
+    /// its runs on any of its assignments and its result, then the agent's gates.
+    /// </summary>
+    private static OccurrenceState StateOf(EstateModel model, AgentRuns.Ledger ledger, Occurrence occurrence, List<RecordEnvelope>? holders, RecordEnvelope? holding, List<AgentRuns.Run> runs, string agent, string agentReason, Period? period, int inFlight, int awaiting, int awaitingCap, int open, int openCap)
     {
-        RecordEnvelope? holder = holders is { Count: > 0 } ? holders[^1] : null;
+        RecordEnvelope? holder = holders is { Count: > 0 } ? holding ?? holders[^1] : null;
         if (holder is not null)
         {
             IReadOnlyList<string> chain = holders!.SelectMany(model.Chain).ToList();

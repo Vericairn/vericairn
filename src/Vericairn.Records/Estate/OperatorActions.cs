@@ -358,7 +358,8 @@ public static class OperatorActions
             string? reserved = Routing.ReservedAction(Routing.RoleOf(order));
             string state = states.GetValueOrDefault(order.Id) ?? "planned";
             if (reserved is null || state is "accepted" or "retired") continue;
-            IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(model, order);
+            // From 0.9.4 (ID-11) the assignment that holds the work order is the holder rule's, not the latest by time.
+            IReadOnlyList<RecordEnvelope> assignments = Routing.Holding(model, order);
             RecordEnvelope? assignment = assignments.Count == 0 ? null : assignments[^1];
             string? by = assignment is null ? null : EstateModel.BodyString(assignment, "contributor");
             if (assignment is null || by is null || !model.HasRole(by, Roles.Operator)) continue;

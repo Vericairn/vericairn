@@ -32,6 +32,11 @@ public static class ApiRoutes
             PresencePromptsResponse response = await service.PresencePromptsAsync(request, context.RequestAborted).ConfigureAwait(false);
             return Results.Json(response, ProtocolJson.Options, statusCode: response.Problem?.Code == "invalid" ? StatusCodes.Status400BadRequest : StatusCodes.Status200OK);
         });
+        // From 0.9.4 (ID-11): presence leases, renewed by agent sessions' transports; runtime state, never a record.
+        app.MapPost($"{v}/presence", (PresenceRegisterRequest request) => Results.Json(service.PresenceRegister(request), ProtocolJson.Options));
+        app.MapPost($"{v}/presence/{{lease}}/heartbeat", (string lease) => Results.Json(service.PresenceHeartbeat(lease), ProtocolJson.Options));
+        app.MapDelete($"{v}/presence/{{lease}}", (string lease) => Results.Json(service.PresenceRelease(lease), ProtocolJson.Options));
+        app.MapGet($"{v}/presence", (string? principal) => Results.Json(service.Presence(principal), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
         app.MapPost($"{v}/estate-policies/hash", (PolicyHashRequest request) =>

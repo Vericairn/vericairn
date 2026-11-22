@@ -269,6 +269,28 @@ recorded observation as evidence; the orientation file's agent matrix shows each
 version, and every harness stays a non-claim until then. This build's tests exercise both paths with the
 in-process clients and the bridge, not with any agent harness.
 
+## Presence (0.9.4)
+
+From 0.9.4 (`ID-11`) `vericairn mcp serve --as <principal>` registers its session's presence with the
+daemon when it acts for an agent or a service principal, and renews the lease while the server runs: the
+server is the session's transport, so a long turn of the agent's model keeps the lease, and a process that
+dies, a machine that sleeps or a dropped connection loses it. When standard input ends the server releases
+the lease, and a release is no lapse. `vericairn mcp serve --connection <connection>` keeps the paired
+device's principal present at the remote runtime the same way. A server the worker starts for a run
+(`--run`) registers nothing, since the worker watches its runs. A session acting for a person, whom no
+connection tracks, or served by the embedded runtime, which keeps no presence, registers nothing and says
+nothing; any other refusal is told on standard error, and the session is served either way.
+
+While its lease is live the session holds the assignments its principal records attempts, completed
+phases or progress claims on through `work_attempt` and `work_progress`, and those routing gives it
+through the session route. If the lease lapses while the session holds unsettled work, the daemon raises
+a `presence` event and attention, a local observation, and after the goal's `reassignAfterSeconds` (600
+by default) asks the goal's accountable principal whether to hand the step to another principal of its
+role; a heartbeat restores the lease and the ask is withdrawn. After a hand-over, `work_attempt`,
+`work_progress` and `work_result` on the displaced assignment are refused, whatever time they state: only
+the step's current holder's work counts. Subscriptions and `events_read` carry `presence` events like any
+other kind. See [events and presence](events-and-presence.md#presence-agent-sessions-and-their-leases-094).
+
 ## Tools
 
 `context_prepare` computes the same context package as

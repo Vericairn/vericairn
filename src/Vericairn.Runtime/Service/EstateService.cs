@@ -2881,6 +2881,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return (null, communicationRefusal);
         }
 
+        // From 0.9.4 (ID-11): only the step's current holder acts, whatever time its record states, and only a person hands a held step on.
+        if ((DisplacedWriteRefusal(draft, current) ?? AssignmentTakesNothingRefusal(draft, current)) is string displacedRefusal)
+        {
+            return (null, displacedRefusal);
+        }
+
         if (BlockedTermRefusal(draft, current) is string blockedRefusal) return (null, blockedRefusal);
         // A history checkpoint follows every head of this copy and lists exactly what no head witnesses (design/signed-history.md § 5).
         if (draft.Type == "history-checkpoint" && global::Vericairn.Records.History.SignedHistory.AuthoringRefusal(current, draft.Body) is string historyRefusal)

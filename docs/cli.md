@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 43, November 21, 2026. Add availability and quiet hours to `communication set` (`--availability`, `--away-until`, `--away-from`, `--quiet-hours`) and their state to `communication show`, `--basis` on `work takeover`, which hands a lapsed step to another principal of its role, the session route of `goal step`, presence leases kept by `mcp serve`, and `presence` events in `events watch`, in the development build.
+
 Revision 42, November 21, 2026. `estate upgrade` says whether the previous release can read the estate after it, refuses a one-way upgrade without `--one-way`, records a restore point and states the way back, in the development build.
 
 Revision 41, November 21, 2026. Add `worker drill`, the timed stop drill, which stops a scratch run and records the time from the stop to containment and to the run's last write as a `stop-drill` verification, in the development build.
@@ -674,6 +676,9 @@ vericairn events watch --subject <goal id> --after <cursor>
 
 A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
+
+From 0.9.4 the daemon raises `presence` events: a session holding work lapsed, the runtime asked about it, or the lapse
+is over (see [events and presence](events-and-presence.md)). `due` stays reserved for reminders, which are planned.
 
 ## Network MCP: `runtime configure --mcp` and `mcp serve --connection` (0.9.2)
 
@@ -1451,6 +1456,33 @@ what is raised afterwards. While the agent's open outputs, its possibilities sti
 not closed, reach `open` (ten when omitted), its occurrences defer and no run of it starts. `goal due`, `status` and `progress` show
 its open outputs; an occurrence's brief states its output caps and names the agent's earlier open and declined possibilities among
 its sources.
+
+## Presence, availability and hand-overs (0.9.4)
+
+`vericairn mcp serve --as <principal>` registers its session's presence with the daemon and renews the lease while it
+runs (`ID-11`); see [the MCP server](mcp.md#presence-094). A person declares availability and quiet hours on their own
+communication setting (`GOAL-11`), in an estate at record format 3:
+
+| Option of `communication set` | Meaning |
+|---|---|
+| `--availability available\|away\|inherit` | Declare yourself available, or away; `inherit` removes the declaration. |
+| `--away-until <time>` | With `away`: when you are back, a UTC time such as `2026-12-02T09:00:00Z`. Required for `away`. |
+| `--away-from <time>` | With `away`: when the absence begins; at once when omitted. |
+| `--quiet-hours <file>\|-\|inherit` | A JSON file of quiet hours: `zone`, `windows` (each `days`, `start`, `end` as `HH:MM`) and optional `breakthrough` categories; `-` reads standard input; `inherit` removes them. |
+
+A change keeps the values it does not name. `communication show --recipient <person>` adds the availability and quiet
+hours in force and whether quiet hours hold notifications now. Both belong to a person's own scope only.
+
+```sh
+vericairn communication set --as <person> --availability away --away-until 2026-12-02T09:00:00Z
+vericairn communication set --as <person> --quiet-hours quiet.json
+```
+
+`goal next` and `goal step` pass over an away person, and give a step to an agent's live session when no launcher here
+starts its harness and the step's exposure reads nothing: `goal step` then records the assignment with `routedWith:
+session` and reports the outcome `session`. `work takeover <assignment> --by <person> --contributor <principal>
+--basis <ask>` hands a step an agent holds to any principal the roster names for its role, citing the lapse ask;
+handing it to anyone but a person requires `--basis`. See [events and presence](events-and-presence.md#routing-and-reassignment-094).
 
 ## `vericairn worker drill` (0.9.4)
 

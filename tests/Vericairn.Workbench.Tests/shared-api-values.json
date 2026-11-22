@@ -356,7 +356,8 @@
   ],
   "Vericairn.Records.Types.AssignmentType.RoutedWith": [
     "run",
-    "ask"
+    "ask",
+    "session"
   ],
   "Vericairn.Records.Types.Caps.UnitNames": [
     "wallMinutes",
