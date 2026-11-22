@@ -104,15 +104,15 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Read-only display of the effective settings in a developer build; no real-device or communication qualification claimed ([Remote](remote.md)) |
 
-This document describes 0.9.3: 0.8.0's estate policies and duties, readable companions,
-checked changes, operator actions and cancellable client operations, with 0.8.2's, 0.8.3's, 0.8.4's, 0.9.0's, 0.9.1's, 0.9.2's and 0.9.3's corrections and
-additions described with their owning flows below; 0.8.4's templates, saved prompts, operator close and operator requests, 0.9.0's [Remote](remote.md), [community build guides](community-build-guides.md) and [efficiency adapter](efficiency-adapter.md), and 0.9.2's [flows](templates.md#flows-092) and [large private artifacts](large-artifacts.md), and 0.9.3's [enrollment troubleshooting](enrollment-troubleshooting.md), have their own guides. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
+This document describes 0.9.4: 0.8.0's estate policies and duties, readable companions,
+checked changes, operator actions and cancellable client operations, with the corrections and additions of every release since 0.8.2
+described with their owning flows below; 0.8.4's templates, saved prompts, operator close and operator requests, 0.9.0's [Remote](remote.md), [community build guides](community-build-guides.md) and [efficiency adapter](efficiency-adapter.md), the [flows](templates.md#flows-092) and [large private artifacts](large-artifacts.md) added in 0.9.2, the [enrollment troubleshooting](enrollment-troubleshooting.md) added in 0.9.3, and 0.9.4's [events and presence](events-and-presence.md), [presence session qualification](presence-session-qualification.md), [automated observers](observers.md) and [progress targets](progress-targets.md), have their own guides. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
 repositories, UPDATE-01's newer-release notice, FIX-20's command-audit corrections,
 FIX-21's concurrent TLS handshake correction and FIX-22's current required attention.
 The [API guide](api-v1.md#transports) describes certificate preparation and handshake diagnostics.
 Earlier guides retain the behavior of their own releases.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12, and the withdrawn 0.8.1 candidate's ship in 0.8.2 with FIX-53 and FIX-54; earlier sets remain frozen.
-0.9.3 retains the existing hand-over, watching, communication, measured context and explicit qualified
+0.9.4 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts, and 0.7.2's corrections to identifier ordering, release gates and dispatch, notes and
 attention, export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
 All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
@@ -381,7 +381,7 @@ archive is documentation, and a draft is complete when its checksum file names e
 0.9.4 (FIX-140), with or without declared artifacts, a draft is complete only when it also attaches every file
 its checksum file names: a reader can download each listed file from the release itself.
 
-Before submitting, 0.9.3 offers the whole admission gate without an effect:
+Before submitting, 0.9.4 offers the whole admission gate without an effect:
 
 ```sh
 vericairn release submit --check --product <id> --version X --by <id> --commit <exact-commit> --expected <product-hash>
@@ -512,9 +512,9 @@ The "Milestone and release acceptances" section includes each operator acceptanc
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
 including a builder's acceptance of its own ordinary work, stay out of that section.
 
-To render the 0.9.3 notes from the estate's records, use
-`vericairn docs notes --from 0.9.2 --to 0.9.3 --out docs/releases/0.9.3`.
-The exclusive start follows 0.9.2's recorded end; the command writes its exact window to the manifest.
+To render the 0.9.4 notes from the estate's records, use
+`vericairn docs notes --from 0.9.3 --to 0.9.4 --out docs/releases/0.9.4`.
+The exclusive start follows 0.9.3's recorded end; the command writes its exact window to the manifest.
 The earlier set keeps its approved Security section on F-01 and its original notes window.
 
 The product's CLI test suite checks every file of each frozen set against

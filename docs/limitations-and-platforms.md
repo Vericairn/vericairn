@@ -1,42 +1,48 @@
-# Limitations and platforms, Vericairn 0.9.3
+# Limitations and platforms, Vericairn 0.9.4
 
 The estate's release record, written when the candidate is observed and superseded when publication is observed, is the authority for its commit, workflow run, artifact hashes and publication. This set describes implementation and test boundaries. Platform and live-session qualifications require their own recorded observations; documentation and stand-in tests do not establish them.
 
-0.9.3 is the release after 0.9.2. It corrects what the estates running 0.9.2 reported and readies the release
-flow for the next release. Export and restore keep each file's executable mode (FIX-112), a timestamp in the
-wrong form is refused with the form required (FIX-114), `doctor --json` returns one documented result and every
-command that takes `--json` writes JSON (FIX-119), document reviews, pins and checks say what they declare, need
-and found (FIX-113, FIX-120 and FIX-122), an operation keeps its intent and target in every revision (FIX-109),
-a goal is recorded impossible only after its evaluator's verdict (FIX-116), and work proposed for a goal waits
-for its sponsor's approval (FIX-117). Every operator action announces and counts its presence prompts (FIX-124),
-release steps sign only what they store (FIX-130), and the work-order key check, key closings and admissions are
-judged in near-linear time (FIX-107, FIX-121 and FIX-131). A change merges through a required merge queue with
-its outcome recorded (CODE-71), an operator action's push and merge trail reaches the estate (FIX-126), and a
-work order whose current result is accepted reads as accepted (FIX-128), with FIX-125 and FIX-127, so a release
-can run on its declared flow. `vericairn estate first-authority` names an estate's first authority (CODE-72),
-guides cover enrollment's presence prompts and a cold recovery's inventories (DOCS-33 and DOCS-32), an estate's
-root can hold its owner's agent instruction files (CODE-70), and main's push run skips a commit the merge queue
-already tested (CI-07), with FIX-118 and FIX-133. Every distributable is still built with SDK 10.0.404 and
-embeds the .NET and ASP.NET Core 10.0.15 runtimes. 0.9.3 reads a key only in the form Vericairn makes
-(FIX-132), as its release notes' Security section describes.
-0.9.2 added declared flows: a goal can run a template of kind `flow` whose steps are routed to their roles one
-step per command, with each step's position, hand-offs and reviews derived from the records, stops where a
-person holds the role, and the software pack's release and upgrade flows (PROC-05, PROC-06, PROC-07 and
-PROC-10). It added the event journal clients follow through the API stream, MCP notifications and `events_read`
-(WATCH-05 and MCP-05), signed history with checkpoints, closings and authority read as it stood at a record's
-time (ID-05, ID-06, OPS-07, FIX-108 and DOCS-15), MCP's Streamable HTTP transport (MCP-03), keyword search for
-an agent's context (CONTEXT-02), security reports that hold a release until they are triaged (OPS-11), the
-runtime step of an upgrade (OPS-05), the documentation-set tooling (DOCS-11), the guide to large private
-artifacts (DOCS-29) and the merge queue (CI-06), with FIX-85, FIX-89, FIX-93 to FIX-101, FIX-103 and FIX-123.
-It moved every distributable to SDK 10.0.404 and the .NET and ASP.NET Core 10.0.15 runtimes (FIX-115), and it
-hardened how admissions and the root of trust are read, per-user state, held-term matching, request
-authentication, and authority and policy records (FIX-102, FIX-104, FIX-105, FIX-106, FIX-110 and FIX-111), as
-its release notes' Security section describes. Earlier published releases, and the withdrawn candidates 0.5.0,
-0.5.1, 0.6.0, 0.7.0 and 0.8.1, are recorded in their own frozen sets.
-0.9.3 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
-upgrades from 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1 or 0.9.2 without a format step. The format-3 upgrade
+0.9.4 is the release after 0.9.3. It readies an estate for work that goes on between the commands a person runs. A
+standing agent carries each occurrence its triggers make due, within its caps, and every output it raises lands as a
+possibility, question or publication request that another principal disposes of; the duty carrier, researcher and bug
+hunter ship as built-in standing roles (GOAL-07, GOAL-08 and PROC-08, with FIX-155). A flow's step takes its timing and a
+decision among named paths (PROC-18 and PROC-19). Concurrent assignments are compared by their permitted paths, and a
+concurrent-paths policy holds an unresolved overlap (CODE-73 and POLICY-08). The daemon keeps presence leases for agent
+sessions, with a person's availability and quiet hours and a hand-over when a session lapses (ID-11, GOAL-11 and
+DOCS-25); the dispatcher's scope and role closings are recorded and checked (ID-07 and ID-14); and a run's record shows
+what it could reach, with public retrieval for research runs (CODE-82 and RUN-04). An operator action may ask one
+presence check for a list of signatures it announces first (ID-15, ID-16, CODE-80 and DOCS-37), the operator answers
+asks with their recommendations and signs every ready item in one reviewed act (OPS-16 and OPS-24), optional requests
+become possible todos (OPS-22), an observer that stops reporting becomes attention (OPS-20), a timed stop drill measures
+stopping a run (OPS-21), progress is kept at a target such as a GitHub discussion (WATCH-06), and an upgrade has a
+restore point and a stated way back (FIX-145). Status and the other reads judge the estate once per command (FIX-136,
+FIX-148 and FIX-152), progress counts a release's placed work (FIX-149), an acceptance of a work order's current revision
+accepts its current result (FIX-141), export and restore carry the owner's agent instruction files, which the estate
+check reads for hooks, automatic approvals and secret-like values (FIX-135 and FIX-139), the held guides take their
+changes as fragments (OPS-17), each documentation set carries `llms.txt` and `llms-full.txt` (DOCS-38), and MCP tools
+carry behavior annotations (MCP-07), with CODE-81, FIX-134, FIX-137, FIX-138, FIX-140, FIX-142 to FIX-144, FIX-146,
+FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. Every
+distributable is still built with SDK 10.0.404 and embeds the .NET and ASP.NET Core 10.0.15 runtimes.
+In 0.9.3 Vericairn corrected what the estates reported in 0.9.2 and readied the release flow for the next release.
+Export and restore kept each file's executable mode (FIX-112), a timestamp in the wrong form was refused with the form
+required (FIX-114), `doctor --json` returned one documented result and every command that takes `--json` wrote JSON
+(FIX-119), document reviews, pins and checks said what they declare, need and found (FIX-113, FIX-120 and FIX-122), an
+operation kept its intent and target in every revision (FIX-109), a goal was recorded impossible only after its
+evaluator's verdict (FIX-116), and work proposed for a goal waited for its sponsor's approval (FIX-117). Every operator
+action announced and counted its presence prompts (FIX-124), release steps signed only what they store (FIX-130), and
+the work-order key check, key closings and admissions were judged in near-linear time (FIX-107, FIX-121 and FIX-131). A
+change merged through a required merge queue with its outcome recorded (CODE-71), an operator action's push and merge
+trail reached the estate (FIX-126), and a work order whose current result is accepted read as accepted (FIX-128), with
+FIX-125 and FIX-127, so a release could run on its declared flow. `vericairn estate first-authority` named an estate's
+first authority (CODE-72), guides covered enrollment's presence prompts and a cold recovery's inventories (DOCS-33 and
+DOCS-32), an estate's root could hold its owner's agent instruction files (CODE-70), and main's push run skipped a
+commit the merge queue already tested (CI-07), with FIX-118 and FIX-133. It read a key only in the form Vericairn makes
+(FIX-132), as its release notes' Security section describes. Earlier published releases, and the withdrawn candidates
+0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1, are recorded in their own frozen sets.
+0.9.4 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
+upgrades from 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1, 0.9.2 or 0.9.3 without a format step. The format-3 upgrade
 from 0.7.3 preserves historical records and requires explicit adoption afterwards. The features and corrections
-of 0.8.0 through 0.9.2 remain. Earlier sets stay frozen.
+of 0.8.0 through 0.9.3 remain. Earlier sets stay frozen.
 
 Before 0.9.2, the shipped builds, which run without ICU, compared held keys, held phrases and blocked terms with case folded but
 compatibility forms unchanged, so text in full-width, ligature or other compatibility forms of a held key or a blocked term was
@@ -113,11 +119,11 @@ The release workflow requires a Release build and the suite on three runners bef
 
 A passing release run supplies this automation evidence; the release record states which platforms were qualified. `linux-arm64`, `osx-x64` and `win-arm64` are cross-published by the workflow and are not executed by that matrix. The Intel Mac helper is compiled for its architecture, but that job executes only the arm64 helper. Providing an archive does not qualify its architecture.
 
-The archives are self-contained .NET applications and require no separate .NET runtime, but still depend on the operating system's native libraries. 0.9.3's are built with SDK 10.0.404 and embed the .NET and ASP.NET Core 10.0.15 runtimes, as 0.9.2's were (FIX-115). Workbench needs a desktop; on Linux its Avalonia desktop uses X11 or XWayland. Secret-service custody needs a running service and `secret-tool`. The macOS helper is compiled for macOS 13.0 and later and probes enclave availability at runtime. A machine that cannot use it falls back to other available custody. The release carries no iOS or Android client: [Remote](remote.md#building-from-source), the phone companion, is a developer build made from `src/Vericairn.Mobile.slnx`, outside this solution. 0.9.3's phone heads are built with workload sets 10.0.401 (iOS) and 10.0.404 (Android); they ship in no release artifact.
+The archives are self-contained .NET applications and require no separate .NET runtime, but still depend on the operating system's native libraries. 0.9.4's are built with SDK 10.0.404 and embed the .NET and ASP.NET Core 10.0.15 runtimes, unchanged since 0.9.2 (FIX-115). Workbench needs a desktop; on Linux its Avalonia desktop uses X11 or XWayland. Secret-service custody needs a running service and `secret-tool`. The macOS helper is compiled for macOS 13.0 and later and probes enclave availability at runtime. A machine that cannot use it falls back to other available custody. The release carries no iOS or Android client: [Remote](remote.md#building-from-source), the phone companion, is a developer build made from `src/Vericairn.Mobile.slnx`, outside this solution. 0.9.4's phone heads are built with workload sets 10.0.401 (iOS) and 10.0.404 (Android); they ship in no release artifact.
 
 The workflow packages unsigned developer builds. There is no application-signing or notarization step, application bundle or installer. Check downloaded bytes against `SHA256SUMS` and the estate's recorded hashes; see `install.md` for quarantine and SmartScreen behavior. These checks establish the downloaded bytes, not a platform signature.
 
-The NuGet packages are framework-dependent: the `dotnet-vc` tool needs the .NET and ASP.NET Core 10 runtimes supplied by the .NET 10 SDK. It installs no Workbench and no macOS Secure Enclave helper. Use the macOS archive for the bundled helper. The worker's agent-side MCP command still resolves `vericairn`, so a NuGet-only worker installation is not qualified by package smoke tests. `Vericairn` is a dependency-only SDK front door; it does not bring an embedded runtime or daemon. The release workflow builds packages into the draft; NuGet Trusted Publishing happens only after the operator publishes that release. The 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1, 0.9.2 and 0.9.3 packages are published. Name-reservation versions are not product releases.
+The NuGet packages are framework-dependent: the `dotnet-vc` tool needs the .NET and ASP.NET Core 10 runtimes supplied by the .NET 10 SDK. It installs no Workbench and no macOS Secure Enclave helper. Use the macOS archive for the bundled helper. The worker's agent-side MCP command still resolves `vericairn`, so a NuGet-only worker installation is not qualified by package smoke tests. `Vericairn` is a dependency-only SDK front door; it does not bring an embedded runtime or daemon. The release workflow builds packages into the draft; NuGet Trusted Publishing happens only after the operator publishes that release. 0.9.4 package availability requires operator publication and a successful package workflow; the packages of 0.8.0 and of each later published release up to 0.9.3 are published. Name-reservation versions are not product releases.
 
 Nuget.org receives exactly the package assets the operator publishes, verified against that release's own `SHA256SUMS`. The workflow checks completeness and hashes but does not compare with the estate's accepted candidate or require its acceptance record; a published prerelease also triggers it. Publishing the exact accepted draft supplies that binding. Changing both assets and their checksum file would pass this comparison. Upload never rebuilds packages. Duplicate versions are skipped, not replaced or independently verified against nuget.org's existing bytes.
 
@@ -169,7 +175,7 @@ nuget.org availability or account-holder qualification claim.
 
 ## Goals, routing and asks
 
-0.9.3 retains goal proposal and lifecycle, record predicates, independent evaluations, acceptance, roster routing, asks and one-step dispatch, and retains record-derived hand-over and resume. Record format 3 arrived in 0.8.0; 0.5.2 was the first published format-2 release. The upgrade preserves original bytes and supplies a refusal boundary for older readers. The progress, communication, execution and harness-qualification additions shipped in 0.7.1 remain; the scope-read and attempt-missing signal values need readers that understand 0.7.2. A shared format number does not establish that an older writer understands them.
+0.9.4 retains goal proposal and lifecycle, record predicates, independent evaluations, acceptance, roster routing, asks and one-step dispatch, and retains record-derived hand-over and resume. Record format 3 arrived in 0.8.0; 0.5.2 was the first published format-2 release. The upgrade preserves original bytes and supplies a refusal boundary for older readers. The progress, communication, execution and harness-qualification additions shipped in 0.7.1 remain; the scope-read and attempt-missing signal values need readers that understand 0.7.2. A shared format number does not establish that an older writer understands them.
 
 - The evaluator must have authored no step; the accepter must be neither a step's author nor the evaluator. Activation and spending need the accountable person's authority. Goal acceptance is not an automatic consequence of a passing predicate or an exited harness.
 - `goal next` depends on this machine's launchers, keys and custody. Predicates involving covered files or unavailable living-document contributions can also differ by machine. Record-only predicates and the eligibility relations derive from the records.
@@ -559,7 +565,7 @@ candidate helper exercises it (docs/presence-session-qualification.md, point 3).
 
 **The same-user limit.** Nothing binds a presence key to the helper's code. Any process running as your operating-system user can load
 the key's enclave-wrapped blob in its own process, write its own dialog text (a fingerprint copied from the notices included) and, after
-one approval of that dialog, sign anything, without limit. This was true of 0.9.3's one check per signature and stays true with
+one approval of that dialog, sign anything, without limit. This was true of one check per signature up to 0.9.3 and stays true with
 sessions; the only control is refusing a dialog you did not expect. Binding presence keys to the release helper's code identity is
 future work, which needs keys in the data protection keychain under an access group only Vericairn's team can use and a rotation of
 every presence device.
@@ -632,7 +638,7 @@ FIX-12's credential-pattern exemption is limited to validated device `body.publi
 
 ## Workbench, MCP and living documents
 
-Workbench's Goals workspace, asks and progress are read views. It has no goal activation/acceptance, worker launch/stop or pairing form. Headless journeys cover the work loop, releases, Documents, Goals and progress. They do not establish native desktop, screen-reader or interactive-presence qualification; consult the estate's qualification records for the observed cells. There is no claim here of a new native qualification for 0.9.3. Projects are not a record type. Record comparison is a line difference of canonical JSON, and docking is panel placement with keyboard alternatives. The probe has no direct open option for every workspace and can run before a newly started daemon has supplied a page; start the daemon first.
+Workbench's Goals workspace, asks and progress are read views. It has no goal activation/acceptance, worker launch/stop or pairing form. Headless journeys cover the work loop, releases, Documents, Goals and progress. They do not establish native desktop, screen-reader or interactive-presence qualification; consult the estate's qualification records for the observed cells. There is no claim here of a new native qualification for 0.9.4. Projects are not a record type. Record comparison is a line difference of canonical JSON, and docking is panel placement with keyboard alternatives. The probe has no direct open option for every workspace and can run before a newly started daemon has supplied a page; start the daemon first.
 
 FIX-13 reduces Workbench's first-screen work by sharing status and progress observations, avoiding a
 duplicate refresh after daemon startup and reusing parsing and hashes for unchanged original bytes.
@@ -829,7 +835,7 @@ the estate manifest, allowlisted local metadata and eleven software reader kinds
 Coverage describes implemented contracts; a missing implementation, stale snapshot,
 unsupported audience or incomplete selection remains unavailable. Only the authorized
 Internal projection is supported through the public companion read operations.
-Members and Public projections, and mobile and public-site caches of companions, are outside 0.9.3.
+Members and Public projections, and mobile and public-site caches of companions, are outside 0.9.4.
 Local inspectors cannot be invoked through companion API or MCP routes. Metadata
 reads grant neither source access nor authority to act on what they render.
 
@@ -874,7 +880,7 @@ nothing. Synchronous SDK methods preserve their earlier timeouts and exception b
 Workbench marks interrupted retained views as cached and retains uncertain-effect
 notices. Companion access loss or an unavailable refresh clears protected content.
 Headless behavior does not establish native screen-reader, keyboard or desktop
-qualification for 0.9.3. Policies have CLI/API/SDK/MCP inspection, and [Remote](remote.md#policy-conditions-and-recurring-duties) shows policy
+qualification for 0.9.4. Policies have CLI/API/SDK/MCP inspection, and [Remote](remote.md#policy-conditions-and-recurring-duties) shows policy
 and recurring-duty conditions; a separate Workbench
 policy editor or inspector is not supplied by this release.
 
@@ -897,12 +903,17 @@ implementations outside Vericairn need supply none;
 0.9.1 adds `RunPrepare` and its asynchronous counterpart to `IEstateApi`, both with default
 implementations, so implementations outside Vericairn need supply none;
 [API compatibility for 0.9.1](api-compatibility-0.9.1.md) lists these changes.
-0.9.2 adds `IEstateApi` members for unfinished operator actions, events, security reports, history checkpoints,
+In 0.9.2 `IEstateApi` gained members for unfinished operator actions, events, security reports, history checkpoints,
 search and search-selected context, and `ISourceAdapter` members, all with default implementations, so
 implementations outside Vericairn need supply none; [API compatibility for 0.9.2](api-compatibility-0.9.2.md) lists these changes.
-0.9.3 adds `IEstateApi` members for presence prompts and the estate's first authority, members of `IDeviceKeyStore`,
-`IRecordCommitAdapter` and `IPullRequestProvider`, all with default implementations, so implementations outside Vericairn
-need supply none; [API compatibility for 0.9.3](api-compatibility-0.9.3.md) lists these changes.
+In 0.9.3 `IEstateApi` gained members for presence prompts and the estate's first authority, and `IDeviceKeyStore`,
+`IRecordCommitAdapter` and `IPullRequestProvider` gained members, all with default implementations, so implementations outside
+Vericairn need supply none; [API compatibility for 0.9.3](api-compatibility-0.9.3.md) lists these changes.
+0.9.4 adds `IEstateApi` members for presence leases, standing agents and their outputs, a decision step's decision, concurrent
+assignments, the operator's answers and reviewed acts, automated observers and the timed stop drill, members of
+`IDeviceKeyStore`, `ISourceAdapter`, `IWorkspaceProvider` and `IAgentLauncher`, and the progress-target adapter contract, all
+with default implementations where they extend an existing interface, so implementations outside Vericairn need supply none;
+[API compatibility for 0.9.4](api-compatibility-0.9.4.md) lists these changes.
 
 ## Checked changes and operator actions
 
@@ -979,8 +990,8 @@ The generated CLI reference includes every visible option at its declaring comma
 
 The GitHub Releases provider runs through the runtime user's `gh` login. It identifies a dispatched run by listing recent runs and can report uncertainty when none appears within thirty seconds. It is the only shipped release provider. Verifications preserve a command's exit, duration and output; they do not parse test reports. Third-party notices and license texts remain hand-maintained beside the generated SBOM and checked against lock files. The 0.6.0 review found its SBOM named the component 0.0.0, included packages absent from archives and omitted the embedded .NET and ASP.NET Core runtimes. From 0.8.2 (CI-03) the SBOM is generated from the self-contained distributables' locked platform restores and checked to name every package they ship; from 0.8.4 the publish evidence adds the .NET and ASP.NET Core runtime and apphost packs each distributable embeds, which lock files do not hold, and the check requires every one of them; from 0.9.1 (FIX-90) its metadata component names Vericairn and the release's version, where earlier bills named 0.0.0, and the check refuses another name or version. This set establishes no complete inventory from it beyond those checks. Use the notices for bundled components and the release review's artifact observations. Live stores for clones no longer present are not listed or removed by a command.
 
-The notes command renders the estate's records with `--from 0.9.2 --to 0.9.3`.
-Its exclusive start follows 0.9.2's recorded end; `docs notes` writes the exact window to the manifest.
+The notes command renders the estate's records with `--from 0.9.3 --to 0.9.4`.
+Its exclusive start follows 0.9.3's recorded end; `docs notes` writes the exact window to the manifest.
 FIX-13 gives accepted work one entry per work order, naming the latest accepted current result in the
 window by recorded time and then identifier, with its acceptance. Earlier results and attempts remain
 available through `work observe`; later unaccepted results remain separate. Superseded results are omitted.
@@ -1064,14 +1075,15 @@ The workflow is configured to produce:
 
 | Artifact | Contents |
 |---|---|
-| `vericairn-0.9.3-<platform>.tar.gz` (`.zip` on Windows), six platforms | Self-contained CLI, LICENSE, NOTICE, notices and `licenses/`; macOS includes `bin/vericairn-enclave` |
-| `vericairn-workbench-0.9.3-<platform>.tar.gz` (`.zip` on Windows), six platforms | Workbench with the CLI, macOS helper where applicable, and license material |
-| `vericairn-0.9.3-sbom.cdx.json` | CycloneDX bill of materials of the packages and of every platform graph of the self-contained distributables |
-| `vericairn-0.9.3-THIRD-PARTY-NOTICES.md` | Third-party notices |
-| `vericairn-0.9.3-docs.zip` | This documentation set, including the estate-derived release notes and their recorded window |
-| `dotnet-vc.0.9.3.nupkg` | Portable .NET tool, invoked as `dotnet vc`; no Workbench or macOS helper |
-| `Vericairn.0.9.3.nupkg` | Dependency-only SDK front door |
-| `Vericairn.*.0.9.3.nupkg` and corresponding `.snupkg` where produced | Community libraries and portable symbols, published from these exact verified files after release publication |
+| `vericairn-0.9.4-<platform>.tar.gz` (`.zip` on Windows), six platforms | Self-contained CLI, LICENSE, NOTICE, notices and `licenses/`; macOS includes `bin/vericairn-enclave` |
+| `vericairn-workbench-0.9.4-<platform>.tar.gz` (`.zip` on Windows), six platforms | Workbench with the CLI, macOS helper where applicable, and license material |
+| `vericairn-0.9.4-sbom.cdx.json` | CycloneDX bill of materials of the packages and of every platform graph of the self-contained distributables |
+| `vericairn-0.9.4-THIRD-PARTY-NOTICES.md` | Third-party notices |
+| `vericairn-0.9.4-docs.zip` | This documentation set, including the estate-derived release notes and their recorded window |
+| `vericairn-0.9.4-companions.zip` | The serialized build's companion archive, also retained by CI, attached from 0.9.4 (FIX-140) |
+| `dotnet-vc.0.9.4.nupkg` | Portable .NET tool, invoked as `dotnet vc`; no Workbench or macOS helper |
+| `Vericairn.0.9.4.nupkg` | Dependency-only SDK front door |
+| `Vericairn.*.0.9.4.nupkg` and corresponding `.snupkg` where produced | Community libraries and portable symbols, published from these exact verified files after release publication |
 | `SHA256SUMS` | Artifact SHA-256 values |
 
 Hashes, sizes, observations and acceptance belong to the release record and its evidence. The structural documentation check verifies the set's completeness; release review and acceptance remain separate steps.

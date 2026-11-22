@@ -1,42 +1,48 @@
-# The operator's guide, Vericairn 0.9.3
+# The operator's guide, Vericairn 0.9.4
 
-This guide walks the journeys an operator and the agents working for them perform with the 0.9.3 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption; sections 30 and 31 cover durable operator requests and the support bundle.
+This guide walks the journeys an operator and the agents working for them perform with the 0.9.4 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption; sections 30 and 31 cover durable operator requests and the support bundle.
 
-0.9.3 is the release after 0.9.2. It corrects what the estates running 0.9.2 reported and readies the release
-flow for the next release. Export and restore keep each file's executable mode (FIX-112), a timestamp in the
-wrong form is refused with the form required (FIX-114), `doctor --json` returns one documented result and every
-command that takes `--json` writes JSON (FIX-119), document reviews, pins and checks say what they declare, need
-and found (FIX-113, FIX-120 and FIX-122), an operation keeps its intent and target in every revision (FIX-109),
-a goal is recorded impossible only after its evaluator's verdict (FIX-116), and work proposed for a goal waits
-for its sponsor's approval (FIX-117). Every operator action announces and counts its presence prompts (FIX-124),
-release steps sign only what they store (FIX-130), and the work-order key check, key closings and admissions are
-judged in near-linear time (FIX-107, FIX-121 and FIX-131). A change merges through a required merge queue with
-its outcome recorded (CODE-71), an operator action's push and merge trail reaches the estate (FIX-126), and a
-work order whose current result is accepted reads as accepted (FIX-128), with FIX-125 and FIX-127, so a release
-can run on its declared flow. `vericairn estate first-authority` names an estate's first authority (CODE-72),
-guides cover enrollment's presence prompts and a cold recovery's inventories (DOCS-33 and DOCS-32), an estate's
-root can hold its owner's agent instruction files (CODE-70), and main's push run skips a commit the merge queue
-already tested (CI-07), with FIX-118 and FIX-133. Every distributable is still built with SDK 10.0.404 and
-embeds the .NET and ASP.NET Core 10.0.15 runtimes. 0.9.3 reads a key only in the form Vericairn makes
-(FIX-132), as its release notes' Security section describes.
-0.9.2 added declared flows: a goal can run a template of kind `flow` whose steps are routed to their roles one
-step per command, with each step's position, hand-offs and reviews derived from the records, stops where a
-person holds the role, and the software pack's release and upgrade flows (PROC-05, PROC-06, PROC-07 and
-PROC-10). It added the event journal clients follow through the API stream, MCP notifications and `events_read`
-(WATCH-05 and MCP-05), signed history with checkpoints, closings and authority read as it stood at a record's
-time (ID-05, ID-06, OPS-07, FIX-108 and DOCS-15), MCP's Streamable HTTP transport (MCP-03), keyword search for
-an agent's context (CONTEXT-02), security reports that hold a release until they are triaged (OPS-11), the
-runtime step of an upgrade (OPS-05), the documentation-set tooling (DOCS-11), the guide to large private
-artifacts (DOCS-29) and the merge queue (CI-06), with FIX-85, FIX-89, FIX-93 to FIX-101, FIX-103 and FIX-123.
-It moved every distributable to SDK 10.0.404 and the .NET and ASP.NET Core 10.0.15 runtimes (FIX-115), and it
-hardened how admissions and the root of trust are read, per-user state, held-term matching, request
-authentication, and authority and policy records (FIX-102, FIX-104, FIX-105, FIX-106, FIX-110 and FIX-111), as
-its release notes' Security section describes. Earlier published releases, and the withdrawn candidates 0.5.0,
-0.5.1, 0.6.0, 0.7.0 and 0.8.1, are recorded in their own frozen sets.
-0.9.3 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
-upgrades from 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1 or 0.9.2 without a format step. The format-3 upgrade
+0.9.4 is the release after 0.9.3. It readies an estate for work that goes on between the commands a person runs. A
+standing agent carries each occurrence its triggers make due, within its caps, and every output it raises lands as a
+possibility, question or publication request that another principal disposes of; the duty carrier, researcher and bug
+hunter ship as built-in standing roles (GOAL-07, GOAL-08 and PROC-08, with FIX-155). A flow's step takes its timing and a
+decision among named paths (PROC-18 and PROC-19). Concurrent assignments are compared by their permitted paths, and a
+concurrent-paths policy holds an unresolved overlap (CODE-73 and POLICY-08). The daemon keeps presence leases for agent
+sessions, with a person's availability and quiet hours and a hand-over when a session lapses (ID-11, GOAL-11 and
+DOCS-25); the dispatcher's scope and role closings are recorded and checked (ID-07 and ID-14); and a run's record shows
+what it could reach, with public retrieval for research runs (CODE-82 and RUN-04). An operator action may ask one
+presence check for a list of signatures it announces first (ID-15, ID-16, CODE-80 and DOCS-37), the operator answers
+asks with their recommendations and signs every ready item in one reviewed act (OPS-16 and OPS-24), optional requests
+become possible todos (OPS-22), an observer that stops reporting becomes attention (OPS-20), a timed stop drill measures
+stopping a run (OPS-21), progress is kept at a target such as a GitHub discussion (WATCH-06), and an upgrade has a
+restore point and a stated way back (FIX-145). Status and the other reads judge the estate once per command (FIX-136,
+FIX-148 and FIX-152), progress counts a release's placed work (FIX-149), an acceptance of a work order's current revision
+accepts its current result (FIX-141), export and restore carry the owner's agent instruction files, which the estate
+check reads for hooks, automatic approvals and secret-like values (FIX-135 and FIX-139), the held guides take their
+changes as fragments (OPS-17), each documentation set carries `llms.txt` and `llms-full.txt` (DOCS-38), and MCP tools
+carry behavior annotations (MCP-07), with CODE-81, FIX-134, FIX-137, FIX-138, FIX-140, FIX-142 to FIX-144, FIX-146,
+FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. Every
+distributable is still built with SDK 10.0.404 and embeds the .NET and ASP.NET Core 10.0.15 runtimes.
+In 0.9.3 Vericairn corrected what the estates reported in 0.9.2 and readied the release flow for the next release.
+Export and restore kept each file's executable mode (FIX-112), a timestamp in the wrong form was refused with the form
+required (FIX-114), `doctor --json` returned one documented result and every command that takes `--json` wrote JSON
+(FIX-119), document reviews, pins and checks said what they declare, need and found (FIX-113, FIX-120 and FIX-122), an
+operation kept its intent and target in every revision (FIX-109), a goal was recorded impossible only after its
+evaluator's verdict (FIX-116), and work proposed for a goal waited for its sponsor's approval (FIX-117). Every operator
+action announced and counted its presence prompts (FIX-124), release steps signed only what they store (FIX-130), and
+the work-order key check, key closings and admissions were judged in near-linear time (FIX-107, FIX-121 and FIX-131). A
+change merged through a required merge queue with its outcome recorded (CODE-71), an operator action's push and merge
+trail reached the estate (FIX-126), and a work order whose current result is accepted read as accepted (FIX-128), with
+FIX-125 and FIX-127, so a release could run on its declared flow. `vericairn estate first-authority` named an estate's
+first authority (CODE-72), guides covered enrollment's presence prompts and a cold recovery's inventories (DOCS-33 and
+DOCS-32), an estate's root could hold its owner's agent instruction files (CODE-70), and main's push run skipped a
+commit the merge queue already tested (CI-07), with FIX-118 and FIX-133. It read a key only in the form Vericairn makes
+(FIX-132), as its release notes' Security section describes. Earlier published releases, and the withdrawn candidates
+0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1, are recorded in their own frozen sets.
+0.9.4 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
+upgrades from 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1, 0.9.2 or 0.9.3 without a format step. The format-3 upgrade
 from 0.7.3 preserves historical records and requires explicit adoption afterwards. The features and corrections
-of 0.8.0 through 0.9.2 remain. Earlier sets stay frozen.
+of 0.8.0 through 0.9.3 remain. Earlier sets stay frozen.
 
 NuGet availability follows publication and a successful package workflow. The remaining limits are in
 `limitations-and-platforms.md`.
@@ -82,7 +88,7 @@ without a recorded commit requires this option; omitting it refuses before any m
 are written. The default comes from the build's version metadata, so the estate's Git history does
 not choose the pin.
 
-`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.9.3 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
+`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.9.4 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
 
 Expected observation: `status` shows the estate's name, the operator principal, no work orders yet, and `estate check` reports `2 records: 0 errors, 0 warnings`. The manifest is not a third record.
 
@@ -175,7 +181,7 @@ vericairn devices admit <device id> --by <operator id> --note "The operator's wo
 
 That admission, signed by the device it admits, is the estate's first authority: the root operator's first device admitting itself. It is accepted once in an estate's history. At record format 2 or 3 every other admission, and every revocation, counts only when signed by an already admitted device, whatever the charter's signature policy, or when an operator's signed migration to format 2 anchored an existing unsigned admission (section 9), or, from 0.9.2, when an anchoring history checkpoint lists it ([history checkpoints](#history-checkpoints-092)). A refused admission explains which admitted device or recovery key could sign it.
 
-From 0.9.2, every admission and revocation is judged from that first authority outward: one counts only when the device that signed it was admitted, at that time, through admissions that count in turn, only when its signature verifies, and only when its author may admit then: you, another operator, or a person you granted `administer`, read from your principal records and grants as they stood at the admission's time, as every other rule reads them, and not through a grant a closing closed before it. A person you granted `administer` must be described as a person by a principal record that is signed or that a checkpoint anchored. A record written later restores no earlier admission. The judgment is the same whatever order the records are read in and whichever was written first; of two devices admitted at the same remove from the first authority that revoke each other as of before either revocation, neither revocation counts. A revocation that would unseat what its own signature or its author's authority rests on, such as one stated as of a time before the admission of the device that signs it, counts for nothing and revokes nothing. An admission that does not count admits and revokes nothing and is reported with its finding, such as `signature.unadmitted`, `signature.invalid`, `admission.author` or `admission.unseats-support`. The root operator is read from the charter your estate's manifest names, which is the charter `estate init` wrote, and the first authority from the admission the manifest names as `firstAuthority`: the runtime writes it when your first device admits itself, and an upgrade to 0.9.2 or later writes it for an estate whose manifest names none. A second charter that supersedes nothing, or a second device admitting itself for you, takes the place of neither, whatever date it states; one that comes with history checkpoints of its own leaves the copy unsettled, with no record counting, until it is removed. When the manifest names no first authority and the estate holds more than one such self-admission, the estate check reports `manifest.first-authority`, listing each with its device, and no device's admission counts until you name yours in the manifest. From 0.9.3 you name it with `vericairn estate first-authority` rather than by editing the manifest ([the command](cli.md#vericairn-estate-first-authority-093)): without options it lists every self-admission with its evidence, the device's custody and presence, whether that device stands revoked, how many devices rest on it and how many records it signed; with `--device` or `--admission` and `--check` it shows the change to `estate/manifest.json` and a plan hash; with `--expect-plan <plan> --by <operator id>` it writes it. It names only one of your own devices whose self-admission's signature verifies under that device's key, never an agent's, another person's or a recovery device, nor a self-admission whose signature does not verify, which anyone able to add a file can write; a revoked device stays nameable, since your first device is the root revoked or not. It lists and names nothing while `estate/manifest.json` does not read cleanly. It refuses when the estate's first authority already works, named by the manifest or settled by adopted history, when the copy reads unsettled, and when history checkpoints witness a self-admission first when it is read as the first authority, since such history could have come into the copy with it: compare the copy with a head you know first (`vericairn estate check --expect <checkpoint>`). Nothing signs the manifest, so the command is yours at the runtime's machine, as the hand edit was; no device-signed request reaches it. Naming it makes your devices' admissions count again, but every other self-admission still reads `signature.self-admission`, an error, which the command lists and never removes, so `vericairn estate upgrade`, which refuses any estate with errors, proceeds only once you have also removed those records from the copy. The manifest is a plain file that nothing signs: until your estate adopts history checkpoints, someone who can edit both your records and `estate/manifest.json` in a copy can point it at another charter or first authority. Adopting checkpoints narrows that: from adoption on, a manifest naming another charter or first authority than the ones your checkpoints witnessed leaves the copy unsettled (`history.root-ambiguous`, `history.manifest-root`) instead of moving either, whether it names another charter, another first authority or both. This is one more reason to adopt checkpoints soon after upgrading to 0.9.2.
+From 0.9.2, every admission and revocation is judged from that first authority outward: one counts only when the device that signed it was admitted, at that time, through admissions that count in turn, only when its signature verifies, and only when its author may admit then: you, another operator, or a person you granted `administer`, read from your principal records and grants as they stood at the admission's time, as every other rule reads them, and not through a grant a closing closed before it. A person you granted `administer` must be described as a person by a principal record that is signed or that a checkpoint anchored. A record written later restores no earlier admission. The judgment is the same whatever order the records are read in and whichever was written first; of two devices admitted at the same remove from the first authority that revoke each other as of before either revocation, neither revocation counts. A revocation that would unseat what its own signature or its author's authority rests on, such as one stated as of a time before the admission of the device that signs it, counts for nothing and revokes nothing. An admission that does not count admits and revokes nothing and is reported with its finding, such as `signature.unadmitted`, `signature.invalid`, `admission.author` or `admission.unseats-support`. The root operator is read from the charter your estate's manifest names, which is the charter `estate init` wrote, and the first authority from the admission the manifest names as `firstAuthority`: the runtime writes it when your first device admits itself, and an upgrade to 0.9.2 or later writes it for an estate whose manifest names none. A second charter that supersedes nothing, or a second device admitting itself for you, takes the place of neither, whatever date it states; one that comes with history checkpoints of its own leaves the copy unsettled, with no record counting, until it is removed. When the manifest names no first authority and the estate holds more than one such self-admission, the estate check reports `manifest.first-authority`, listing each with its device, and no device's admission counts until you name yours in the manifest. From 0.9.3 you name it with `vericairn estate first-authority` rather than by editing the manifest ([the command](cli.md#vericairn-estate-first-authority-093)): without options it lists every self-admission with its evidence, the device's custody and presence, whether that device stands revoked, how many devices rest on it and how many records it signed; with `--device` or `--admission` and `--check` it shows the change to `estate/manifest.json` and a plan hash; with `--expect-plan <plan> --by <operator id>` it writes it. It names only one of your own devices whose self-admission's signature verifies under that device's key, never an agent's, another person's or a recovery device, nor a self-admission whose signature does not verify, which anyone able to add a file can write; a revoked device stays nameable, since your first device is the root revoked or not. It lists and names nothing while `estate/manifest.json` does not read cleanly. It refuses when the estate's first authority already works, named by the manifest or settled by adopted history, when the copy reads unsettled, and when history checkpoints witness a self-admission first when it is read as the first authority, since such history could have come into the copy with it: compare the copy with a head you know first (`vericairn estate check --expect <checkpoint>`). Nothing signs the manifest, so the command is yours at the runtime's machine, as the hand edit was; no device-signed request reaches it. Naming it makes your devices' admissions count again, but every other self-admission still reads `signature.self-admission`, an error, which the command lists and never removes, so `vericairn estate upgrade`, which refuses any estate with errors, proceeds only once you have also removed those records from the copy. The manifest is a plain file that nothing signs: until your estate adopts history checkpoints, someone who can edit both your records and `estate/manifest.json` in a copy can point it at another charter or first authority. Adopting checkpoints narrows that: from adoption on, a manifest naming another charter or first authority than the ones your checkpoints witnessed leaves the copy unsettled (`history.root-ambiguous`, `history.manifest-root`) instead of moving either, whether it names another charter, another first authority or both. This is one more reason to adopt checkpoints soon after upgrading to 0.9.2 or later.
 
 From 0.9.4 (FIX-134), the first authority counts only when its own signature verifies: read as the first authority, its content
 has the hash its envelope declares, and every signature on it verifies as the estate verifies every signature, under its device's
@@ -248,8 +254,8 @@ Rules the tool enforces here: only the root operator or a principal granted `adm
 
 Up to 0.9.3 a device that needs its owner's presence asks once for every record it signs. From 0.9.4 an operator action may instead
 ask one check for a list of its signatures it announces first, a presence session ([presence sessions](#presence-sessions-094)), where
-the release build's helper and your macOS version allow it; everything below holds for each signature that keeps its own check. From
-0.9.3 (FIX-124), an operator action, a release step or a single write that signs with such a device announces every record it will
+the release build's helper and your macOS version allow it; everything below holds for each signature that keeps its own check.
+From 0.9.3 (FIX-124), an operator action, a release step or a single write that signs with such a device announces every record it will
 sign before the first prompt, each with its type, the key you know it by and what signing it authorizes. At each prompt the command
 line prints `Signature k of n: <what it signs>` on standard error, from 0.9.4 followed by the record's short hash, the first twelve
 hexadecimal digits of its content hash; Workbench writes the same line to its status and activity log. From 0.9.4 every such line,
@@ -279,7 +285,7 @@ signed the intent is still the submitting principal's admitted device whose key 
 whose key is no longer held here, dispatches no build, and neither does another device of the principal that signed nothing in the
 submission; the intent then stays unsettled for you to reconcile, and nothing more is asked.
 
-| Step (release flow step) | One check per signature (0.9.3, and every setting, build and macOS version without sessions) | With presence sessions (0.9.4) |
+| Step (release flow step) | One check per signature (up to 0.9.3, and every setting, build and macOS version without sessions) | With presence sessions (0.9.4) |
 | --- | --- | --- |
 | `release submit` (`submit`) | 3 in an estate that has adopted history checkpoints: the release gate's history checkpoint, the intent and the dispatch receipt. One fewer before adoption (no checkpoint). An admission that changes before dispatch replaces the receipt with the intent's cancellation, 3 in all, or records the reserved intent again first, 4 in all; when no device here may sign the cancellation, it asks for nothing more. | 1 for the list of the checkpoint and the release build's records, bound to the provider, the release's repository, the version, the product, the commit and the workflow its dispatch names. A submission whose ref is no commit, or whose workflow is outside letters, digits and `._/-` (at most 100 characters), keeps one check per signature. |
 | `release observe` of a finished build (`candidate`) | 2: the operation's revision, then the candidate. The revision alone when the build failed or a candidate is already recorded. An intent without a receipt is recorded as uncertain first (1 more, 3 in all), and is announced with the rest; while the build still runs, the observation signs that alone. | 1 where it signs two or more; a single signature keeps its own check. |
@@ -420,7 +426,7 @@ with the charter's. A setting that cannot be read, a Vericairn home that cannot 
 neither `per-signature` nor `per-action` each count as per-signature, and `devices presence` refuses to write over a settings file
 that cannot be read, saying which file it is: repair it, or remove it to return every device on the machine to the default and set
 each again. Neither setting is enforced by the hardware: a process of your
-operating-system user can change the machine's setting. Under per-signature presence everything is as 0.9.3 left it, with the helper's
+operating-system user can change the machine's setting. Under per-signature presence everything is as it was up to 0.9.3, with the helper's
 label at each prompt.
 
 **When the helper refuses.** If the helper refuses a record the runtime's own checks admitted, nothing is signed, the session ends, the
@@ -962,15 +968,15 @@ publishes a release automatically.
 From 0.9.2 a release can run as a goal on the software pack's release flow, which orders the steps below and checks the traps of
 earlier releases before each ([the software release and upgrade flows](#the-software-release-and-upgrade-flows-092)).
 
-A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.3 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
+A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.4 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
 
 A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. From 0.9.4 (FIX-140) a draft is complete only when it also attaches every file its checksum file names; once its run has succeeded, a draft that leaves one out is observed as a known failure naming each missing file, no candidate is recorded, and `release submit --check` names those files until the retry gives a reconciliation. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.
 
 ```sh
 vericairn release providers
-vericairn release submit --check --product <product id> --version 0.9.3 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
-vericairn release submit --product <product id> --version 0.9.3 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
-vericairn release observe --version 0.9.3 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
+vericairn release submit --check --product <product id> --version 0.9.4 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
+vericairn release submit --product <product id> --version 0.9.4 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
+vericairn release observe --version 0.9.4 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
 ```
 
 From 0.8.3, `release submit --check` uses the intended submission's options and reports
@@ -1072,8 +1078,8 @@ The operator accepts the exact candidate before publishing:
 
 ```sh
 vericairn records new acceptance --by <operator id> --subject release:<candidate id>:<candidate hash> --body accept-release.json
-gh release edit v0.9.3 -R owner/name --draft=false --latest
-vericairn release observe --version 0.9.3 --product <product id> --by <builder id>
+gh release edit v0.9.4 -R owner/name --draft=false --latest
+vericairn release observe --version 0.9.4 --product <product id> --by <builder id>
 vericairn release list
 ```
 
@@ -1084,7 +1090,7 @@ against the repository's full-SHA allow-list. The NuGet pull-request job builds 
 symbols with the publication verifier, without a login, token permission or upload. This does not verify
 the organization's live Actions settings or bind the published draft to estate acceptance.
 
-### Security reports hold a release (0.9.2)
+### Security reports hold releases (0.9.2)
 
 From 0.9.2 (OPS-11), the security advisories filed against a product's repositories reach you as required attention within minutes, and a security report you have not triaged holds every release. GitHub raises no issue, discussion or notification for a draft advisory or a private vulnerability report, so Vericairn reads them itself.
 
@@ -1506,7 +1512,7 @@ A local-only estate's database is never moved, deleted or rebuilt as a cache, an
 
 From 0.9.2 (FIX-99), one writer at a time writes a working tree. Every runtime that writes records takes an exclusive write lock in the working tree's own `.vericairn/write-lock/` directory, whether it is a daemon or an embedded command and whatever its Vericairn home. It holds the lock from judging the write against the tree's current record files until the records and their companions are stored. A second writer therefore judges against the records the first one stored, and the ordinary rules refuse it before it writes anything, for example with `operation.duplicate-identity`. A writer that cannot take the lock within 30 seconds is refused with a `conflict` that names the holder: its process id, host, a digest of its Vericairn home and when it took the lock. The holder records these beside the lock in `holder.json`, never as a path. The operating system releases the lock when its process ends, so a stopped command leaves no lock behind. A local-only estate keeps its records in the live store under the Vericairn home, so its writers take the same lock beside that store instead.
 
-The lock covers one working tree on one machine. It is separate from the per-home `live.lock`, which guards a cache rebuild, and it makes no claim across clones or machines. Two clones still meet at merge, where duplicates are reported for reconciliation. Keep to one writer anyway: route writes through one daemon per working tree, or run embedded commands from one home, and do not edit record files while a writer runs. A runtime of a release before 0.9.2 takes no lock, so do not run one beside 0.9.3 on the same tree.
+The lock covers one working tree on one machine. It is separate from the per-home `live.lock`, which guards a cache rebuild, and it makes no claim across clones or machines. Two clones still meet at merge, where duplicates are reported for reconciliation. Keep to one writer anyway: route writes through one daemon per working tree, or run embedded commands from one home, and do not edit record files while a writer runs. A runtime of a release before 0.9.2 takes no lock, so do not run one beside 0.9.4 on the same tree.
 
 Duplicates written before this rule, by two writers of an earlier release or by two merged clones, are never repaired automatically. While such an error stands, the runtime refuses further writes. To recover:
 
@@ -1801,10 +1807,10 @@ dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool
 
 The manifest names the exact reference build commit, distinct from the later documentation or release commit. Comparison checks version, record formats, public inventories, complete reference bytes and retained companion inputs. A later documentation-only commit can retain that build pin only when the build sources agree; both commits must be locally available. A structural docs check does not judge prose, note completeness or release acceptance. FIX-09's frozen-set checksum guard detects changed, missing or added files in earlier sets, including withdrawn 0.7.0; never repair an earlier set in place.
 
-The notes command renders the estate's records from 0.9.2 to 0.9.3:
+The notes command renders the estate's records from 0.9.3 to 0.9.4:
 
 ```sh
-vericairn --estate <root> docs notes --from 0.9.2 --to 0.9.3 --out docs/releases/0.9.3
+vericairn --estate <root> docs notes --from 0.9.3 --to 0.9.4 --out docs/releases/0.9.4
 ```
 
 `docs notes` writes the exact window to the manifest. Its exclusive start follows 0.9.2's recorded end.
@@ -1834,7 +1840,7 @@ that differ from its commit, as `generate` always has, and a set whose directory
 
 ```sh
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- assemble --out docs/releases/0.9.3 --documents docs/releases/documents.json --overview overview.md
-vericairn --estate <root> docs notes --from 0.9.2 --to 0.9.3 --out docs/releases/0.9.3
+vericairn --estate <root> docs notes --from 0.9.3 --to 0.9.4 --out docs/releases/0.9.4
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- insert docs/releases/0.9.3 --section security.md --expected-hash sha256:<hex>
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- llms docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.3
@@ -3075,8 +3081,8 @@ by the person asked and accepts no work.
 ## 24. Release notices and upgrades
 
 After installing an upgrade, restart a serving daemon as well as running workers. Follow the stop/start
-commands and coordination steps in section 9 before using the upgraded CLI against that estate. From
-0.9.2 `estate upgrade` itself replaces a daemon of an older release than the new pin, or says exactly
+commands and coordination steps in section 9 before using the upgraded CLI against that estate.
+From 0.9.2 `estate upgrade` itself replaces a daemon of an older release than the new pin, or says exactly
 what to run when it cannot.
 
 `vericairn version`, `vericairn doctor`, `vericairn status` and Workbench disclose a release check
@@ -3187,7 +3193,7 @@ Canonical status JSON derives attention from records alone and is identical on m
 records. Progress also reads this runtime's worker observations; human status, progress and Workbench
 label additional concerns `Local worker observations`. From 0.9.2, the operator's attention in human status,
 Workbench and Remote also shows this machine's security-report observations, which canonical status leaves out
-([security reports](#security-reports-hold-a-release-092)). No reader can infer another machine's unrecorded
+([security reports](#security-reports-hold-releases-092)). No reader can infer another machine's unrecorded
 facts. The estate observation's existing status-hash contract is unchanged; these API v1 projections add
 no record fields, CLI commands or permissions.
 

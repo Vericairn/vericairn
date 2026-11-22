@@ -417,3 +417,10 @@ implementations compile and behave as before; record equality now also compares 
 adds `members` to a field that has them, each member with `emptyAllowed` and `limits` where they apply. The record reference's
 input (`inputs/record-types.json`) adds the same `members`; the record-reference companion renders an input without them as
 before.
+
+## The embedded runtime
+
+No route, interface member, protocol type or record changes. 0.9.4 is still built with SDK 10.0.404 (`global.json`), and the
+self-contained distributables embed the .NET and ASP.NET Core 10.0.15 runtimes, unchanged from 0.9.3. The central package versions
+move to System.CommandLine 2.0.14, Avalonia 12.1.5 and Microsoft.Data.Sqlite 10.0.14, and the test framework to xunit.v3 4.0.3. The
+NuGet packages still target `net10.0` and run on the shared runtimes the installed .NET 10 SDK supplies.

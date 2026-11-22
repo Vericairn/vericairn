@@ -1218,8 +1218,8 @@ whatever date they state:
 
 Any other such record is `history.after-closing`, an error that leads status and holds
 release submission. It is kept and counts for nothing until an anchoring checkpoint of the
-root operator or a person holding `administer` lists its exact id and hash, which, from
-0.9.2, it may do for a signed record a closing refuses as well as for an unsigned one. Such
+root operator or a person holding `administer` lists its exact id and hash, which,
+from 0.9.2, it may do for a signed record a closing refuses as well as for an unsigned one. Such
 an admission or revocation admits or revokes nothing until anchored. A device revision a
 closing refuses changes no key or name, and an anchor does not restore it, so an anchoring
 checkpoint naming one is refused; the device's line skips it. A checkpoint a closing refuses witnesses nothing until anchored, nor do those

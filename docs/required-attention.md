@@ -101,7 +101,7 @@ repository whose reports could not be read completely. Through the event journal
 they reach the operator alone, their subjects named by an opaque key. They come from
 this machine's observations, so they never appear in status or progress JSON,
 and no other principal's attention shows them. See
-[security reports](operator-guide.md#security-reports-hold-a-release-092).
+[security reports](operator-guide.md#security-reports-hold-releases-092).
 
 From 0.9.4 (OPS-20), the operator's attention also carries a `failed check` for each automated observer declared on this
 machine that is silent past its interval plus its grace, whose latest report observed a failure, or whose latest report says

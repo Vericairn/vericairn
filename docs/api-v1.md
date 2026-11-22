@@ -31,7 +31,17 @@ instead; see [release-basis diagnostics](#release-basis-diagnostics-083).
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This document describes 0.9.3. It adds, in `IEstateApi` and over the daemon's local socket, the presence notices of
+This document describes 0.9.4. It adds, in `IEstateApi` and over the daemon, presence leases for agent sessions,
+`POST /v1/presence`, its heartbeat and release, and `GET /v1/presence` (ID-11); a standing agent's occurrences and outputs,
+`GET /v1/goals/{id}/due` and `POST /v1/standing/outputs` (GOAL-07 and GOAL-08); a decision step's decision,
+`POST /v1/goals/{id}/decide` (PROC-19); concurrent assignments, `GET /v1/overlaps` and `POST /v1/overlaps/preview` (CODE-73); the
+operator's answers and reviewed acts, `GET` and `POST /v1/operator/answers` and `/v1/operator/act` (OPS-16 and OPS-24); automated
+observers, `GET /v1/observers` and its `declare`, `report` and `withdraw` (OPS-20); and the timed stop drill, `POST /v1/runs/drill`
+(OPS-21). Presence notices carry a presence session's terms, nonce and signatures (CODE-80), an upgrade states whether the
+previous release can read the estate and records a restore point (FIX-145), and the communication settings carry availability
+and quiet hours (GOAL-11). Each added `IEstateApi` member has a default implementation, so existing implementers stay
+source-compatible, and [API compatibility for 0.9.4](api-compatibility-0.9.4.md) lists the changes. In 0.9.3 it added, in
+`IEstateApi` and over the daemon's local socket, the presence notices of
 operator actions, `POST /v1/presence/prompts` (FIX-124), and naming the estate's first authority,
 `POST /v1/estate/first-authority` (CODE-72). `POST /v1/changes/merge` enqueues into a target branch's required merge
 queue and `POST /v1/changes/observe` records the queue's outcome (CODE-71), with `checkStatus` `queued` and the
@@ -40,7 +50,7 @@ unfinished stage `merge-queued`; status and the goal reads add the work proposed
 `goal-status.verdict` (FIX-116), `operation.intent-kept` and `operation.target-kept` (FIX-109), `document.pin-content`
 (FIX-120) and `body.timestamp` (FIX-114), and a release dispatches only from the device that signed its intent
 (FIX-130). Each added `IEstateApi` member has a default implementation, so existing implementers stay
-source-compatible, and [API compatibility for 0.9.3](api-compatibility-0.9.3.md) lists every change. 0.9.2 added, in
+source-compatible, and [API compatibility for 0.9.3](api-compatibility-0.9.3.md) lists every change. In 0.9.2 it added, in
 `IEstateApi` and over the daemon, the event journal: `GET /v1/events`,
 as server-sent events or a long poll, `GET /v1/events/{key}` (WATCH-05) and `POST /v1/events/select` (MCP-05);
 keyword search and search-selected context, `POST /v1/search`, `/search/index`, `/search/replay`,
@@ -77,13 +87,13 @@ writing-exception authoring, typed duty evidence, readable companions, checked r
 operator's signed record action. Every
 `IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
 See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
-and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds, [for 0.9.1](api-compatibility-0.9.1.md), for the members 0.9.1 adds, [for 0.9.2](api-compatibility-0.9.2.md), for the members and records 0.9.2 changes, and [for 0.9.3](api-compatibility-0.9.3.md), for the members and records 0.9.3 changes.
+and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds, [for 0.9.1](api-compatibility-0.9.1.md), for the members 0.9.1 adds, [for 0.9.2](api-compatibility-0.9.2.md), for the members and records changed in 0.9.2, [for 0.9.3](api-compatibility-0.9.3.md), for those changed in 0.9.3, and [for 0.9.4](api-compatibility-0.9.4.md), for those 0.9.4 changes.
 The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.9.3's packages are
-available on nuget.org, pushed by the package workflow that its publication started.
+API route and ordinary SDK calls do not initiate the daily release check. 0.9.4 package availability
+requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -233,7 +243,7 @@ for it. Its body, `PresencePromptsRequest`, names `after`, the position the read
 and `wait`, 0 to 25 seconds to wait for a notice (0 by default). `PresencePromptsResponse` carries the `notices` after that
 position, oldest first, and the `cursor` to continue from; a position newer than the runtime's, as after a restart, delivers
 every notice it keeps (the newest 256). Each `PresenceNotice` has its `sequence`, its `kind`, the `action` (such as
-`operator close` or `release submit 0.9.3`), the `count` of signatures announced so far, how many were `made`, its
+`operator close` or `release submit 0.9.4`), the `count` of signatures announced so far, how many were `made`, its
 `signatures` (each `PresenceSignature`: the record `type`, the `key` a person knows it by and the `purpose` signing it
 authorizes), the `text` a client prints and, for a prompt, its `index` from 1. The kinds come in order: `announced` before the
 first prompt, listing every record; `added` before signatures the action did not announce, with why; `revised` when the path
