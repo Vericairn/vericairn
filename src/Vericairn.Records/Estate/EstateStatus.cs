@@ -294,7 +294,7 @@ public static class EstateStatus
         }
 
         OperatorRequests.Waiting queue = OperatorRequests.WaitingOf(model, null, at);
-        if (queue.Open.Count > 0 || queue.Withdrawn.Count > 0) text.Append(OperatorRequests.RenderText(model, null, at));
+        if (queue.Open.Count > 0 || queue.Withdrawn.Count > 0 || queue.Optional.Count > 0) text.Append(OperatorRequests.RenderText(model, null, at));
 
         // A run's position and its stops (design/flow.md § 8), as a live read shows them.
         text.Append(FlowStops.RunsText(model, FlowStops.Runs(model, at)));

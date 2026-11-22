@@ -7,7 +7,10 @@ Durable action requests join this queue in 0.8.4. They show their recommendation
 first, with three delivered at once and every remaining identity queued in order.
 Use `operator done` or `operator dismiss` for one signed outcome. See
 [Operator requests](operator-requests.md) for creation, revision, carry-over and
-agent citations.
+agent citations. From 0.9.4 (OPS-22), an optional request is a possible todo, listed after
+the queue in its own section, **Possible todos** (`possibleTodos` in the JSON), each with its
+guide, recommendation and the commands that fetch its kit and close it; it holds nothing
+([optional requests](operator-requests.md#optional-requests-possible-todos-094)).
 
 ```sh
 vericairn operator list
@@ -200,7 +203,10 @@ acceptance of that result; from 0.9.4, nor an acceptance of the work order's cur
 that accepts it (below). Each entry shows its key, work-order id and hash, exit question, result
 id, hash, outcome and summary, and every passing review's id, hash, independence and summary.
 Both ordinary work and milestones can appear. A partial or blocked latest result, an old review
-of a superseded result, or a superseded passing review cannot qualify a step.
+of a superseded result, or a superseded passing review cannot qualify a step. From 0.9.4 (OPS-24), every current review of the
+exact result must pass: a step whose result has a current review with findings or a failed one beside a passing one, such as a
+passing self-review beside a failed independent review, is no longer listed, and a selection of it is refused; before 0.9.4 one
+passing review was enough and the others were not shown. Each listed step shows every current review of its result.
 
 `--select` is repeatable. `--all` selects the complete eligible list across the estate; inspect it
 before using it when several releases have finished work. The selected evidence is displayed
@@ -282,6 +288,104 @@ error before signing so standard output remains one JSON document. Exit 0 means 
 or the complete selection was stored, 1 means a record or selection refusal, and 2 means invalid
 arguments or a client failure. An interrupted client request retains the existing uncertainty
 rules: inspect current acceptances before retrying.
+
+## Answer open asks with their recommendations in one act (0.9.4)
+
+From 0.9.4 (OPS-16), you answer a selection of the asks waiting on you, or all of them, each with its recommendation, in one
+act signed by your own admitted device. Run it on your device:
+
+```sh
+vericairn operator answer
+vericairn operator answer --select <ask-id> --select <ask-id> --by <operator-id>
+vericairn operator answer --all --by <operator-id> --stake low
+```
+
+Without a selection the command is read-only. It lists every ask waiting on an operator, as `operator list` does, or on
+`--by`: each by its exact revision and hash, with its recommendation and that recommendation's SHA-256 first, then the question,
+what happens while it stays unanswered and its options. A carried ask waits as its request and is not listed. With `--select`
+or `--all` the act is shown the same way before anything is signed, and the runtime compares every ask and recommendation hash
+with the current records: an ask revised, answered, withdrawn or carried since, or a recommendation that is not the one shown,
+refuses the whole act, and `--all` also refuses when an ask arrived. Nothing is written then; read the asks again.
+
+Each ask gets its own decision. Its `statement` is the act's: `Take the recommendation: answered in one signed act after
+inspecting the exact ask and its recommendation.`, its summary and synthesis carry the recommendation as the ask states it, its
+effect says the recommendation is taken, `notAuthorized` says it authorizes nothing the recommendation does not state, and its
+stake is `--stake` (default `low`); the ask supplies none. `decidedAt` is the act's time, the same for every decision of the act,
+and its `act` member names the act: `id`, the exact ask revision (`ask`, `hash`), the recommendation's SHA-256
+(`recommendation`) and `count`, how many asks the act set out to answer: those it showed and you chose before its first signature.
+An act from the command line, Workbench or the API stores all its decisions or none, so their number is its count; an act on Remote
+that stops part-way writes fewer, never more, and the decisions that name its `id` are the ones it wrote. All decisions are signed before the batch stores any, and stored
+together; an interrupted storage keeps its receipts and journal for reconciliation, as `operator close` does.
+
+Only the operator an ask is put to answers it in an act, and only a person: an agent never performs it, whatever role it holds,
+and the record format refuses a decision naming an act that its decider did not record and sign. A decision of an act takes the
+recommendation and nothing more: it carries no guided answer, change set, documents, obligations, policy requirements, release
+review or prompt use. Answering one ask alone, with your own words, works as before, and an ask you answer in chat is still
+recorded by the builder. Where presence sessions are on, the act signs under `decision from ask` sessions: up to 16 decisions
+listed by exact hash under one check, a list for each 16, each announced before its own check; while an agent run this machine's
+worker started is unsettled under your user, each decision asks its own check. No MCP tool performs the act.
+
+`GET /v1/operator/answers` (optional `to`) and `POST /v1/operator/answers` carry the listing and the act; SDK clients use
+`OperatorAnswerCandidates(principal)` and `OperatorAnswer(OperatorAnswerRequest)`, or their `Async` counterparts. Each item
+provides `ToSelection()` to copy its ask pin and recommendation hash. The request carries `by`, `selection`, optional `all`
+(default `false`) and `stake` (default `low`); the response carries the act's `act` id, `written` receipts, `ok` and `problem`.
+An authenticated device acts only for its own principal. From Remote, the same act signs each decision with the phone's presence
+key ([Remote](remote.md#answering-asks-with-their-recommendations-094)).
+
+## Sign every ready item in one reviewed act (0.9.4)
+
+From 0.9.4 (OPS-24), `vericairn operator act --ready` lists every operator item whose command is ready and signs the ones you
+choose in one act on your own admitted device. An act signs a listing you read: save it, read it, then act on it.
+
+```sh
+vericairn operator act --ready --by <operator-id> --json > listing.json
+vericairn operator act --ready --by <operator-id> --from listing.json --all --skip <item> --dismiss "<request item>=<your reason>"
+vericairn operator act --ready --by <operator-id> --from listing.json --select <item> --select <item>
+```
+
+Without a choice the command is read-only. Each listed item names its id, its kind, what its signature records, its exact subject
+revision, the exact basis it rests on and, for an acceptance, every review it rests on: who reviewed, the outcome, the independence
+and the exact hash reviewed:
+
+| Kind | Ready when | What its signature records |
+| --- | --- | --- |
+| `close` | `operator close` lists the step: a completed latest result with no acceptance, at least one current review, and every current review of it passing | An acceptance of that exact result, on the basis of every review shown, all passing |
+| `answer` | An ask waits on you, as `operator answer` lists it | A decision answering it with its recommendation, as [one act](#answer-open-asks-with-their-recommendations-in-one-act-094) records it |
+| `goal-acceptance` | `operator list` offers you its acceptance command: activated, every predicate holding, evaluated, and you neither its evaluator nor a step's author | An acceptance of the goal relying on its current evaluation |
+| `release-acceptance`, `milestone-acceptance`, `milestone-result-acceptance` | `operator list` offers you its acceptance command, and, as `operator close` admits a step, its exact revision has at least one current review and every current review of it passes; a result must be completed | An acceptance of that exact candidate, milestone or result on the basis of those reviews; it publishes nothing |
+| `request` | An open action request put to you; a run's reserved step and a publication's close are not listed, since their own commands complete them | A close of the request as done, recording that you did what it asks; dismissed, your reason |
+
+A candidate, milestone or result with a failed review, a review with findings, no review, or a result that is not completed is not
+listed and is never signed by the act: accept it, if you do, with its own acceptance command from `operator list`.
+
+`--from` names the listing you read, saved by `--ready --json`; the act signs only the pins it holds. Without `--from` the act
+shows the listing it read and asks you to type `yes` in a terminal, and is refused, signing nothing, when there is no terminal.
+`--all` signs every item of that listing except those named with `--skip`, which wait, and `--dismiss`, which dismisses a request
+with your reason; it refuses if any item became ready or stopped being ready since the listing you read, so an ask that arrived
+afterwards is never answered by it. `--select` signs only the items named, every other item waits, and `--dismiss` may join it.
+Only a request is dismissed; any other item is left waiting. The act is shown before anything is signed: each item with its choice
+and what its signature records. The runtime compares every chosen item's subject, basis and recommendation with the current records,
+again after signing and before storing: an item that changed or is no longer ready, a review arriving among them, refuses the whole
+act and writes nothing. `--stake` (default `low`) is each answer's decision stake. In Workbench and Remote an acceptance starts
+waiting and signs only when you choose it; an answer or a request starts chosen to sign.
+
+Each chosen record is authored completely before the first signature and stored together with the others; nothing outside the list
+of choices is signed. Where presence sessions are on, the records sign under one presence check whose announced list names each
+by type and exact hash, under the session action `operator act`, which decision `01M8001M0T9XRGF7SKHW3B45KF` adds to the closed
+vocabulary: the dialog reads "open Vericairn session", its fingerprint, "operator act", the count and the limit, then the records by
+type; the runtime opens sessions only with the release helper shipped beside it, which knows the name. A list holds at most 16 exact entries and 128 signatures, and every record of the act is an exact entry, so an act of more
+than 16 records announces one list for each 16, in the order shown, each just before its own check. While an agent run this
+machine's worker started is unsettled under your user, each record asks its own check. A declined or unanswered check signs nothing
+and stops the act. Only a person holding the operator role performs the act, for their own items, never an agent; no MCP tool
+performs it. The local-network ledger keeps a refused act as failed and names the last record of an act that stored its records, as
+it does for `operator close`.
+
+`GET /v1/operator/act` (optional `by`) and `POST /v1/operator/act` carry the list and the act; SDK clients use
+`OperatorActItems(principal)` and `OperatorAct(OperatorActRequest)`, or their `Async` counterparts. Each item provides
+`Choose(choice, reason)` to copy its pins with your choice (`sign`, `wait` or `dismiss`) and carries its `reviews`. The request
+carries `by`, `choices`, optional `all` (default `false`) and `stake`; the response carries the act's `act` id, each stored record
+in `written` (`item`, `choice`, `record`), `ok` and `problem`. Workbench (Work → Operator act: ready items) and Remote (Attention →
+Ready items) offer the same reviewed list ([Workbench](workbench.md#what-exists), [Remote](remote.md#ready-items-in-one-reviewed-act-094)).
 
 ## Record and merge in one command
 

@@ -805,6 +805,55 @@ keeps every machine on a release that reads them. A format-2 estate refuses them
 `records describe possibility`, `records describe ask` and `records describe
 operator-request` include this contract.
 
+## Events and presence (0.9.4)
+
+ID-11 and GOAL-11 add fields within format 3 and no record type; each is optional:
+
+- `goal` and `roster`: `limits.watch.reassignAfterSeconds`, 60 to 86,400, how long a lapsed session holding a step stays lapsed
+  before the runtime asks about reassignment (600 when neither sets it).
+- `communication-setting`, person scope only: `values.availability` (`state` `available`, or `away` with `until` and an optional
+  earlier `from`) and `values.quietHours` (`zone`, an IANA time zone; `windows`, 1 to 14 of `days`, `start` and `end` as `HH:MM`;
+  `breakthrough`, attention categories).
+- `assignment`: `routedWith` `session` (routing gave the step to a live session; stored alone, it holds its step at once) and
+  `basis`, the lapse ask a hand-over answers, recorded by a person and about an assignment of the same step.
+
+A format-2 record cannot carry them. A reader of format 3 that predates them refuses each as an unknown key or value, as any later
+format-3 field, so the estate's pin keeps every machine on a release that reads them. The generic record reader advances to
+`vericairn.records/readers/12`, which carries `basis` and the session value. See [events and presence](events-and-presence.md).
+
+## Answering asks in one act (0.9.4)
+
+OPS-16 adds one optional field to `decision` within format 3, and no record type. A decision without `act` behaves as before.
+
+| Type | Field |
+| --- | --- |
+| `decision` | Optional `act: {id, ask, hash, recommendation, count}` names the operator's act that answered this ask with its recommendation: `id`, the act's ULID, which each of its decisions names; `ask` and `hash`, the exact ask revision `answers` names; `recommendation`, the SHA-256 of that revision's recommendation as UTF-8; and `count`, 1 to 256, how many asks the act set out to answer: those it showed and the operator chose before its first signature. An act that stops part-way, as a phone's may, writes fewer decisions than its count, never more. `decidedAt` is the act's time. |
+
+Validation refuses an `act` whose `answers` is not exactly its ask, whose hash is not that revision's or whose recommendation
+hash is not that revision's recommendation's; one recorded by anyone but its `decidedBy`, or whose decider is not a person; an
+unsigned one; one carrying `answer`, `changeSet`, `documents`, `obligations`, `policies`, `releaseReview` or `promptUse`; decisions
+of one act that differ in `decidedBy`, `decidedAt` or `count`, answer one ask twice or number more than `count`; and `act` in an
+earlier format. That the ask revision is still the current one and still waits on its operator is the runtime's to check when it
+writes the decision. A reader before 0.9.4 refuses a decision carrying `act`, since a decision admits no other member, so an estate
+records an act only after every writer upgrades.
+
+## Optional requests (0.9.4)
+
+OPS-22 adds one optional field to `operator-request` within format 3, and no record type. A request without `optional` behaves as
+before.
+
+| Type | Field |
+| --- | --- |
+| `operator-request` | Optional `optional: true` marks the request a possible todo: shown in its own section, never holding a release's closing or a goal's evaluation, closed, done or dismissed, whenever the operator chooses. Its requester may create it optional; a required request becomes optional only by a revision the operator it is put to, a person, writes, changing nothing but the mark. |
+
+Validation refuses `optional: true` on a run's step request (`flowStep`), whose step says whether it is required, and a value that
+is not a boolean; a revision by the requester that turns a required request optional; and a revision by the operator it is put to
+that changes anything but the mark, or by an operator who is not a person. Reading counts a turn to optional only when that operator
+wrote it, so a refused mark holds nothing back; a revision back to required always counts. That every file a request pins is held
+by the estate's objects is the runtime's to check when it writes the request. A reader before 0.9.4 refuses a request carrying
+`optional`, since a request admits no other member, so an estate marks requests optional only after every writer upgrades. See
+[operator requests](operator-requests.md#optional-requests-possible-todos-094).
+
 ## Identifiers more than one record carries (0.9.4)
 
 A record's identifier is its own: the write boundary refuses a record whose
@@ -824,45 +873,90 @@ the estate refuses every write while they stand; removing all but one of the
 records carrying the identifier makes the line read again. An estate with no such
 identifier reads exactly as before.
 
-In these readings leaving a record unread can only fail toward the person:
+From 0.9.4 (FIX-159) leaving a record unread never makes another count. A record
+can refuse others when read: a charter's signature requirement refuses unsigned
+records and its operator roots every admission; a revocation ends what its device
+signs; a history checkpoint's closing refuses what its device, key, grant or person
+signs and it does not witness; an adoption refuses unsigned records no anchoring
+checkpoint lists; a witnessed listing refuses other bytes under its identifier.
+Left out, such a record refuses nothing. So while records are unread the loader
+judges counting again with the unread records read each way they can be: each
+identifier more than one file carries read as one of the records carrying it (copies
+with the same content and signatures once) or as none of them, with the rest of its
+line. A record counts only when it counts in the reading that leaves the unread
+records out and in every such reading. One of those readings is the estate as it
+was before the copies were written, so whatever it refused stays refused, by every
+reading, check and write; and since the reading that leaves them out is among them,
+a copy can only take counting away. That reading is the earlier estate exactly only
+for the files that share an identifier: a new file with an identifier of its own
+that joins an unread line, as one superseding a record of it does, is in every
+reading, and it gains nothing its writer could not gain by writing it without a
+duplicate. The records that count for nothing only for
+this reason are reported once (`record.duplicate-refused`, a warning). Past 16
+readings which records a reading would refuse is not established, and no record
+counts (`record.duplicate-unsettled`, an error) until all but one record carrying
+each identifier is removed. Only counting is judged this way; in every other respect
+the records read keep the reading that leaves the unread records out.
 
-- an answer it carried answers nothing, so its ask stays waiting, and a
-  disposition of a standing agent's output it carried disposes of nothing;
-- a standing agent's failures count an unread line of the goal's agent runs as
-  failed, and a run an unread record names as its own records decide it or as
-  failed (above);
-- a standing agent's output whose line is unread stays among its open outputs,
-  one for each first revision the line holds, and is adopted by nobody; an output
-  or an ask of a standing agent whose goal is unread is disposed of and answered
-  by nobody;
-- an unread assignment of the goal's work, or revision of a roster, ties the agents
-  it names to the goal, as if it were read;
+What holds while records are unread:
+
+- no record counts that a reading of the unread records refuses, so an unsigned
+  record in the operator's name stays refused when a copy of the charter's or its
+  revision's identifier leaves the requirement unread, and a record a closed
+  device signed stays refused when a copy of the closing's identifier, or two new
+  files superseding it, leaves the closing unread;
 - a record left unread can make others stop counting: the device, admission,
   principal or grant a record's signature or authority rests on may be the unread
   one, and a copy of a device's identifier, or two new files superseding it, leaves
-  every record that device signed counting for nothing. So while any record is
-  unread, a record that does not count is read against standing agents as a tied
-  agent's record is, and never for them: its blocked or abandoned results, intents
-  and revisions count toward failures, its outputs stay open until a revision that
+  every record that device signed counting for nothing; with the charter left
+  unread no admission counts, so no signed record does;
+- an answer an unread record carried answers nothing, so its ask stays waiting, and
+  a disposition of a standing agent's output it carried disposes of nothing;
+- a standing agent's failures count an unread line of the goal's agent runs as
+  failed, and a run an unread record names as its own records decide it or as
+  failed (above); a standing agent's output whose line is unread stays among its
+  open outputs, one for each first revision the line holds, and is adopted by
+  nobody; an output or an ask of a standing agent whose goal is unread is disposed
+  of and answered by nobody; an unread assignment of the goal's work, or revision
+  of a roster, ties the agents it names to the goal, as if it were read;
+- a record that does not count is read against standing agents as a tied agent's
+  record is, and never for them: its blocked or abandoned results, intents and
+  revisions count toward failures, its outputs stay open until a revision that
   counts disposes of them, its assignments and roster revisions tie, and it makes
   no success, cancellation, correction, stop, answer or disposition;
 - every standing agent reads `held` while the estate leaves any record unread,
   whatever its status reads, unless it is stopped or not dispatched here: what its
   records rest on reaches, through their devices, admissions, principals and grants,
   records anywhere in the estate. `goal due` names the unread record (one that names
-  a record of the agent when there is one), and `goal step` dispatches nothing of
-  the agent until all but one of the records carrying the identifier is removed.
+  a record of the agent when there is one), and no run of the agent starts: goal
+  step dispatches nothing of it and an agent run's intent is refused for the hold
+  (`operation.standing`), whatever its failures read. A goal whose own line is
+  unread is not shown as missing: `goal due` says its state, failures and open
+  outputs are not established;
+- nothing acts: release submission, every record a device signs on the runtime's
+  machine or that is prepared for a device elsewhere to sign, a pairing code, run
+  admission, preparation and launch, a goal's step by any route and a repository
+  operation (a checked push, opening or merge, or its observation) refuse before
+  they act, naming the finding, and so does every MCP tool and daemon route that
+  reaches them. While the estate reports any other error, release submission, run
+  admission and launch, a goal's step and a repository operation refuse the same
+  way, and a record is judged by the write boundary with the estate as it would be with
+  the record, as before, and stored only when it clears every error, so that an
+  estate can still be repaired by its records. Stopping a run is never refused.
 
-Elsewhere an unread line reads as absent, as if its files had been removed, and
-so do the records resting on it, such as those an unread device signed: no
-reading takes any of its records, or any copy's content, in another's place. A
-record that restricted another, such as a goal status, a review or a history
-checkpoint's closing, restricts nothing while it is unread, as when its file is
-removed, and a reading outside a standing agent's that counts records against a
-principal, such as a flow goal's ledger of runs, does not count it.
+Outside counting an unread line reads as absent, as if its files had been removed:
+no reading takes any of its records, or any copy's content, in another's place. What
+an unread record would restrict other than by refusing to count a record, such as a
+goal status, a review or a reconciliation's withdrawal, restricts nothing in the
+readings while it is unread, and a reading outside a standing agent's that counts
+records against a principal, such as a flow goal's ledger of runs, does not count
+it; nothing acts on such a reading while the duplicate stands, since every acting
+surface refuses.
 
 This adds no field and no record type within format 3. A reader that predates it
-reads the first of the records in path order, as before, and reports the others.
+reads the first of the records in path order, as before, and reports the others; a
+development build before FIX-159 counts a record a reading of the unread records
+refuses, and does not refuse acts while the estate reports an error.
 
 ## Security reports (0.9.2)
 

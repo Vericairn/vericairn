@@ -41,7 +41,10 @@ public sealed partial class EstateService
         internal Problem Problem { get; } = problem;
     }
 
-    /// <summary>Records the intent, scans exactly the planned commits, records the scan, pushes with a lease, then records the observed remote head.</summary>
+    /// <summary>
+    /// Records the intent, scans exactly the planned commits, records the scan, pushes with a lease, then records the observed remote head.
+    /// From 0.9.4 (FIX-154) the plan covers every commit the target does not hold and records its basis; a push to the target refuses.
+    /// </summary>
     public ChangeResponse ChangesPush(ChangesPushRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -53,10 +56,22 @@ public sealed partial class EstateService
             ISecretScanner scanner = Providers.SecretScanner ?? throw new ProviderRefusedException("No secret scanner is registered.");
             string directory = ChangeClone(claim.Configuration);
             string remote = claim.Configuration.Provider.PushRemote(claim.Configuration.Destination);
-            PushPlan plan = adapter.Prepare(directory, remote, request.Branch, claim.Configuration.Target, request.Head);
+            // FIX-154: the scan covers every commit the target does not hold: it begins at the head of the newest complete recorded push
+            // of the branch against the declared target that the remote branch still holds, which the adapter checks, or else at the
+            // merge base with the target. A retry of a push that recorded its basis keeps it, as every reader requires of a retry's
+            // target facts other than its base and heads: it offers the adapter only that basis, and refuses if it no longer applies.
+            IReadOnlyList<PushCoverage.Covered> covered;
+            lock (gate) covered = PushCoverage.Covering(session.Load(), claim.Configuration.Repository.Id, claim.Configuration.Destination, request.Branch, claim.Configuration.Target);
+            string? kept = claim.Body["target"]!["basis"]?.GetValue<string>();
+            if (kept is not null) covered = [.. covered.Where(c => c.Operation == kept)];
+            string[] recorded = [.. covered.Select(c => c.Head)];
+            PushPlan plan = adapter.Prepare(directory, remote, request.Branch, claim.Configuration.Target, request.Head, recorded);
             if (plan.Head != request.Head || plan.Branch != request.Branch || plan.Target != claim.Configuration.Target
                 || !Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.TargetHead))
                 throw new ProviderRefusedException("The adapter's push plan does not match the requested head and branches.");
+            string basis = covered.FirstOrDefault(c => c.Head == plan.Base)?.Operation ?? PushCoverage.MergeBase;
+            if (kept is not null && basis != kept)
+                throw new ProviderRefusedException("This retry continues the basis its earlier attempt recorded, which no longer applies: the remote branch no longer holds the push it continued. Nothing was pushed; push a new head of the branch, which scans from the merge base.");
             JsonObject target = claim.Body["target"]!.AsObject();
             target["base"] = plan.Base;
             target["remoteHead"] = plan.RemoteHead ?? string.Empty;
@@ -66,11 +81,14 @@ public sealed partial class EstateService
             if (!scan.Passed(plan)) throw new ProviderRefusedException("The scan of exactly the push's commits did not pass.");
             string? warned = CheckPushedMessages(claim, adapter, directory, plan);
             RefuseHeldDisclosure(claim, adapter, directory, plan);
+            // The basis is recorded from the dispatch on, where the scan passed: a push refused before it records none, so its retry may
+            // choose one (FIX-154).
+            target["basis"] = basis;
             // The dispatch record precedes the push, which runs within its two-minute bound: the session must outlast it (ID-16).
             PresenceEffectAhead();
             DispatchChange(claim);
             claim.EffectMayHaveStarted = true;
-            adapter.Push(directory, remote, plan, scan);
+            adapter.Push(directory, remote, plan, scan, recorded);
             // The transport's success is not the observed effect. This read also has its own intent and outcome.
             string? observed = ObserveChange(claim, "push-head", observation =>
             {
@@ -290,11 +308,12 @@ public sealed partial class EstateService
             if (refused.Count > 0) throw new ProviderRefusedException(string.Join(" ", refused));
             if (!WholeQueue(queue))
                 throw new ProviderRefusedException("Whether the target branch requires a merge queue could not be observed completely; nothing was merged.");
-            // Every merged head rests on a scan of exactly its commits, even when its pull request was opened elsewhere.
+            // Every merged head rests on a complete checked push of exactly that head, which scanned and checked every commit it carries
+            // that the target does not hold, even when its pull request was opened elsewhere (FIX-154).
             lock (gate)
             {
-                if (!ScannedPush(claim, pull.Branch, request.Head))
-                    throw new ProviderRefusedException("No successful scanned push of this exact head to the pull request's branch is recorded; push it with vericairn changes push, which scans exactly its commits, before merging.");
+                if (!ScannedPush(claim, pull.Branch, request.Head, complete: true))
+                    throw new ProviderRefusedException("No complete checked push of this exact head to the pull request's branch is recorded, one whose scan covered every commit it carries that the target does not hold; push it with vericairn changes push, which scans from the merge base or from the branch's last complete push, before merging.");
             }
             (string? message, string? warned) = CheckMergeMessage(claim, pull, queue.Required || pinnedToQueue);
             claim.Body["target"]!["pullRequest"] = pull.Number;
@@ -518,12 +537,29 @@ public sealed partial class EstateService
     // A host's removal reason enters a record only as a short upper-case token, never as free text.
     private static string? QueueReason(string? reason) => reason is { Length: > 0 and <= 64 } && reason.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') && char.IsAsciiLetterUpper(reason[0]) ? reason : null;
 
-    // A recorded push, observed at the remote after its scan of exactly the pushed commits passed. Caller holds the gate.
-    private bool ScannedPush(ChangeClaim claim, string? branch, string head) =>
-        session.Load().Current("operation").Any(o => EstateModel.BodyString(o, "action") == "change-push"
+    // A recorded push, observed at the remote after its scan of exactly the pushed commits passed, and, where asked, complete against the
+    // declaration's current target: its scan began at the merge base or at an earlier complete push of the branch (FIX-154). Caller holds the gate.
+    private bool ScannedPush(ChangeClaim claim, string? branch, string head, bool complete = false)
+    {
+        EstateModel model = session.Load();
+        return model.Current("operation").Any(o => EstateModel.BodyString(o, "action") == "change-push"
             && EstateModel.BodyString(o, "status") == "observed-success" && o.Body.TryGetProperty("target", out JsonElement t)
             && ChangeText(t, "repository") == claim.Configuration.Repository.Id && ChangeText(t, "branch") == branch
-            && ChangeText(t, "head") == head && ChangeText(t, "destination") == claim.Configuration.Destination);
+            && ChangeText(t, "head") == head && ChangeText(t, "destination") == claim.Configuration.Destination
+            && (!complete || PushCoverage.Complete(model, o, claim.Configuration.Target)));
+    }
+
+    // The identity a change's effect is reconciled under. A head whose recorded push of the branch was not complete, as a push before
+    // 0.9.4 whose scan began at a remote head no checked push left, is pushed again under an identity of its own beside that push, so
+    // its scan covers every commit the target does not hold and the merge gate can accept it (FIX-154). Caller holds the gate.
+    private static string ChangeIdentity(EstateModel model, ChangeConfiguration configuration, string action, string name, string head)
+    {
+        string identity = $"{configuration.Provider.Provider}:{configuration.Repository.Id}:{action}:{name}:{head}:{configuration.Product.ComputedHash[7..]}";
+        if (action != "change-push") return identity;
+        RecordEnvelope? prior = model.Current("operation").FirstOrDefault(o => EstateModel.BodyString(o, "identity") == identity);
+        return prior is not null && EstateModel.BodyString(prior, "status") == "observed-success" && !PushCoverage.Complete(model, prior, configuration.Target)
+            ? identity + ":after:" + prior.Id : identity;
+    }
 
     /// <summary>Observes an original change under its recorded pins. Absence, stale heads and incomplete reads remain uncertain.</summary>
     public ChangeResponse ChangesObserve(ChangesObserveRequest request)
@@ -651,7 +687,10 @@ public sealed partial class EstateService
                 if (string.IsNullOrEmpty(head) || !Patterns.Commit.IsMatch(head) || string.IsNullOrWhiteSpace(name) || name.Length > 200 || name.StartsWith('-'))
                     throw new ProviderRefusedException("An exact commit and an explicit branch or pull-request number are required.");
                 ChangeConfiguration configuration = ChangeConfigurationFor(product, currentDeclaration: true);
-                string identity = $"{configuration.Provider.Provider}:{configuration.Repository.Id}:{action}:{name}:{head}:{configuration.Product.ComputedHash[7..]}";
+                // A push to the declared target would land commits with no merge gate; nothing relaxes this (FIX-154).
+                if (action == "change-push" && string.Equals(name, configuration.Target, StringComparison.Ordinal))
+                    return ChangeProblem(TargetPush, $"A checked push never goes to the declared target branch {configuration.Target} ({TargetPush}); push another branch, open its pull request and merge it with vericairn changes merge. Nothing was recorded or pushed.");
+                string identity = ChangeIdentity(session.Load(), configuration, action, name, head);
                 RecordEnvelope? prior = CurrentOperation(identity);
                 if (changeEffects.Contains(identity) && prior is not null)
                     return ChangePriorRefusal(prior, "This effect is already in progress; observe it after it returns.");
@@ -671,6 +710,7 @@ public sealed partial class EstateService
                 body["target"]![action == "change-merge" ? "pullRequest" : "branch"] = name;
                 if (prior is not null)
                 {
+                    // What the push observed is found again by the retry; a basis its earlier attempt recorded is kept (FIX-154).
                     foreach (JsonProperty fact in prior.Body.GetProperty("target").EnumerateObject())
                         if (fact.Name is not ("base" or "remoteHead" or "targetHead") && body["target"]![fact.Name] is null)
                             body["target"]![fact.Name] = JsonNode.Parse(fact.Value.GetRawText());
@@ -730,7 +770,8 @@ public sealed partial class EstateService
     {
         EstateModel model = session.Load();
         if (session.Manifest.RecordFormat < 2) throw new ProviderRefusedException("Repository changes require record format 2 so target failures can raise an operator ask.");
-        if (model.Findings.HasErrors) throw new ProviderRefusedException("The estate has validation errors; no repository operation is admitted.");
+        // From 0.9.4 (FIX-159): no repository operation is admitted while the estate reports an error, and the refusal names the finding.
+        if (ActingRefusal.BeforeActing(model, "the repository operation") is Problem invalid) throw new ProviderRefusedException(invalid.Message);
         DateTimeOffset at = DateTimeOffset.UtcNow;
         // Grants are read only from records their authors may write (EstateModel.Authority).
         bool granted = model.Authority.GrantLines.Select(model.Authority.Current).OfType<RecordEnvelope>().Any(a => a.AtTime <= at && !EstateModel.Expired(a, at)
@@ -886,7 +927,11 @@ public sealed partial class EstateService
         claim.Written, PullRequest: claim.Body["target"]!["pullRequest"]?.GetValue<string>(), Head: claim.Head,
         MergeCommit: claim.Body["target"]!["mergeCommit"]?.GetValue<string>());
 
-    private static ChangeResponse ChangeProblem(string message) => new("changes", "not-started", message, false, Problem: new("refused", message, []));
+    private static ChangeResponse ChangeProblem(string message) => ChangeProblem("refused", message);
+    private static ChangeResponse ChangeProblem(string code, string message) => new("changes", "not-started", message, false, Problem: new(code, message, []));
+
+    /// <summary>The refusal of a checked push to the declared target branch (FIX-154), never relaxed.</summary>
+    internal const string TargetPush = "change.target-push";
     private static ChangeResponse ChangePriorRefusal(RecordEnvelope prior, string message) => new(EstateModel.BodyString(prior, "identity")!,
         EstateModel.BodyString(prior, "status") is "not-started" or "dispatched" ? "uncertain" : EstateModel.BodyString(prior, "status")!, message, false,
         new(prior.ExpectedPath, prior.Id, prior.ComputedHash), Head: ChangeText(prior.Body.GetProperty("target"), "head"), Problem: new("refused", message, []));

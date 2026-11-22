@@ -1815,8 +1815,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // Generated members whose bytes are exactly an earlier generator implementation's output move to the current bytes with the
             // migration; a member that differs in any other way was edited, stays as it is, and the estate check keeps reporting it.
             ImmutableArray<GeneratedMemberUpgrade> regenerated = GeneratedDocumentUpgrade.Prepare(model);
+            // From 0.9.4 (FIX-145): whether the release pinned before reads the estate after, decided before anything is applied.
+            UpgradeReadability readability = UpgradeReturns.Check(model, plan, EstateUpgrade.ManifestAfter(session.Manifest, plan),
+                [.. dependency is null ? Array.Empty<string>() : ["record:observation/vericairn-release"],
+                 .. global::Vericairn.Records.History.SignedHistory.Adopted(model) ? ["record:history-checkpoint"] : Array.Empty<string>()]);
             var response = new UpgradeResponse(plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, plan.Release.Id, plan.Artifacts, false, null, plan.Anchored.Count == 0 ? null : [.. plan.Anchored.Select(a => a.Id)])
-                { Line = plan.Line, Channel = plan.Channel, Regenerated = [.. regenerated.Select(m => m.Path)] };
+                { Line = plan.Line, Channel = plan.Channel, Regenerated = [.. regenerated.Select(m => m.Path)], Return = ReturnOf(readability, plan, null) };
             if (request.Check)
             {
                 return (response, null);
@@ -1846,6 +1850,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             if (request.By is null || !Ulid.IsValid(request.By))
             {
                 return (null, new Problem("refused", "The principal applying the upgrade must be a ULID.", []));
+            }
+
+            // A one-way upgrade is applied only on the explicit confirmation; one already recorded is finished without it.
+            if (pending is null && readability.Readability == UpgradeReadability.OneWay && !request.OneWay)
+            {
+                return (null, new Problem("one-way", $"This upgrade is one-way: {string.Join("; ", readability.Reasons)}. After it, {plan.FromPin} cannot read this estate, and returning to it means returning to the restore point the upgrade records and leaving behind every record written after the upgrade. Nothing changed. To apply it, run it again with --one-way.", []));
             }
 
             // The migration that anchors the unsigned admissions decides which of them keep counting, so it is the operator's, or an
@@ -1893,7 +1903,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     return (null, new Problem("refused", $"Migration {pending.Id} is recorded, and the manifest still could not be replaced: {exception.Message} Rerun the upgrade to finish it.", []));
                 }
 
-                return (response with { Applied = true, Migration = new RecordWritten(pending.ExpectedPath, pending.Id, pending.ComputedHash), Regenerated = [] }, null);
+                // The run that recorded the migration recorded its restore point; finishing it records none.
+                return (response with { Applied = true, Migration = new RecordWritten(pending.ExpectedPath, pending.Id, pending.ComputedHash), Regenerated = [], Return = null }, null);
             }
 
             // Migrations stage their files first; nothing is written until every step succeeded.
@@ -1910,6 +1921,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 }
             }
 
+            // From 0.9.4 (FIX-145): the restore point is recorded before anything is written; without it nothing is applied.
+            RestorePoint restore;
+            try
+            {
+                RepositoryObservation? repository = model.Manifest!.Profile == "repository-synced" ? RestoreRepository(session.Root) : null;
+                restore = UpgradeReturns.Record(session, plan.FromPin, plan.ToPin, repository?.Commit, repository is null || repository.Clean, PolicyClock.GetUtcNow());
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+            {
+                return (null, new Problem("refused", $"The upgrade's restore point could not be recorded on this machine ({exception.GetType().Name}), so nothing was applied. Nothing changed.", []));
+            }
+
+            bool restoreKept = false;
             var changes = new List<string> { $"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}" };
             if (model.Manifest!.Line != plan.Line || model.Manifest.Channel != plan.Channel)
                 changes.Add($"followed line/channel changed explicitly from {model.Manifest.Line}/{model.Manifest.Channel} to {plan.Line}/{plan.Channel}");
@@ -1919,11 +1943,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             changes.AddRange(context.Staged.Keys.Order(StringComparer.Ordinal).Select(relative => $"{relative} written by the migrations"));
             changes.AddRange(regenerated.GroupBy(m => (m.Destination, m.Earlier, m.Current)).OrderBy(g => g.Key.Destination, StringComparer.Ordinal)
                 .ThenBy(g => g.Key.Earlier, StringComparer.Ordinal).Select(g => $"{g.Key.Destination}: {g.Count()} generated member{(g.Count() == 1 ? string.Empty : "s")} rewritten by {g.Key.Current}; each held exactly the bytes {g.Key.Earlier} wrote for the same sources"));
+            changes.Add(restore.Commit is { } restoreCommit
+                ? $"restore point {restore.Id}: estate commit {restoreCommit}{(restore.Clean ? string.Empty : " with uncommitted changes beside it")} and this machine's local state, inventory {restore.StateHash}, kept on the machine that applied the upgrade; readability by {plan.FromPin}: {readability.Readability}"
+                : $"restore point {restore.Id}: this machine's local state, its live store included, inventory {restore.StateHash}, kept on the machine that applied the upgrade; readability by {plan.FromPin}: {readability.Readability}");
             using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
             var migrationDraft = new RecordDraft("migration", request.By, body.RootElement,
                 Subject: VericairnReleaseObservation.Is(plan.Release) ? plan.Release.Reference : null, Format: Math.Min(plan.ToFormat, RecordFormats.Current));
             (AuthoredRecord? migration, string? migrationRefusal) = AuthorLocked(migrationDraft, model);
-            if (migration is null) return (null, new Problem("refused", migrationRefusal!, []));
+            if (migration is null)
+            {
+                UpgradeReturns.Discard(restore.Directory);
+                return (null, new Problem("refused", migrationRefusal!, []));
+            }
+
             AuthoredRecord[] proposed = dependency is null ? [migration] : [dependency, migration];
             // In an estate that has adopted history checkpoints the upgrade writes one with trigger upgrade in the same batch, signed by the
             // device then writing (design/release-procedure.md § 7). A checkpoint that cannot be written never blocks the upgrade; the
@@ -2002,6 +2034,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     return (null, outcome.Problem);
                 }
 
+                // The migration names the restore point, so it is kept from here, whatever stops the run before the manifest moves.
+                restoreKept = true;
                 UpgradeStage?.Invoke("recorded");
                 try
                 {
@@ -2012,11 +2046,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     return (null, new Problem("refused", $"Migration {outcome.Written.Id} is recorded, and the manifest could not be replaced: {exception.Message} Rerun the upgrade to finish it; the estate check reports upgrade.incomplete until then.", []));
                 }
 
-                return (response with { Applied = true, Migration = outcome.Written, Checkpoint = upgradeCheckpoint }, outcome.Problem);
+                return (response with { Applied = true, Migration = outcome.Written, Checkpoint = upgradeCheckpoint, Return = ReturnOf(readability, plan, restore) }, outcome.Problem);
             }
             finally
             {
                 if (upgradePrepared is not null && !keepCheckpointObjects) RemoveObjects(upgradePrepared);
+                if (!restoreKept) UpgradeReturns.Discard(restore.Directory);
             }
         }
     }
@@ -2630,6 +2665,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(denied);
         }
 
+        // From 0.9.4 (FIX-159): nothing is signed or prepared for a device to sign while the estate leaves records unread.
+        if (ActingRefusal.BeforeSigning(current, "signing the " + draft.Type + " record") is Problem unread)
+        {
+            return WriteOutcome.Fail(unread);
+        }
+
         // From 0.9.2 (MCP-03): a request whose records only its device signs prepares or writes its one record with that device.
         if (requestDevice.Value is { Closed: false, Signing: { } signing } device)
         {
@@ -2649,6 +2690,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         if (RequestDeviceRefusal(current) is Problem denied)
         {
             return WriteOutcome.Fail(denied);
+        }
+
+        // From 0.9.4 (FIX-159): before any presence prompt or signature, while the estate leaves records unread.
+        if (ActingRefusal.BeforeSigning(current, "signing the " + draft.Type + " record") is Problem unread)
+        {
+            return WriteOutcome.Fail(unread);
         }
 
         // A write outside an operator action states its own batch's presence prompts before the first (FIX-124): the record, and the
@@ -2801,6 +2848,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        // From 0.9.4 (FIX-159): every signature made on this machine, and every record prepared unsigned, passes here; none is made while
+        // the estate leaves records unread.
+        if (ActingRefusal.BeforeSigning(current, "signing the " + draft.Type + " record") is Problem unread)
+        {
+            return (null, unread.Message);
+        }
+
         // From 0.9.2 (MCP-03): under device signing nothing on this machine signs. A record authored without signers is a candidate
         // only, which the store refuses; the one signer allowed is the requesting device's verified signature over its plan.
         if (requestDevice.Value is { Closed: false, Signing: { } signing } requesting)
@@ -2816,11 +2870,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
+        // From 0.9.4 (OPS-16): a decision naming an operator's act answers the current ask with the recommendation the act showed.
+        if (ActWriteRefusal(draft, current) is string actRefusal) return (null, actRefusal);
+        // From 0.9.4 (OPS-22): a request pins only files the estate's objects hold.
+        if (RequestFileRefusal(draft) is string fileRefusal) return (null, fileRefusal);
         if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
             return (null, templateRefusal);
         if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)
         {
             return (null, communicationRefusal);
+        }
+
+        // From 0.9.4 (ID-11): only the step's current holder acts, whatever time its record states, and only a person hands a held step on.
+        if ((DisplacedWriteRefusal(draft, current) ?? AssignmentTakesNothingRefusal(draft, current)) is string displacedRefusal)
+        {
+            return (null, displacedRefusal);
         }
 
         if (BlockedTermRefusal(draft, current) is string blockedRefusal) return (null, blockedRefusal);

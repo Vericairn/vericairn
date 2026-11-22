@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Estate;
@@ -55,7 +56,37 @@ public static class OperatorRequests
     /// <summary>The open requests: those delivered in original request order, and those not delivered, each with why.</summary>
     /// <param name="Open">The open requests that wait on the operator, in original request order.</param>
     /// <param name="Withdrawn">The open requests of runs that no longer wait on the operator, in original request order.</param>
-    public sealed record Waiting(IReadOnlyList<RecordEnvelope> Open, IReadOnlyList<Held> Withdrawn);
+    public sealed record Waiting(IReadOnlyList<RecordEnvelope> Open, IReadOnlyList<Held> Withdrawn)
+    {
+        /// <summary>From 0.9.4 (OPS-22): the open optional requests, possible todos in original request order, which wait on nobody and hold nothing.</summary>
+        public IReadOnlyList<RecordEnvelope> Optional { get; init; } = [];
+    }
+
+    /// <summary>
+    /// From 0.9.4 (OPS-22): whether a request is optional, a possible todo that never holds a release's closing or a goal's evaluation. Its
+    /// revisions are read in order: a request its requester created optional is optional; a revision that turns a required request optional
+    /// counts only when the operator it is put to, a person holding the operator role, wrote it; a revision that makes it required always
+    /// counts. A run's step request is never optional.
+    /// </summary>
+    public static bool IsOptional(EstateModel model, RecordEnvelope request)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Type != "operator-request" || FlowStops.StepOf(request) is not null) return false;
+        bool optional = false;
+        bool first = true;
+        foreach (string id in model.Chain(request))
+        {
+            if (!model.ById.TryGetValue(id, out RecordEnvelope? revision)) continue;
+            bool marked = OperatorRequestType.Optional(revision);
+            if (first || !marked || optional) optional = marked;
+            else optional = revision.By == EstateModel.BodyString(revision, "to") && GoalRules.IsPerson(model, revision.By) && model.HasRoleAt(revision.By, Roles.Operator, revision);
+            first = false;
+            if (revision.Id == request.Id) break;
+        }
+
+        return optional;
+    }
 
     /// <summary>Every open request that waits on the operator, in original request order, optionally addressed to one operator.</summary>
     public static IReadOnlyList<RecordEnvelope> Open(EstateModel model, string? to = null) => WaitingOf(model, to, DateTimeOffset.UtcNow).Open;
@@ -70,13 +101,13 @@ public static class OperatorRequests
         var positions = new Dictionary<string, FlowPosition.Position?>(StringComparer.Ordinal);
         var states = new Dictionary<string, FlowStops.StepRequest>(StringComparer.Ordinal);
         var open = new List<RecordEnvelope>();
+        var optional = new List<RecordEnvelope>();
         var held = new List<Held>();
-        foreach (RecordEnvelope request in model.Current("operator-request").Where(r => (to is null || EstateModel.BodyString(r, "to") == to) && !Closures(model, r).Any())
-            .OrderBy(r => model.ById[model.Chain(r)[0]].At, StringComparer.Ordinal).ThenBy(r => model.Chain(r)[0], StringComparer.Ordinal))
+        foreach (RecordEnvelope request in InRequestOrder(model, model.Current("operator-request").Where(r => (to is null || EstateModel.BodyString(r, "to") == to) && !Closures(model, r).Any())))
         {
             if (FlowStops.StepOf(request) is not FlowStops.FlowStepReference step)
             {
-                open.Add(request);
+                (IsOptional(model, request) ? optional : open).Add(request);
                 continue;
             }
 
@@ -111,8 +142,23 @@ public static class OperatorRequests
             }
         }
 
-        return new Waiting(open, held);
+        return new Waiting(open, held) { Optional = optional };
     }
+
+    /// <summary>
+    /// From 0.9.4 (OPS-22): the open optional requests in original request order, as <see cref="WaitingOf"/>'s <see cref="Waiting.Optional"/>
+    /// holds them, without the time a run's step request is judged at, which no optional request needs, and reading whether a request is
+    /// optional before its closures, so a reader that shows only possible todos, such as the progress report, walks no record for them.
+    /// </summary>
+    internal static IReadOnlyList<RecordEnvelope> OpenOptional(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return [.. InRequestOrder(model, model.Current("operator-request").Where(r => FlowStops.StepOf(r) is null && IsOptional(model, r) && !Closures(model, r).Any()))];
+    }
+
+    // Requests in original request order: by their first revision's time, then its identifier.
+    private static IOrderedEnumerable<RecordEnvelope> InRequestOrder(EstateModel model, IEnumerable<RecordEnvelope> requests) =>
+        requests.OrderBy(r => model.ById[model.Chain(r)[0]].At, StringComparer.Ordinal).ThenBy(r => model.Chain(r)[0], StringComparer.Ordinal);
 
     /// <summary>Complete queue membership with three delivered bodies and the rest identified in order, and the open requests a run no longer waits on.</summary>
     public static JsonObject Derive(EstateModel model, string? to = null) => Derive(model, to, DateTimeOffset.UtcNow);
@@ -131,6 +177,18 @@ public static class OperatorRequests
                 ["id"] = model.Chain(r)[0], ["revision"] = r.Id, ["hash"] = r.ComputedHash,
             }).ToArray()),
         };
+
+        // From 0.9.4 (OPS-22) the optional requests are possible todos in their own member, each with its guide; a queue without one keeps its
+        // earlier bytes.
+        if (queue.Optional.Count > 0)
+        {
+            derived["optional"] = new JsonArray(queue.Optional.Select(r =>
+            {
+                JsonObject item = Item(model, r);
+                item["guide"] = Guide(r, optional: true);
+                return (JsonNode)item;
+            }).ToArray());
+        }
 
         // Only a run's open request that is no longer delivered adds a member, so a queue without one keeps its earlier bytes.
         if (queue.Withdrawn.Count > 0)
@@ -180,7 +238,67 @@ public static class OperatorRequests
         foreach (Held request in queue.Withdrawn)
             text.Append("  Not delivered, ").Append(request.State).Append(": operator-request ").Append(request.Request.Id).Append(", ").Append(request.Reason)
                 .Append("; it stays open until its operator closes it with vericairn operator done or dismiss.\n");
+        AppendPossibleTodos(text, queue.Optional, "  ");
         return text.ToString();
+    }
+
+    /// <summary>
+    /// From 0.9.4 (OPS-22): the optional requests as possible todos, in their own section: each with its recommendation first, its guide's
+    /// action and destination, its pinned files and the commands that fetch its kit and close it, done or dismissed, whenever the operator
+    /// chooses. They hold nothing.
+    /// </summary>
+    public static void AppendPossibleTodos(StringBuilder text, IReadOnlyList<RecordEnvelope> optional, string indent)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(optional);
+        if (optional.Count == 0) return;
+        text.Append(indent).Append("Possible todos: ").Append(optional.Count.ToString(CultureInfo.InvariantCulture))
+            .Append(optional.Count == 1 ? " optional request" : " optional requests").Append(", which hold no release's closing and no goal's evaluation\n");
+        foreach (RecordEnvelope request in optional)
+        {
+            string to = EstateModel.BodyString(request, "to") ?? "<operator-id>";
+            text.Append(indent).Append("  Recommendation: ").Append(EstateModel.BodyString(request, "recommendation")).Append('\n')
+                .Append(indent).Append("  Possible todo: ").Append(EstateModel.BodyString(request, "action")).Append(" [operator-request ").Append(request.Id).Append("]\n")
+                .Append(indent).Append("  Destination: ").Append(EstateModel.BodyString(request, "destination")).Append('\n');
+            foreach (System.Text.Json.JsonElement item in TJson.Array(request.Body, "content").Where(c => TJson.Text(c, "kind") == "file"))
+                text.Append(indent).Append("  File: ").Append(TJson.Text(item, "name")).Append(" at ").Append(TJson.Text(item, "hash")).Append('\n');
+            text.Append(indent).Append("  Fetch its files and guide: vericairn operator fetch ").Append(request.Id).Append(" --to <folder>\n")
+                .Append(indent).Append("  Done: vericairn operator done ").Append(request.Id).Append(" --by ").Append(to).Append(" --expected ").Append(request.ComputedHash)
+                .Append(EstateModel.BodyString(request, "kind") == "publication" ? " --link <observed-destination>\n" : "\n")
+                .Append(indent).Append("  Dismiss: vericairn operator dismiss ").Append(request.Id).Append(" --by ").Append(to).Append(" --expected ").Append(request.ComputedHash).Append(" --reason <your-reason>\n");
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (OPS-22): a request's guide, as vericairn operator fetch writes it beside the request's files: what it asks and why, the
+    /// recommendation, where it lands, what waits while it stays open, each pinned item by its hash with its text or command verbatim and each
+    /// file by its name, and the commands that close it. It reinterprets nothing.
+    /// </summary>
+    public static string Guide(RecordEnvelope request, bool optional)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string to = EstateModel.BodyString(request, "to") ?? "<operator-id>";
+        var text = new StringBuilder("# ").Append(EstateModel.BodyString(request, "action")).Append("\n\n")
+            .Append("Operator request ").Append(request.Id).Append(" at ").Append(request.ComputedHash).Append(", put to ").Append(to)
+            .Append(" by ").Append(EstateModel.BodyString(request, "askedBy")).Append(optional ? "; optional, a possible todo that holds nothing" : string.Empty).Append(".\n\n")
+            .Append("Recommendation: ").Append(EstateModel.BodyString(request, "recommendation")).Append("\n\n")
+            .Append("Why: ").Append(EstateModel.BodyString(request, "why")).Append("\n\n")
+            .Append("Destination: ").Append(EstateModel.BodyString(request, "destination")).Append("\n\n")
+            .Append("While it stays open: ").Append(EstateModel.BodyString(request, "consequence")).Append("\n\n")
+            .Append("## Pinned content\n\n");
+        foreach (System.Text.Json.JsonElement item in TJson.Array(request.Body, "content"))
+        {
+            string? kind = TJson.Text(item, "kind");
+            text.Append("- ").Append(kind).Append(' ').Append(TJson.Text(item, "hash"));
+            if (kind == "file") text.Append(": the file ").Append(TJson.Text(item, "name")).Append(", beside this guide\n");
+            else text.Append(":\n\n```text\n").Append(TJson.Text(item, "text")).Append("\n```\n");
+        }
+
+        return text.Append("\n## Finishing it\n\n")
+            .Append("Done: vericairn operator done ").Append(request.Id).Append(" --by ").Append(to).Append(" --expected ").Append(request.ComputedHash)
+            .Append(EstateModel.BodyString(request, "kind") == "publication" ? " --link <observed-destination>\n" : "\n")
+            .Append("Dismiss: vericairn operator dismiss ").Append(request.Id).Append(" --by ").Append(to).Append(" --expected ").Append(request.ComputedHash).Append(" --reason <your-reason>\n")
+            .ToString();
     }
 
     /// <summary>An exact request and its recorded body, without reinterpreting its content.</summary>

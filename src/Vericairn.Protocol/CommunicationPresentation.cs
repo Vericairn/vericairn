@@ -71,6 +71,22 @@ public static class CommunicationPresentation
             }
         }
 
+        // From 0.9.4 (GOAL-11): the person's declared availability and quiet hours, as of the read.
+        if (profile.Availability is CommunicationAvailability availability)
+        {
+            text.Append("availability: ").Append(availability.State);
+            if (availability.From is not null) { text.Append(" from ").Append(availability.From); }
+            if (availability.Until is not null) { text.Append(" until ").Append(availability.Until); }
+            text.Append(profile.AvailabilityNow is { Away: true } ? "; away now" : "; available now").Append('\n');
+        }
+
+        if (profile.QuietHours is QuietHoursSetting quiet)
+        {
+            text.Append("quiet hours: ").Append(string.Join("; ", quiet.Windows.Select(w => $"{string.Join(",", w.Days)} {w.Start}-{w.End}"))).Append(" in ").Append(quiet.Zone)
+                .Append("; breakthrough ").Append(string.Join(", ", quiet.Breakthrough ?? AvailabilityRules.DefaultBreakthrough))
+                .Append(profile.AvailabilityNow is { Quiet: true, QuietUntil: string until } ? $"; holding notifications until {until}" : "; not holding notifications now").Append('\n');
+        }
+
         foreach (CommunicationLayer revision in profile.Revisions)
         {
             text.Append(revision.Current ? "Current " : "Historical ").Append(revision.Scope).Append(" revision ").Append(revision.Record).Append(" at ").Append(revision.Hash).Append(" by ").Append(revision.By).Append('\n');

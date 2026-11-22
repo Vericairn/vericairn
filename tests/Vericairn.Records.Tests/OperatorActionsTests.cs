@@ -289,6 +289,31 @@ public class OperatorActionsTests
         Assert.Contains("records new attempt", Assert.Single(Commands(item))["command"]!.GetValue<string>(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AReservedWorkOrderIsListedByTheAssignmentThatHoldsItNotByALaterOneThatHoldsNothing()
+    {
+        // From 0.9.4 (ID-11): the operator holds a reserved work order by their own assignment; the builder, under local-engineering,
+        // then records by hand an assignment of it to itself, which holds nothing by the holder rule though it is the latest by time.
+        // The operator's item stays on their list, by the assignment that holds it.
+        using var estate = new TestEstate(2);
+        RecordEnvelope grant = estate.Add("decision", estate.OperatorId, Decision(estate, string.Empty));
+        estate.Add("authority", estate.OperatorId, $$"""{"grantee":"{{estate.BuilderId}}","scope":["local-engineering"],"reserved":[],"conditions":[],"basis":"{{grant.Id}}"}""");
+        JsonObject body = JsonNode.Parse(OrderBody("P-1", "ordinary", string.Empty))!.AsObject();
+        body["role"] = "publisher";
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, body.ToJsonString());
+        RecordEnvelope held = estate.Add("assignment", estate.OperatorId, GoalEvaluationTests.Assignment(estate.OperatorId), order.Reference);
+        RecordEnvelope later = estate.Add("assignment", estate.BuilderId, GoalEvaluationTests.Assignment(estate.BuilderId), order.Reference);
+        EstateModel model = estate.Load();
+        Assert.True(GoalRules.Before(held, later));
+        Assert.Equal(held.Id, Routing.HolderOf(model, later)!.Id);
+
+        JsonObject item = Assert.Single(Items(OperatorActions.Derive(model)), i => Id(i) == order.Id);
+        Assert.Equal("assigned", item["state"]!.GetValue<string>());
+        Assert.Contains($"with operator {estate.OperatorId}.", item.ToJsonString(), StringComparison.Ordinal);
+        Assert.Contains(held.Id, item["references"]!.ToJsonString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(later.Id, item["references"]!.ToJsonString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("milestone", "ordinary", 1)]
     [InlineData("ordinary", "milestone", 0)]

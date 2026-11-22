@@ -19,7 +19,7 @@ namespace Vericairn.Records.Estate;
 /// derivation (<see cref="ReleaseContents"/>) and the next eligible work is <see cref="NextEligible"/>, so the report never contradicts
 /// status or the notes and holds no figure the records do not hold: its numbers are counts of records, each beside its denominator.
 /// </summary>
-public static class ProgressReport
+public static partial class ProgressReport
 {
     /// <summary>The machine form's format.</summary>
     public const string Format = "vericairn.progress/1";
@@ -171,6 +171,10 @@ public static class ProgressReport
             sorted, states, model.Current("release").Count(), releases, upcoming, planned, Asked(model), Due(model, orders, assignments))
         {
             Overlaps = AssignmentOverlaps.Overlaps(model),
+            Assignments = assignments,
+            // From 0.9.4 (OPS-22), the open optional requests, which no time decides, so the report stays the same on every machine and
+            // walks no record for them.
+            Todos = OperatorRequests.OpenOptional(model),
         };
     }
 
@@ -433,6 +437,10 @@ public static class ProgressReport
         {
             text.Append("      ").Append(EstateModel.BodyString(goal.Goal, "title")).Append(", accepted by ").Append(goal.Accepter).Append(Names(goal.Goal, goal.Evaluation)).Append('\n');
         }
+
+        // From 0.9.4 (OPS-22): the possible todos in their own section, as operator list and status show them; a report without one is
+        // unchanged.
+        OperatorRequests.AppendPossibleTodos(text, report.Todos, "  ");
     }
 
     private static JsonObject StandingJson(Report report) => new()
@@ -484,7 +492,25 @@ public static class ProgressReport
         }).ToArray()),
     };
 
-    private static JsonObject OperatorJson(Report report) => new()
+    private static JsonObject OperatorJson(Report report)
+    {
+        JsonObject json = OperatorAsksAndAcceptancesJson(report);
+        // From 0.9.4 (OPS-22): the open optional requests, each as the request queue's optional member carries it, with its guide; only
+        // when one exists, so a report without one keeps its bytes.
+        if (report.Todos.Count > 0)
+        {
+            json["possibleTodos"] = new JsonArray([.. report.Todos.Select(r =>
+            {
+                JsonObject item = OperatorRequests.Item(report.Model, r);
+                item["guide"] = OperatorRequests.Guide(r, optional: true);
+                return (JsonNode)item;
+            })]);
+        }
+
+        return json;
+    }
+
+    private static JsonObject OperatorAsksAndAcceptancesJson(Report report) => new()
     {
         ["asks"] = new JsonArray(report.Asks.Select(a => (JsonNode)new JsonObject
         {
@@ -645,5 +671,11 @@ public static class ProgressReport
     {
         /// <summary>From 0.9.4 (CODE-73), the overlaps among active assignments, from the records alone.</summary>
         public IReadOnlyList<AssignmentOverlaps.Overlap> Overlaps { get; init; } = [];
+
+        /// <summary>From 0.9.4 (WATCH-06), every current assignment with its derived state, which a progress target's in-flight work reads.</summary>
+        public IReadOnlyList<WorkView.AssignmentItem> Assignments { get; init; } = [];
+
+        /// <summary>From 0.9.4 (OPS-22), the open optional requests, possible todos in original request order, which hold nothing.</summary>
+        public IReadOnlyList<RecordEnvelope> Todos { get; init; } = [];
     }
 }

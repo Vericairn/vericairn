@@ -212,6 +212,19 @@
       ]
     },
     {
+      "name": "operator act of mixed records",
+      "about": "From 0.9.4 (OPS-24, decision 01M8001M0T9XRGF7SKHW3B45KF): operator act names one reviewed act over ready items of several types, each an exact entry, signed in any order, each once.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "operator act", "actionIdentity": "sha256:a595aff2f22767f4ef386f4771828714fb15489ce0f9ffa7cd53bb3415b12c48", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "exact", "type": "acceptance", "hash": "${hash:acceptRelease}"}, {"entry": "exact", "type": "decision", "hash": "${hash:decision}"}], "references": []},
+      "bytes": ["accept", "acceptRelease", "decision"],
+      "dialog": "open Vericairn session ${fingerprint}: operator act, 3 signatures in 300 s; 1 acceptance; 1 release acceptance; 1 decision",
+      "open": "opened",
+      "steps": [
+        {"sign": "decision", "entry": 2, "left": 2},
+        {"sign": "accept", "entry": 0, "left": 1},
+        {"sign": "acceptRelease", "entry": 1, "left": 0}
+      ]
+    },
+    {
       "name": "a long breakdown is cut",
       "about": "The breakdown is cut at its end with an ellipsis at 200 characters; the fingerprint, the action, the total and the limit are never cut.",
       "terms": {"format": "vericairn.presence-session/1", "action": "work move-plan", "actionIdentity": "sha256:7bfcdebb690014f2eeef6dbcfef40767845402c2315f8f81a78a71a5b81edf54", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "review", "hash": "${hash:review}"}, {"entry": "exact", "type": "decision", "hash": "${hash:decision}"}, {"entry": "exact", "type": "ask", "hash": "${hash:ask}"}, {"entry": "exact", "type": "assignment", "hash": "${hash:assignment}"}, {"entry": "exact", "type": "document-revision", "hash": "${hash:documentRevision}"}, {"entry": "exact", "type": "work-order", "hash": "${hash:workOrder}"}, {"entry": "exact", "type": "work-status", "hash": "${hash:workStatus}"}, {"entry": "exact", "type": "operator-request", "hash": "${hash:operatorRequest}"}, {"entry": "exact", "type": "release", "hash": "${hash:withdrawn}"}, {"entry": "exact", "type": "operation", "hash": "${hash:agentRun}", "action": "agent-run"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 100, "atMost": true, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
@@ -314,6 +327,14 @@
       "name": "an action outside the vocabulary",
       "about": "A name outside the action vocabulary.",
       "terms": {"format": "vericairn.presence-session/1", "action": "estate charter", "actionIdentity": "sha256:d3fdb3f504b0e8aee1dd1ecba7141f7e8f48220791bfcf98224d0a2e84701664", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
+      "bytes": ["accept"],
+      "open": {"refused": "terms.not-allowed", "ended": "refusal"},
+      "steps": []
+    },
+    {
+      "name": "an action that only resembles one in the vocabulary",
+      "about": "A name close to operator act that the vocabulary does not hold.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "operator acts", "actionIdentity": "sha256:d3fdb3f504b0e8aee1dd1ecba7141f7e8f48220791bfcf98224d0a2e84701664", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
       "bytes": ["accept"],
       "open": {"refused": "terms.not-allowed", "ended": "refusal"},
       "steps": []

@@ -83,9 +83,10 @@ public sealed partial class GitleaksScanner : ISecretScanner
         // of the scan runs (FIX-160, ScanFolder).
         string temporary = Path.Combine(Path.GetTempPath(), "vericairn-scan-" + Guid.NewGuid().ToString("N"));
         string number = "unknown";
+        using GitHardening hardening = Harden();
         try
         {
-            var folder = new ScanFolder(Path.Combine(temporary, "source"), null);
+            var folder = new ScanFolder(Path.Combine(temporary, "source"), null, hardening);
             Directory.CreateDirectory(folder.Source);
             ProcessResult version = run(Start("gitleaks", folder, ["version"]));
             number = version.StandardOutput.Trim();
@@ -147,13 +148,17 @@ public sealed partial class GitleaksScanner : ISecretScanner
     // creates for itself, which is gitleaks' source; once git has named the clone's git directory from the clone, each reads it through
     // GIT_DIR alone, with that empty folder as its work tree, so no file of the clone's working tree is read and no file in the git
     // directory is taken for gitleaks' own; and none inherits a GITLEAKS_ or git variable (Isolate).
-    private sealed record ScanFolder(string Source, string? GitDirectory);
+    // Each also runs with the hardening of every git process on a repository Vericairn did not create (FIX-147): a git process takes it on
+    // its command line and, as gitleaks' own git does, through git's configuration environment (Isolate). The scan's one hardening outlives
+    // its last process.
+    private sealed record ScanFolder(string Source, string? GitDirectory, GitHardening Hardening);
 
     private static ProcessStartInfo Start(string file, ScanFolder folder, IEnumerable<string> arguments)
     {
         var info = new ProcessStartInfo(file) { WorkingDirectory = folder.Source, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        Isolate(info);
+        if (file == "git") folder.Hardening.Apply(info, arguments);
+        else foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        Isolate(info, folder.Hardening);
         if (folder.GitDirectory is not null)
         {
             info.Environment["GIT_DIR"] = folder.GitDirectory;
@@ -197,22 +202,21 @@ public sealed partial class GitleaksScanner : ISecretScanner
     // (FIX-150); and every other inherited git variable, such as those choosing a diff's context, an external diff, notes or attributes,
     // and every GITLEAKS_ variable (FIX-160), so that the environment the scan was started in changes nothing it reads. No process of the
     // scan fetches a missing object either, whatever remote the clone's configuration names for one, as none of the push adapter's does:
-    // a read that meets one fails, and the scan is incomplete (FIX-160).
-    internal static void Isolate(ProcessStartInfo info)
+    // a read that meets one fails, and the scan is incomplete (FIX-160). The settings forced here are the hardening of every git process
+    // on a repository Vericairn did not create (GitHardening: no system or global configuration, an empty hooks directory, and the clone's
+    // own program settings overridden; FIX-147), followed by the read settings above, all carried through git's configuration environment,
+    // which every git process the scan starts reads, gitleaks' own included. The hardening's directory must outlive the process.
+    internal static void Isolate(ProcessStartInfo info, GitHardening hardening)
     {
+        ArgumentNullException.ThrowIfNull(hardening);
         GitRouting.Remove(info);
         foreach (string name in info.Environment.Keys.Where(n => n.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)
             || n.StartsWith("GITLEAKS_", StringComparison.OrdinalIgnoreCase)).ToArray())
             info.Environment.Remove(name);
+        hardening.ApplyEnvironment(info, ReadSettings.Select(s => s.Key + "=" + s.Value));
         info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
         info.Environment["GIT_NO_LAZY_FETCH"] = "1";
         info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
-        info.Environment["GIT_CONFIG_COUNT"] = ReadSettings.Length.ToString(CultureInfo.InvariantCulture);
-        for (int i = 0; i < ReadSettings.Length; i++)
-        {
-            info.Environment["GIT_CONFIG_KEY_" + i.ToString(CultureInfo.InvariantCulture)] = ReadSettings[i].Key;
-            info.Environment["GIT_CONFIG_VALUE_" + i.ToString(CultureInfo.InvariantCulture)] = ReadSettings[i].Value;
-        }
     }
 
     /// <summary>
@@ -311,6 +315,18 @@ public sealed partial class GitleaksScanner : ISecretScanner
         ProcessResult result = run(Start("git", folder, ["--no-replace-objects", "rev-list", "--count", range]));
         return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0
             && int.TryParse(result.StandardOutput.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int count) && count >= 0 ? count : null;
+    }
+
+    private static GitHardening Harden()
+    {
+        try
+        {
+            return GitHardening.Create();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new ProviderRefusedException("git cannot run isolated: a temporary directory could not be created; nothing was scanned.", error);
+        }
     }
 
     private static byte[] ReadConfiguration()

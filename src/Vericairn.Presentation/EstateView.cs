@@ -50,6 +50,22 @@ public sealed record FlowRunRow(string Goal, string Title, string Status, string
     public string Heading => $"{Title}: {StateLanguage.Label("goal", Status)}; {Flow}, {Done.ToString(System.Globalization.CultureInfo.InvariantCulture)} of {Steps.ToString(System.Globalization.CultureInfo.InvariantCulture)} steps done; next: {(Next.Count == 0 ? "none" : string.Join(", ", Next))}{(AsOf is null ? string.Empty : $"; as of {AsOf}, the newest record")}";
 }
 
+/// <summary>
+/// From 0.9.4 (OPS-22): an optional operator request, a possible todo, as status gives it: its recommendation first, what it asks, where it
+/// lands, its guide and the commands that fetch its kit and close it whenever the operator chooses. It holds nothing.
+/// </summary>
+public sealed record TodoRow(string Id, string Revision, string Hash, string To, string Action, string Recommendation, string Destination, string Guide)
+{
+    /// <summary>The possible todo, in words.</summary>
+    public string Heading => $"Possible todo: {Action}";
+
+    /// <summary>Its recommendation, destination and the commands that fetch and finish it.</summary>
+    public string Detail => $"Recommendation: {Recommendation}\nDestination: {Destination}\nRequest {Revision} at {Hash}\n" +
+        $"Fetch its files and guide on a machine with the estate: vericairn operator fetch {Revision} --to <folder>\n" +
+        $"Done: vericairn operator done {Revision} --by {To} --expected {Hash}\nDismiss: vericairn operator dismiss {Revision} --by {To} --expected {Hash} --reason <your-reason>\n" +
+        "It holds no release's closing and no goal's evaluation.";
+}
+
 /// <summary>A finding as a surface lists it.</summary>
 public sealed record FindingRow(string Severity, string Code, string Location, string Message);
 
@@ -205,6 +221,9 @@ public sealed class EstateView
     /// <summary>From 0.9.4, the standing agents status shows, each as of the estate's newest record.</summary>
     public IReadOnlyList<StandingRow> Standing { get; private set; } = [];
 
+    /// <summary>From 0.9.4 (OPS-22), the optional operator requests status shows as possible todos, in their own section.</summary>
+    public IReadOnlyList<TodoRow> PossibleTodos { get; private set; } = [];
+
     /// <summary>Every run's stops, run by run, in the order each flow reaches them.</summary>
     public IReadOnlyList<StopRow> Stops => Runs.SelectMany(r => r.Stops).ToList();
 
@@ -283,6 +302,14 @@ public sealed class EstateView
             };
         });
         view.Standing = StandingRow.From(document.TryGetProperty("standingAgents", out JsonElement standing) ? standing : default);
+        view.PossibleTodos = document.TryGetProperty("operatorRequests", out JsonElement requests) && requests.ValueKind == JsonValueKind.Object
+            ? Rows(requests, "optional", e =>
+            {
+                JsonElement body = e.TryGetProperty("body", out JsonElement b) ? b : default;
+                return new TodoRow(Str(e, "id") ?? "?", Str(e, "revision") ?? "?", Str(e, "hash") ?? "?", Str(body, "to") ?? "?", Str(body, "action") ?? "?",
+                    Str(body, "recommendation") ?? "?", Str(body, "destination") ?? "?", Str(e, "guide") ?? string.Empty);
+            })
+            : [];
         view.Reconcile = Rows(document, "reconcile", e => new FindingRow("error", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
         view.Proposals = Rows(document, "proposals", e => new ProposalRow(Str(e, "goal") ?? "?", Str(e, "goalTitle") ?? "?", Str(e, "sponsor"), Str(e, "key") ?? "?", Str(e, "title") ?? "?", Str(e, "id") ?? string.Empty, Str(e, "by") ?? "?"));
         view.Attention = DeriveAttention(view);

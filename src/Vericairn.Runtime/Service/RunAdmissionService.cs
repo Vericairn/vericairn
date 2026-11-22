@@ -104,6 +104,13 @@ internal sealed class RunAdmissionService(
         {
             List<RecordFile> files = session.Files().Concat(carried.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
             EstateModel model = session.LoadFiles(files);
+            // From 0.9.4 (FIX-159): no run is admitted, prepared or marked while the estate reports an error, before any workspace, setup,
+            // probe or record.
+            if (ActingRefusal.BeforeActing(model, prepareOnly ? "preparing the run's workspace" : "admitting the run") is Problem invalid)
+            {
+                return new RunResponse(pending, "not-started", invalid.Message, false, Problem: invalid);
+            }
+
             (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, files, request, launcher, configuration);
             if (planned is null)
             {
@@ -573,6 +580,8 @@ internal sealed class RunAdmissionService(
             // Probes start subprocesses and can take time. Judge authority again from the records after they finish.
             if (WorkspaceRootProblem(configuredRoot) is string changedRoot) throw new ProviderRefusedException(changedRoot);
             dispatchModel = session.Load();
+            // From 0.9.4 (FIX-159): no harness is launched while the estate reports an error, judged after the final probes.
+            if (ActingRefusal.BeforeActing(dispatchModel, "launching the run") is Problem invalid) throw new ProviderRefusedException(invalid.Message);
             dispatchGoal = AgentRuns.GoalAt(dispatchModel, plan.Goal);
             if (dispatchGoal is null || !SelectionStillCurrent(dispatchModel, dispatchGoal, plan, configuration, launcher, request))
             {
@@ -619,10 +628,12 @@ internal sealed class RunAdmissionService(
     {
         RecordEnvelope current = model.Latest(assignment);
         FlowRuns.StepRef? step = FlowRuns.StepOf(current);
-        IReadOnlyList<RecordEnvelope> holders = WorkView.OrderOfAssignment(model, current) is RecordEnvelope order
-            ? Routing.Assignments(model, model.Latest(order), step).Where(a => StandingAgents.KeyOf(a) == StandingAgents.KeyOf(current)).ToList() : [];
-        // A later assignment of the step holds it; routing's own pending assignment, not yet stored with its intent, is the latest.
-        RecordEnvelope? later = holders.LastOrDefault(h => h.Id != current.Id && GoalRules.Before(current, h));
+        List<RecordEnvelope> holders = WorkView.OrderOfAssignment(model, current) is RecordEnvelope order
+            ? Routing.Holding(model, model.Latest(order), step).Where(a => StandingAgents.KeyOf(a) == StandingAgents.KeyOf(current)).ToList() : [];
+        // A later holding assignment of the step holds it; routing's own pending assignment, not yet stored with its intent, is the latest.
+        // From 0.9.4 (ID-11) a stored assignment that does not hold its step under the holder rule runs nothing either.
+        RecordEnvelope? later = holders.LastOrDefault(h => h.Id != current.Id && GoalRules.Before(current, h))
+            ?? (model.ById.ContainsKey(current.Id) && !Routing.Stranded(model, current) && holders.Count > 0 && !model.Chain(current).Contains(holders[^1].Id) ? holders[^1] : null);
         return later is not null
             ? $"{(step is null ? string.Empty : $"Step {step} of ")}{(step is null ? "Work order" : "work order")} {key} is held by assignment {later.Id}; its step goes on from that assignment."
             : null;

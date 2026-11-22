@@ -91,5 +91,22 @@ public sealed partial class EstateService
         }
     }
 
+    /// <summary>
+    /// From 0.9.4 (OPS-22): why a request may not be written now, or null: every file it pins is held by the estate's objects, so its content
+    /// is retrievable from any copy of the estate. Applies to every write of a request, its revisions included.
+    /// </summary>
+    private string? RequestFileRefusal(RecordDraft draft)
+    {
+        if (draft.Type != "operator-request" || draft.Body.ValueKind != JsonValueKind.Object || !draft.Body.TryGetProperty("content", out JsonElement content)
+            || content.ValueKind != JsonValueKind.Array) return null;
+        string[] missing = [.. content.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("kind", out JsonElement kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "file"
+                && item.TryGetProperty("hash", out JsonElement hash) && hash.ValueKind == JsonValueKind.String && global::Vericairn.Records.Hashing.ContentHash.IsValid(hash.GetString())
+                && !session.Objects.Has(hash.GetString()!))
+            .Select(item => (item.TryGetProperty("name", out JsonElement name) && name.ValueKind == JsonValueKind.String ? name.GetString() : "a file") + " (" + item.GetProperty("hash").GetString() + ")")];
+        return missing.Length == 0 ? null
+            : $"The request pins {(missing.Length == 1 ? "a file" : missing.Length + " files")} the estate's objects do not hold: {string.Join(", ", missing)}. Store each with vericairn objects put <file> first, so any copy of the estate can fetch it; nothing was written.";
+    }
+
     private static WriteOutcome RequestConflict() => WriteOutcome.Fail(new("conflict", "The request or ask changed, is already carried or closed, or does not match the expected hash. Read the current queue and exact record before acting.", []));
 }

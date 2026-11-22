@@ -42,6 +42,8 @@ public sealed partial class EstateService
         {
             EstateModel model = session.Load();
             if (RequestDeviceRefusal(model) is Problem denied) return new(false, Problem: denied);
+            // From 0.9.4 (FIX-159): nothing is prepared for a device to sign while the estate leaves records unread.
+            if (ActingRefusal.BeforeSigning(model, "preparing the " + request.Type + " record for device " + device.Device + " to sign") is Problem unread) return new(false, Problem: unread);
             if (Standing(model, device.Device) is not DeviceStanding standing || !string.Equals(standing.Principal, request.By, StringComparison.Ordinal))
                 return Unprepared("denied", $"Device {device.Device} signs only its own principal's records.");
             if (ClosingRequired(model, request.Type, request.Body, subject, request.Supersedes) is { } closes) return Unprepared("refused", SignedElsewhereRefusal(closes));

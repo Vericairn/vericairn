@@ -97,6 +97,35 @@ public class StandingAgentTests
     }
 
     [Fact]
+    public void AnOccurrenceIsHeldAndRoutedByTheAssignmentThatHoldsItNotByALaterOneThatHoldsNothing()
+    {
+        // From 0.9.4 (ID-11): the operator assigns an occurrence to the builder; the builder, under local-engineering, then records by hand
+        // an assignment of it to the operator, which an agent may not hand over and which holds nothing by the holder rule, though it is the
+        // latest by time. The occurrence stays the builder's by the operator's assignment: due, and routed as the builder's by it.
+        using var fixture = new StandingFixture();
+        RecordEnvelope grant = fixture.Estate.Add("decision", fixture.Estate.OperatorId, $$"""{"title":"A grant","statement":"Grant local-engineering.","summary":"A grant.","synthesis":"A grant of local-engineering.","effects":["local-engineering"],"affects":[],"decidedBy":"{{fixture.Estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"medium","notAuthorized":[]}""");
+        fixture.Estate.Add("authority", fixture.Estate.OperatorId, $$"""{"grantee":"{{fixture.Estate.BuilderId}}","scope":["local-engineering"],"reserved":[],"conditions":[],"basis":"{{grant.Id}}"}""");
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope held = fixture.Assign(occurrence);
+        RecordEnvelope later = fixture.Add("assignment", StandingFixture.AssignmentBody(occurrence, fixture.Estate.OperatorId), builder: true, subject: fixture.Work.Reference);
+        EstateModel model = fixture.Estate.Load();
+        Assert.True(GoalRules.Before(held, later));
+        Assert.Equal(held.Id, Routing.HolderOf(model, later)!.Id);
+
+        StandingAgents.Agent agent = StandingAgents.Derive(model, fixture.Goal, fixture.Estate.Clock);
+        StandingAgents.OccurrenceState state = Assert.Single(agent.Occurrences);
+        Assert.Equal(("due", held.Id), (state.State, state.Assignment!.Id));
+        Assert.Contains($"assignment {held.Id} holds it", state.Reason, StringComparison.Ordinal);
+
+        NextEligible.OccurrenceRoute routed = Assert.Single(NextEligible.Standing(model, agent, new Routing.Machine([], _ => false, (_, _) => [], fixture.Estate.Clock)).Occurrences);
+        // No launcher here starts the builder's harness, so the builder cannot go on from here and its sponsor is asked; it is never given
+        // to the operator by the assignment that holds nothing.
+        Assert.Equal("unavailable", routed.Route!.State);
+        Assert.Contains($"{Routing.NameOf(model, fixture.Estate.BuilderId)} holds it by assignment {held.Id}", routed.Route.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain(later.Id, routed.Route.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnOccurrenceNamesTheKeyItsGoalTriggerRevisionAndItemMakeAndIsNeverCarriedBeforeItIsDue()
     {
         using var fixture = new StandingFixture();
@@ -1258,5 +1287,194 @@ public class StandingAgentTests
         Assert.Contains(Carry(elsewhere), f => f.Code == "assignment.occurrence" && f.Message.Contains("is not one of the schedule's product", StringComparison.Ordinal));
         Assert.Contains(Carry(early), f => f.Code == "assignment.occurrence" && f.Message.Contains("published before the schedule's activation", StringComparison.Ordinal));
         Assert.Contains(Carry(republished), f => f.Code == "assignment.occurrence" && f.Message.Contains("is not the first published revision", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Three runs of the standing agent exit cleanly after the carrier, signing with its admitted device, recorded a blocked result in each; in
+    /// the third it raised a possibility and asked a question. Returns the possibility, the ask and the last run's intent.
+    /// </summary>
+    internal static (RecordEnvelope Possibility, RecordEnvelope Ask, RecordEnvelope Last) ThreeBlockedRuns(StandingFixture fixture)
+    {
+        StandingAgents.Occurrence occurrence = Assert.Single(fixture.Agent(fixture.Estate.Clock).Occurrences).Occurrence;
+        RecordEnvelope assignment = fixture.Assign(occurrence);
+        RecordEnvelope? possibility = null, ask = null, last = null;
+        for (int i = 1; i <= 3; i++)
+        {
+            RecordEnvelope intent = fixture.RunIntent(assignment, "run-" + i);
+            fixture.Result(assignment, "blocked");
+            if (i == 3)
+            {
+                var raised = new JsonObject { ["goal"] = fixture.Goal.Id, ["occurrence"] = occurrence.Key, ["assignment"] = assignment.Id, ["run"] = intent.Id };
+                possibility = fixture.Add("possibility", new JsonObject
+                {
+                    ["title"] = "Cache the widget's index", ["idea"] = "Reading the index on every call costs a second.", ["origin"] = "The researcher's occurrence.", ["disposition"] = "open",
+                    ["raisedBy"] = raised.DeepClone(), ["fingerprint"] = "cache/index", ["sources"] = new JsonArray(new JsonObject { ["address"] = "https://example.org/widget/index" }),
+                }, builder: true);
+                ask = fixture.Add("ask", new JsonObject
+                {
+                    ["to"] = fixture.Estate.OperatorId, ["question"] = "Should the index be cached?", ["recommendation"] = "Cache it.", ["consequence"] = "Nothing waits on it.",
+                    ["goal"] = fixture.Goal.Id, ["state"] = "open", ["raisedBy"] = raised.DeepClone(),
+                }, builder: true);
+            }
+
+            last = fixture.Settle(intent, "observed-success");
+        }
+
+        return (possibility!, ask!, last!);
+    }
+
+    /// <summary>The operator's signed revision of the charter to required signatures, as the root operator writes it.</summary>
+    internal static RecordEnvelope Require(StandingFixture fixture) => fixture.Estate.Add("estate", fixture.Estate.OperatorId,
+        $$$"""{"name":"Test Estate","slug":"test-estate","purpose":"Exercise the record format.","operator":"{{{fixture.Estate.OperatorId}}}","recordFormat":3,"policies":{"signatures":"required","releaseAcceptance":["operator"]}}""",
+        supersedes: fixture.Estate.Estate.Id, signer: fixture.Policies.OperatorSigner);
+
+    /// <summary>The next history checkpoint, prepared from the estate as it stands, its objects stored, signed by the operator's first device.</summary>
+    internal static RecordEnvelope Checkpoint(StandingFixture fixture, string trigger, IEnumerable<RecordEnvelope>? anchored = null, (string Kind, string Id)? closes = null)
+    {
+        Records.History.CheckpointDraft draft = Records.History.SignedHistory.Prepare(fixture.Estate.Load(), trigger, anchored, closes: closes);
+        foreach (byte[] bytes in draft.Objects)
+        {
+            string path = Path.Combine(fixture.Estate.Root, EstateLayout.ObjectsDirectory, Hashing.ContentHash.Sha256(bytes)[Hashing.ContentHash.Prefix.Length..]);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, bytes);
+        }
+
+        return fixture.Estate.Add("history-checkpoint", fixture.Estate.OperatorId, draft.Body.GetRawText(), signer: fixture.Policies.OperatorSigner);
+    }
+
+    /// <summary>Adopts history checkpoints, anchoring every unsigned record present, by the operator.</summary>
+    internal static RecordEnvelope Adopt(StandingFixture fixture) => Checkpoint(fixture, "adoption", fixture.Estate.Load().Records.Where(r => r.Signatures.Count == 0));
+
+    /// <summary>A revision of a possibility with a disposition, by the operator, signed by the signer given or unsigned.</summary>
+    internal static RecordEnvelope Disposition(StandingFixture fixture, RecordEnvelope possibility, string disposition, Signing.IRecordSigner? signer)
+    {
+        JsonObject body = PolicyFixture.Body(possibility);
+        body["disposition"] = disposition;
+        body["reason"] = "Later.";
+        return fixture.Estate.Add("possibility", fixture.Estate.OperatorId, body.ToJsonString(), supersedes: possibility.Id, signer: signer);
+    }
+
+    /// <summary>A decision by the operator answering an ask, signed by the signer given or unsigned.</summary>
+    internal static RecordEnvelope Answer(StandingFixture fixture, RecordEnvelope ask, Signing.IRecordSigner? signer)
+    {
+        JsonObject answer = fixture.Policies.DecisionBody();
+        answer["answers"] = new JsonArray(ask.Id);
+        return fixture.Estate.Add("decision", fixture.Estate.OperatorId, answer.ToJsonString(), signer: signer);
+    }
+
+    [Fact]
+    public void LeavingTheChartersRequirementUnreadCountsNoUnsignedRecordInTheOperatorsName()
+    {
+        // FIX-159, the Reviewer's first probe of FIX-156: with signatures required and history adopted, unsigned records in the operator's name park
+        // the agent's possibility and answer its ask, and count for nothing. Leaving the charter or its required revision unread, by any of the
+        // four shapes, left the requirement unread, so before 0.9.4's fix they counted and the agent read held with no open output. A record counts
+        // only when every reading of the unread records counts it, and the reading with the charter refuses them: they still count for nothing,
+        // the agent reads held with three failures and two open outputs, and a run intent is refused by the hold whatever the failures. Removing
+        // the files reads the estate as before.
+        foreach (string target in new[] { "charter", "revision" })
+        {
+            foreach (string shape in UnreadShapes)
+            {
+                using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+                (RecordEnvelope possibility, RecordEnvelope ask, _) = ThreeBlockedRuns(fixture);
+                RecordEnvelope revision = Require(fixture);
+                Adopt(fixture);
+                Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings.Where(f => f.Severity == Severity.Error)));
+                RecordEnvelope parked = Disposition(fixture, possibility, "parked", signer: null);
+                RecordEnvelope answered = Answer(fixture, ask, signer: null);
+                EstateModel before = fixture.Estate.Load();
+                Assert.False(before.Counts(before.ById[parked.Id]) || before.Counts(before.ById[answered.Id]), $"{target}, {shape}: an unsigned record counts under required signatures");
+                StandingAgents.Agent held = fixture.Agent(fixture.Estate.Clock);
+                Assert.Equal(("held", 3, 2), (held.State, held.Failures, held.OpenOutputs));
+
+                IReadOnlyList<RecordEnvelope> written = LeaveUnread(fixture, target == "charter" ? fixture.Estate.Estate : revision, shape);
+                EstateModel model = fixture.Estate.Load();
+                Assert.True(model.IsUnreadable(fixture.Estate.Estate.Id) && model.IsUnreadable(revision.Id), $"{target}, {shape}");
+                Assert.False(model.Counts(model.ById[parked.Id]), $"{target}, {shape}: the parking counts");
+                Assert.False(model.Counts(model.ById[answered.Id]), $"{target}, {shape}: the answer counts");
+                Assert.Contains(model.Findings, f => f.Code == "record.duplicate-refused" && f.Severity == Severity.Warning);
+                StandingAgents.Agent agent = fixture.Agent(fixture.Estate.Clock);
+                Assert.True(("held", 3, 2) == (agent.State, agent.Failures, agent.OpenOutputs), $"{target}, {shape}: {(agent.State, agent.Failures, agent.OpenOutputs)}");
+                Assert.Contains("record.duplicate-id", agent.Reason, StringComparison.Ordinal);
+                Assert.All(agent.Occurrences, o => Assert.NotEqual("due", o.State));
+                Assert.Contains(Validate(fixture, "operation", fixture.RunBody(Assert.Single(fixture.Estate.Load().Records, r => r.Type == "assignment"), "run-held", "not-started")),
+                    f => f.Code == "operation.standing" && f.Message.Contains("record.duplicate-id", StringComparison.Ordinal));
+
+                foreach (RecordEnvelope file in written)
+                {
+                    Remove(fixture, file);
+                }
+
+                EstateModel restored = fixture.Estate.Load();
+                Assert.Empty(restored.UnreadableLines);
+                Assert.False(restored.Counts(restored.ById[parked.Id]) || restored.Counts(restored.ById[answered.Id]));
+                Assert.DoesNotContain(restored.Findings, f => f.Code is "record.duplicate-refused" or "record.duplicate-id");
+                StandingAgents.Agent again = fixture.Agent(fixture.Estate.Clock);
+                Assert.Equal(("held", 3, 2), (again.State, again.Failures, again.OpenOutputs));
+                Assert.Contains("failed in a row", again.Reason, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    [Fact]
+    public void LeavingADevicesClosingUnreadCountsNothingItsDeviceSignedAfterIt()
+    {
+        // FIX-159, the Reviewer's second probe of FIX-156: the operator's second device is closed by a history checkpoint and revoked. Records
+        // signed with it and dated before the closing, written after it (an answer to the failure pause's ask, a parking of the possibility and an
+        // answer to the agent's ask), count for nothing while the closing is read. Leaving the closing unread, by any of the four shapes, made them
+        // count before 0.9.4's fix: the agent read held with no failure and no open output. The reading with the closing refuses them, so they still
+        // count for nothing: held, three failures, two open outputs, a run intent refused by the hold; removing the files reads as before.
+        foreach (string shape in UnreadShapes)
+        {
+            using var fixture = new StandingFixture(budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 12, ["concurrency"] = 2 }, period: new JsonObject { ["unit"] = "months", ["runs"] = 20, ["wallMinutes"] = 400 });
+            (RecordEnvelope possibility, RecordEnvelope ask, RecordEnvelope last) = ThreeBlockedRuns(fixture);
+            Signing.StoreSigner second = fixture.Policies.AdmitSigner(fixture.Estate.OperatorId);
+            RecordEnvelope admission = Assert.Single(fixture.Estate.Load().OfType("admission"), a => a.Subject?.Id == second.DeviceId);
+            Require(fixture);
+            Adopt(fixture);
+            RecordEnvelope pause = fixture.Add("ask", new JsonObject
+            {
+                ["to"] = fixture.Estate.OperatorId, ["question"] = "Required attention in goal Research the widget: its runs failed. How does the run go on?", ["recommendation"] = "Let it go on.",
+                ["consequence"] = "Nothing is dispatched.", ["goal"] = fixture.Goal.Id, ["state"] = "open",
+            }, subject: last.Reference);
+            // The forged records are dated in the half minute before the closing, while the device still stood.
+            DateTimeOffset backdated = fixture.Estate.Clock;
+            fixture.Estate.SetClock(backdated.AddSeconds(30));
+            RecordEnvelope closing = Checkpoint(fixture, "closing", closes: ("device", second.DeviceId));
+            fixture.Estate.Add("admission", fixture.Estate.OperatorId, $$"""{"principal":"{{fixture.Estate.OperatorId}}","status":"revoked","note":"Revoked.","revokedAt":"{{RecordParser.FormatTimestamp(fixture.Estate.Clock.AddSeconds(1))}}"}""",
+                fixture.Estate.Load().ById[second.DeviceId].Reference, supersedes: admission.Id, signer: fixture.Policies.OperatorSigner);
+            Assert.False(fixture.Estate.Load().Findings.HasErrors, string.Join('\n', fixture.Estate.Load().Findings.Where(f => f.Severity == Severity.Error)));
+            DateTimeOffset now = fixture.Estate.Clock;
+            fixture.Estate.SetClock(backdated);
+            RecordEnvelope[] forged = [Answer(fixture, pause, second), Disposition(fixture, possibility, "parked", second), Answer(fixture, ask, second)];
+            fixture.Estate.SetClock(now);
+            EstateModel before = fixture.Estate.Load();
+            Assert.All(forged, f => Assert.False(before.Counts(before.ById[f.Id]), f.Id));
+            Assert.Contains(before.Findings, f => f.Code == "history.after-closing");
+            StandingAgents.Agent held = fixture.Agent(fixture.Estate.Clock);
+            Assert.Equal(("held", 3, 2), (held.State, held.Failures, held.OpenOutputs));
+
+            IReadOnlyList<RecordEnvelope> written = LeaveUnread(fixture, closing, shape);
+            EstateModel model = fixture.Estate.Load();
+            Assert.True(model.IsUnreadable(closing.Id), shape);
+            Assert.All(forged, f => Assert.False(model.Counts(model.ById[f.Id]), $"{shape}: {f.Type} {f.Id} counts\n" + string.Join("\n", model.Findings.Where(x => x.Severity != Severity.Info).Select(x => x.Code + " " + x.Location + " " + x.Message))));
+            StandingAgents.Agent agent = fixture.Agent(fixture.Estate.Clock);
+            Assert.True(("held", 3, 2) == (agent.State, agent.Failures, agent.OpenOutputs), $"{shape}: {(agent.State, agent.Failures, agent.OpenOutputs)}");
+            Assert.Contains("record.duplicate-id", agent.Reason, StringComparison.Ordinal);
+            Assert.All(agent.Occurrences, o => Assert.NotEqual("due", o.State));
+            Assert.Contains(Validate(fixture, "operation", fixture.RunBody(Assert.Single(fixture.Estate.Load().Records, r => r.Type == "assignment"), "run-held", "not-started")),
+                f => f.Code == "operation.standing" && f.Message.Contains("record.duplicate-id", StringComparison.Ordinal));
+
+            foreach (RecordEnvelope file in written)
+            {
+                Remove(fixture, file);
+            }
+
+            EstateModel restored = fixture.Estate.Load();
+            Assert.Empty(restored.UnreadableLines);
+            Assert.All(forged, f => Assert.False(restored.Counts(restored.ById[f.Id]), f.Id));
+            StandingAgents.Agent again = fixture.Agent(fixture.Estate.Clock);
+            Assert.Equal(("held", 3, 2), (again.State, again.Failures, again.OpenOutputs));
+        }
     }
 }

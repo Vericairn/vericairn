@@ -18,6 +18,9 @@ public static class OperatorActions
     /// <summary>The versioned machine representation.</summary>
     public const string Format = "vericairn.operator-actions/1";
 
+    // The two closes of a request, in the order a surface offers them.
+    private static readonly string[] CloseActions = ["done", "dismiss"];
+
     /// <summary>Derive every waiting item from one record snapshot, without inspecting a device or a provider, a run's requests delivered now.</summary>
     public static JsonObject Derive(EstateModel model) => Derive(model, DateTimeOffset.UtcNow);
 
@@ -48,7 +51,7 @@ public static class OperatorActions
             }
         }
 
-        return new JsonObject
+        var report = new JsonObject
         {
             ["format"] = Format,
             ["estate"] = model.CurrentEstate?.Id,
@@ -59,6 +62,37 @@ public static class OperatorActions
                 ["severity"] = f.Severity.ToString().ToLowerInvariant(), ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message,
             }).ToArray()),
         };
+
+        // From 0.9.4 (OPS-22) the optional requests are possible todos in their own section, apart from what waits: each with its guide,
+        // recommendation and commands. A queue without one keeps its earlier bytes.
+        IReadOnlyList<RecordEnvelope> optional = OperatorRequests.WaitingOf(model, null, at).Optional;
+        if (optional.Count > 0)
+        {
+            report["possibleTodos"] = new JsonArray(optional.Select(request =>
+            {
+                string to = EstateModel.BodyString(request, "to") ?? "?";
+                JsonObject todo = OperatorRequests.Item(model, request);
+                todo["guide"] = OperatorRequests.Guide(request, optional: true);
+                var commands = new JsonArray();
+                List<string> fetch = ["operator", "fetch", request.Id, "--to", "<folder>"];
+                commands.Add(new JsonObject { ["by"] = to, ["command"] = "vericairn " + string.Join(' ', fetch), ["arguments"] = Strings(fetch), ["purpose"] = "Write its pinned files, under their names, and its guide into a folder. Reading signs nothing." });
+                if (!model.Findings.HasErrors)
+                {
+                    foreach (string action in CloseActions)
+                    {
+                        List<string> arguments = ["operator", action, request.Id, "--by", to, "--expected", request.ComputedHash];
+                        if (action == "dismiss") arguments.AddRange(["--reason", "<your-reason>"]);
+                        else if (EstateModel.BodyString(request, "kind") == "publication") arguments.AddRange(["--link", "<observed-destination>"]);
+                        commands.Add(new JsonObject { ["by"] = to, ["command"] = "vericairn " + string.Join(' ', arguments), ["arguments"] = Strings(arguments), ["purpose"] = "Close it whenever you choose, on your word; it holds nothing while it stays open." });
+                    }
+                }
+
+                todo["commands"] = commands;
+                return (JsonNode)todo;
+            }).ToArray());
+        }
+
+        return report;
     }
 
     /// <summary>The queue as canonical JSON; presentation preferences never remove an item or a command.</summary>
@@ -118,6 +152,21 @@ public static class OperatorActions
                     text.Append("  Record and merge: ").Append(oneStep.GetValue<string>()).Append('\n');
                 text.Append("    ").Append(command["purpose"]!.GetValue<string>()).Append('\n');
                 text.Append("    Supply JSON on standard input; fill every null with your own words or evidence:\n    ").Append(command["body"]!.ToJsonString()).Append('\n');
+            }
+        }
+
+        if (report["possibleTodos"] is JsonArray todos)
+        {
+            text.Append("\nPossible todos: ").Append(todos.Count.ToString(CultureInfo.InvariantCulture)).Append(todos.Count == 1 ? " optional request" : " optional requests")
+                .Append(", which hold no release's closing and no goal's evaluation; close each whenever you choose\n");
+            foreach (JsonObject todo in todos.OfType<JsonObject>())
+            {
+                JsonNode body = todo["body"]!;
+                text.Append("  Recommendation: ").Append(body["recommendation"]?.GetValue<string>()).Append('\n')
+                    .Append("  Possible todo: ").Append(body["action"]?.GetValue<string>()).Append(" [operator-request ").Append(todo["revision"]!.GetValue<string>()).Append("]\n")
+                    .Append("  Destination: ").Append(body["destination"]?.GetValue<string>()).Append('\n');
+                foreach (JsonObject command in todo["commands"]!.AsArray().OfType<JsonObject>())
+                    text.Append("  Command: ").Append(command["command"]!.GetValue<string>()).Append('\n');
             }
         }
 
@@ -309,7 +358,8 @@ public static class OperatorActions
             string? reserved = Routing.ReservedAction(Routing.RoleOf(order));
             string state = states.GetValueOrDefault(order.Id) ?? "planned";
             if (reserved is null || state is "accepted" or "retired") continue;
-            IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(model, order);
+            // From 0.9.4 (ID-11) the assignment that holds the work order is the holder rule's, not the latest by time.
+            IReadOnlyList<RecordEnvelope> assignments = Routing.Holding(model, order);
             RecordEnvelope? assignment = assignments.Count == 0 ? null : assignments[^1];
             string? by = assignment is null ? null : EstateModel.BodyString(assignment, "contributor");
             if (assignment is null || by is null || !model.HasRole(by, Roles.Operator)) continue;

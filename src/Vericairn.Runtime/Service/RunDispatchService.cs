@@ -92,7 +92,12 @@ internal sealed partial class RunDispatchService(
                 previous["executionObserved"] = new RunExecutionObservation(Element(plan.Selection)).Snapshot();
                 if (admitted.Efficiency is not null) previous["executionObserved"]!["adapter"] = admitted.Efficiency.Measurement();
             });
-            return Refused(new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} The run is recorded as a known failure; nothing ran and nothing is charged.", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, [])));
+            // From 0.9.4 (FIX-159): the message says what was recorded. A launch refused while the estate reports an error, as when a
+            // duplicate lands between admission and launch, cannot record its known failure either, so its intent stays not-started.
+            string failure = failed.Ok
+                ? "The run is recorded as a known failure; nothing ran and nothing is charged."
+                : $"Its known failure could not be recorded either ({failed.Problem?.Code ?? "refused"}), so its intent stays not-started: nothing ran, and the run stays in flight, charged at its cap, until a revision settles it.";
+            return Refused(new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} {failure}", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, [])));
         }
 
         if (supervisor is null)
@@ -107,7 +112,10 @@ internal sealed partial class RunDispatchService(
                 previous["observed"] = new JsonObject { ["summary"] = $"Cancelled before dispatch: when the harness was about to start, {devices} on the machine that ran the worker, with no custody exception in force for the goal{named}. Nothing was launched and nothing is charged.", ["at"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
             });
             string refusal = RunAdmissionService.CustodyRefusal(plan.Goal, lapsed);
-            return Refused(new RunResponse(run, canceled.Ok ? "canceled" : "not-started", $"Run {run} was cancelled before dispatch: {refusal} Its intent is recorded as canceled; nothing was launched and nothing is charged.", false, canceled.Written ?? intent, Element(plan.Cap), where, new Problem("refused", refusal, [])));
+            string kept = canceled.Ok
+                ? "Its intent is recorded as canceled; nothing was launched and nothing is charged."
+                : $"Its cancellation could not be recorded ({canceled.Problem?.Code ?? "refused"}), so its intent stays not-started: nothing was launched, and the run stays in flight, charged at its cap, until a revision settles it.";
+            return Refused(new RunResponse(run, canceled.Ok ? "canceled" : "not-started", $"Run {run} was cancelled before dispatch: {refusal} {kept}", false, canceled.Written ?? intent, Element(plan.Cap), where, new Problem("refused", refusal, [])));
         }
 
         WriteOutcome dispatched;

@@ -85,9 +85,13 @@ public sealed class PushProviderTests
             Assert.True(Path.IsPathFullyQualified(grafts) && !File.Exists(grafts) && !Directory.Exists(Path.GetDirectoryName(grafts)));
             Assert.False(info.Environment.ContainsKey("GIT_CONFIG_PARAMETERS"));
             Assert.False(info.Environment.ContainsKey(Trace));
-            Assert.Equal("8", info.Environment["GIT_CONFIG_COUNT"]);
+            // The hardening of every git process on a repository Vericairn did not create comes first (FIX-147), then the read settings.
+            int hardened = GitHardening.Settings.Length + 1;
+            Assert.Equal((hardened + 8).ToString(CultureInfo.InvariantCulture), info.Environment["GIT_CONFIG_COUNT"]);
+            Assert.Equal("core.hooksPath", info.Environment["GIT_CONFIG_KEY_0"]);
+            Assert.Equal(GitHardening.Settings, Enumerable.Range(1, hardened - 1).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
             Assert.Equal(["core.commitGraph=false", "pack.useBitmaps=false", "core.multiPackIndex=false", "color.ui=false", "color.diff=false", "log.showRoot=true",
-                "log.showSignature=false", "log.diffMerges=first-parent"], Enumerable.Range(0, 8).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
+                "log.showSignature=false", "log.diffMerges=first-parent"], Enumerable.Range(hardened, 8).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
         });
     }
 
@@ -114,11 +118,10 @@ public sealed class PushProviderTests
         GitPushAdapter.Isolate(push, []);
         Assert.All(routing.Concat(indexed), name => Assert.NotEqual("inherited", push.Environment.TryGetValue(name, out string? value) ? value : null));
         ProcessStartInfo scan = Inherited();
-        GitleaksScanner.Isolate(scan);
+        using (GitHardening hardening = GitHardening.Create()) GitleaksScanner.Isolate(scan, hardening);
         Assert.DoesNotContain(scan.Environment, variable => variable.Value == "inherited");
         Assert.Equal("1", scan.Environment["GIT_NO_REPLACE_OBJECTS"]);
-        Assert.Equal("8", scan.Environment["GIT_CONFIG_COUNT"]);
-        Assert.False(scan.Environment.ContainsKey("GIT_CONFIG_KEY_12"));
+        Assert.Equal((GitHardening.Settings.Length + 1 + 8).ToString(CultureInfo.InvariantCulture), scan.Environment["GIT_CONFIG_COUNT"]);
     }
 
     // FIX-160: no variable gitleaks reads its configuration from and no other inherited git variable reaches a process of the scan.
@@ -128,7 +131,7 @@ public sealed class PushProviderTests
         var info = new ProcessStartInfo("gitleaks");
         foreach (string name in new[] { "GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML", "GIT_DIFF_OPTS", "GIT_EXTERNAL_DIFF", "GIT_NOTES_REF", "GIT_ATTR_SOURCE", "GIT_LITERAL_PATHSPECS" })
             info.Environment[name] = "inherited";
-        GitleaksScanner.Isolate(info);
+        using (GitHardening hardening = GitHardening.Create()) GitleaksScanner.Isolate(info, hardening);
         Assert.DoesNotContain(info.Environment, variable => variable.Value == "inherited");
     }
 
@@ -139,7 +142,7 @@ public sealed class PushProviderTests
     {
         var info = new ProcessStartInfo("git");
         info.Environment["GIT_NO_LAZY_FETCH"] = "0";
-        GitleaksScanner.Isolate(info);
+        using (GitHardening hardening = GitHardening.Create()) GitleaksScanner.Isolate(info, hardening);
         Assert.Equal("1", info.Environment["GIT_NO_LAZY_FETCH"]);
         var push = new ProcessStartInfo("git");
         GitPushAdapter.Isolate(push, []);
@@ -193,7 +196,7 @@ public sealed class PushProviderTests
             Assert.False(process.Info.Environment.ContainsKey("GIT_VERICAIRN_SCAN_TEST"));
         });
         Assert.Equal(["version"], started[0].Info.ArgumentList);
-        Assert.Equal(["-C", clone, "rev-parse", "--absolute-git-dir"], started[1].Info.ArgumentList);
+        Assert.Equal(["-C", clone, "rev-parse", "--absolute-git-dir"], Requested(started[1].Info));
         Assert.All(started.Take(2), process => Assert.False(process.Info.Environment.ContainsKey("GIT_DIR") || process.Info.Environment.ContainsKey("GIT_WORK_TREE")));
         Assert.All(started.Skip(2), process =>
         {
@@ -228,7 +231,7 @@ public sealed class PushProviderTests
             if (info.FileName == "git" && info.ArgumentList.Contains("--verify-objects"))
             {
                 reads.Add("objects");
-                Assert.Equal(["--no-replace-objects", "rev-list", "--objects", "--verify-objects", "--quiet", Plan.Range], info.ArgumentList);
+                Assert.Equal(["--no-replace-objects", "rev-list", "--objects", "--verify-objects", "--quiet", Plan.Range], Requested(info));
                 return read switch
                 {
                     "objects fail" => new(ProcessOutcome.Exited, true, 128, string.Empty, "untrusted: object is corrupt"),
@@ -241,7 +244,7 @@ public sealed class PushProviderTests
             {
                 reads.Add("patches");
                 Assert.Equal(["--no-replace-objects", "log", "-p", "-U0", Plan.Range, "--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text",
-                    "--output=" + nothing], info.ArgumentList);
+                    "--output=" + nothing], Requested(info));
                 return read switch
                 {
                     "patches fail" => new(ProcessOutcome.Exited, true, 128, string.Empty, "untrusted: unable to read"),
@@ -296,7 +299,7 @@ public sealed class PushProviderTests
             {
                 Assert.Equal("C", info.Environment["LC_ALL"]);
                 Assert.Equal(["--no-replace-objects", "log", "--no-show-signature", "--format=commit %H", "--name-only", "--root", "--no-renames", "--full-history", "-m",
-                    "--diff-filter=d", "--no-relative", "--no-ext-diff", "--no-textconv", Plan.Range, "--", ":(top)objects"], info.ArgumentList);
+                    "--diff-filter=d", "--no-relative", "--no-ext-diff", "--no-textconv", Plan.Range, "--", ":(top)objects"], Requested(info));
                 return range switch
                 {
                     "log fails" => new(ProcessOutcome.Exited, true, 128, string.Empty, string.Empty),
@@ -479,6 +482,31 @@ public sealed class PushProviderTests
     }
 
     [Fact]
+    public void APushToItsTargetBranchIsRefusedBeforeTheRemoteIsRead()
+    {
+        var scripted = new RecordedGit();
+        var adapter = new GitPushAdapter(scripted.Run);
+        Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(Path.GetTempPath(), "https://example.invalid/widget", "main", "main", Head, []));
+        Assert.DoesNotContain(scripted.Calls, c => c.Contains("ls-remote") || c.Contains("push"));
+    }
+
+    [Fact]
+    public void AnAdapterWrittenBeforeTheRecordsHeadsTakesNoCheckedPush()
+    {
+        IPushAdapter adapter = new OlderAdapter();
+        Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(Path.GetTempPath(), "https://example.invalid/widget", "work/change", "main", Head, []));
+        PushPlan plan = new("work/change", "main", Head, Basis, null, Basis);
+        Assert.Throws<ProviderRefusedException>(() => adapter.Push(Path.GetTempPath(), "https://example.invalid/widget", plan, new("scanner", "1.0.0", plan.Range, "passed", 0), []));
+    }
+
+    private sealed class OlderAdapter : IPushAdapter
+    {
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) => new(branch, target, head, head, head, Basis);
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan) { }
+        public string? Observe(string directory, string remote, string branch) => null;
+    }
+
+    [Fact]
     public void NonFastForwardUpdatesAreRefusedBeforeScanning()
     {
         var scripted = new RecordedGit { Divergent = true };
@@ -501,6 +529,17 @@ public sealed class PushProviderTests
     private static readonly string GitDirectory = Path.GetTempPath();
 
     private static bool AsksForTheGitDirectory(ProcessStartInfo info) => info.FileName == "git" && info.ArgumentList.Contains("--absolute-git-dir");
+
+    // A git process of the scan starts with the hardened options of every git process on a repository Vericairn did not create (FIX-147):
+    // no pager, the empty hooks directory, then the shared settings. What follows them is the scan's own request.
+    private static string[] Requested(ProcessStartInfo info)
+    {
+        Assert.Equal("--no-pager", info.ArgumentList[0]);
+        Assert.Equal("-c", info.ArgumentList[1]);
+        Assert.StartsWith("core.hooksPath=", info.ArgumentList[2], StringComparison.Ordinal);
+        Assert.Equal(GitHardening.Settings.SelectMany(setting => new[] { "-c", setting }), info.ArgumentList.Skip(3).Take(2 * GitHardening.Settings.Length));
+        return [.. info.ArgumentList.Skip(3 + 2 * GitHardening.Settings.Length)];
+    }
 
     private sealed class RecordedGit
     {
