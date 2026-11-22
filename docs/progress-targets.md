@@ -66,7 +66,9 @@ again, since a comment notifies. Run one follower per target.
 The **private** form carries the report's sections as the records give them: the releases (each release work order not yet
 accepted with how many of its work orders are accepted, then the published releases, newest first), the next release's work
 orders by state, the work in flight with who holds it, the milestones, and what waits on the operator, each ask with its question
-and recommendation and each acceptance only the operator gives. It is for a destination only the estate's own people read.
+and recommendation and each acceptance only the operator gives, and from 0.9.4 (OPS-22) each possible todo, an optional operator
+request, with what it asks, whom and its recommendation, which holds nothing. It is for a destination only the estate's own people
+read.
 
 The **public** form follows the disclosure rules (decision `01M7824E3CQF5PC9P7X04KXYD7`): it carries no held security fix, no
 private estate detail and no open ask before each is public.
@@ -75,7 +77,8 @@ private estate detail and no open ask before each is public.
   every work order whose own text would disclose one, carry a blocked term of the estate's policies, a record identifier, a
   machine path, a credential or a contact address. Every count counts only what the text shows, so nothing left out can be
   inferred from a total.
-- It names no principal and no record identifier, and of what waits on the operator it says only how many asks and acceptances.
+- It names no principal and no record identifier, and of what waits on the operator it says only how many asks and acceptances
+  and, when there are any, how many possible todos, never their text.
 
 A target is given the private form only when it is configured private and its adapter reports its destination readable by its
 own members alone; a destination anyone may read, or one whose adapter cannot tell, always takes the public form, and `refresh`

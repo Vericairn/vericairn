@@ -172,6 +172,9 @@ public static partial class ProgressReport
         {
             Overlaps = AssignmentOverlaps.Overlaps(model),
             Assignments = assignments,
+            // From 0.9.4 (OPS-22), the open optional requests, which no time decides, so the report stays the same on every machine and
+            // walks no record for them.
+            Todos = OperatorRequests.OpenOptional(model),
         };
     }
 
@@ -434,6 +437,10 @@ public static partial class ProgressReport
         {
             text.Append("      ").Append(EstateModel.BodyString(goal.Goal, "title")).Append(", accepted by ").Append(goal.Accepter).Append(Names(goal.Goal, goal.Evaluation)).Append('\n');
         }
+
+        // From 0.9.4 (OPS-22): the possible todos in their own section, as operator list and status show them; a report without one is
+        // unchanged.
+        OperatorRequests.AppendPossibleTodos(text, report.Todos, "  ");
     }
 
     private static JsonObject StandingJson(Report report) => new()
@@ -485,7 +492,25 @@ public static partial class ProgressReport
         }).ToArray()),
     };
 
-    private static JsonObject OperatorJson(Report report) => new()
+    private static JsonObject OperatorJson(Report report)
+    {
+        JsonObject json = OperatorAsksAndAcceptancesJson(report);
+        // From 0.9.4 (OPS-22): the open optional requests, each as the request queue's optional member carries it, with its guide; only
+        // when one exists, so a report without one keeps its bytes.
+        if (report.Todos.Count > 0)
+        {
+            json["possibleTodos"] = new JsonArray([.. report.Todos.Select(r =>
+            {
+                JsonObject item = OperatorRequests.Item(report.Model, r);
+                item["guide"] = OperatorRequests.Guide(r, optional: true);
+                return (JsonNode)item;
+            })]);
+        }
+
+        return json;
+    }
+
+    private static JsonObject OperatorAsksAndAcceptancesJson(Report report) => new()
     {
         ["asks"] = new JsonArray(report.Asks.Select(a => (JsonNode)new JsonObject
         {
@@ -649,5 +674,8 @@ public static partial class ProgressReport
 
         /// <summary>From 0.9.4 (WATCH-06), every current assignment with its derived state, which a progress target's in-flight work reads.</summary>
         public IReadOnlyList<WorkView.AssignmentItem> Assignments { get; init; } = [];
+
+        /// <summary>From 0.9.4 (OPS-22), the open optional requests, possible todos in original request order, which hold nothing.</summary>
+        public IReadOnlyList<RecordEnvelope> Todos { get; init; } = [];
     }
 }

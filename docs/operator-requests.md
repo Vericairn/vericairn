@@ -116,12 +116,14 @@ publication or acceptance authority.
 ## Optional requests: possible todos (0.9.4)
 
 From 0.9.4 (OPS-22), a request may be marked `optional`: an action you may or may not do, such as a post you might make. An
-optional request is a possible todo. `operator list`, status and Remote's Attention show it in its own section, **Possible
-todos**, apart from what waits on you, each with its recommendation first, what it asks, where it lands, its pinned files and the
-commands that fetch its kit and close it; `operator list --json` carries each under `possibleTodos` with its `guide` and
-`commands`, and the request queue's JSON (`operator requests`, status's `operatorRequests`) under `optional`, with its `guide`. A
-list without one has neither member. An optional request is not among the three delivered requests or the waiting count, raises
-no required attention, and its events are `open` with the category `information`.
+optional request is a possible todo. `operator list`, status, `progress` and Remote's Attention show it in its own section,
+**Possible todos**, apart from what waits on you, each with its recommendation first, what it asks, where it lands, its pinned files
+and the commands that fetch its kit and close it; `operator list --json` carries each under `possibleTodos` with its `guide` and
+`commands`, the request queue's JSON (`operator requests`, status's `operatorRequests`) under `optional`, with its `guide`, and
+`progress --json` (`vericairn.progress/1`) under `operator.possibleTodos`, each as the queue's `optional` carries it. A list or
+report without one has none of these members, and its bytes are unchanged. A [progress target](progress-targets.md#forms) lists
+them in its private form and only counts them in its public form. An optional request is not among the three delivered requests or
+the waiting count, raises no required attention, and its events are `open` with the category `information`.
 
 An optional request never holds a release's closing or a goal's evaluation: a goal's record predicate over requests counts no
 optional request, and nothing a release closes on waits for one. It stays open until you close it, done or dismissed, whenever

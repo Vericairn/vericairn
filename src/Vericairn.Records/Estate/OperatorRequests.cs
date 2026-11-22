@@ -103,8 +103,7 @@ public static class OperatorRequests
         var open = new List<RecordEnvelope>();
         var optional = new List<RecordEnvelope>();
         var held = new List<Held>();
-        foreach (RecordEnvelope request in model.Current("operator-request").Where(r => (to is null || EstateModel.BodyString(r, "to") == to) && !Closures(model, r).Any())
-            .OrderBy(r => model.ById[model.Chain(r)[0]].At, StringComparer.Ordinal).ThenBy(r => model.Chain(r)[0], StringComparer.Ordinal))
+        foreach (RecordEnvelope request in InRequestOrder(model, model.Current("operator-request").Where(r => (to is null || EstateModel.BodyString(r, "to") == to) && !Closures(model, r).Any())))
         {
             if (FlowStops.StepOf(request) is not FlowStops.FlowStepReference step)
             {
@@ -145,6 +144,21 @@ public static class OperatorRequests
 
         return new Waiting(open, held) { Optional = optional };
     }
+
+    /// <summary>
+    /// From 0.9.4 (OPS-22): the open optional requests in original request order, as <see cref="WaitingOf"/>'s <see cref="Waiting.Optional"/>
+    /// holds them, without the time a run's step request is judged at, which no optional request needs, and reading whether a request is
+    /// optional before its closures, so a reader that shows only possible todos, such as the progress report, walks no record for them.
+    /// </summary>
+    internal static IReadOnlyList<RecordEnvelope> OpenOptional(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return [.. InRequestOrder(model, model.Current("operator-request").Where(r => FlowStops.StepOf(r) is null && IsOptional(model, r) && !Closures(model, r).Any()))];
+    }
+
+    // Requests in original request order: by their first revision's time, then its identifier.
+    private static IOrderedEnumerable<RecordEnvelope> InRequestOrder(EstateModel model, IEnumerable<RecordEnvelope> requests) =>
+        requests.OrderBy(r => model.ById[model.Chain(r)[0]].At, StringComparer.Ordinal).ThenBy(r => model.Chain(r)[0], StringComparer.Ordinal);
 
     /// <summary>Complete queue membership with three delivered bodies and the rest identified in order, and the open requests a run no longer waits on.</summary>
     public static JsonObject Derive(EstateModel model, string? to = null) => Derive(model, to, DateTimeOffset.UtcNow);

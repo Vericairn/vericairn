@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Estate;
@@ -148,5 +149,78 @@ public sealed class OptionalRequestTests
         reworded["why"] = "The operator's own reason.";
         RecordEnvelope widened = estate.Add("operator-request", estate.OperatorId, reworded.ToJsonString(), work.Reference, kept.Id);
         Assert.Contains(estate.Load().Findings, f => f.Code == "operator-request.revision" && f.Location.StartsWith(widened.ExpectedPath, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheProgressReportListsPossibleTodosInTheirOwnSectionAndAReportWithoutOneKeepsItsBytes()
+    {
+        using var estate = new TestEstate(3);
+        RecordEnvelope work = OperatorRequestTests.Work(estate);
+        estate.Add("operator-request", estate.BuilderId, OperatorRequestTests.Body(estate, 1).ToJsonString(), work.Reference);
+        EstateModel without = estate.Load();
+        string text = ProgressReport.Render(without, null);
+        string json = ProgressReport.RenderJson(without, null);
+        Assert.DoesNotContain("Possible todo", text, StringComparison.Ordinal);
+        Assert.Null(JsonNode.Parse(json)!["operator"]!["possibleTodos"]);
+
+        JsonObject body = OperatorRequestTests.Body(estate, 2);
+        body["optional"] = true;
+        RecordEnvelope todo = estate.Add("operator-request", estate.BuilderId, body.ToJsonString(), work.Reference);
+        EstateModel with = estate.Load();
+        Assert.False(with.Findings.HasErrors, string.Join('\n', with.Findings));
+        Assert.Equal(OperatorRequests.WaitingOf(with, null, DateTimeOffset.UtcNow).Optional, OperatorRequests.OpenOptional(with));
+        Assert.Equal([todo.Id], OperatorRequests.OpenOptional(with).Select(r => r.Id));
+
+        // The text gains the possible todos' section after the acceptances, as operator list and status show it, and nothing else.
+        var section = new StringBuilder();
+        OperatorRequests.AppendPossibleTodos(section, [todo], "  ");
+        string listed = ProgressReport.Render(with, null);
+        Assert.Equal(text + section, listed);
+        Assert.Contains($"  Possible todo: Perform action 2 [operator-request {todo.Id}]\n", listed, StringComparison.Ordinal);
+        Assert.Contains($"  Fetch its files and guide: vericairn operator fetch {todo.Id} --to <folder>\n", listed, StringComparison.Ordinal);
+
+        // The JSON gains operator.possibleTodos, each as the request queue's optional member carries it, with its guide, and nothing else.
+        JsonObject report = JsonNode.Parse(ProgressReport.RenderJson(with, null))!.AsObject();
+        JsonObject item = Assert.IsType<JsonObject>(Assert.Single(report["operator"]!["possibleTodos"]!.AsArray()));
+        Assert.Equal(todo.Id, item["revision"]!.GetValue<string>());
+        Assert.Equal(todo.ComputedHash, item["hash"]!.GetValue<string>());
+        Assert.Equal(OperatorRequests.Guide(todo, optional: true), item["guide"]!.GetValue<string>());
+        report["operator"]!.AsObject().Remove("possibleTodos");
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(json), report));
+        Assert.Equal(ProgressReport.RenderJson(with, null), ProgressReport.RenderJson(estate.Load(), null));
+    }
+
+    [Fact]
+    public void AProgressTargetListsPossibleTodosInItsPrivateFormAndOnlyCountsThemInItsPublicForm()
+    {
+        const string Marker = "vericairn progress-target status 0123456789abcdef";
+        using var estate = new TestEstate(3);
+        RecordEnvelope work = OperatorRequestTests.Work(estate);
+        EstateModel without = estate.Load();
+        Assert.DoesNotContain("Possible todos", ProgressReport.RenderTarget(without, ProgressReport.PrivateForm, null, Marker, estate.Clock).Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Possible todos", ProgressReport.RenderTarget(without, ProgressReport.PublicForm, null, Marker, estate.Clock).Text, StringComparison.Ordinal);
+
+        JsonObject body = OperatorRequestTests.Body(estate, 2);
+        body["optional"] = true;
+        RecordEnvelope todo = estate.Add("operator-request", estate.BuilderId, body.ToJsonString(), work.Reference);
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+
+        // The private form lists each with what it asks, whom and its recommendation, and carries the request and its operator.
+        ProgressPayload inside = ProgressReport.RenderTarget(model, ProgressReport.PrivateForm, null, Marker, estate.Clock);
+        Assert.Contains("- **Acceptances only the operator gives: 0**\n- **Possible todos: 1**, which hold no release's closing and no goal's evaluation\n"
+            + "  - Perform action 2 (to Test Operator)\n    recommendation: Recommended action 2\n", inside.Text, StringComparison.Ordinal);
+        Assert.Contains(new RecordReference(todo.Type, todo.Id, todo.ComputedHash), inside.Carried);
+        Assert.Contains(inside.Carried, r => r.Id == estate.OperatorId);
+        Assert.Null(ProgressReport.TargetRefusal(model, ProgressReport.PrivateForm, inside.Text, estate.Clock));
+
+        // The public form counts them only: no text of a request, no principal, and it carries neither.
+        ProgressPayload open = ProgressReport.RenderTarget(model, ProgressReport.PublicForm, null, Marker, estate.Clock);
+        Assert.Contains("- Asks awaiting an answer: 0\n- Acceptances only the operator gives: 0\n- Possible todos: 1\n", open.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Perform action 2", open.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Recommended action 2", open.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Test Operator", open.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(open.Carried, r => r.Id == todo.Id || r.Type == "principal");
+        Assert.Null(ProgressReport.TargetRefusal(model, ProgressReport.PublicForm, open.Text, estate.Clock));
     }
 }

@@ -39,18 +39,19 @@ public static partial class ProgressReport
     /// <summary>The most published releases a target lists, newest first.</summary>
     internal const int PublishedRows = 12;
 
-    /// <summary>The most asks the private form lists with their question and recommendation.</summary>
+    /// <summary>The most asks the private form lists with their question and recommendation, and from 0.9.4 (OPS-22) the most possible todos.</summary>
     internal const int AskRows = 20;
 
     /// <summary>
     /// The progress report's sections for a progress target, as Markdown, from the same derivation as <see cref="Render"/>: the releases,
-    /// the next release's work orders by state, the work in flight, the milestones and what waits on the operator, the text ending with
-    /// <paramref name="marker"/> as an HTML comment, by which an adapter finds the place it keeps. The private form carries what the
-    /// report carries for these sections. The public form follows the disclosure rules: no work order held from disclosure, nor any line
-    /// whose text would disclose one or carry a blocked term, a record identifier, a machine path, a credential or a contact address;
-    /// no principal's name, no record identifier, and of what waits on the operator only how many, never an ask's text. Every count in
-    /// the public form counts only what it shows. Its lines are screened as of <paramref name="screenedAt"/>, when the estate's blocked
-    /// terms are read; <see cref="TargetRefusal"/> checks the whole text at the same time before anything is placed.
+    /// the next release's work orders by state, the work in flight, the milestones and what waits on the operator, with, from 0.9.4
+    /// (OPS-22), the possible todos, the text ending with <paramref name="marker"/> as an HTML comment, by which an adapter finds the
+    /// place it keeps. The private form carries what the report carries for these sections. The public form follows the disclosure
+    /// rules: no work order held from disclosure, nor any line whose text would disclose one or carry a blocked term, a record
+    /// identifier, a machine path, a credential or a contact address; no principal's name, no record identifier, and of what waits on
+    /// the operator only how many, never an ask's or a possible todo's text. Every count in the public form counts only what it shows.
+    /// Its lines are screened as of <paramref name="screenedAt"/>, when the estate's blocked terms are read; <see cref="TargetRefusal"/>
+    /// checks the whole text at the same time before anything is placed.
     /// </summary>
     internal static ProgressPayload RenderTarget(EstateModel model, string form, string? title, string marker, DateTimeOffset screenedAt)
     {
@@ -160,7 +161,8 @@ public static partial class ProgressReport
         foreach (OrderLine milestone in milestones) carried.Add(milestone.Order);
 
         // What waits on the operator: the private form as the report gives it; the public form counts only, since an open ask is not
-        // public before its answer is.
+        // public before its answer is. From 0.9.4 (OPS-22) the possible todos follow, listed in the private form and counted in the
+        // public one, only when one exists.
         Acceptances due = report.Acceptances;
         int acceptances = due.Submitted.Count + due.Results.Count + due.Candidates.Count + due.Goals.Count;
         text.Append("\n## What waits on the operator\n\n");
@@ -168,6 +170,7 @@ public static partial class ProgressReport
         {
             text.Append("- Asks awaiting an answer: ").Append(report.Asks.Count.ToString(CultureInfo.InvariantCulture)).Append('\n');
             text.Append("- Acceptances only the operator gives: ").Append(acceptances.ToString(CultureInfo.InvariantCulture)).Append('\n');
+            if (report.Todos.Count > 0) text.Append("- Possible todos: ").Append(report.Todos.Count.ToString(CultureInfo.InvariantCulture)).Append('\n');
         }
         else
         {
@@ -208,6 +211,21 @@ public static partial class ProgressReport
             {
                 text.Append("  - goal ").Append(Cell(EstateModel.BodyString(goal.Goal, "title"))).Append(", accepted by ").Append(Cell(goal.Accepter)).Append('\n');
                 carried.Add(goal.Goal);
+            }
+
+            if (report.Todos.Count > 0)
+            {
+                text.Append("- **Possible todos: ").Append(report.Todos.Count.ToString(CultureInfo.InvariantCulture)).Append("**, which hold no release's closing and no goal's evaluation\n");
+                foreach (RecordEnvelope todo in report.Todos.Take(AskRows))
+                {
+                    string? to = EstateModel.BodyString(todo, "to");
+                    text.Append("  - ").Append(Cell(EstateModel.BodyString(todo, "action"))).Append(" (to ").Append(Cell(Name(model, to)))
+                        .Append(")\n    recommendation: ").Append(Cell(EstateModel.BodyString(todo, "recommendation"))).Append('\n');
+                    carried.Add(todo);
+                    carried.Add(model.CurrentPrincipal(to));
+                }
+
+                if (report.Todos.Count > AskRows) text.Append("  - and ").Append((report.Todos.Count - AskRows).ToString(CultureInfo.InvariantCulture)).Append(" more, which vericairn operator list shows\n");
             }
         }
 
