@@ -6,13 +6,15 @@ using System.Diagnostics;
 namespace Vericairn.TestSupport;
 
 /// <summary>
-/// A repository whose own configuration names a program that git can run while reading it: an fsmonitor hook, a clean filter, a
-/// signature verifier, a hooks directory or a pager. Every program only writes a marker file outside the repository. Reading the
-/// repository through Vericairn must leave the marker absent; <see cref="Control"/> shows that plain git does run the program.
+/// A repository whose own configuration names a program that git can run while reading it: an fsmonitor hook (also with an index that
+/// carries the fsmonitor extension), a clean filter, a signature verifier, a hooks directory or a pager. Every program only writes a
+/// marker file outside the repository. Reading the repository through Vericairn must leave the marker absent; <see cref="Control"/>
+/// shows that plain git does run the program.
 /// </summary>
 internal sealed class RepositoryProgramProbe : IDisposable
 {
     internal const string Fsmonitor = "fsmonitor";
+    internal const string FsmonitorIndex = "fsmonitor-index";
     internal const string Filter = "filter";
     internal const string Signature = "signature";
     internal const string Hooks = "hooks";
@@ -73,6 +75,12 @@ internal sealed class RepositoryProgramProbe : IDisposable
             case Fsmonitor:
                 Git("config", "core.fsmonitor", command);
                 break;
+            case FsmonitorIndex:
+                // The index gains the fsmonitor extension once, before the hook is configured, so that a read which only loads the index,
+                // such as diff-tree, asks the hook as well.
+                Git("update-index", "--fsmonitor");
+                Git("config", "core.fsmonitor", command);
+                break;
             case Filter:
                 Git("config", "filter.probe.clean", command);
                 Git("config", "filter.probe.required", "true");
@@ -102,14 +110,19 @@ internal sealed class RepositoryProgramProbe : IDisposable
 
     /// <summary>
     /// Runs plain git in the way that reaches the program and reports whether it ran, removing the marker; null for the pager, which
-    /// git starts only on a terminal.
+    /// git starts only on a terminal. The index probe reads one commit's paths, which loads the index without reading the working tree.
     /// </summary>
     internal bool? Control()
     {
         if (Kind == Pager) return null;
         File.Delete(Marker);
         File.SetLastWriteTimeUtc(Path.Combine(Repository, "widget.dat"), Earlier);
-        _ = Run(Kind == Signature ? ["log", "-1"] : ["status", "--porcelain"], out _, out _);
+        _ = Run(Kind switch
+        {
+            Signature => ["log", "-1"],
+            FsmonitorIndex => ["diff-tree", "-r", "--root", "--name-only", "HEAD"],
+            _ => ["status", "--porcelain"],
+        }, out _, out _);
         bool ran = Ran;
         File.Delete(Marker);
         return ran;

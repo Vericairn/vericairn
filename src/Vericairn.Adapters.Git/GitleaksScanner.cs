@@ -52,8 +52,10 @@ public sealed partial class GitleaksScanner : ISecretScanner
     internal const string InventoryLine = "(" + InventoryTypes + @")/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}";
 
     // The options of gitleaks' history read, git log -p -U0 over the range, which the scanner's own patch read repeats exactly; -m reads
-    // each merge as its patch against its first parent, whatever the clone's log.diffMerges says (ReadSettings).
-    private static readonly string[] LogOptions = ["--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text"];
+    // each merge as its patch against its first parent, whatever the clone's log.diffMerges says (ReadSettings). --submodule=short shows a
+    // submodule's change as its two commit ids, whatever the clone's diff.submodule says, so neither read starts a git process of its own
+    // in the submodule, which would read the submodule's configuration and attributes without these options.
+    private static readonly string[] LogOptions = ["--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text", "--submodule=short"];
 
     // The patch read's output goes nowhere: it is read to establish that git can read every patch, never retained.
     private static readonly string NullDevice = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
