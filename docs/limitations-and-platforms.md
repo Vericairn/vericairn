@@ -21,8 +21,11 @@ accepts its current result (FIX-141), export and restore carry the owner's agent
 check reads for hooks, automatic approvals and secret-like values (FIX-135 and FIX-139), the held guides take their
 changes as fragments (OPS-17), each documentation set carries `llms.txt` and `llms-full.txt` (DOCS-38), and MCP tools
 carry behavior annotations (MCP-07), with CODE-81, FIX-134, FIX-137, FIX-138, FIX-140, FIX-142 to FIX-144, FIX-146,
-FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. Every
-distributable is still built with SDK 10.0.404 and embeds the .NET and ASP.NET Core 10.0.15 runtimes.
+FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. It runs git on
+a repository it did not create without letting that repository's configuration start a program (FIX-147), gives the
+secret scan of a checked push only the inputs it writes itself (FIX-160) and starts every program by its resolved
+absolute path (FIX-161), as its release notes' Security section describes. Every distributable is still built with SDK
+10.0.404 and embeds the .NET and ASP.NET Core 10.0.15 runtimes.
 In 0.9.3 Vericairn corrected what the estates reported in 0.9.2 and readied the release flow for the next release.
 Export and restore kept each file's executable mode (FIX-112), a timestamp in the wrong form was refused with the form
 required (FIX-114), `doctor --json` returned one documented result and every command that takes `--json` wrote JSON
@@ -957,18 +960,21 @@ the push; before 0.9.4 gitleaks reported no finding for the part it could not re
 merge as its patch against its first parent whatever the clone's `log.diffMerges` setting, and its git processes drop the
 routing variables the push's own processes drop, such as `GIT_DIR` and `GIT_SHALLOW_FILE`, so neither a clone setting nor the
 pushing process's environment can show the scan less of the history than the push carries; before 0.9.4 either could
-([changes](changes.md#push-and-open)). Merges require exact declared check names and every reported
-check successful at the expected head; forks are unsupported. From 0.9.3 a required merge
-queue is entered with the pinned head, and its outcome is read from the pull request and
-its place in the queue. A change out of the queue with no removal the host dates after
-its dispatch leaves the merge uncertain until it is reconciled; the GitHub provider tells
-a failure from a removal by the host's latest removal reason, compared with a local
-dispatch time, so a clock far from the host's leaves more merges uncertain. A merge commit
-inside a queue's group is judged by the group that landed it only when the provider finds
-that group among the queue's latest twenty pushes; otherwise its target checks stay pending.
-A confirmed merge with pending or failed target checks remains incomplete. Git and gh
-use the runtime user's existing configuration and login. No permission, credential
-or publication authority is inferred from a check result.
+([changes](changes.md#push-and-open)). From 0.9.4 (FIX-160) gitleaks applies only the rules and the empty ignore file the
+scan writes, never a `.gitleaksignore` or `.gitleaks.toml` from the clone. Merges require exact declared check names and
+every reported check successful at the expected head; forks are unsupported. From 0.9.3 a required merge queue is entered
+with the pinned head, and its outcome is read from the pull request and its place in the queue. A change out of the queue
+with no removal the host dates after its dispatch leaves the merge uncertain until it is reconciled; the GitHub provider
+tells a failure from a removal by the host's latest removal reason, compared with a local dispatch time, so a clock far from
+the host's leaves more merges uncertain. A merge commit inside a queue's group is judged by the group that landed it only
+when the provider finds that group among the queue's latest twenty pushes; otherwise its target checks stay pending. A
+confirmed merge with pending or failed target checks remains incomplete. gh uses the runtime user's existing configuration
+and login, and so does git where `operator record` commits in the estate's own clone, with no hooks and no fsmonitor. A
+checked push's git takes from the user's system and global configuration only the credential helpers and TLS trust settings
+its remote access needs; from 0.9.4 (FIX-147) its reads of the clone, like every git process Vericairn starts on a repository
+it inspects or adopts or on a registered clone, run without the system configuration, with an empty global configuration and
+hooks path of their own, and with the repository's fsmonitor, pager and other program settings overridden
+([changes](changes.md#push-and-open)). No permission, credential or publication authority is inferred from a check result.
 
 From 0.9.4 (CODE-81), a checked push matches the message of every commit it carries that its target branch does not already
 hold against the estate's blocked terms, and a checked merge the message of the merge commit it would create, at the level an
@@ -988,10 +994,13 @@ registered clones is designed separately and planned.
 
 From 0.9.4 (CODE-81, decision 01M7PNCMA3V2ZQG2ZK9V7NBEJK), the push adapter's git processes and the secret scan's, gitleaks' own
 git included, read grafts from a file that never exists, and the scan's also ignore replace objects, the commit-graph, bitmaps and
-the multi-pack-index, as the adapter's already did. Before 0.9.4 a graft in the clone could make the fast-forward check accept a
-remote head that was not an ancestor, so the leased push overwrote the remote branch, and could hide a commit of the range from the
-scan, the message check and the disclosure hold while the push delivered it; a clone used with `changes push` before 0.9.4 can be
-checked for an `info/grafts` file, and each pushed branch compared with the head Vericairn recorded.
+the multi-pack-index, as the adapter's already did. Both the adapter's reads of the clone and the scan's processes run without the
+system configuration and with an empty global configuration and hooks path of their own, and read the clone's own configuration
+only with its fsmonitor, pager and other program settings overridden (FIX-147). Before 0.9.4 a graft in the clone could make the
+fast-forward check accept a remote head that was not an ancestor, so the leased push overwrote the remote branch, and could hide a
+commit of the range from the scan, the message check and the disclosure hold while the push delivered it; a clone used with
+`changes push` before 0.9.4 can be checked for an `info/grafts` file, and each pushed branch compared with the head Vericairn
+recorded.
 
 The coverage of a checked push rests on the records and the remote's own refs. A commit that reaches a branch outside checked
 changes is scanned by the next checked push that carries it or builds on it, not when it arrives; until then it is on the remote

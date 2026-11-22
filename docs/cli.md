@@ -472,10 +472,13 @@ worker runs in the workspace before each such run, outside the agent's sandbox.
 `--setup-timeout <seconds>` sets its deadline, 1 through 600 and 300 when
 omitted. The command runs work-branch content as you; from 0.9.2 it receives
 the environment a harness would, without credential or loader variables, and
-`--setup-variable <name>`, repeatable, passes a named variable besides.
-`--clear-setup` removes it; `--repository` alone shows it, and
-`worker configure` with no choices shows every setup command beside the
-workspace root. See [Preparing a workspace before the agent
+`--setup-variable <name>`, repeatable, passes a named variable besides. From
+0.9.4 (FIX-161) a relative executable with a directory part names the
+workspace's file, a bare name is found in an absolute directory of `PATH`, and
+an executable that can never be started is refused here and reported unreadable
+where it was stored earlier. `--clear-setup` removes it; `--repository` alone
+shows it, and `worker configure` with no choices shows every setup command
+beside the workspace root. See [Preparing a workspace before the agent
 starts](software.md#coding-agents-the-worker-and-its-launchers) for the checks
 that follow setup and what the run records.
 
@@ -1042,7 +1045,7 @@ such as the version, the tool's version line, the estate's path, the default cus
 | Field | States |
 |---|---|
 | `version`, `runtime`, `custody`, `records` | `present` |
-| `git`, `dotnet` | `present`, or `missing` when the tool is not on `PATH` |
+| `git`, `dotnet` | `present`, or `missing` when no absolute directory of `PATH` holds the tool; from 0.9.4 (FIX-161) a copy in the current directory or a relative `PATH` entry is not used |
 | `estate` | `present`, or `missing` for a path that is not an estate root; `value` is the path either way |
 | `enclave` | `present` or `unavailable` on macOS, with the reason in `detail`; `not-applicable` elsewhere |
 | `search` | `present`, or `unavailable` with the reason |
@@ -1194,7 +1197,9 @@ compares a snapshot of the records without holding its other operations. `--json
 `leftOut`, `after`, `active`, `state`, `labels`, `result` and, for a result that names one, `change` with its `integration`
 (`merged`, `reachable`, `not-integrated`, `mismatched` or `unknown`), the `mainLine` it was compared with, the `problem` that makes
 it `mismatched`, and its `paths`, each `path` with its `change` (`added`, `modified` or `removed`), read from this machine's
-registered clone by name without rename detection, or `pathsUnavailable` when a commit is missing there; `overlaps`, each with
+registered clone by name without rename detection, with the clone's own program settings overridden (FIX-147), or
+`pathsUnavailable` when they cannot be read there, for example when a commit is missing from that clone or no clone of the
+repository is registered on this machine; `overlaps`, each with
 `first` and `second`, `repository`, `determined`,
 `witnesses`, `witnessKind` (`tracked` or `possible`), `branch`, `resolution` (`none` or `sequence`), `held`, `policies` and
 `labels`; and, for a preview, `draft`.

@@ -21,8 +21,11 @@ accepts its current result (FIX-141), export and restore carry the owner's agent
 check reads for hooks, automatic approvals and secret-like values (FIX-135 and FIX-139), the held guides take their
 changes as fragments (OPS-17), each documentation set carries `llms.txt` and `llms-full.txt` (DOCS-38), and MCP tools
 carry behavior annotations (MCP-07), with CODE-81, FIX-134, FIX-137, FIX-138, FIX-140, FIX-142 to FIX-144, FIX-146,
-FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. Every
-distributable is still built with SDK 10.0.404 and embeds the .NET and ASP.NET Core 10.0.15 runtimes.
+FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. It runs git on
+a repository it did not create without letting that repository's configuration start a program (FIX-147), gives the
+secret scan of a checked push only the inputs it writes itself (FIX-160) and starts every program by its resolved
+absolute path (FIX-161), as its release notes' Security section describes. Every distributable is still built with SDK
+10.0.404 and embeds the .NET and ASP.NET Core 10.0.15 runtimes.
 In 0.9.3 Vericairn corrected what the estates reported in 0.9.2 and readied the release flow for the next release.
 Export and restore kept each file's executable mode (FIX-112), a timestamp in the wrong form was refused with the form
 required (FIX-114), `doctor --json` returned one documented result and every command that takes `--json` wrote JSON

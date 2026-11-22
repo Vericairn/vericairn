@@ -281,9 +281,10 @@ says whether a path is inside a repository with at least one commit; `Inspect` r
 branch, the origin remote, the root commit, whether the working tree is clean with modified and untracked
 counts, the tags and the ten most recent commits, with an as-of time. The adapter never fetches, commits,
 pushes or changes the index; a repository without commits is refused with the next step rather than
-invented. Two implementations satisfy one conformance suite: `GitCommandAdapter` runs the git command on the
-PATH (in `Vericairn.Adapters.Git`), and `RecordedSourceAdapter` (beside the contract in the runtime) replays
-recorded observations for offline fixtures and tests; the recorded one qualifies no real repository.
+invented. Two implementations satisfy one conformance suite: `GitCommandAdapter` (in
+`Vericairn.Adapters.Git`) runs the git command found in an absolute directory of `PATH` (from 0.9.4,
+FIX-161), and `RecordedSourceAdapter` (beside the contract in the runtime) replays recorded observations for
+offline fixtures and tests; the recorded one qualifies no real repository.
 
 Commands:
 
@@ -2260,10 +2261,12 @@ instruction-file links are permitted. Refusals name discovered configuration usi
 The operator's `RunEnvironmentPolicy` must still exactly match the established inventory; observing it does not grant
 permission to admit it. The worker records its components, canonical `inventoryHash` and harness version in the intent.
 It repeats the entire preflight immediately before dispatch. Native preflight also checks that its evidence did not
-change while probing. The additive `RunPreflight.LocalBindingHash` compares command arguments, entry files, explicit
-MCP content and environment values locally; it is never copied into the intent or any other record. Thus machine
-bindings cannot silently change while the portable inventory remains the same. Any difference after intent refuses
-dispatch and records an unstarted, zero-charge failure.
+change while probing. The additive `RunPreflight.LocalBindingHash` compares command arguments, the files the harness
+command and Vericairn's MCP server start as, entry files, explicit MCP content and environment values locally; from
+0.9.4 (FIX-161) those two files are found by the lookup every start uses, an absolute path as given or a bare name in
+the absolute directories of `PATH`. It is never copied into the intent or any other record. Thus machine bindings
+cannot silently change while the portable inventory remains the same. Any difference after intent refuses dispatch and
+records an unstarted, zero-charge failure.
 
 This is a qualification of the launcher inventory protocol using stand-in executables, not a live-agent or sign-in
 qualification. The live observations below cover only the reported runs; other provider/account-dependent behavior

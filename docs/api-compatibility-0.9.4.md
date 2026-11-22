@@ -627,6 +627,56 @@ reports two new findings, `record.duplicate-refused` (warning) and `record.dupli
 and preparation, a standing goal step, record writes, checkpoint writes, record preparation for a device and pairing-code issuance
 return a `refused` problem naming the errors as described above. `EstateStatus.ReconcileCodes` is unchanged.
 
+## Git on a repository Vericairn did not create starts no program its configuration names (FIX-147)
+
+No route, interface member, protocol type, record type or field changes, and no public member of a package is added or changed. The
+new types are internal to `Vericairn.Adapters.Git`, which is not a package: `GitHardening`, the configuration isolation every git
+process on a repository Vericairn did not create starts with, and the record `GitWorkingTree`. Its internal
+`GitFileSource.StartInfo` and `GitFileSource.RunIsolated` take a `GitHardening`, and its internal unhardened
+`GitFileSource.Run(clone, …)` overloads are removed. Behavior changes of the adapter's public classes, which the `vericairn` tool
+carries: `GitCommandAdapter.Inspect` refuses, with `ProviderRefusedException`, a working tree git cannot read completely, which it
+reported clean, a repository another account owns, with a message naming the ownership, and any repository when no temporary
+directory can be created for the isolation; `IsRepository` refuses in that last case; `InspectRelease` answers null in each. Both
+inspections read the working tree through a git directory Vericairn writes, carry ten of the repository's own settings to that read,
+and count a submodule by its checked-out commit only, where `InspectRelease` also read submodule working trees. Every
+`GitPushAdapter` method that reads the clone refuses with `ProviderRefusedException` when no temporary directory can be created for
+the read; `GitleaksScanner`'s history reads pass `--submodule=short`; the overlap reads answer null when they cannot run isolated;
+`GitRecordCommitAdapter` turns off the estate repository's fsmonitor and untracked cache on every call and adds its intent-to-add
+entries with no hooks. No record, protocol or estate format changes.
+
+## The secret scan reads only what it writes and the clone's history (FIX-160)
+
+No route, interface member, protocol type, record type or field changes, and no public member is added or changed:
+`GitleaksScanner`, in `Vericairn.Adapters.Git`, keeps `Scan(string directory, PushPlan plan)`, and a recorded scan keeps its tool,
+version, range, verdict and count. Every process of a scan, gitleaks and git, runs in an empty folder the scan creates in the
+temporary directory, which is gitleaks' source; after one `git -C <clone> rev-parse --absolute-git-dir`, git reads the clone's git
+directory through `GIT_DIR`, with that folder as its work tree, so no file of the clone's working tree is read. Every inherited
+`GIT_` and `GITLEAKS_` variable is dropped before the scan's own settings are set, and no process fetches a missing object. A clone
+whose git directory git cannot name as an existing absolute path scans `incomplete`, and so does a range that meets a missing
+object, which is no longer fetched; either refuses the push, as an unreadable range did. The internal `GitleaksScanner.Isolate`
+takes the scan's `GitHardening` (FIX-147).
+
+## Programs are started by their resolved absolute path (FIX-161)
+
+No route, interface member, protocol type, record type or field changes, and no public member is added or changed. `ProgramPath`,
+the one resolver every process start uses, and `ProgramNotFoundException`, a `Win32Exception` with native error 2, are new internal
+types of `Vericairn.Records` (namespace `Vericairn.Records.Processes`), whose internals also become visible to
+`Vericairn.Adapters.Git` and `Vericairn.Packs.Software`, by simple name as the existing entries are. A program that cannot be
+resolved fails with that exception before anything starts, as a start that cannot find its file did. Behavior changes of public
+members: `WorkerConfigurationStore.WriteSetup` (`Vericairn.Runtime`) refuses, with `ProviderRefusedException`, an executable that
+can never be started (one naming nothing or a directory, and on Windows one rooted only on the current drive or relative to a
+drive's current directory), and `ReadSetup` refuses, and `ListSetup` lists with its problem, a stored setup with such an executable;
+`SecretServiceKeyStore` (`Vericairn.Records`) finds `secret-tool` only in an absolute directory of `PATH`, where it also accepted
+relative entries; `SecureEnclaveKeyStore` and `ServiceInstaller` (`Vericairn.Daemon`) start their programs by the resolved path.
+Every start resolves a bare name to the first absolute directory of `PATH` that holds it as a program (on Linux and macOS a file
+with an execute permission; on Windows with `.exe` or `.com`, in `PATHEXT`'s order, `.exe` always), uses an absolute path as given,
+and refuses a relative path, except a workspace setup command's relative path with a directory part, which is read against the
+workspace. On Windows the containment primitive passes the resolved path to `CreateProcessW` as the application name. A started
+program receives `PATH` without its empty and relative entries when its environment holds this process's own `PATH`, and none when
+no absolute entry is left; a `PATH` a caller sets is passed as given. A launch binding's executable and MCP server hashes are of the
+files that lookup finds. A configured relative program path that used to start, read against the current directory, is now refused.
+No record, record format or wire value changes.
+
 ## Operations, the OpenAPI document, MCP and the record reader
 
 `IEstateApi` now has 170 synchronous operations, each with a cancellable counterpart, where 0.9.3 had 151. Nineteen are added, each
