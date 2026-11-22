@@ -317,6 +317,37 @@ public sealed class RepositoryProgramIsolationTests
         Assert.True(File.Exists(marker), "Plain git did not run the submodule's diff driver; the probe proves nothing.");
     }
 
+    // The push adapter's reads of the clone being pushed, here a checked push's patch and path reads, start as every hardened read
+    // does: they run no program the clone's configuration names, and read what they read without it.
+    [Fact]
+    public void ThePushReadsRunNoProgramTheClonesConfigurationNames()
+    {
+        using var probe = new RepositoryProgramProbe(RepositoryProgramProbe.FsmonitorIndex);
+        string basis = probe.Git("rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(probe.Repository, "release.md"), "Release notes\n");
+        probe.Git("add", "release.md");
+        probe.Git("commit", "-q", "-m", "Add release notes");
+        string head = probe.Git("rev-parse", "HEAD");
+        var plan = new PushPlan("work/change", "main", head, basis, null, basis);
+        var adapter = new GitPushAdapter();
+        string? text = adapter.PublishedText(probe.Repository, plan);
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? paths = adapter.ChangedPaths(probe.Repository, plan);
+        Assert.Contains("Release notes", text, StringComparison.Ordinal);
+        Assert.NotNull(paths);
+        Assert.Equal(["release.md"], paths[head]);
+
+        probe.Arm();
+        string? textAfter = adapter.PublishedText(probe.Repository, plan);
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? pathsAfter = adapter.ChangedPaths(probe.Repository, plan);
+        Assert.False(probe.Ran, "The push reads ran the program the clone's fsmonitor configuration names.");
+        Assert.Equal(text, textAfter);
+        Assert.NotNull(pathsAfter);
+        Assert.Equal(paths[head], pathsAfter[head]);
+
+        // Plain git's read of a commit's paths, which loads the index, does run it, so the probe was armed.
+        Assert.True(probe.Control() == true, "Plain git did not run the fsmonitor program; the probe proves nothing.");
+    }
+
     // A committed repository with an inside/ and an outside/ directory and a file at its root, for the layout tests.
     private sealed class ScratchRepository : IDisposable
     {

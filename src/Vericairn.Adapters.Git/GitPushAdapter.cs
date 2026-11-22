@@ -10,10 +10,11 @@ namespace Vericairn.Adapters.Git;
 
 /// <summary>Explicit, single-ref pushes through git, pinned to a scanned commit and the observed remote head, never to the target branch.</summary>
 /// <remarks>
-/// Every git process runs without the system and global configuration. Remote access runs from a private bare repository that reads
-/// the clone's objects but never its configuration, so the clone's address rewrites, transport settings and hooks cannot change
-/// where or how a checked push goes. Only the declared remote's protocol is allowed, and the user's own configuration contributes
-/// only its credential helpers and the installation's TLS trust settings.
+/// Every git process runs without the system and global configuration, and every local read of the clone starts with the hardening
+/// shared by every git process on a repository Vericairn did not create (GitHardening). Remote access runs from a private bare
+/// repository that reads the clone's objects but never its configuration, so the clone's address rewrites, transport settings and
+/// hooks cannot change where or how a checked push goes. Only the declared remote's protocol is allowed, and the user's own
+/// configuration contributes only its credential helpers and the installation's TLS trust settings.
 /// </remarks>
 public sealed class GitPushAdapter : IPushAdapter
 {
@@ -344,12 +345,40 @@ public sealed class GitPushAdapter : IPushAdapter
         return Path.Combine(common, "objects");
     }
 
-    // Local reads in the clone: no system or global configuration, no hooks, and no transport for lazily fetched objects.
+    // Local reads in the clone, each with a hardening of its own that is removed when the read ends (Local).
     private ProcessResult Invoke(string directory, string[] arguments, Func<ProcessStartInfo, ProcessResult>? runner = null)
     {
-        ProcessStartInfo info = Start(directory, ["-c", "protocol.allow=never", .. arguments]);
-        Isolate(info, []);
-        return (runner ?? run)(info);
+        using GitHardening hardening = Harden();
+        return (runner ?? run)(Local(directory, hardening, arguments));
+    }
+
+    /// <summary>
+    /// The arguments and environment of a local read in the clone being pushed: the hardening of every git process on a repository
+    /// Vericairn did not create (<see cref="GitHardening"/>: no system or global configuration, a hooks directory with no hooks, and the
+    /// clone's own fsmonitor, pager and program settings overridden), then the adapter's own: no inherited routing, no transport for
+    /// lazily fetched objects, and replace objects, derived caches and grafts ignored. <paramref name="hardening"/> must outlive the process.
+    /// </summary>
+    internal static ProcessStartInfo Local(string directory, GitHardening hardening, IEnumerable<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(hardening);
+        ArgumentNullException.ThrowIfNull(arguments);
+        var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        GitRouting.Remove(info);
+        hardening.Apply(info, ["--no-replace-objects", .. IgnoreDerived, "-c", "protocol.allow=never", .. arguments]);
+        info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
+        return info;
+    }
+
+    private static GitHardening Harden()
+    {
+        try
+        {
+            return GitHardening.Create();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new ProviderRefusedException("git cannot run isolated: a temporary directory could not be created; the clone was not read.", error);
+        }
     }
 
     // Remote access from a private bare repository with only the declared remote's protocol. It loads none of the clone's
