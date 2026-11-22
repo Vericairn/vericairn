@@ -244,8 +244,12 @@ displaced rather than in progress or awaiting review, `work observe` names the a
 step, no review is asked for its result, and routing goes on with the step's holder. A displaced result
 that names unresolved effects keeps its `uncertain-effect` attention until they are resolved. For a run
 of a flow only decisions under the step's current holder count in the current round; a decision dated
-before a hand-over keeps deciding the earlier round it decided. A hand-over still asks the displaced
-assignment's runs to stop.
+before a hand-over keeps deciding the earlier round it decided. The holder a decision is judged by is the
+holder rule's, over the step's assignments recorded before the decision, so a decision under an
+assignment that holds nothing, such as an agent's hand-written assignment of a gate a person assigned,
+never counts, and never keeps the holder's own decision from counting. A standing agent's occurrence,
+its route, and the operator's list of reserved work read their holder by the same rule. A hand-over
+still asks the displaced assignment's runs to stop.
 
 ## Availability and quiet hours for people (0.9.4)
 
@@ -324,7 +328,9 @@ an agent already holds stays with that assignment, which the session then holds;
 holds a step's assignment, `goal next` shows the step `assigned`. The session hears it through its
 subscription (the assignment's `record` event, and `list_changed` over MCP), reads its brief and records
 an attempt. A step it records no attempt on within five minutes counts as a lapse: attention, then the
-ask after `reassignAfterSeconds`.
+ask after `reassignAfterSeconds`. Giving a step to a session dispatches it, so, as a run is neither
+admitted nor launched, `goal step` gives no session a step, and records nothing, while the estate
+reports an error; it names the finding, which `vericairn estate check` lists.
 
 A live session's own holds, reads and sends are unseen by the runtime, so the session route never takes
 a step whose exposure reads (`design/holds-reads-sends.md` § 7). In this build that is judged
