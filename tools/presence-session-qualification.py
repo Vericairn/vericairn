@@ -68,8 +68,8 @@ def push_entry(branch, count):
     return {"entry": "kind", "type": "operation", "action": "change-push", "count": count, "atMost": False, "statuses": STATUSES, "fixed": fixed}
 
 
-def terms_for(key, entries, limit):
-    return {"format": FORMAT, "action": "changes push", "actionIdentity": "sha256:" + hashlib.sha256(ulid().encode()).hexdigest(), "principal": PRINCIPAL,
+def terms_for(key, entries, limit, action="changes push"):
+    return {"format": FORMAT, "action": action, "actionIdentity": "sha256:" + hashlib.sha256(ulid().encode()).hexdigest(), "principal": PRINCIPAL,
             "device": DEVICE, "publicKey": key, "session": ulid(), "limitSeconds": limit, "entries": entries, "references": []}
 
 
@@ -201,7 +201,7 @@ def command_key(arguments):
 
 def command_open(arguments):
     key = public_key(arguments.helper, arguments.blob)
-    terms = terms_for(key, [push_entry(BRANCH, arguments.count)], arguments.limit)
+    terms = terms_for(key, [push_entry(BRANCH, arguments.count)], arguments.limit, arguments.action)
     session = Session([arguments.helper, "session", arguments.blob])
     session.say(f"helper process {session.process.pid}")
     opened = open_session(session, terms, [])
@@ -271,7 +271,7 @@ def command_parent(arguments):
 def command_maximum(arguments):
     key = public_key(arguments.helper, arguments.blob)
     entries = [push_entry("q/" + letter * 98, 1) for letter in "abc"]
-    terms = terms_for(key, entries, arguments.limit)
+    terms = terms_for(key, entries, arguments.limit, arguments.action)
     session = Session([arguments.helper, "session", arguments.blob])
     opened = open_session(session, terms, [])
     if opened is None:
@@ -296,6 +296,8 @@ def main():
         command = commands.add_parser(name, help=text)
         command.add_argument("--blob", required=True, help="the throwaway presence key's blob")
         command.add_argument("--limit", type=int, default=300, help="the session's limit in seconds, 60 to 300")
+        if name in ("open", "maximum"):
+            command.add_argument("--action", default="changes push", help="the action the terms name, from the closed vocabulary; from 0.9.4 also 'operator act'")
         if name == "open":
             command.add_argument("--count", type=int, default=22, help="how many records to sign, at most 128")
             command.add_argument("--spread", type=float, default=0, help="the seconds the signatures are spread over")

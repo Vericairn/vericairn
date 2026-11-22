@@ -176,6 +176,20 @@
     "closed",
     "queued"
   ],
+  "Vericairn.Records.Estate.OperatorActs.Choices": [
+    "sign",
+    "wait",
+    "dismiss"
+  ],
+  "Vericairn.Records.Estate.OperatorActs.Kinds": [
+    "close",
+    "answer",
+    "goal-acceptance",
+    "release-acceptance",
+    "milestone-acceptance",
+    "milestone-result-acceptance",
+    "request"
+  ],
   "Vericairn.Records.Model.RecordParser.HashExcludedKeys": [
     "hash",
     "signatures"

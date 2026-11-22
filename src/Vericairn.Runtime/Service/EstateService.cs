@@ -2630,6 +2630,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(denied);
         }
 
+        // From 0.9.4 (FIX-159): nothing is signed or prepared for a device to sign while the estate leaves records unread.
+        if (ActingRefusal.BeforeSigning(current, "signing the " + draft.Type + " record") is Problem unread)
+        {
+            return WriteOutcome.Fail(unread);
+        }
+
         // From 0.9.2 (MCP-03): a request whose records only its device signs prepares or writes its one record with that device.
         if (requestDevice.Value is { Closed: false, Signing: { } signing } device)
         {
@@ -2649,6 +2655,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         if (RequestDeviceRefusal(current) is Problem denied)
         {
             return WriteOutcome.Fail(denied);
+        }
+
+        // From 0.9.4 (FIX-159): before any presence prompt or signature, while the estate leaves records unread.
+        if (ActingRefusal.BeforeSigning(current, "signing the " + draft.Type + " record") is Problem unread)
+        {
+            return WriteOutcome.Fail(unread);
         }
 
         // A write outside an operator action states its own batch's presence prompts before the first (FIX-124): the record, and the
@@ -2801,6 +2813,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        // From 0.9.4 (FIX-159): every signature made on this machine, and every record prepared unsigned, passes here; none is made while
+        // the estate leaves records unread.
+        if (ActingRefusal.BeforeSigning(current, "signing the " + draft.Type + " record") is Problem unread)
+        {
+            return (null, unread.Message);
+        }
+
         // From 0.9.2 (MCP-03): under device signing nothing on this machine signs. A record authored without signers is a candidate
         // only, which the store refuses; the one signer allowed is the requesting device's verified signature over its plan.
         if (requestDevice.Value is { Closed: false, Signing: { } signing } requesting)
@@ -2816,6 +2835,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
+        // From 0.9.4 (OPS-16): a decision naming an operator's act answers the current ask with the recommendation the act showed.
+        if (ActWriteRefusal(draft, current) is string actRefusal) return (null, actRefusal);
+        // From 0.9.4 (OPS-22): a request pins only files the estate's objects hold.
+        if (RequestFileRefusal(draft) is string fileRefusal) return (null, fileRefusal);
         if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
             return (null, templateRefusal);
         if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)

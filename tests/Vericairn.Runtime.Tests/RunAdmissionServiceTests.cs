@@ -63,7 +63,7 @@ public sealed class RunAdmissionServiceTests
         Assert.False(File.Exists(run.Report("admission")));
     }
 
-    private static RunAdmissionService.AdmittedRun Prepare(RunEstate run, RunAdmissionService admission)
+    internal static RunAdmissionService.AdmittedRun Prepare(RunEstate run, RunAdmissionService admission)
     {
         var request = new RunStartRequest(run.Assignment, "generic", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource,
             Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("generic", run.Report("admission")) });
@@ -78,7 +78,7 @@ public sealed class RunAdmissionServiceTests
 
     // Compose admission on its own. Only generic records and context assembly use the fixture's facade; no run API is used
     // to prepare or launch. The supplied record boundary checks that intent publication retains the admission gate.
-    private static RunAdmissionService Admission(RunEstate run, object gate)
+    internal static RunAdmissionService Admission(RunEstate run, object gate)
     {
         var records = new EstateRecordAccess(gate, run.Service.Session,
             (draft, _) =>

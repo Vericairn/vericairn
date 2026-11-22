@@ -351,6 +351,17 @@ internal sealed partial class ReleaseCoordinationService(
         string destination = descriptor.Destination is { } destinationKey ? settings.GetValueOrDefault(destinationKey) ?? "unavailable" : providerId;
         if (string.IsNullOrWhiteSpace(destination)) destination = "unavailable";
         string identity = ReleaseFlow.Identity(providerId, destination, request.Version);
+        // From 0.9.4 (FIX-159): a submission acts on nothing while the estate reports an error, before any presence prompt, the release
+        // gate's checkpoint, the intent or the provider. The refusal names the errors, and beside them every objection the submission's
+        // check reads, which signs, records and dispatches nothing.
+        if (!checkOnly && ActingRefusal.BeforeActing(prepared, "submitting release " + request.Version) is Problem invalid)
+        {
+            ReleaseResponse check = Submit(request, checkOnly: true);
+            IReadOnlyList<FindingDto> objections = check.Problem?.Findings ?? [];
+            return ReleaseProblem(identity, "not-started", new Problem(invalid.Code, check.Ok || check.Problem is null ? invalid.Message : invalid.Message + " " + check.Message,
+                [.. objections, .. invalid.Findings.Where(e => !objections.Any(o => o.Code == e.Code && o.Location == e.Location))]));
+        }
+
         string? releaseCommit = request.Commit ?? (settings.TryGetValue("ref", out string? exactRef) && Patterns.Commit.IsMatch(exactRef) ? exactRef : null);
         // Security reports are read before the gate is taken and only here, before any durable claim: their objections are never
         // retained or written into an intent, so no advisory identity reaches a record through a refused or canceled submission.

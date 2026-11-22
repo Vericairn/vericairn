@@ -75,6 +75,12 @@ the build must not list this macOS version, so every signature keeps its own che
 expected: 200 characters, ending with an ellipsis, the fingerprint included. Record the process name the
 dialog shows.
 
+From 0.9.4 (OPS-24, decision `01M8001M0T9XRGF7SKHW3B45KF`) the closed vocabulary names `operator act`, the one reviewed act that
+signs every ready operator item selected. Run `open --count 3 --action "operator act"` and `maximum --action "operator act"`: each
+dialog begins "open Vericairn session", the fingerprint and "operator act", shows the whole text the driver printed, and the first
+signs its three records under one check. Run `open --count 2 --action "operator acts"`: the helper refuses it with
+`terms.not-allowed` before any dialog. Record these with point 3.
+
 **4. Another process gets its own dialog.** Run `hold --every 10` and answer its dialog. While it holds the
 session, in a second terminal run `./vericairn-enclave sign <blob> <64 zeros> "a second process"`: a
 dialog of its own opens, reading "sign an unread Vericairn digest: a second process". Then copy the
@@ -121,7 +127,9 @@ helper answers `ended` with `parent` and the driver prints `the helper exited` w
 
 **10. The daemon and a missing graphical session.** With the candidate's runtime started by
 `vericairn runtime start`, run an operator action that announces a list on this device: the dialog
-appears although the daemon hosts the runtime (this needs `ID-16`'s runtime in the candidate). Then, over
+appears although the daemon hosts the runtime (this needs `ID-16`'s runtime in the candidate). From 0.9.4, also run
+`vericairn operator act --ready` over at least two ready items of a throwaway estate on this device: one dialog names
+`operator act` and the list's records by type, and one check signs them. Then, over
 Remote Login (`ssh` to this Mac, with no graphical session), run `open --count 2`: the helper refuses with
 `check.unavailable` and ends, and does not wait.
 

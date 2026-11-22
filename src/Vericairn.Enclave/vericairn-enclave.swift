@@ -756,6 +756,8 @@ let termsFormat = "vericairn.presence-session/1"
 let actionVocabulary: Set<String> = [
     "operator close", "operator record", "operator unfinished", "changes push", "changes open", "changes merge", "changes observe",
     "release submit", "release observe", "release withdraw", "decision from ask", "docs pass assign", "work move-plan", "goal step",
+    // From 0.9.4 (OPS-24, decision 01M8001M0T9XRGF7SKHW3B45KF): the one reviewed act that signs every ready operator item selected.
+    "operator act",
 ]
 
 /// The record types an exact entry may have (design/presence-sessions.md § 10); a release only with status withdrawn.

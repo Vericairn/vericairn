@@ -213,9 +213,60 @@ public sealed class LocalPushTests : IDisposable
         Git(repository, "merge", "--no-ff", "-m", "Take in main\n\nSigned-off-by: Test <test@example.invalid>", "main");
         string head = Git(repository, "rev-parse", "HEAD");
         var adapter = Adapter();
-        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        // The branch's pushed head is the head of a complete recorded push, so the range continues from it (FIX-154).
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head, [pushed]);
         Assert.Equal((pushed, landed), (plan.Base, plan.TargetHead));
         Assert.Equal(head, Assert.Single(adapter.CommitMessages(repository, plan)!).Commit);
+    }
+
+    // FIX-154: a recorded head counts only when the remote branch, observed now, still holds it; otherwise, as when the clone lacks it
+    // or nothing is recorded, the scan starts at the merge base with the target, never at the remote branch's head.
+    [Theory]
+    [InlineData("held")]
+    [InlineData("none")]
+    [InlineData("missing")]
+    [InlineData("beside")]
+    public void TheScanBaseIsARecordedHeadTheRemoteBranchHoldsOrTheMergeBase(string recorded)
+    {
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        string start = Git(repository, "rev-parse", "HEAD");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "beside");
+        File.WriteAllText(Path.Combine(repository, "beside.txt"), "Beside.\n");
+        Git(repository, "add", "beside.txt");
+        Git(repository, "commit", "-m", "A commit on another line");
+        string beside = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "checkout", "-b", "work/change", start);
+        File.WriteAllText(Path.Combine(repository, "one.txt"), "One.\n");
+        Git(repository, "add", "one.txt");
+        Git(repository, "commit", "-m", "Add one");
+        string one = Git(repository, "rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(repository, "two.txt"), "Two.\n");
+        Git(repository, "add", "two.txt");
+        Git(repository, "commit", "-m", "Add two");
+        Git(repository, "push", remote, "work/change");
+        File.WriteAllText(Path.Combine(repository, "three.txt"), "Three.\n");
+        Git(repository, "add", "three.txt");
+        Git(repository, "commit", "-m", "Add three");
+        string head = Git(repository, "rev-parse", "HEAD");
+        string[] heads = recorded switch
+        {
+            "held" => [one],
+            "missing" => [new string('e', 40), "not a commit"],
+            "beside" => [beside],
+            _ => [],
+        };
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head, heads);
+        Assert.Equal(recorded == "held" ? one : start, plan.Base);
+        // The push prepares again from the same heads; other heads give another plan, which refuses before anything is pushed.
+        var scan = new SecretScan("test-scanner", "1.0.0", plan.Range, "passed", 0);
+        if (recorded == "held") Assert.Throws<ProviderRefusedException>(() => adapter.Push(repository, remote, plan, scan, []));
+        adapter.Push(repository, remote, plan, scan, heads);
+        Assert.Equal(head, adapter.Observe(repository, remote, "work/change"));
     }
 
     // The adapter isolates its own git processes. Only its read of the user's credential settings sees this test's stand-in

@@ -47,8 +47,8 @@ public sealed partial class EstateService
         {
             PresenceChangeStep step = steps[i];
             string? name = step.Action == "change-merge" ? step.PullRequest : step.Branch;
-            RecordEnvelope? current = head is null || name is null ? null : model.Current("operation").FirstOrDefault(o => EstateModel.BodyString(o, "identity")
-                == $"{configuration.Provider.Provider}:{configuration.Repository.Id}:{step.Action}:{name}:{head}:{configuration.Product.ComputedHash[7..]}");
+            string? identity = head is null || name is null ? null : ChangeIdentity(model, configuration, step.Action, name, head);
+            RecordEnvelope? current = identity is null ? null : model.Current("operation").FirstOrDefault(o => EstateModel.BodyString(o, "identity") == identity);
             if (current is not null) references.Add(current.Id);
             string key = step.Action == "change-merge" ? (name is null ? "the pull request the opening reveals" : "pull request " + name) : "branch " + name;
             string at = head is null ? "at the head the first change record states" : "at head " + head[..12];

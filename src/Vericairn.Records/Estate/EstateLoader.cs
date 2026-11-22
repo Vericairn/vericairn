@@ -158,7 +158,7 @@ public static class EstateLoader
             read.Add((record, location));
         }
 
-        IReadOnlyList<IReadOnlyList<RecordEnvelope>> unreadable = [];
+        List<List<RecordEnvelope>> unreadable = [];
         if (duplicated is null)
         {
             records.AddRange(read.Select(r => r.Record));
@@ -172,9 +172,10 @@ public static class EstateLoader
         Dictionary<string, string> supersededBy = Successors(records, byId, supersession);
         // A judgment reserves room in the signature tables for every signature it may verify, by every key its device records name,
         // before it verifies any, so the bound follows the estate (design/performance.md § 3.1); so does an identities load given a
-        // context, whose caller may judge its trust itself.
+        // context, whose caller may judge its trust itself. From 0.9.4 (FIX-159) the records left unread are judged too, in each reading
+        // of them (RefusedWhileUnread), so they are reserved for as well.
         using Signing.SignatureTables.Judgment? signatures = judge || context is not null
-            ? (context?.Tables ?? Signing.SignatureTables.Process).Begin(records.Sum(r => r.Signatures.Count), DistinctKeys(records), context)
+            ? (context?.Tables ?? Signing.SignatureTables.Process).Begin(read.Sum(r => r.Record.Signatures.Count), DistinctKeys(read.Select(r => r.Record).ToList()), context)
             : null;
         var model = new EstateModel(root, records, byId, supersededBy, findings)
         {
@@ -200,6 +201,14 @@ public static class EstateLoader
         EstateManifest? manifest = manifestBytes is null ? EstateManifest.Load(root, manifestFindings) : EstateManifest.Parse(manifestBytes, manifestFindings);
         EstateTrust trust = EstateTrust.Build(model, manifest, model.ObjectReader, model.FilePaths);
         IReadOnlySet<string> excluded = trust.NotCounting();
+        // From 0.9.4 (FIX-159): while records are unread, a record counts only when every reading of them counts it, so no record counts
+        // because the record that would refuse it is unread. Judged here, once, where counting is judged, so that every reading, the write
+        // boundary and every acting check inherit it.
+        if (unreadable.Count > 0 && RefusedWhileUnread(model, manifest, read, unreadable, excluded, findings) is { Count: > 0 } refused)
+        {
+            excluded = new HashSet<string>(excluded.Concat(refused), StringComparer.Ordinal);
+        }
+
         if (excluded.Count == 0)
         {
             foreach (Finding finding in supersession) findings.Add(finding);
@@ -385,6 +394,126 @@ public static class EstateLoader
         }
 
         return order;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-159): the most readings of the unread records the loader judges, beyond the reading that leaves them out. Each reading
+    /// judges the estate's trust again, and the readings multiply with every identifier more than one file carries, so they are bounded;
+    /// past the bound, which records a reading would refuse is not established, and no record counts.
+    /// </summary>
+    internal const int MaxUnreadReadings = 16;
+
+    /// <summary>
+    /// From 0.9.4 (FIX-159): the records read that count for nothing while records are unread because a reading of the unread records refuses
+    /// them. A record refuses others when read: a charter's signature requirement refuses unsigned records, its operator roots every
+    /// admission, a revocation ends what its device signs, a history checkpoint's closing refuses what its device, key, grant or person signs
+    /// and it does not witness, an adoption refuses unanchored unsigned records, and a witnessed listing refuses other bytes under its
+    /// identifier. Left out, such a record refuses nothing, so what it refused would count. No list of refusers is complete, so none is
+    /// kept: the estate is judged again with the unread records read each way they can be, each identifier more than one file carries
+    /// read as one of its records, any copy with the same content and signatures once, or as none of them, with the rest of its line,
+    /// and a record counts only when the reading that leaves them out and every such reading count it. One of those readings is the estate
+    /// before the copies were written, so whatever that estate refused stays refused, and since the reading that leaves them out is among
+    /// them, a reading of a copy can only take counting away, never give it. Past <see cref="MaxUnreadReadings"/> readings no record counts
+    /// (record.duplicate-unsettled, an error); otherwise the records refused this way are reported once (record.duplicate-refused, a
+    /// warning). Only counting is judged here: the records read keep the reading that leaves the unread records out in every other respect.
+    /// </summary>
+    private static HashSet<string> RefusedWhileUnread(EstateModel model, EstateManifest? manifest, List<(RecordEnvelope Record, string Location)> read,
+        List<List<RecordEnvelope>> unreadable, IReadOnlySet<string> excluded, FindingList findings)
+    {
+        var refused = new HashSet<string>(StringComparer.Ordinal);
+        var unread = new HashSet<RecordEnvelope>(unreadable.SelectMany(line => line), ReferenceEqualityComparer.Instance);
+        string location = read.First(r => unread.Contains(r.Record)).Location;
+        // Each line's readings: its records carried by one file each, with one choice for each identifier more than one file carries.
+        var fixedRecords = new List<RecordEnvelope>();
+        var choices = new List<List<RecordEnvelope?>>();
+        foreach (List<RecordEnvelope> line in unreadable)
+        {
+            foreach (IGrouping<string, RecordEnvelope> group in line.GroupBy(r => r.Id, StringComparer.Ordinal))
+            {
+                if (group.Count() == 1)
+                {
+                    fixedRecords.Add(group.First());
+                }
+                else
+                {
+                    choices.Add([.. group.DistinctBy(Content, StringComparer.Ordinal), null]);
+                }
+            }
+        }
+
+        long readings = 1;
+        foreach (List<RecordEnvelope?> choice in choices)
+        {
+            readings = Math.Min(readings * choice.Count, MaxUnreadReadings + 1L);
+        }
+
+        if (readings > MaxUnreadReadings)
+        {
+            foreach (RecordEnvelope record in model.Records) refused.Add(record.Id);
+            findings.Error("record.duplicate-unsettled", location, $"{choices.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} identifiers are each carried by more than one record (record.duplicate-id), which can be read more than {MaxUnreadReadings.ToString(System.Globalization.CultureInfo.InvariantCulture)} ways: which records a reading of them would refuse is not established, so no record counts until all but one record carrying each identifier is removed.");
+            return refused;
+        }
+
+        var reading = new int[choices.Count];
+        while (true)
+        {
+            var chosen = new HashSet<RecordEnvelope>(fixedRecords, ReferenceEqualityComparer.Instance);
+            for (int i = 0; i < choices.Count; i++)
+            {
+                if (choices[i][reading[i]] is RecordEnvelope record) chosen.Add(record);
+            }
+
+            foreach (string id in NotCountingIn(model, manifest, [.. read.Select(r => r.Record).Where(r => !unread.Contains(r) || chosen.Contains(r))]))
+            {
+                if (model.ById.ContainsKey(id)) refused.Add(id);
+            }
+
+            int next = 0;
+            while (next < choices.Count && ++reading[next] == choices[next].Count)
+            {
+                reading[next++] = 0;
+            }
+
+            if (next == choices.Count) break;
+        }
+
+        refused.ExceptWith(excluded);
+        if (refused.Count > 0)
+        {
+            string some = string.Join(", ", refused.Order(StringComparer.Ordinal).Take(5));
+            findings.Warning("record.duplicate-refused", location, $"{refused.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} records count for nothing while records are unread (record.duplicate-id), because a reading of the unread records refuses them ({some}{(refused.Count > 5 ? ", ..." : string.Empty)}): a record counts only when it counts with the unread records left out and with them read each way they can be. They count again once all but one record carrying each identifier is removed.");
+        }
+
+        return refused;
+
+        // Copies with the same content and signatures read alike, so each is one reading.
+        static string Content(RecordEnvelope record) =>
+            record.ComputedHash + " " + record.DeclaredHash + " " + string.Join(" ", record.Signatures.Select(s => s.Algorithm + ":" + s.Device + ":" + s.Signature));
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-159): the records that count for nothing in one reading of an estate's records, each identifier carried once: judged as
+    /// the loader judges counting, by signatures, anchors, history and closings, then the authority of policy records and of dispatchers.
+    /// </summary>
+    private static HashSet<string> NotCountingIn(EstateModel model, EstateManifest? manifest, List<RecordEnvelope> records)
+    {
+        var byId = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
+        foreach (RecordEnvelope record in records) byId[record.Id] = record;
+        var reading = new EstateModel(model.Root, records, byId, Successors(records, byId, new FindingList()), new FindingList())
+        {
+            ObjectReader = model.ObjectReader,
+            FilePaths = model.FilePaths,
+            AuthorityAtRecordTime = model.AuthorityAtRecordTime,
+            Signatures = model.Signatures,
+        };
+        reading.Manifest = manifest;
+        EstateTrust trust = EstateTrust.Build(reading, manifest, reading.ObjectReader, reading.FilePaths);
+        var excluded = new HashSet<string>(trust.NotCounting(), StringComparer.Ordinal);
+        reading.ApplyCounting(trust, excluded, Successors(records.Where(r => !excluded.Contains(r.Id)).ToList(), byId, new FindingList(), r => trust.AttachedTo(r)?.Id));
+        excluded.UnionWith(Types.PolicyAuthority.Unauthorized(reading));
+        excluded.UnionWith(Types.PolicyAuthority.RemovedBeforeHistory(reading).Keys);
+        excluded.UnionWith(Types.DispatchAuthority.Withheld(reading));
+        return excluded;
     }
 
     // The public keys the device records name: every key a signature may be verified with.
