@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Processes;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
@@ -56,7 +57,7 @@ internal static class HarnessInventory
 
     public static string Binary(LaunchContext context, IReadOnlyList<string> command) => Digest(new
     {
-        executable = ContentHash.Sha256File(Executable(command, context.Environment)),
+        executable = ContentHash.Sha256File(Executable(command)),
         entries = EntryFiles(context, command).Select(ContentHash.Sha256File).ToArray(),
     });
 
@@ -93,8 +94,8 @@ internal static class HarnessInventory
         mcp = context.McpServer, mcpFile = ContentHash.Sha256File(context.McpConfiguration),
         environment = context.Environment.OrderBy(p => p.Key, StringComparer.Ordinal),
         mcpEnvironment = context.McpEnvironment.OrderBy(p => p.Key, StringComparer.Ordinal),
-        executable = ContentHash.Sha256File(Executable(command, context.Environment)),
-        server = ContentHash.Sha256File(Executable(context.McpServer, context.Environment)),
+        executable = ContentHash.Sha256File(Executable(command)),
+        server = ContentHash.Sha256File(Executable(context.McpServer)),
         entries = EntryFiles(context, command).Concat(EntryFiles(context, context.McpServer)).Select(ContentHash.Sha256File).ToArray(),
     });
 
@@ -109,21 +110,27 @@ internal static class HarnessInventory
         }
     }
 
-    public static string Executable(IReadOnlyList<string> command, IReadOnlyDictionary<string, string> environment)
+    /// <summary>
+    /// The file a launch of <paramref name="command"/> runs, whose hash its binding records. From 0.9.4 (FIX-161) it is what the program
+    /// resolver gives, as for the start itself: an absolute path as given, or a bare name found as a program in an absolute directory
+    /// of this process's PATH. A relative path is refused, and so is a file that is not there.
+    /// </summary>
+    public static string Executable(IReadOnlyList<string> command)
     {
         string name = command[0];
-        if (Path.IsPathFullyQualified(name) && File.Exists(name)) return name;
-        if (Path.GetFileName(name) != name) throw new ProviderRefusedException("An inventory executable must be absolute or resolved through the admitted PATH.");
-        string[] extensions = OperatingSystem.IsWindows() ? (environment.GetValueOrDefault("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD").Split(';') : [];
-        foreach (string directory in (environment.GetValueOrDefault("PATH") ?? "").Split(Path.PathSeparator).Where(Path.IsPathFullyQualified))
+        string resolved;
+        try
         {
-            foreach (string suffix in extensions.Prepend(""))
-            {
-                string candidate = Path.Combine(directory, name + suffix);
-                if (File.Exists(candidate)) return candidate;
-            }
+            resolved = ProgramPath.Resolve(name);
         }
-        throw new ProviderRefusedException("The inventory executable could not be resolved through the admitted PATH.");
+        catch (ProgramNotFoundException)
+        {
+            throw new ProviderRefusedException(Path.GetFileName(name) != name && !Path.IsPathFullyQualified(name)
+                ? "An inventory executable must be absolute or resolved through the admitted PATH."
+                : "The inventory executable could not be resolved through the admitted PATH.");
+        }
+
+        return File.Exists(resolved) ? resolved : throw new ProviderRefusedException("The inventory executable could not be resolved through the admitted PATH.");
     }
 
     /// <summary>
@@ -138,7 +145,7 @@ internal static class HarnessInventory
     {
         IReadOnlyList<string> command = HarnessProcess.Command(context.Settings, executable);
         var components = new List<RunComponent>();
-        string harnessHash = ContentHash.Sha256File(Executable(command, context.Environment));
+        string harnessHash = ContentHash.Sha256File(Executable(command));
         string[] needs = context.Environment.Keys.Order(StringComparer.Ordinal).ToArray();
         List<string> dependencies = Dependencies(command, id);
         components.Add(new(id, "harness", version, harnessHash, configuration, needs, [destination, "local"], [id + "-configuration", "vericairn", .. dependencies]));
@@ -152,7 +159,7 @@ internal static class HarnessInventory
         {
             components.Add(new(tool, "tool", version, Digest(new { harnessHash, tool }), configuration, [], [RetrievalAdmission.Destination], [id]));
         }
-        string mcpHash = ContentHash.Sha256File(Executable(context.McpServer, context.Environment));
+        string mcpHash = ContentHash.Sha256File(Executable(context.McpServer));
         string mcpConfiguration = Digest(new { server = "vericairn", transport = "stdio", environment = context.McpEnvironment.Keys.Order(StringComparer.Ordinal).ToArray(), authority = "run-principal" });
         components.Add(new("vericairn", "mcp", "vericairn.mcp-v1", mcpHash, mcpConfiguration, context.McpEnvironment.Keys.Order(StringComparer.Ordinal).ToArray(), ["estate"], Dependencies(context.McpServer, "vericairn")));
         return components;
