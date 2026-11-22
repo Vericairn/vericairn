@@ -35,6 +35,8 @@ internal static class PresenceSessionProtocol
     [
         "operator close", "operator record", "operator unfinished", "changes push", "changes open", "changes merge", "changes observe",
         "release submit", "release observe", "release withdraw", "decision from ask", "docs pass assign", "work move-plan", "goal step",
+        // From 0.9.4 (OPS-24, decision 01M8001M0T9XRGF7SKHW3B45KF): the one reviewed act that signs every ready operator item selected.
+        "operator act",
     ], StringComparer.Ordinal);
 
     /// <summary>The record types an exact entry may have (§ 10); a release only when withdrawn, an operation only of <see cref="ExactActions"/>.</summary>

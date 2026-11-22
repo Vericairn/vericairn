@@ -60,8 +60,9 @@ internal static class RecordCompanionText
         // An earlier implementation's fields are the current ones without those added after it.
         foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat <= source.RecordFormat && (omitted.IsDefault || !omitted.Contains(f.Name))))
         {
-            // Preserve earlier rendition bytes when the additive prompt-use field was not recorded.
-            if (field.Name == "promptUse" && !body.TryGetProperty(field.Name, out _)) continue;
+            // Preserve earlier rendition bytes when the additive prompt-use field, or from 0.9.4 a decision's act (OPS-16) or a request's optional
+            // mark (OPS-22), was not recorded.
+            if ((field.Name is "promptUse" or "act" || field.Name == "optional" && source.RecordType == "operator-request") && !body.TryGetProperty(field.Name, out _)) continue;
             yield return "## " + Label(field.Name) + "\n\n" + DocumentMarkdown.Text(field.Description) + "\n\n";
             if (body.TryGetProperty(field.Name, out JsonElement value))
                 foreach (string block in Value(value, field.Name)) yield return block;

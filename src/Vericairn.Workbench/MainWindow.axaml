@@ -30,6 +30,7 @@
         <MenuItem Header="Readable _views" InputGesture="Ctrl+Shift+V" Click="OnOpenCompanionCatalog" />
         <MenuItem Header="Progress _report" InputGesture="Ctrl+Shift+P" Click="OnOpenProgress" />
         <MenuItem Header="_Hand-over and resume" InputGesture="Ctrl+Shift+H" Click="OnOpenHandoff" />
+        <MenuItem Header="_Operator act: ready items" Click="OnOpenOperatorAct" />
         <MenuItem Header="_Goals workspace" InputGesture="Ctrl+Shift+G" Click="OnOpenGoals" />
         <MenuItem Header="_Assign the open work order" InputGesture="Ctrl+Shift+A" Click="OnOpenComposer" />
         <MenuItem Header="_Compare the open record with its earlier revision" Click="OnCompareOpen" />
@@ -805,6 +806,35 @@
                     <SelectableTextBlock Text="{Binding Effective}" TextWrapping="Wrap" Focusable="True" />
                     <TextBlock Text="Preview of this draft" FontWeight="SemiBold" />
                     <SelectableTextBlock Text="{Binding Preview}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Communication preview" />
+                  </StackPanel>
+                </ScrollViewer>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:OperatorActDocument">
+                <ScrollViewer>
+                  <StackPanel Margin="12" Spacing="8">
+                    <TextBlock Text="Operator act: ready items" FontSize="20" FontWeight="SemiBold" />
+                    <TextBlock Text="Every operator item whose command is ready, each with what its signature records. Unselect any item to leave it waiting, or dismiss a request with your reason; the rest sign in one act on your own device. A changed item refuses the whole act, and nothing outside the list is signed." TextWrapping="Wrap" />
+                    <Button Content="Refresh the ready items" Click="OnRefreshOperatorAct" HorizontalAlignment="Left" AutomationProperties.Name="Read the ready operator items again; reading signs nothing" />
+                    <ItemsControl ItemsSource="{Binding Rows}" AutomationProperties.Name="Ready operator items and your choices">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="local:OperatorActRow">
+                          <Border Padding="6" Margin="0,0,0,6" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1">
+                            <StackPanel Spacing="4">
+                              <SelectableTextBlock Text="{Binding Label}" TextWrapping="Wrap" Focusable="True" />
+                              <ComboBox ItemsSource="{Binding Choices}" SelectedItem="{Binding Choice}" MinWidth="140" AutomationProperties.Name="Sign, wait or dismiss this item" />
+                              <TextBox Text="{Binding Reason}" PlaceholderText="Your reason, for a dismissal" AutomationProperties.Name="Your reason for dismissing this request" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="Each answer's decision stake" />
+                    <ComboBox ItemsSource="{Binding Stakes}" SelectedItem="{Binding Stake}" MinWidth="140" AutomationProperties.Name="Each answer's decision stake" />
+                    <TextBlock Text="The act as it will be signed" FontWeight="SemiBold" />
+                    <SelectableTextBlock Text="{Binding Review}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="The act as it will be signed" />
+                    <CheckBox IsChecked="{Binding Reviewed}" Content="I reviewed each item and what its signature records" AutomationProperties.Name="Confirm the reviewed act" />
+                    <Button Content="Sign the act" IsEnabled="{Binding CanSign}" Click="OnSignOperatorAct" HorizontalAlignment="Left" AutomationProperties.Name="Sign the chosen items in one act on your own device" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Note}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Operator act outcome" />
                   </StackPanel>
                 </ScrollViewer>
               </DataTemplate>

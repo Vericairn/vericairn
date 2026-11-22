@@ -109,5 +109,5 @@ feature moves behind payment.
 
 Courses and video, crowdfunding, Unity projects and games follow, with the further foundries, adapters and
 providers of the creator domains beyond their first versions. Vericairn's catalog plans more than 3,000 entries
-across creative and technical work and 27 industries, listed in the [README](README.md#planned); each further
+across creative and technical work and 28 industries, listed in the [README](README.md#planned); each further
 domain is placed on this roadmap when it is chosen.
