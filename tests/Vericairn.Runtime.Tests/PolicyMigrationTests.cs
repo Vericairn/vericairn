@@ -30,7 +30,7 @@ public class PolicyMigrationTests
         Assert.Null(problem);
         Assert.Equal(["record-format-3"], plan!.Migrations);
         AssertSnapshot(before, f.Estate.Root);
-        (UpgradeResponse? applied, Problem? failed) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false));
+        (UpgradeResponse? applied, Problem? failed) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false) { OneWay = true });
         Assert.Null(failed);
         Assert.True(applied!.Applied);
         EstateModel moved = service.Session.Load();
@@ -45,7 +45,7 @@ public class PolicyMigrationTests
         Assert.Empty(moved.OfType("authority"));
         Assert.Empty(moved.OfType("result"));
         Dictionary<string, byte[]> once = Snapshot(f.Estate.Root);
-        (UpgradeResponse? repeated, Problem? repeatProblem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false));
+        (UpgradeResponse? repeated, Problem? repeatProblem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false) { OneWay = true });
         Assert.Null(repeatProblem);
         Assert.False(repeated!.Applied);
         Assert.Null(repeated.Migration);
@@ -67,7 +67,7 @@ public class PolicyMigrationTests
         Dictionary<string, byte[]> before = Snapshot(f.Estate.Root);
         string[] directories = Directories(f.Estate.Root);
         using var migrations = EstateUpgrade.UseMigrations([new FailedStep()]);
-        (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false));
+        (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false) { OneWay = true });
         Assert.Null(applied);
         Assert.Contains("nothing changed", problem!.Message, StringComparison.Ordinal);
         AssertSnapshot(before, f.Estate.Root);
@@ -83,7 +83,7 @@ public class PolicyMigrationTests
         Dictionary<string, byte[]> before = Snapshot(f.Estate.Root);
         string[] directories = Directories(f.Estate.Root);
         using var migrations = EstateUpgrade.UseMigrations([new StagedStep()]);
-        (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", "01ARZ3NDEKTSV4RRFFQ69G5FAV", false));
+        (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", "01ARZ3NDEKTSV4RRFFQ69G5FAV", false) { OneWay = true });
         Assert.Null(applied);
         Assert.NotNull(problem);
         AssertSnapshot(before, f.Estate.Root);
@@ -97,7 +97,7 @@ public class PolicyMigrationTests
         Publish(f, "0.8.0", 3);
         using (var service = EstateService.Open(f.Estate.Root))
         {
-            Assert.Null(service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false)).Problem);
+            Assert.Null(service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false) { OneWay = true }).Problem);
         }
         f.Estate.MoveTo(3, writeManifest: false);
         RecordEnvelope duty = f.Policy();
@@ -141,7 +141,7 @@ public class PolicyMigrationTests
             EstateService.UpgradeStage = s => { if (s == stage) throw new StoppedRun(s); };
             try
             {
-                Assert.Throws<StoppedRun>(() => service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false)));
+                Assert.Throws<StoppedRun>(() => service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false) { OneWay = true }));
             }
             finally
             {
@@ -158,7 +158,7 @@ public class PolicyMigrationTests
 
         using (var service = EstateService.Open(f.Estate.Root))
         {
-            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false));
+            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false) { OneWay = true });
             Assert.Null(problem);
             Assert.True(applied!.Applied);
             EstateModel moved = service.Session.Load();
@@ -181,7 +181,7 @@ public class PolicyMigrationTests
         File.WriteAllBytes(Path.Combine(f.Estate.Root, EstateLayout.ManifestPath), EstateUpgrade.ManifestAfter(model.Manifest!, EstateUpgrade.Plan(model, "0.8.0")));
         Dictionary<string, byte[]> before = Snapshot(f.Estate.Root);
         using var service = EstateService.Open(f.Estate.Root);
-        (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false));
+        (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false) { OneWay = true });
         Assert.Null(applied);
         Assert.Contains("no migration record names that pin", problem!.Message, StringComparison.Ordinal);
         AssertSnapshot(before, f.Estate.Root);

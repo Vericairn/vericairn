@@ -139,6 +139,9 @@ public sealed partial class EstateService
         // From 0.9.4 (ID-16): a refusal that ended a presence session here, kept in this runtime's memory (presence.outside-list).
         foreach (var refusal in PresenceAttention(principal))
             Add(refusal.Kind, refusal.Subject, refusal.Why, refusal.State, refusal.Next, refusal.Type, refusal.Id, refusal.Hash, refusal.At, refusal.Target, refusal.Basis);
+        // From 0.9.4 (OPS-20): an automated observer declared on this machine that is silent, failed or not observing.
+        foreach (var observer in ObserverNotices(model, principal))
+            Add(observer.Kind, observer.Subject, observer.Why, observer.State, observer.Next, observer.Type, observer.Id, observer.Hash, observer.At, observer.Target, observer.Basis);
         notices.AddRange(PolicyNotices(progress, principal));
         Dictionary<string, AttentionAcknowledgment> kept = ReadAcknowledgments(principal);
         // Several findings can concern the same kind and subject. Keep every reason in that notice.

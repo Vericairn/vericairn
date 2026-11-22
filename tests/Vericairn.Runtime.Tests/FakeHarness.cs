@@ -84,6 +84,14 @@ internal static class FakeHarness
             Environment.Exit(reached);
         }
 
+        // The stop drill's scratch run (OPS-21) is the vericairn executable with a private argument; the test executable stands in for it
+        // wherever a test names it as the vericairn command, and runs the product's own scratch run.
+        int drill = Array.IndexOf(arguments, Vericairn.Runtime.Workers.StopDrill.Marker);
+        if (drill > 0 && Vericairn.Runtime.Workers.StopDrill.TryRun(arguments[drill..]) is int drilled)
+        {
+            Environment.Exit(drilled);
+        }
+
         int at = Array.IndexOf(arguments, Marker);
         bool native = at < 0;
         if (native) at = Array.IndexOf(arguments, NativeMarker);

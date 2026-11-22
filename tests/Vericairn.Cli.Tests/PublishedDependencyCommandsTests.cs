@@ -198,7 +198,13 @@ public sealed class PublishedDependencyCommandsTests
             Assert.Equal(0, check.Code);
             Assert.False(check.Json.GetProperty("applied").GetBoolean());
             Assert.Equal(before, Snapshot(estate.Root));
-            CliHarness.Outcome applied = Run(fixture.Build.Identity, service, [.. args, "--by", estate.OperatorId]);
+            // From 0.9.4 (FIX-145) the move to the release's record format is one-way, named by the check and applied only when confirmed.
+            Assert.Equal("one-way", check.Json.GetProperty("return").GetProperty("readability").GetString());
+            CliHarness.Outcome unconfirmed = Run(fixture.Build.Identity, service, [.. args, "--by", estate.OperatorId]);
+            Assert.Equal(2, unconfirmed.Code);
+            Assert.Contains("This upgrade is one-way", unconfirmed.Err, StringComparison.Ordinal);
+            Assert.Equal(before, Snapshot(estate.Root));
+            CliHarness.Outcome applied = Run(fixture.Build.Identity, service, [.. args, "--by", estate.OperatorId, "--one-way"]);
             Assert.Equal(0, applied.Code);
             Assert.True(applied.Json.GetProperty("applied").GetBoolean());
             RecordEnvelopeAssertion(estate.Load());

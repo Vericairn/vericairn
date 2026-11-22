@@ -66,6 +66,7 @@ public sealed class RunSupervisor
     private string? priceUnit;
     private DateTimeOffset? transmitted;
     private TimeSpan grace;
+    private bool hurried;
     private readonly Func<RunLiveness, string?>? attention;
     private long lastEventTick;
     private readonly string workspace;
@@ -380,9 +381,22 @@ public sealed class RunSupervisor
         }
     }
 
+    /// <summary>
+    /// From 0.9.4 (OPS-21): the stop drill's escalation once its limit passed. The stop asked of the run, or the next one, escalates at the
+    /// next heartbeat instead of after its grace; containment still requires observing the whole boundary exited.
+    /// </summary>
+    internal void EscalateNow()
+    {
+        lock (gate)
+        {
+            hurried = true;
+            grace = TimeSpan.Zero;
+        }
+    }
+
     private void Begin(StopRequest request)
     {
-        grace = request.GraceSeconds is int seconds and >= 0 ? TimeSpan.FromSeconds(seconds) : options.Grace;
+        grace = hurried ? TimeSpan.Zero : request.GraceSeconds is int seconds and >= 0 ? TimeSpan.FromSeconds(seconds) : options.Grace;
         state.Stop = new RunStop(request.RequestedAt, request.RequestedBy, request.Reason);
         var transmission = new StringBuilder();
         options.BeforeTransmission?.Invoke();
