@@ -882,6 +882,18 @@ vericairn sources adopt <path> --by <id> --name "widget" --role "the product's s
 vericairn sources observe <path> --resource <resource id> --by <id>
 ```
 
+From 0.9.4 (FIX-147), Vericairn reads a repository it did not create without letting that repository's configuration run
+anything. Each git process ignores your system and global git configuration, receives an empty global configuration and hooks
+directory of its own, and turns off the fsmonitor, pagers, external diff, signature display, transports, missing-object fetches
+and automatic maintenance. Inspection and release admission read the working tree through a git directory Vericairn writes for
+the purpose, holding the observed commit, the repository's objects and index, copies of its exclude, attribute and
+sparse-checkout files and Vericairn's own configuration, so that read never opens the repository's configuration and runs no
+filter driver. When git cannot read the working tree completely, the observation is refused instead of being recorded as clean.
+The overrides also apply to the clones you register with `sources clone`, which release admission, policies, living documents
+and the overlap check read, to a checked push's own reads of the clone, and to the clone the secret scan reads before a checked
+push, whose history reads show a submodule's change as its two commit ids. What this changes for the repository's own settings
+and yours is listed in the [limitations guide](limitations-and-platforms.md#reading-repositories-vericairn-did-not-create-094).
+
 A check runs a command in a repository and records a verification of the exact commit (command, environment, exit code, duration, output as an object):
 
 ```sh
@@ -890,6 +902,10 @@ vericairn check observe --resource <resource id> --repository owner/name --run <
 ```
 
 `check observe` records a workflow run at GitHub as automation's verification of the commit it built, through your `gh` login. Results cite verifications as evidence.
+
+From 0.9.4 (FIX-161), git, gitleaks and gh must be in an absolute directory of `PATH` (as an installer puts them). A copy in the
+current directory, an estate root or a clone is not used, and `vericairn doctor` reports git as missing when only such a copy
+exists.
 
 ## 8. Releases
 

@@ -283,7 +283,7 @@ counts, the tags and the ten most recent commits, with an as-of time. The adapte
 pushes or changes the index; a repository without commits is refused with the next step rather than
 invented. Two implementations satisfy one conformance suite: `GitCommandAdapter` (in
 `Vericairn.Adapters.Git`) runs the git command found in an absolute directory of `PATH` (from 0.9.4,
-FIX-161), and `RecordedSourceAdapter` (beside the contract in the runtime) replays recorded observations for
+FIX-161), each process hardened as the operator guide's section 7 describes (FIX-147), and `RecordedSourceAdapter` (beside the contract in the runtime) replays recorded observations for
 offline fixtures and tests; the recorded one qualifies no real repository.
 
 Commands:
@@ -310,6 +310,9 @@ object, and writes a `verification` of the resource at the exact commit the work
 platform and runtime as environment. The exit status of the command itself is in the record; `check run`
 exits 0 once the record is written, because recording a failed check is the point. A check that does not
 finish within `--timeout` is stopped and recorded as `unknown`.
+
+From 0.9.4 (FIX-161), the command's program is started by its absolute path: a bare name found in an absolute directory of `PATH`,
+or an absolute path. A relative path is refused; give the script's absolute path instead.
 
 `vericairn check observe --resource <id> --run <id> [--workflow ci.yml] [--repository <destination>] [--provider <id>] --by <id>`
 asks the host for the run's status, conclusion and commit and writes a verification in the `automation`
@@ -925,6 +928,22 @@ The `command` setting of each launcher names another executable, or a JSON array
 its leading arguments. Native qualification refuses leading option flags in that setting: the launcher supplies every
 harness option. Positional wrapper arguments and entry-file content have inventory identities, and local command
 bindings are rechecked before dispatch. No launcher reads a price, so a cap in currency is charged in full.
+
+From 0.9.4 (FIX-161), every program Vericairn starts is started by one absolute path, chosen before the start: a launcher's
+`command`, a workspace setup command, a `check run` command, git, gitleaks, gh and the platform tools the daemon installer runs.
+A bare name is looked up only in the absolute directories of `PATH`, in order; an empty or relative `PATH` entry and the current
+directory are not used for that lookup, whatever directory the command line or the daemon runs in. An absolute path is used as
+given. On Windows a bare name is found as a program `PATHEXT` lists, `.exe` or `.com`, in an absolute directory of `PATH`,
+directory by directory and in `PATHEXT`'s order within each; a script (`.cmd`, `.bat`) is started only when it is named with its
+extension (`codex.cmd`) or by its absolute path, as before. A relative path (`./build.sh`, `bin\tool.exe`) is refused with a message
+saying so, except a workspace setup command's (below).
+
+The program then receives `PATH` without its empty and relative entries, its absolute entries kept as written and in order, so a
+program that starts another by name, as git, a harness or a setup script does, finds it in an absolute directory as well. With no
+absolute entry left, `PATH` is removed. This is the `PATH` Vericairn hands over; a program that sets its own search path, or reads
+another, decides for itself what it then starts.
+
+The launch binding records the hash of the file the start runs, found by the same lookup.
 
 `vericairn worker run <assignment> --launcher <id> --agent <principal> --by <principal> --repository <resource> [--goal <id>] [--branch <name>] [--base <ref>] [--wall-minutes <n>] [--setting name=value]... [--prepare-only] [--detach]`:
 
@@ -2055,6 +2074,13 @@ keys refuse; the file holds `variables` only when the command names some, so a f
 It never enters a record or reaches a harness. A file that cannot be read refuses the run, naming the file,
 and nothing is used in its place. A worker run refuses to configure one, since the command runs outside the agent's
 sandbox.
+
+From 0.9.4 (FIX-161), a setup command's executable given as a relative path with a directory part (`./scripts/setup.sh`,
+`scripts\setup.cmd`) is the workspace's file, started by its absolute path; a bare name is found in an absolute directory of `PATH`;
+an absolute path is used as given. `worker configure --setup-command` refuses an executable that can never be started, with the
+reason: one that names nothing or a directory, and on Windows a path rooted only on the current drive (`\tools\setup.cmd`) or relative
+to a drive's current directory (`C:setup.cmd`). A setup configuration stored earlier with such an executable is reported as
+unreadable, and refuses runs, until it is replaced or cleared.
 
 Record credential checks exclude only encoding values validated by the record rules: a device body's
 `publicKey` and an envelope's `signatures[].signature`. The same credential-shaped text in any other field,

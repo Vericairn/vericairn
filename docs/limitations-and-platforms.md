@@ -938,6 +938,62 @@ assignments, the operator's answers and reviewed acts, automated observers and t
 with default implementations where they extend an existing interface, so implementations outside Vericairn need supply none;
 [API compatibility for 0.9.4](api-compatibility-0.9.4.md) lists these changes.
 
+## Reading repositories Vericairn did not create (0.9.4)
+
+From 0.9.4 (FIX-147), every git process Vericairn starts on a repository it did not create runs with the overrides the
+[operator guide](operator-guide.md#7-repositories-and-checks-as-evidence) describes, and inspection and release admission read the
+working tree through a git directory Vericairn writes. What that changes:
+
+- **Your git configuration does not apply to inspection.** Settings that live only in your system or global git configuration are not
+  used when Vericairn reads a repository it did not create. In particular:
+  - `safe.directory` entries in your global configuration do not apply, so a repository owned by another account is refused, with a
+    message naming the ownership; inspect it as its owner, or from a clone you own.
+  - Line-ending conversion set only in the system or global configuration (Git for Windows sets `core.autocrlf=true` in its system
+    configuration by default) does not apply. A working tree checked out with conversion can count files as modified when git re-reads
+    them (for example after their timestamps change, or while an entry is racy just after checkout). Set `core.autocrlf` or `core.eol`
+    in the repository's own configuration to keep it (see the next item).
+  - A custom global excludes file (`core.excludesFile` in your global configuration) does not apply, so files it ignores count as
+    untracked. The default location (`$XDG_CONFIG_HOME/git/ignore`, usually `~/.config/git/ignore`) and the repository's own
+    `.gitignore` files and `.git/info/exclude` still apply. On macOS, a `.DS_Store` ignored only through a custom global file makes
+    the working tree read as changed.
+- **Only ten of the repository's own settings apply to the working-tree read.** Inspection and release admission carry the
+  repository's `core.autocrlf`, `core.eol`, `core.ignorecase`, `core.precomposeunicode`, `core.filemode`, `core.symlinks`,
+  `core.checkStat` and `core.trustctime` when their values are plain words, and `core.sparseCheckout` and `core.sparseCheckoutCone`
+  when they are plain booleans, with a copy of `.git/info/sparse-checkout`. No other setting of the repository's configuration
+  applies to that read. In particular:
+  - a repository-level `core.excludesFile` does not apply, so files it alone ignores count as untracked;
+  - a repository-level `core.attributesFile` does not apply (`.gitattributes` files and `.git/info/attributes` still do);
+  - `status.renames` and `diff.renames` do not apply, so a staged rename counts as one change where git with renames turned off
+    counts two (whether the tree is clean is unchanged);
+  - `index.sparse` does not apply: a sparse index is expanded for the read, which is slower and gives the same result.
+- **Partial clones.** No missing object is fetched. A partial clone whose working-tree read needs an object it does not hold is
+  refused as unreadable, where earlier releases fetched the object from the promisor remote.
+- **What a changed working tree affects.** The clean observation decides: `docs pass --before`, which refuses while the guides' clone
+  has modified or untracked files; `check run` and `estate verify`, which add a limitation to their recorded result; release
+  admission, which objects to a registered clone with changes (`release.clone-dirty`); the runtime's search, which pins the commit
+  only when the working tree is clean; and the `clean` value of adoption and observation records. Each of the limitations above can
+  therefore make one of these see a change that `git status` in your own shell does not show.
+- **An unreadable working tree is refused.** When git cannot read the working tree (for example an index it cannot parse, or a
+  directory it cannot open), inspection and adoption refuse with "git could not read the working tree completely" and record nothing;
+  release admission reports that the registered clone cannot be inspected. Earlier releases recorded such a repository as clean. A
+  directory git cannot open is recognized from git's English warning text; with a git that prints translated messages, that one case
+  still reads as clean, its contents not counted.
+- **The ownership message.** The refusal that names ownership appears only for inspection (release admission reports that the
+  clone cannot be inspected; document reads of such a clone are unavailable), and it is recognized from git's English message text;
+  with a git that prints translated messages, the refusal says only that the folder is not inside a git working tree.
+- **Filter drivers do not run while reading the working tree.** Files that git re-reads are compared as stored on disk, so a file kept
+  through a filter (Git LFS, for example) can count as modified when its timestamp changed. A repository whose `.git/info/exclude`,
+  `.git/info/attributes` or `.git/info/sparse-checkout` is a symbolic link, is not a regular file once opened, is larger than 1 MiB,
+  or cannot be read within ten seconds, is not observed.
+- **Submodules are observed by their checked-out commit only.** A submodule checked out at a commit other than the recorded one counts
+  as a modified entry; changes and untracked files inside a submodule's own working tree are not counted, by inspection or by the
+  release admission check of registered clones. (Release admission reads no file inside a submodule.)
+- **Older git.** The overrides travel as `-c` options and work with any supported git. Git older than 2.32 does not read
+  `GIT_CONFIG_GLOBAL`, so your own global configuration still applies there (it is yours, not the repository's). On git older than
+  2.36, `core.fsmonitor=false` names a hook command `false`, which the shell runs harmlessly. The secret scanner's own git processes
+  take the overrides on their command line; only gitleaks' own git receives them through git's configuration environment, which
+  needs git 2.31 or later, as checked pushes already did.
+
 ## Checked changes and operator actions
 
 Checked pushes need an installed Gitleaks scanner, 8.25.0 or later, and complete local
