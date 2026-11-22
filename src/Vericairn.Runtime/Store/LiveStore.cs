@@ -235,6 +235,18 @@ public sealed class LiveStore : IDisposable
         return read;
     }
 
+    /// <summary>
+    /// From 0.9.4 (FIX-145): writes a consistent copy of the whole store, its records and its metadata, to a new file, as an upgrade's restore
+    /// point keeps it. The copy is taken in one read, so a write in flight is in it entirely or not at all.
+    /// </summary>
+    internal void ExportTo(string path) => Guard(() =>
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "VACUUM INTO $path;";
+        command.Parameters.AddWithValue("$path", path);
+        return command.ExecuteNonQuery();
+    });
+
     /// <inheritdoc />
     public void Dispose()
     {

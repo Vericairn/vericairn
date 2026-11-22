@@ -945,6 +945,9 @@ public sealed record UpgradeRequest(string Version, string? By, bool Check)
 
     /// <summary>The invoking command line's full build identity, checked against the runtime before observing a dependency.</summary>
     public string? ClientBuild { get; init; }
+
+    /// <summary>From 0.9.4 (FIX-145): the explicit confirmation of a one-way upgrade, which the previous release cannot read after; refused without it.</summary>
+    public bool OneWay { get; init; }
 }
 
 /// <summary>An upgrade plan, and whether it was applied.</summary>
@@ -975,6 +978,13 @@ public sealed record UpgradeResponse(string FromPin, string ToPin, long FromForm
     /// exactly what an earlier implementation of its generator wrote for the same sources. A member edited by hand is never listed or rewritten.
     /// </summary>
     public IReadOnlyList<string> Regenerated { get; init; } = [];
+
+    /// <summary>
+    /// From 0.9.4 (FIX-145): whether the release the estate was pinned to before can still read it after, and how to return to that release,
+    /// with the restore point an applied upgrade recorded. Absent from older runtimes.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpgradeReturn? Return { get; init; }
 }
 
 /// <summary>A reconcile task.</summary>

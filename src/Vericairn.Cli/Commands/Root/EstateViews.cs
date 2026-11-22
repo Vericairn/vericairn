@@ -71,10 +71,34 @@ internal sealed class EstateViews(CommandContext context)
 
         string text = CommandPresentation.Status(api, status, presentation);
         context.Output.Write(text);
+        // From 0.9.4 (OPS-20): the observers declared on this machine, each with its latest report, labelled as this machine's.
+        if (Observers(api) is { Count: > 0 } observers)
+        {
+            context.Output.Write(text.Length == 0 || text.EndsWith('\n') ? "\n" : "\n\n");
+            context.Output.WriteLine("Observers (this machine):");
+            foreach (ObserverRow row in observers) context.Output.WriteLine("  " + ObserversCommand.Line(row));
+            text = "\n";
+        }
+
         if (serving is null) return;
         context.Output.Write(text.Length == 0 || text.EndsWith('\n') ? "\n" : "\n\n");
         context.Output.WriteLine($"Serving runtime (this machine): {serving.Describe()}.");
         if (serving.Mismatch() is { } line) context.Output.WriteLine("Mismatch: " + line);
+    }
+
+    // A runtime older than 0.9.4 has no observers, and refuses the read; an unreadable declaration shows in the operator's attention, not here.
+    // Status never fails for want of this machine's observers: only cancellation and exhaustion pass.
+    private static IReadOnlyList<ObserverRow>? Observers(IEstateApi api)
+    {
+        try
+        {
+            ObserversResponse? observers = api.Observers();
+            return observers is { Ok: true } ? observers.Observers : null;
+        }
+        catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+        {
+            return null;
+        }
     }
 
     /// <summary>Recorded progress with labelled local claims and worker observations, through the API; exit 1 when the check it shows found errors, as status does.</summary>

@@ -169,6 +169,8 @@ public static class ApiRoutes
         app.MapGet($"{v}/runs", () => Results.Json(service.Runs(), ProtocolJson.Options));
         app.MapPost($"{v}/runs/prepare", (RunStartRequest request) => Results.Json(service.RunPrepare(request), ProtocolJson.Options));
         app.MapPost($"{v}/runs", (RunStartRequest request) => Results.Json(service.RunStart(request), ProtocolJson.Options));
+        // From 0.9.4 (OPS-21): the timed stop drill, run by the runtime's own worker on its machine.
+        app.MapPost($"{v}/runs/drill", (StopDrillRequest request) => Results.Json(service.StopDrill(request), ProtocolJson.Options));
         app.MapPost($"{v}/runs/{{id}}/stop", (string id, RunStopRequest request) => Results.Json(service.RunStop(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/runs/{{id}}/settle", (string id, RunSettleRequest request) => Results.Json(service.RunSettle(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/work/{{key}}/move-plan", (string key, WorkMovePlanRequest request) => Results.Json(service.WorkMovePlan(key, request), ProtocolJson.Options));
@@ -187,6 +189,11 @@ public static class ApiRoutes
         app.MapPost($"{v}/packages/deprecate", (PackagesDeprecateRequest request) => Results.Json(service.PackagesDeprecate(request), ProtocolJson.Options));
         app.MapPost($"{v}/security-reports/poll", async (SecurityReportsPollRequest request, CancellationToken cancellationToken) => Results.Json(await service.SecurityReportsPollAsync(request, cancellationToken).ConfigureAwait(false), ProtocolJson.Options));
         app.MapPost($"{v}/security-reports/triage", (SecurityReportTriageRequest request) => Results.Json(service.SecurityReportsTriage(request), ProtocolJson.Options));
+        // From 0.9.4 (OPS-20): the automated observers declared on the runtime's machine and their reports.
+        app.MapGet($"{v}/observers", () => Results.Json(service.Observers(), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/declare", (ObserverDeclareRequest request) => Results.Json(service.ObserverDeclare(request), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/report", (ObserverReportRequest request) => Results.Json(service.ObserverReport(request), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/withdraw", (ObserverWithdrawRequest request) => Results.Json(service.ObserverWithdraw(request), ProtocolJson.Options));
 
         app.MapPost($"{v}/estate/upgrade", (UpgradeRequest request) =>
         {

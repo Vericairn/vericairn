@@ -142,6 +142,9 @@ public sealed partial class EstateService
         // From 0.9.4 (ID-11): a lapsed agent session holding work, a local observation kept in this runtime's live store.
         foreach (var lapse in LeaseAttention(model, principal))
             Add(lapse.Kind, lapse.Subject, lapse.Why, lapse.State, lapse.Next, lapse.Type, lapse.Id, lapse.Hash, lapse.At, lapse.Target, lapse.Basis);
+        // From 0.9.4 (OPS-20): an automated observer declared on this machine that is silent, failed or not observing.
+        foreach (var observer in ObserverNotices(model, principal))
+            Add(observer.Kind, observer.Subject, observer.Why, observer.State, observer.Next, observer.Type, observer.Id, observer.Hash, observer.At, observer.Target, observer.Basis);
         notices.AddRange(PolicyNotices(progress, principal));
         Dictionary<string, AttentionAcknowledgment> kept = ReadAcknowledgments(principal);
         // Several findings can concern the same kind and subject. Keep every reason in that notice.

@@ -387,12 +387,12 @@ internal sealed class EstateOperations(CommandContext context)
         }
     }
 
-    public int Upgrade(string root, string version, string? by, bool check, bool json, string? from = null, string? buildIdentity = null, string? line = null, string? channel = null)
+    public int Upgrade(string root, string version, string? by, bool check, bool json, string? from = null, string? buildIdentity = null, string? line = null, string? channel = null, bool oneWay = false)
     {
         UpgradeResponse? upgraded = null;
         int code = context.WithApi(root, api =>
         {
-            (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check) { From = from is null ? null : Path.GetFullPath(from), ClientBuild = buildIdentity ?? VersionText(), Line = line, Channel = channel });
+            (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check) { From = from is null ? null : Path.GetFullPath(from), ClientBuild = buildIdentity ?? VersionText(), Line = line, Channel = channel, OneWay = oneWay });
             if (plan is null)
             {
                 if (problem is not null && problem.Findings.Count > 0)
@@ -438,6 +438,21 @@ internal sealed class EstateOperations(CommandContext context)
             }
 
             context.ReportCheckpoint(plan.Checkpoint);
+            // From 0.9.4 (FIX-145): whether the previous release reads the estate after, the restore point and the way back.
+            if (plan.Return is { } back)
+            {
+                context.Output.WriteLine(back.Readability switch
+                {
+                    "readable" => $"previous release: {back.PreviousPin} reads the estate after this upgrade",
+                    "one-way" => $"one-way: {back.PreviousPin} cannot read the estate after this upgrade: {string.Join("; ", back.Reasons)}{(plan.Applied ? string.Empty : "; applying needs --one-way")}",
+                    _ => $"previous release unconfirmed: {string.Join("; ", back.Reasons)}",
+                });
+                if (back.RestorePoint is { } point)
+                    context.Output.WriteLine($"restore point {point.Id}: {(point.Commit is null ? "no repository commit" : "commit " + point.Commit + (point.Clean ? string.Empty : " (with uncommitted changes)"))}; local state {point.Directory} ({point.StateHash})");
+                context.Output.WriteLine(plan.Applied ? $"way back to {back.PreviousPin}:" : "restore point and way back:");
+                for (int step = 0; step < back.Steps.Count; step++)
+                    context.Output.WriteLine($"  {step + 1}. {back.Steps[step]}");
+            }
 
             return Clean;
         }, readOnly: check, upgrade: true);
