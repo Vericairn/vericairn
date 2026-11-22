@@ -418,6 +418,76 @@ adds `members` to a field that has them, each member with `emptyAllowed` and `li
 input (`inputs/record-types.json`) adds the same `members`; the record-reference companion renders an input without them as
 before.
 
+## A checked push refuses the estate's blocked terms in the pushed commits' messages (CODE-81)
+
+- **Vericairn.Runtime**: a new public record `PushedCommit(string Commit, string Message)`; `IPushAdapter.CommitMessages(string
+  directory, PushPlan plan)`, the commits a push carries that its target branch does not hold, with a default that reads nothing
+  and returns null, so an adapter built against 0.9.3 keeps working and its pushes are refused only while the estate declares a
+  blocked term or a required trailer; `PullRequestObservation.Title` and `PullRequestObservation.Body`, init-only properties beside
+  the unchanged positional parameters; `IPullRequestProvider.Merge(string destination, string number, string head, string
+  message)`, whose default merges as the three-argument `Merge`; on `MemoryPullRequestProvider`, that overload and `MergeMessage`;
+  `IRecordCommitAdapter.Commit` with a seventh parameter, the trailer lines, whose default refuses a non-empty list and otherwise
+  commits as before.
+- **Vericairn.Providers.GitHub** and **Vericairn.Adapters.Git** (neither is a package): `GitHubPullRequestProvider` reports the
+  pull request's title and description and implements the four-argument `Merge`, which passes `commit_title` and
+  `commit_message`; `GitPushAdapter.CommitMessages` and the seven-argument `GitRecordCommitAdapter.Commit`.
+- **Vericairn.Records**: no public member is added or changed.
+- **Policy kinds**: `vericairn.estate/commit-messages`, version 1, selections `estate`, appears in the policy kinds listing.
+- **Record format 3**: unchanged. The new rule kind lives in an existing estate policy's `rules`; a reader before 0.9.4 keeps it
+  intact and reports it unavailable. A push or merge records its message check as one more `evidence` entry of its operation.
+
+## A disclosure hold ends where the release procedure says it does (FIX-137)
+
+- **Vericairn.Runtime**: `IPushAdapter.FileText(string directory, PushPlan plan, string commit, string path)` and
+  `IPushAdapter.ChangedPaths(string directory, PushPlan plan)` are new members of the push adapter contract, with defaults that
+  read nothing and return null, so an adapter built against 0.9.3 keeps working and never lets a held work order's text pass with
+  a documentation set (FIX-137). The shipped git adapter implements both: files only at the plan's head or target head, by a
+  normalized repository-relative path, without the clone's filters; each carried commit's paths exactly as git names them,
+  without renames, external diffs or text conversion, a merge commit naming only paths that differ from every parent.
+- **Vericairn.Records**: no public member is added or changed; `DisclosureHolds.Active` and `Disclosed` read as before.
+- **Record format 3**: unchanged. The approval is read from existing asks and decisions; no field or type is added.
+
+## A checked push covers every commit its target does not hold (FIX-154)
+
+No route, interface member of `IEstateApi` or protocol type is added. `POST /v1/changes/push` (`changes push`) keeps
+`ChangesPushRequest` and `ChangeResponse`. Its scan, commit-message check and disclosure hold now read every commit the push carries
+that the target does not hold: from the head of the newest complete recorded push of the same repository and branch that the remote
+branch still holds, otherwise from the merge base of the new head with the target's observed head; before, an existing branch's scan
+began at the remote branch's head. A push to the declared target branch is refused before anything is recorded, its `problem.code`
+`change.target-push`; before, it could fast-forward the target. `POST /v1/changes/merge` (`changes merge`) now takes only a complete
+push of the exact head, and refuses a head whose only recorded push was not complete. A head pushed again after such a push is
+recorded under its own operation identity, the earlier identity followed by `:after:` and the earlier push's record id
+([changes](changes.md#coverage-094)).
+
+No record type is added. A `change-push` operation adds, from its dispatch on, the target fact `basis`: `merge-base`, or the
+record id of the observed `change-push` of the same repository, destination, branch and target that it continued, whose head is
+its `base`. Validation refuses a basis on another action, any other value, and a continued push of another repository,
+destination, branch or target, or whose head is not the revision's `base` where it records one, with `operation.change-basis` at
+severity `error`. A recorded `basis` is never changed or dropped: a push refused before its dispatch records none, so its retry
+records the basis it finds, while a retry of a push refused after its dispatch keeps the basis it recorded and is refused,
+pushing nothing, where the remote branch no longer holds the push it continued. So a reader before 0.9.4, whose rule lets a retry
+change only `base`, `remoteHead` and `targetHead`, keeps `basis` as one more string target fact and ignores it, on every push and
+retry; its merge gate still takes any observed push. Only a push scanned against the declaration's current target counts; after
+the operator moves the declaration, earlier pushes of a branch count for nothing. Pushes recorded before 0.9.4 keep their reading:
+the runtime derives whether each is complete from its `remoteHead` and `base`. Record format remains 3.
+
+`Vericairn.Runtime` adds to `IPushAdapter`, each with a default implementation: `Prepare(directory, remote, branch, target, head,
+recorded)` and `Push(directory, remote, plan, scan, recorded)`, where `recorded` holds the heads of the branch's complete recorded
+pushes, newest first, at most sixteen. The runtime calls only these. Their defaults refuse with `ProviderRefusedException`, so an
+adapter written before 0.9.4 takes no checked push rather than choosing a base of its own; the existing `Prepare` and `Push` stay,
+unchanged in signature. `Vericairn.Adapters.Git`'s `GitPushAdapter` implements both overloads; its existing `Prepare` and `Push`
+now scan from the merge base with the target whatever the remote branch holds, and every form refuses a branch that is its target.
+`PushPlan` and `SecretScan` are unchanged.
+
+## No record counts because its refuser is unread (FIX-159)
+
+No route, request, response shape, protocol type, record field, record type or public member changes. Behaviors: the estate check
+reports two new findings, `record.duplicate-refused` (warning) and `record.duplicate-unsettled` (error), only while records are unread;
+`GoalDue` (and `GET /v1/goals/{id}/due`) returns the problem form instead of null (404) for a goal whose own line is unread;
+`StandingAgents.RunRefusals` adds an `operation.standing` refusal for the hold while records are unread; release submission, run start
+and preparation, a standing goal step, record writes, checkpoint writes, record preparation for a device and pairing-code issuance
+return a `refused` problem naming the errors as described above. `EstateStatus.ReconcileCodes` is unchanged.
+
 ## The embedded runtime
 
 No route, interface member, protocol type or record changes. 0.9.4 is still built with SDK 10.0.404 (`global.json`), and the

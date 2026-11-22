@@ -214,6 +214,8 @@ nuget.org availability or account-holder qualification claim.
   about the carrier still waits, open or notified; it proves no approval. It cannot tell whether a release needs a section,
   what the deciding decision says, or whether an ask was withdrawn instead of answered, and a set frozen with none asked, or
   after one was withdrawn, passes it.
+- From 0.9.4 (FIX-137), a checked push lets the carrying release's documentation set carry a held work order's text once the ask about the carrier that begins "Approve the Security section of <version>" is answered by the operator's decision recording "The Security section of <version> is approved for <key>." and naming that work order among those it affects, after its current revision, with none still waiting. It reads those forms, not the section: nothing binds the decision to the section's bytes, which `insert --expected-hash` checks when the set is prepared, and the forms are as strong as the practice of recording the operator's answers, since a decision an agent records naming the operator as its decider counts. It knows the set by its layout and its commits: a `vericairn.docs/1` manifest at `docs/releases/<version>/manifest.json` that the push's head holds and its target branch does not, and every commit the target does not hold either beginning its subject with a held key of that release and a colon, or changing only Markdown, JSON and plain-text files under `docs/`, `README.md`, `llms.txt`, and `Directory.Build.props` in its `<VersionPrefix>` line alone, compared with the target branch's file. A held fix's commit is trusted by its subject: it may change any path. A product that keeps its sets elsewhere, a set whose pull request changes other paths or other build settings, and a `Directory.Build.props` that differs from the target's in other lines because the target moved on are refused until publication, or until the branch takes in the target. A push adapter that does not implement `FileText`, `CommitMessages` and `ChangedPaths` never lets a set pass; a commit whose paths exceed the adapter's 4 MiB of output cannot pass as the set, and the refusal says the paths could not be read.
+- From 0.9.4 (FIX-137, decision 01M7PNCMA3V2ZQG2ZK9V7NBEJK), the disclosure hold reads every message and every commit's own added lines, as text whatever the clone's attributes and big-file threshold, in UTF-8 whatever the clone's output encoding, and a merge's lines added against every parent, or the push is refused. A line holding NUL characters is read again with them removed, so UTF-16 and UTF-32 text is matched by its letters, but text in other encodings, compressed or encoded files and images is not read as text; and binary data whose bytes, NULs removed, happen to spell a held key would refuse the push. The patches are read by git's plumbing, which the clone's log and diff display settings do not change, and a commit whose tree changed must show a file. A file larger than 512 MiB, patches beyond the hold's own bound of 64 MiB together, or messages beyond the adapter's 4 MiB of output are unreadable, so a push carrying them is refused while a hold is in force. A submodule's own content is not read: its pointer is. Before 0.9.4 text one commit added and a later one removed, the added lines of a file git called binary, an added line whose text began with `++`, text in a UTF-16 or UTF-32 file, and every message under a clone that set `i18n.logOutputEncoding` to UTF-16 were not read, so held text in them passed. From 0.9.4 `operator record`'s check of a resumed commit also reads its real parents, whatever grafts the clone holds.
 - A corrective version after a withdrawal is a revision of the run's goal naming the new version; the run then derives afresh
   from `docs-before-freeze`. The release flow's `gate` step does not itself look for the history checkpoint with trigger
   `release` that `release submit` writes before its own admission check in an estate that adopted checkpoints; the submission
@@ -276,6 +278,19 @@ on the roster for that role included, can never again record your decision or a 
 and where the principal that records an agent's runs is itself tied to it, as an agent that steps its own standing goal under
 `local-engineering` is, none of its runs ever succeeds, so only your answer ends its failures, and a stop you ask of its runs, which
 that principal records, counts as the agent's failure.
+
+Two record files carrying one identifier leave their line unread, and so do two new files with one identifier that supersede a record.
+No record counts that a reading of the unread records would refuse (judged with them left out and read each way they can be, up to 16
+readings, past which no record counts); a standing agent's readings also count what they cannot read against the agent (its failures,
+open outputs and ties, every record that does not count while one is unread, and the hold of every standing agent); elsewhere, outside
+counting, the line reads as absent, as if its files had been removed, so a goal status or a review in it restricts nothing in the
+readings and a flow goal's ledger of runs does not count a run in it, and nothing acts on those readings, since every acting surface
+refuses while the copy stands. The estate reports every copy as an error and refuses every write until all but one is removed. The estate view and
+Workbench label every held standing agent "held by its failures"; the agent's reason, which `goal due` shows, names the record that
+is not read when that is what holds it.
+
+Judging the readings of unread records reads the estate's trust once for each reading, so an estate with several copies loads more
+slowly until they are removed; an estate with none loads as before.
 
 A run the runtime saw succeed counts as a success only when its settlement names the result its agent recorded during it, as the
 worker records it at the run's exit; a run settled from the worker's retained observation after a restart, or by hand, names none
@@ -813,6 +828,11 @@ From 0.9.4 (DOCS-46) the record reference spells out the members of an assignmen
 such as an assignment's `step` and `occurrence`, are still described in prose. No command validates a proposed record without
 writing it.
 
+From 0.9.4 the policy kinds listing includes `vericairn.estate/commit-messages`, version 1, which configures the commit-message
+check of checked pushes and merges and selects no records. A build before 0.9.4 keeps such a rule intact, reports it unavailable
+when it evaluates the estate's policies, and checks no commit message; declare it at level `remind` while such a build still
+evaluates the estate's policies for a release submission.
+
 ## Policy implementation identity: correction for 0.8.2
 
 Since FIX-31, policy kind implementation digests identify a compilation through
@@ -922,7 +942,22 @@ history of the exact range. Aggregate scan success is no claim about every possi
 unobserved future commit. From 0.8.2 the scan applies gitleaks' rules without their built-in
 allowlists, so it can report a finding that gitleaks' defaults pass. A finding refuses the push,
 and with it the merge; there is no per-estate allowance, so a change refused for a value that is
-not a secret is pushed and merged outside the checked flow. Merges require exact declared check names and every reported
+not a secret is pushed and merged outside the checked flow.
+From 0.9.4 (FIX-150), the scan passes a history checkpoint's inventory, whose random record ids can spell a key word just
+before a hash, through one allowance of Vericairn's own: a line of exactly an inventory line's shape, in a file named by 64
+lower-case hexadecimal digits directly in the repository's `objects/` folder, applied only when every such file the pushed
+commits add or change holds nothing but such lines. A range in which one of them mixes inventory lines with any other line is
+scanned without the allowance. The allowance trusts the shape, not the checkpoint's signature: any value in an inventory
+line's hash position passes, as a 64-digit hexadecimal secret written there would. That is the only position that passes a
+value: the line's other positions take only a record type the estate format defines, a month, a record id and `.json`, so a
+credential in any of them is found, and a line naming a record type the running release does not define is scanned as
+before. Every other line and path is scanned as before, and there is still no per-estate allowance. Also from 0.9.4, a scan
+whose read of the pushed history fails or stops early, at a missing, corrupt or truncated object, is incomplete and refuses
+the push; before 0.9.4 gitleaks reported no finding for the part it could not read, and the scan passed. The scan reads each
+merge as its patch against its first parent whatever the clone's `log.diffMerges` setting, and its git processes drop the
+routing variables the push's own processes drop, such as `GIT_DIR` and `GIT_SHALLOW_FILE`, so neither a clone setting nor the
+pushing process's environment can show the scan less of the history than the push carries; before 0.9.4 either could
+([changes](changes.md#push-and-open)). Merges require exact declared check names and every reported
 check successful at the expected head; forks are unsupported. From 0.9.3 a required merge
 queue is entered with the pinned head, and its outcome is read from the pull request and
 its place in the queue. A change out of the queue with no removal the host dates after
@@ -934,6 +969,33 @@ that group among the queue's latest twenty pushes; otherwise its target checks s
 A confirmed merge with pending or failed target checks remains incomplete. Git and gh
 use the runtime user's existing configuration and login. No permission, credential
 or publication authority is inferred from a check result.
+
+From 0.9.4 (CODE-81), a checked push matches the message of every commit it carries that its target branch does not already
+hold against the estate's blocked terms, and a checked merge the message of the merge commit it would create, at the level an
+estate policy sets, `refuse` unless one sets `warn`; and every such pushed commit must carry each trailer line the estate requires.
+A commit the target branch held when the push was prepared is not checked again, so a term or a missing trailer already on the
+target, such as in the merge commits a checked merge creates, never refuses a branch that takes in the target. The check matches
+a term whole, as records do, so a term split by other characters or spelled with substituted letters passes it. It reads commit
+messages only: a term in a file's content or a tag is not refused by it, and a branch whose name holds a term is refused only
+because the operation recording the push would hold it. A merge through a required merge queue cannot set its merge commit's
+message: the check reads the message the queue composes with the pull request's title and description as observed when the
+merge observes the pull request, so a title or description edited after that observation, before the queue builds its merge
+commit, is not seen; and a provider that does not implement the merge with a message (`IPullRequestProvider.Merge` with four
+arguments) merges with the host's own message. The required trailer is not required of the merge commit the host creates. While a
+term or a trailer is declared, a push whose messages the adapter cannot read is refused, as is a range whose messages exceed the
+adapter's 4 MiB of output. Pushes made with git directly, outside `vericairn changes`, are not checked; a guard for them in
+registered clones is designed separately and planned.
+
+From 0.9.4 (CODE-81, decision 01M7PNCMA3V2ZQG2ZK9V7NBEJK), the push adapter's git processes and the secret scan's, gitleaks' own
+git included, read grafts from a file that never exists, and the scan's also ignore replace objects, the commit-graph, bitmaps and
+the multi-pack-index, as the adapter's already did. Before 0.9.4 a graft in the clone could make the fast-forward check accept a
+remote head that was not an ancestor, so the leased push overwrote the remote branch, and could hide a commit of the range from the
+scan, the message check and the disclosure hold while the push delivered it; a clone used with `changes push` before 0.9.4 can be
+checked for an `info/grafts` file, and each pushed branch compared with the head Vericairn recorded.
+
+The coverage of a checked push rests on the records and the remote's own refs. A commit that reaches a branch outside checked
+changes is scanned by the next checked push that carries it or builds on it, not when it arrives; until then it is on the remote
+unscanned. The guard that refuses such a plain push in each clone is `CODE-98`'s, in 0.9.5.
 
 `operator record` requires repository-synced format 3, the operator's own admitted
 device and a matching changes declaration. It commits exactly the signed record

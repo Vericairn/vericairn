@@ -1395,6 +1395,32 @@ vericairn estate reconcile
 
 An export carries records, objects, manifest and documents with an inventory, and no keys or authority; a restore verifies the inventory and produces a repository-synced estate without importing a private key. A device already admitted in those records can sign when its key is held locally; otherwise signed authoring requires a new device and admission. Optional-signature policy may still permit unsigned records. `recover inspect` says what this copy holds, which devices can author from here, work in progress and unresolved effects; `recover compare` lists records only in this copy, only in the other, or (never expected) differing. Two copies that both added records merge in git as file additions; what cannot merge by itself, divergent revisions of one record, duplicate keys, duplicate results, is listed by `estate reconcile` and settled with a reconciliation record.
 
+From 0.9.4, when two record files carry one identifier, the estate reads neither of them, whatever their dates, paths or contents,
+and none of the records of their line: every record joined to either through `supersedes`. The runtime refuses such a record when
+it is written, so two copies only meet when one was written by hand or a file was copied and the original left behind. Before 0.9.4
+the first of them in path order was read, so a copy dated in an earlier month was read in place of the record it copied. The estate
+check reports each copy (`record.duplicate-id`, an error that `estate reconcile` and `status` list) and notes each other record of
+the line (`record.duplicate-line`), every write is refused while they stand, and a standing agent that one of them names is held
+(section 18). Compare the copies' files, and their history in git, and remove the one you did not write: once a single record
+carries the identifier, the line reads again. Two new files sharing a fresh identifier that supersede a record take its line out in
+the same way. A record that is not read never makes another count: while records are not read, a record counts only when it counts with them left
+out and with them read each way they can be (each record carrying the identifier, or none of them), so an unsigned record in your
+name stays refused when a copy leaves the charter's signature requirement unread, and what a closed device signed stays refused when a
+copy leaves its closing unread. The estate check reports the records refused this way once (`record.duplicate-refused`); when the
+copies can be read more than 16 ways, no record counts at all (`record.duplicate-unsettled`). A device, admission, principal or grant
+that is not read leaves the records resting on it counting for nothing, so a copy of a device's identifier leaves everything that
+device signed uncounted, and a copy of the charter's leaves nothing signed counting. While a copy stands nothing acts: `release
+submit`, every command that signs a record, a checkpoint or a pairing code, `worker run` and `goal step` refuse before they act,
+naming the copy, and so do the MCP tools and API routes that reach them. Outside counting, a record that is not read restricts nothing
+in the readings, a goal status or a review among them, as if its file had been removed. Remove the copy before relying on any reading
+of the estate.
+
+From 0.9.4, `release submit`, `worker run` and a standing agent's `goal step` also refuse while the estate reports any other error,
+naming it, before any presence prompt, checkpoint, workspace, record or provider call; `release submit` lists the submission check's
+objections beside it. A record you write while the estate reports an error is judged as before, with the estate as it would be with
+the record, and stored only when it clears every error, so a reconciliation or an acknowledgement still repairs the estate. Stopping a
+run is never refused.
+
 FIX-14 (F-01) binds each restored file to the export inventory. Verification refuses duplicate inventory
 paths or archive members (including metadata), unsafe relative paths and file/directory or normalized-name
 collisions before creating destination material. Case aliases are refused on every platform; macOS also
@@ -2664,12 +2690,27 @@ pause's ask ends them, recorded by you or for you by a principal not tied to the
 which you or your reviewer judge: it never makes a run succeed by itself, and one recorded after its run settled never does, so
 after three failed runs the agent's own attempt and completed result, through `work result`, `records new` or written by hand,
 leave the agent held at three failures. The result still waits for review and counts toward the awaiting-review cap. Each run is
-read from all of its records, on every branch, whatever a divergent record or a reconciliation makes current. Where you, the
-runtime or another principal not tied to the agent settled or canceled the run, nothing an agent tied to the standing agent records
-about the run counts: its revisions and divergent records take back no failure and turn no success into a failure. Only a run that
+read from all of its records, on every branch, whatever a divergent record or a reconciliation makes current. Where you, the runtime
+or another principal not tied to the agent settled or canceled the run, nothing an agent tied to the standing
+agent records about the run counts: its revisions and divergent records take back no failure and turn no success into a failure. The
+latest records those principals wrote decide the run, each one that no other record of theirs follows on its own chain of revisions,
+however many records the agent put between them. As the runtime and `records new` write every revision on the run's latest, that is
+usually one record, the latest of theirs, so your own correction written on the settlement it corrects counts as you wrote it; where
+records of theirs on different branches read differently, the reading least favorable to the agent decides, a failure over nothing
+and nothing over a success, and no record's place in the run's history or its date ranks one above another. Only a run that
 no such principal settled or canceled, as the runs of an agent that steps its own standing goal under
 `local-engineering`, counts the agent's own known-failure settlement as its failure; such a run never succeeds, and a stop of it
 that agent records counts as its failure whoever it names.
+
+A record carrying another's identifier never lowers the agent's failures or frees its outputs, whatever its date or path (section 10):
+a run of the agent that cannot be read counts as failed, a run such a record names counts as its own records decide it or as failed,
+an output that cannot be read stays open and nobody adopts it, and an answer that cannot be read answers nothing. Because a record
+that is not read can be the device, admission, principal or grant other records rest on, while any record is not read a record that
+does not count is read against the agent and never for it: its blocked results and runs still count as failures and its outputs stay
+open. While any record is not read, `goal due` shows every standing agent held, naming that record, `goal step` refuses before it records
+or dispatches anything, and a run's intent is refused for the hold whatever its failures read, until you remove the copy. When the
+goal's own record is not read, `goal due` says its state, failures and open outputs are not established instead of reporting no such
+goal.
 
 `goal pause --standing --by <you>` pauses every active standing agent you may pause; `--stop-runs`, there or on one goal, also asks
 their runs in flight to stop. On resume, missed ticks coalesce and duty occurrences stay owed. `goal stop` on a standing agent
@@ -2793,7 +2834,16 @@ cannot be made: `docs-set` waits on it and takes the check as its input, so a ne
 before the carrier's work closed, as 0.8.3's were, and an ask about the carrier, such as one approving a security section, that
 still waits, open or notified, hold the set. A withdrawn ask no longer holds it. The flow cannot prove an approval: whether a
 release needs a security section, what the deciding decision says and why an ask was withdrawn, the records do not tell, so the
-release manager asks whenever a fix is under a disclosure hold. A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
+release manager asks whenever a fix is under a disclosure hold. From 0.9.4 (FIX-137), the set can carry a held fix's guide text through a checked push only once you approve the Security
+section for that fix in the forms the push reads. The release manager asks you about the carrier with a question that begins
+exactly "Approve the Security section of <version>", the version ending there, such as "Approve the Security section of 9.9.9 as drafted, covering
+FIX-90?". Your decision answering it records, among its effects, exactly "The Security section of <version> is approved for
+<key>." for each held work order it covers, and names those work orders among the work orders it affects; it is made after each
+work order's current revision, with no ask about the carrier still waiting. If you decline the section, the decision records no
+such effect, and the release manager asks again with the revised section; ask again too if a held work order is revised after
+your answer. The set's push must carry nothing but documentation, a version change in `Directory.Build.props`, and the release's
+held fixes, whose commit subjects begin with their key and a colon; every other push that would add the held text stays refused
+until the release is published ([changes](changes.md#disclosure-holds-090)). A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
 withdrawn candidate's draft left at the provider stops `gate`, as do the objections `release submit --check` names, such as a
 client of another build than the serving runtime (0.8.4's stale daemon) or a clone without a default head (0.8.3). An uncertain
 submission stops `submit` until a reconciliation reads the release record. The publication command is computed only once the
@@ -3309,10 +3359,19 @@ many trail records wait
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
 The push scans the exact complete commit range using installed Gitleaks 8.25.0 or
 later and Vericairn's own rules, which keep none of gitleaks' built-in allowlists;
-missing history, scanner or a complete report refuses it. Merges require a recorded
+missing history, scanner or a complete report refuses it.
+From 0.9.4 (FIX-150), a history checkpoint's inventory no longer refuses the push when a record id it lists spells a key word:
+the scan allows exactly an inventory line in the estate's `objects/` files that hold nothing else, passing only the value in
+its hash position, and scans every other byte as before ([changes](changes.md#push-and-open)). Before 0.9.4 such a
+checkpoint push needed your word to push it unchecked after the finding was read. A push whose history the scan cannot read
+completely, such as one carrying a corrupt object, is refused with an incomplete scan: repair or replace the clone and push
+again; do not push it unchecked. Merges require a recorded
 scanned push of the pinned head, and every declared check and every reported check
 to pass at that head; missing, skipped,
-pending or stale checks refuse. The provider performs a synchronous merge with
+pending or stale checks refuse.
+From 0.9.4 a push covers every commit its target does not hold, from the branch's last complete recorded push that the remote
+branch still holds or else the merge base, a push to the declared target branch is refused (`change.target-push`), and a merge
+requires a complete recorded push of the pinned head ([coverage](changes.md#coverage-094)). The provider performs a synchronous merge with
 an atomic head condition, then observes target checks at that merge commit.
 Pending or failed target checks remain incomplete even after a confirmed merge.
 Fork pull requests are unsupported. From 0.9.3, where the target branch requires
@@ -3327,6 +3386,13 @@ uncertain effect. [Checked changes](changes.md) gives the complete reconciliatio
 rules; passing checks supply neither acceptance nor publication authority.
 From 0.9.4 each of these commands, run on its own, lists its operation's records by kind under one presence check where sessions are on,
 renewing before the effect when fewer than three minutes of the session remain and the session's limit is at least three minutes.
+
+From 0.9.4 (CODE-81), declare the names of the models your agents run on as [blocked terms](policies.md#blocked-terms-090), and
+a checked push refuses a commit whose message names one, trailers included, before anything is pushed; a checked merge refuses
+a pull request whose title would put one in the merge commit, or, through a merge queue, whose description would. To require an exact trailer line on every pushed commit, such as
+the attribution line your agents are told to end their commits with, add a `vericairn.estate/commit-messages` rule with
+`trailer` ([commit messages](policies.md#commit-messages-094)); a commit whose harness replaced or altered that line is refused.
+Set `blockedTerms` to `warn` in the same kind of rule only to let such commits through with a warning while you clean up.
 
 ## 29. Cancelling client observation
 
