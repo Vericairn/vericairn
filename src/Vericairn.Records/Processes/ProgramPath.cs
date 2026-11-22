@@ -27,6 +27,9 @@ internal static class ProgramPath
     // Extensions a name is taken to carry already, whatever PATHEXT lists.
     private static readonly string[] Named = [".COM", ".EXE", ".BAT", ".CMD"];
 
+    private static readonly char[] WindowsSeparators = ['/', '\\'];
+    private static readonly char[] UnixSeparators = ['/'];
+
     /// <summary>The absolute path <paramref name="program"/> starts as on this machine, by this process's PATH (and PATHEXT on Windows).</summary>
     /// <exception cref="ProgramNotFoundException">The name is empty, a relative path, or held by no absolute directory of PATH.</exception>
     internal static string Resolve(string program) => Resolve(program, Environment.GetEnvironmentVariable("PATH"));
@@ -60,6 +63,56 @@ internal static class ProgramPath
         NarrowSearchPath(info);
         return Process.Start(info);
     }
+
+    /// <summary>
+    /// <paramref name="program"/> read against <paramref name="directory"/>: a relative path with a directory part, such as
+    /// ./scripts/setup.sh or scripts\setup.cmd, becomes the absolute path it names there; a bare name and an absolute path are returned as
+    /// given, for <see cref="Resolve(string)"/> to look up or use. So is a Windows path rooted only on the current drive (\tools\x.exe) or
+    /// relative to a drive's current directory (C:x.exe), which names no one file and is refused there.
+    /// </summary>
+    internal static string InDirectory(string program, string directory)
+    {
+        ArgumentNullException.ThrowIfNull(directory);
+        bool windows = OperatingSystem.IsWindows();
+        string name = windows ? Unquote(program ?? string.Empty) : program ?? string.Empty;
+        return RelativeWithDirectory(name, windows) ? Path.GetFullPath(Path.Combine(directory, name)) : program ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Why <paramref name="program"/> can never be started however it is read, or null when it can: it names nothing, names a directory, or
+    /// on Windows is rooted only on the current drive or relative to a drive's current directory.
+    /// </summary>
+    internal static string? NeverStarts(string program) => NeverStarts(program, OperatingSystem.IsWindows());
+
+    /// <summary><see cref="NeverStarts(string)"/> for a platform (<paramref name="windows"/>).</summary>
+    internal static string? NeverStarts(string program, bool windows)
+    {
+        string name = windows ? Unquote(program ?? string.Empty) : program ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "it names no program.";
+        }
+
+        static bool Separator(char c, bool windows) => c == '/' || (windows && c == '\\');
+        string last = name.Split(windows ? WindowsSeparators : UnixSeparators)[^1];
+        if (Separator(name[^1], windows) || last is "." or "..")
+        {
+            return "it names a directory, never a program.";
+        }
+
+        if (windows && !FullyQualified(name, windows) && (Separator(name[0], windows) || name.Contains(':', StringComparison.Ordinal)))
+        {
+            return "it is rooted only on the current drive or relative to a drive's current directory, so it names no one file; give an absolute path, a path relative to the workspace, or a bare name found in an absolute directory of PATH.";
+        }
+
+        return null;
+    }
+
+    // A relative path with a directory part: not absolute, holding a separator, and on Windows neither rooted on the current drive nor
+    // naming a drive.
+    internal static bool RelativeWithDirectory(string name, bool windows) =>
+        !string.IsNullOrEmpty(name) && !FullyQualified(name, windows)
+        && (windows ? name.IndexOfAny(['/', '\\']) > 0 && !name.Contains(':', StringComparison.Ordinal) : name.Contains('/', StringComparison.Ordinal));
 
     /// <summary>
     /// The search path a started program receives. When <paramref name="info"/>'s environment holds this process's own PATH, as it does

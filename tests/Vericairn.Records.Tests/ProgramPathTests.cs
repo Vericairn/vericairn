@@ -258,6 +258,55 @@ public sealed class ProgramPathTests
         Assert.Equal(given, info.Environment["PATH"]);
     }
 
+    [Theory]
+    [InlineData(false, "./scripts/setup.sh", true)]
+    [InlineData(false, "scripts/setup.sh", true)]
+    [InlineData(false, "../setup.sh", true)]
+    [InlineData(false, "setup.sh", false)]
+    [InlineData(false, "/opt/tools/setup.sh", false)]
+    [InlineData(true, @"scripts\setup.cmd", true)]
+    [InlineData(true, @".\setup.cmd", true)]
+    [InlineData(true, "scripts/setup.cmd", true)]
+    [InlineData(true, "setup.cmd", false)]
+    [InlineData(true, @"C:\tools\setup.cmd", false)]
+    [InlineData(true, @"\\server\share\setup.cmd", false)]
+    [InlineData(true, @"\tools\setup.cmd", false)]
+    [InlineData(true, "C:setup.cmd", false)]
+    public void OnlyARelativePathWithADirectoryPartIsReadAgainstADirectory(bool windows, string program, bool relative) =>
+        Assert.Equal(relative, ProgramPath.RelativeWithDirectory(program, windows));
+
+    [Fact]
+    public void OnThisMachineARelativePathWithADirectoryPartBecomesTheAbsolutePathItNamesInTheDirectory()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "workspace");
+        Assert.Equal(Path.Combine(directory, "scripts", "setup.sh"), ProgramPath.InDirectory(Path.Combine(".", "scripts", "setup.sh"), directory));
+        Assert.Equal(Path.Combine(Path.GetTempPath(), "setup.sh"), ProgramPath.InDirectory(Path.Combine("..", "setup.sh"), directory));
+        Assert.Equal("make", ProgramPath.InDirectory("make", directory));
+        string absolute = Path.Combine(Path.GetTempPath(), "tools", "setup");
+        Assert.Equal(absolute, ProgramPath.InDirectory(absolute, directory));
+    }
+
+    [Theory]
+    [InlineData(false, "", "it names no program")]
+    [InlineData(false, "scripts/", "it names a directory")]
+    [InlineData(false, ".", "it names a directory")]
+    [InlineData(false, "scripts/..", "it names a directory")]
+    [InlineData(true, @"scripts\", "it names a directory")]
+    [InlineData(true, @"\tools\setup.cmd", "rooted only on the current drive")]
+    [InlineData(true, "C:setup.cmd", "rooted only on the current drive")]
+    public void AnExecutableNoReadingCanStartSaysWhy(bool windows, string program, string why) =>
+        Assert.Contains(why, ProgramPath.NeverStarts(program, windows) ?? string.Empty, StringComparison.Ordinal);
+
+    [Theory]
+    [InlineData(false, "make")]
+    [InlineData(false, "./scripts/setup.sh")]
+    [InlineData(false, "/opt/tools/setup")]
+    [InlineData(true, "npm")]
+    [InlineData(true, @"scripts\setup.cmd")]
+    [InlineData(true, @"C:\tools\setup.exe")]
+    [InlineData(true, @"\\server\share\setup.exe")]
+    public void AnExecutableSomeReadingCanStartIsNotRefused(bool windows, string program) => Assert.Null(ProgramPath.NeverStarts(program, windows));
+
     // A program file of this platform: an executable script on Linux and macOS, a file with the .exe extension on Windows.
     private static string Program(string directory, string name)
     {

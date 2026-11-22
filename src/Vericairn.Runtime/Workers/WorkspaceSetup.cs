@@ -4,6 +4,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using Vericairn.Records.Processes;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Workers;
@@ -33,7 +34,9 @@ internal static class WorkspaceSetup
     internal static WorkspaceSetupResult Run(WorkspaceSetupConfiguration configuration, string workspace, IReadOnlyDictionary<string, string> environment)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        var info = new ProcessStartInfo(configuration.Command[0])
+        // From 0.9.4 (FIX-161) a relative executable with a directory part (./scripts/setup.sh) is the workspace's file, by its absolute
+        // path; a bare name is found in an absolute directory of PATH, as every program is.
+        var info = new ProcessStartInfo(ProgramPath.InDirectory(configuration.Command[0], workspace))
         {
             WorkingDirectory = workspace, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
         };

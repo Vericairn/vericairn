@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Vericairn.Records.Identity;
+using Vericairn.Records.Processes;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Workers;
@@ -159,6 +160,9 @@ public sealed partial class WorkerConfigurationStore
             || string.IsNullOrWhiteSpace(configuration.Command[0]) || configuration.Command.Sum(a => (long)a.Length) > 32768
             || configuration.TimeoutSeconds is < 1 or > WorkspaceSetupConfiguration.MaximumTimeoutSeconds)
             throw new ProviderRefusedException($"A setup command is an executable and at most 127 arguments, 32768 characters in all and none holding a NUL character, with a deadline from 1 through {WorkspaceSetupConfiguration.MaximumTimeoutSeconds} seconds.");
+        // From 0.9.4 (FIX-161) an executable no reading can start is refused here, not at every run.
+        if (ProgramPath.NeverStarts(configuration.Command[0]) is string never)
+            throw new ProviderRefusedException($"The setup command's executable {configuration.Command[0]} can never be started: {never} A relative path with a directory part is read against the workspace, and a bare name is found in an absolute directory of PATH.");
         if (configuration.Variables is { } variables && (variables.Count > WorkspaceSetupConfiguration.MaximumVariables
             || variables.Any(v => v is null || !WorkerEnvironment.IsVariableName(v) || v.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase))
             || variables.Distinct(WorkerEnvironment.Names).Count() != variables.Count))
