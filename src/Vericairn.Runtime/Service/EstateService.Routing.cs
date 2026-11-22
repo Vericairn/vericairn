@@ -394,6 +394,13 @@ public sealed partial class EstateService
     {
         NextEligible.Route route = step.Route;
         string key = step.Key;
+        // From 0.9.4 (FIX-159): giving a step to a live session dispatches it, so while the estate reports an error nothing is recorded,
+        // and no session is given the step to hold, as a run is neither admitted nor launched.
+        if (ActingRefusal.BeforeActing(model, $"giving {key} to {PrincipalName(model, route.Principal)}'s live session {live}") is Problem invalid)
+        {
+            return new GoalStepResponse(goal.Id, "none", invalid.Message, false, key, route.State, route.Principal, Problem: invalid);
+        }
+
         if (route.Assignment is RecordEnvelope holding)
         {
             // The step stays with the assignment that holds it, which the session now holds too.

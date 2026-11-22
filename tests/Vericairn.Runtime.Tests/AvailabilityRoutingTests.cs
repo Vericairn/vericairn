@@ -150,6 +150,43 @@ public sealed class AvailabilityRoutingTests
     }
 
     [Fact]
+    public void NoStepIsGivenToALiveSessionWhileTheEstateReportsAnError()
+    {
+        // From 0.9.4 (FIX-159 with GOAL-11): giving a step to a live session dispatches it, so while the estate reports an error goal step
+        // records nothing and gives the session nothing to hold, naming the finding; once the error is gone the step goes to the session.
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        run.Service.EnableEvents(Path.Combine(run.Scratch, "live"), new SteppedClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds())));
+        Roster(run, ("builder", [builder]));
+        Order(run, "W-2", "builder");
+        PresenceLease lease = run.Service.PresenceRegister(new PresenceRegisterRequest(builder, "a builder session", ["builder"], Capacity: 3)).Lease!;
+        Assert.Equal(lease.Session, Route(run, "W-2").GetProperty("session").GetString());
+
+        // A decision naming a subject that does not exist, written by hand: an error that is no duplicate.
+        RecordEnvelope broken = run.Estate.Add("decision", op, $$"""{"title":"A decision","statement":"Nothing.","summary":"Nothing.","synthesis":"Nothing.","effects":["nothing"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":["spending"]}""",
+            new RecordReference("decision", Records.Identity.Ulid.NewUlid().Value, null));
+        int before = run.Estate.Load().Current("assignment").Count();
+        GoalStepResponse refused = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource));
+        Assert.False(refused.Ok);
+        Assert.Equal(("none", "refused"), (refused.Outcome, refused.Problem!.Code));
+        Assert.StartsWith("Refused before giving W-1 to ", refused.Message, StringComparison.Ordinal);
+        Assert.Contains(refused.Problem.Findings, f => f.Code == "record.subject");
+        Assert.Empty(Assert.Single(run.Service.Presence().Sessions).Holds);
+        Assert.Equal(before, run.Estate.Load().Current("assignment").Count());
+
+        File.Delete(Path.Combine(run.Estate.Root, broken.ExpectedPath.Replace('/', Path.DirectorySeparatorChar)));
+        GoalStepResponse kept = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource));
+        Assert.True(kept.Ok, kept.Message);
+        Assert.Equal(("session", "W-1"), (kept.Outcome, kept.Step));
+        GoalStepResponse routed = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource));
+        Assert.True(routed.Ok, routed.Message);
+        Assert.Equal(("session", "W-2"), (routed.Outcome, routed.Step));
+        Assert.Equal([run.Assignment, routed.Assignment!.Id], Assert.Single(run.Service.Presence().Sessions).Holds);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void APersonHandsALapsedStepToAnotherPrincipalOfItsRoleCitingTheLapseAsk()
     {
         using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
