@@ -810,9 +810,7 @@ public sealed partial class EstateService
         string what = draft.Type switch { "attempt" => "an attempt", "result" => "a result", _ => "a progress claim" };
         RecordEnvelope? order = WorkView.OrderOfAssignment(model, assignment);
         string key = order is null ? assignment.Id : EstateModel.BodyString(model.Latest(order), "key") ?? order.Id;
-        IReadOnlyList<string> chain = model.Chain(model.Latest(assignment));
-        bool held = order is not null && Routing.Assignments(model, order).Any(a => chain.Contains(a.Id));
-        return held
+        return Routing.EverHeld(model, assignment)
             ? $"Assignment {assignment.Id} no longer holds its step of {key}: assignment {holder.Id} of {PrincipalName(model, EstateModel.BodyString(holder, "contributor"))} holds it now. Only the step's current holder records {what}, whatever time it states; nothing was written."
             : $"Assignment {assignment.Id} holds nothing of its step of {key}: assignment {holder.Id} of {PrincipalName(model, EstateModel.BodyString(holder, "contributor"))} holds it, and only a person hands a held step to another principal. Only the step's current holder records {what}, whatever time it states; nothing was written.";
     }

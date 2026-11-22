@@ -308,7 +308,8 @@ public sealed partial class EstateService
             FlowRuns.StepRef? step = FlowRuns.StepOf(held);
             // From 0.9.4 (GOAL-07) a standing agent's assignments hold its occurrences one by one: a hand-over takes over one occurrence.
             string? occurrence = StandingAgents.KeyOf(held);
-            List<RecordEnvelope> assignments = order is null ? [] : Routing.Assignments(model, order, step).Where(a => StandingAgents.KeyOf(a) == occurrence).ToList();
+            // From 0.9.4 (ID-11) the assignment that holds the step now is the holder rule's.
+            List<RecordEnvelope> assignments = order is null ? [] : Routing.Holding(model, order, step).Where(a => StandingAgents.KeyOf(a) == occurrence).ToList();
             string orderStatus = order is null ? "?" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
             personName = PrincipalName(model, person);
             bool toPerson = GoalRules.IsPerson(model, person);

@@ -255,7 +255,8 @@ public sealed class PresenceLeaseTests
         EstateModel model = run.Estate.Load();
         Assert.Equal(handover, Routing.HolderOf(model, model.ById[back.Id])!.Id);
         Assert.Equal(handover, Routing.HolderOf(model, model.ById[run.Assignment])!.Id);
-        Assert.DoesNotContain(Routing.Assignments(model, order), a => a.Id == back.Id);
+        Assert.DoesNotContain(Routing.Holding(model, order), a => a.Id == back.Id);
+        Assert.Contains(Routing.Assignments(model, order), a => a.Id == back.Id);
         RunEstate.Ok(run.Service.Attempt(new AttemptRequest(handover, op, "widget, a work branch", "Finish it.")));
         Assert.Contains($"Assignment {back.Id} holds nothing of its step of W-1", run.Service.Attempt(new AttemptRequest(back.Id, builder, "widget, a work branch", "Mine again.")).Problem!.Message, StringComparison.Ordinal);
         Assert.Contains("no longer holds its step", run.Service.Attempt(new AttemptRequest(run.Assignment, builder, "widget, a work branch", "Mine again.")).Problem!.Message, StringComparison.Ordinal);

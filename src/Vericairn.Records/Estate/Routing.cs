@@ -593,18 +593,33 @@ public static partial class Routing
     }
 
     /// <summary>
-    /// The current assignments of a work order that hold its step, any revision of it, oldest first; the last one holds the step. An
-    /// assignment routing stored without the record it was routed with holds nothing (<see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/>).
-    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10) neither does one that would take the step from another principal's
-    /// holding without a person's act (<see cref="Holding"/>).
+    /// The current assignments of a work order, any revision of it, oldest first by the time each states: the step's whole history, which
+    /// authorship, review independence, a basis's lookup and attention read. An assignment routing stored without the record it was
+    /// routed with is not among them (<see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/>). From 0.9.4 (ID-11) who holds a
+    /// step now is a separate question, which <see cref="Holding(EstateModel, RecordEnvelope)"/> answers.
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
         IReadOnlyList<string> chain = model.Chain(model.Latest(order));
-        return Holding(model, model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && !Stranded(model, a))
-            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal));
+        return model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && !Stranded(model, a))
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): of a work order's assignments, those that hold their step under the holder
+    /// rule, oldest first; for each step the last of them holds it now. The fence, the displaced label, routing, a flow's holder and the
+    /// hand-over read it; everything that reads a step's history reads <see cref="Assignments(EstateModel, RecordEnvelope)"/>.
+    /// </summary>
+    public static IReadOnlyList<RecordEnvelope> Holding(EstateModel model, RecordEnvelope order) => HoldingOf(model, Assignments(model, order));
+
+    /// <summary>From 0.9.4 (ID-11): <see cref="Holding(EstateModel, RecordEnvelope)"/> for one step: of a run's work order, one flow step and item.</summary>
+    public static IReadOnlyList<RecordEnvelope> Holding(EstateModel model, RecordEnvelope order, FlowRuns.StepRef? step)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        return [.. Holding(model, order).Where(a => FlowRuns.StepOf(a) == step)];
     }
 
     /// <summary>
@@ -624,7 +639,7 @@ public static partial class Routing
     /// An assignment that holds nothing never makes its author or contributor the holder, and its writes are fenced as a displaced
     /// holder's are.
     /// </summary>
-    private static List<RecordEnvelope> Holding(EstateModel model, IEnumerable<RecordEnvelope> ordered)
+    private static List<RecordEnvelope> HoldingOf(EstateModel model, IEnumerable<RecordEnvelope> ordered)
     {
         var holding = new List<RecordEnvelope>();
         foreach (IGrouping<string, RecordEnvelope> step in ordered.GroupBy(a => HoldingKey(a.Body), StringComparer.Ordinal))
@@ -698,18 +713,38 @@ public static partial class Routing
     internal static RecordEnvelope? WouldHoldNothing(EstateModel model, RecordEnvelope order, string by, JsonElement body)
     {
         string key = HoldingKey(body);
-        RecordEnvelope? holder = Assignments(model, order).LastOrDefault(a => HoldingKey(a.Body) == key);
+        RecordEnvelope? holder = Holding(model, order).LastOrDefault(a => HoldingKey(a.Body) == key);
         string? contributor = TJson.Text(body, "contributor");
         return holder is not null && Identity(model, EstateModel.BodyString(holder, "contributor")) != Identity(model, contributor) && !GoalRules.IsPerson(model, Identity(model, by))
             ? holder : null;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11), for the wording of a refusal only: true when an assignment held its step at some time: it holds under the
+    /// holder rule, or it held among the agents' and services' assignments of the step dated before any person's assignment of it.
+    /// </summary>
+    internal static bool EverHeld(EstateModel model, RecordEnvelope assignment)
+    {
+        if (WorkView.OrderOfAssignment(model, assignment) is not RecordEnvelope order)
+        {
+            return false;
+        }
+
+        IReadOnlyList<string> chain = model.Chain(model.Latest(assignment));
+        string key = HoldingKey(model.Latest(assignment).Body);
+        List<RecordEnvelope> step = [.. Assignments(model, order).Where(a => HoldingKey(a.Body) == key)];
+        RecordEnvelope? person = step.FirstOrDefault(a => GoalRules.IsPerson(model, Identity(model, a.By)));
+        return HoldingOf(model, step).Any(a => chain.Contains(a.Id))
+            || AgentsHolding(model, [.. step.Where(a => !GoalRules.IsPerson(model, Identity(model, a.By)) && (person is null || GoalRules.Before(a, person)))]).Any(a => chain.Contains(a.Id));
     }
 
     private static string? Identity(EstateModel model, string? principal) =>
         model.CurrentPrincipal(principal) is RecordEnvelope record ? model.Chain(record)[0] : principal;
 
     /// <summary>
-    /// The current assignments that hold one step: of a run's work order, those that name that flow step and item; of any other work
-    /// order, those that name no step. Oldest first; the last one holds the step.
+    /// The current assignments of one step: of a run's work order, those that name that flow step and item; of any other work order,
+    /// those that name no step. Oldest first, by the time each states; from 0.9.4 (ID-11) <see cref="Holding(EstateModel, RecordEnvelope, FlowRuns.StepRef?)"/>
+    /// gives those that hold it.
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order, FlowRuns.StepRef? step)
     {
@@ -738,7 +773,7 @@ public static partial class Routing
         FlowRuns.StepRef? step = FlowRuns.StepOf(latest);
         string? occurrence = StandingAgents.KeyOf(latest);
         FlowRuns.ReviewRef? review = FlowRuns.ReviewOf(latest);
-        return Assignments(model, order, step).LastOrDefault(a => StandingAgents.KeyOf(a) == occurrence && SameReview(FlowRuns.ReviewOf(a), review));
+        return Holding(model, order, step).LastOrDefault(a => StandingAgents.KeyOf(a) == occurrence && SameReview(FlowRuns.ReviewOf(a), review));
 
         static bool SameReview(FlowRuns.ReviewRef? one, FlowRuns.ReviewRef? other) =>
             one is null ? other is null

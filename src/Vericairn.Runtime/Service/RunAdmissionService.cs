@@ -619,10 +619,12 @@ internal sealed class RunAdmissionService(
     {
         RecordEnvelope current = model.Latest(assignment);
         FlowRuns.StepRef? step = FlowRuns.StepOf(current);
-        IReadOnlyList<RecordEnvelope> holders = WorkView.OrderOfAssignment(model, current) is RecordEnvelope order
-            ? Routing.Assignments(model, model.Latest(order), step).Where(a => StandingAgents.KeyOf(a) == StandingAgents.KeyOf(current)).ToList() : [];
-        // A later assignment of the step holds it; routing's own pending assignment, not yet stored with its intent, is the latest.
-        RecordEnvelope? later = holders.LastOrDefault(h => h.Id != current.Id && GoalRules.Before(current, h));
+        List<RecordEnvelope> holders = WorkView.OrderOfAssignment(model, current) is RecordEnvelope order
+            ? Routing.Holding(model, model.Latest(order), step).Where(a => StandingAgents.KeyOf(a) == StandingAgents.KeyOf(current)).ToList() : [];
+        // A later holding assignment of the step holds it; routing's own pending assignment, not yet stored with its intent, is the latest.
+        // From 0.9.4 (ID-11) a stored assignment that does not hold its step under the holder rule runs nothing either.
+        RecordEnvelope? later = holders.LastOrDefault(h => h.Id != current.Id && GoalRules.Before(current, h))
+            ?? (model.ById.ContainsKey(current.Id) && !Routing.Stranded(model, current) && holders.Count > 0 && !model.Chain(current).Contains(holders[^1].Id) ? holders[^1] : null);
         return later is not null
             ? $"{(step is null ? string.Empty : $"Step {step} of ")}{(step is null ? "Work order" : "work order")} {key} is held by assignment {later.Id}; its step goes on from that assignment."
             : null;

@@ -102,6 +102,7 @@ public class StepAuthorityTests
 
         // Until a run completes the routed assignment, the builder's assignment to Pat holds the step, no person having assigned it.
         Assert.Equal([toPat.Id], Routing.Assignments(estate.Load(), w1).Select(a => a.Id));
+        Assert.Equal([toPat.Id], Routing.Holding(estate.Load(), w1).Select(a => a.Id));
 
         // A run of it recorded later completes it. From 0.9.4 (ID-11) the holder rule judges by who recorded each assignment, never by
         // the times they state across kinds of writer: the operator's routed assignment is a person's, so it holds the step, and the
@@ -110,7 +111,8 @@ public class StepAuthorityTests
         EstateModel model = estate.Load();
         Assert.False(Routing.Stranded(model, stranded));
         Assert.True(Routing.Stranded(model, stranded, toPat));
-        Assert.Equal([stranded.Id], Routing.Assignments(model, w1).Select(a => a.Id));
+        Assert.Equal([stranded.Id, toPat.Id], Routing.Assignments(model, w1).Select(a => a.Id));
+        Assert.Equal([stranded.Id], Routing.Holding(model, w1).Select(a => a.Id));
         Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location.StartsWith(toPat.ExpectedPath, StringComparison.Ordinal));
 
         // Routing's assignment of W-2 to Pat holds it only once the ask naming it is recorded, and an ask names only Pat's assignment.
@@ -151,7 +153,8 @@ public class StepAuthorityTests
         estate.SetClock(start.AddMinutes(15));
         RecordEnvelope between = estate.Add("assignment", builder, Assignment(builder), w1.Reference);
         EstateModel model = estate.Load();
-        Assert.Equal([first.Id, takenOver.Id], Routing.Assignments(model, w1).Select(a => a.Id));
+        Assert.Equal([first.Id, takenOver.Id], Routing.Holding(model, w1).Select(a => a.Id));
+        Assert.Equal([early.Id, first.Id, between.Id, takenOver.Id], Routing.Assignments(model, w1).Select(a => a.Id));
         Assert.Equal(takenOver.Id, Routing.HolderOf(model, model.ById[early.Id])!.Id);
         Assert.True(Routing.Displaced(model, model.ById[between.Id]));
         Assert.False(Routing.Displaced(model, model.ById[takenOver.Id]));
@@ -191,7 +194,8 @@ public class StepAuthorityTests
         RecordEnvelope again = estate.Add("assignment", builder, Assignment(helper), w1.Reference);
         RecordEnvelope moved = estate.Add("assignment", builder, Assignment(builder), w1.Reference);
         EstateModel model = estate.Load();
-        Assert.Equal([dispatched.Id, again.Id], Routing.Assignments(model, w1).Select(a => a.Id));
+        Assert.Equal([dispatched.Id, again.Id], Routing.Holding(model, w1).Select(a => a.Id));
+        Assert.Equal([dispatched.Id, again.Id, moved.Id], Routing.Assignments(model, w1).Select(a => a.Id));
         Assert.True(Routing.Displaced(model, model.ById[moved.Id]));
     }
 

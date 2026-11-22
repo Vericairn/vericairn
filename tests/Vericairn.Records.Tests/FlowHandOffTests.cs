@@ -83,6 +83,28 @@ public class FlowHandOffTests
     }
 
     [Fact]
+    public void AnAgentDisplacedAfterRecordingAnAttemptStaysAnAuthorOfTheStepAndIsNeverItsIndependentReviewer()
+    {
+        // From 0.9.4 (ID-11): who holds a step now is the holder rule's, and the step's authors are every principal assigned it or that
+        // recorded an attempt or a result on it, displaced or not.
+        using var run = new FlowFixture(options: new JsonObject { ["review"] = "independent", ["step.review-lyrics"] = "off" });
+        RecordEnvelope drafting = run.Assign("draft", run.Estate.BuilderId);
+        run.Add("attempt", new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(run.Estate.Clock), ["workspace"] = "song repository, a work branch", ["note"] = "Draft it." }, builder: true, subject: drafting.Reference);
+        RecordEnvelope handover = run.Assign("draft", run.Estate.OperatorId);
+        RecordEnvelope lyrics = run.Result(handover, "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        EstateModel model = run.Estate.Load();
+        Assert.True(Routing.Displaced(model, model.ById[drafting.Id]));
+        Assert.Equal(handover.Id, run.Step("draft").Assignment!.Id);
+        Assert.Contains(run.Estate.BuilderId, FlowRuns.Authors(model, Routing.Assignments(model, run.Work, new FlowRuns.StepRef("draft", null))));
+
+        // The displaced builder is refused as the review's assignee, and its pass clears nothing.
+        RecordEnvelope own = ReviewAssignment(run, run.Estate.BuilderId, lyrics, "lyrics");
+        Assert.Contains(Errors(run, own), f => f.Code == "assignment.review" && f.Message.Contains("it authored the step's work", StringComparison.Ordinal));
+        AgentReview(run, lyrics, run.Estate.BuilderId, "pass");
+        Assert.Equal("in-review", run.Step("draft").State);
+    }
+
+    [Fact]
     public void AReviewAssignmentMeetsItsIndependenceAgainstTheStepsAuthors()
     {
         JsonObject flow = FlowFixture.Song();

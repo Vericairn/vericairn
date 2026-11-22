@@ -137,8 +137,10 @@ public static partial class NextEligible
                 continue;
             }
 
-            IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(model, position.Work, instance.Ref);
-            var held = assignments.SelectMany(a => model.Chain(a)).ToHashSet(StringComparer.Ordinal);
+            // From 0.9.4 (ID-11) the step's holder is the holder rule's; its history, every assignment, names the asks and its exposure.
+            IReadOnlyList<RecordEnvelope> history = Routing.Assignments(model, position.Work, instance.Ref);
+            IReadOnlyList<RecordEnvelope> assignments = Routing.Holding(model, position.Work, instance.Ref);
+            var held = history.SelectMany(a => model.Chain(a)).ToHashSet(StringComparer.Ordinal);
             IReadOnlyList<RecordEnvelope> asks = AsksNaming(model, goals, held);
 
             // A stale, reopened or rerun step reruns from a fresh assignment whose brief pins its inputs as they are now, once no run of
@@ -157,7 +159,7 @@ public static partial class NextEligible
                 : null;
             Route route = RouteOf(model, current, status, ledger, role, Routing.ReservedAction(role), assignments, asks, runs, machine, candidate => (person || personal is not null) && candidate.IsAgent
                 ? candidate with { Available = false, Reasons = [.. candidate.Reasons, personal ?? $"the flow marks the {role} role a person's, and an agent never holds it"], Session = null }
-                : candidate, sessionExposure: Routing.SessionExposure(model, current, position.Work, instance.Inputs.Select(i => i.Carrier).Concat(Routing.StepRecords(model, assignments))));
+                : candidate, sessionExposure: Routing.SessionExposure(model, current, position.Work, instance.Inputs.Select(i => i.Carrier).Concat(Routing.StepRecords(model, history))));
             steps.Add(new FlowStepRoute(instance, route));
         }
 

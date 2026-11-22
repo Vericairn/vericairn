@@ -137,7 +137,8 @@ public static partial class NextEligible
         foreach (RecordEnvelope order in GoalRules.Work(model, current))
         {
             string state = statuses.GetValueOrDefault(order.Id) ?? "planned";
-            IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(model, order);
+            // From 0.9.4 (ID-11) the step's holder is the holder rule's; its history is every assignment.
+            IReadOnlyList<RecordEnvelope> assignments = Routing.Holding(model, order);
             RecordEnvelope? holder = assignments.Count == 0 ? null : assignments[^1];
             if (state != "planned")
             {
@@ -158,7 +159,7 @@ public static partial class NextEligible
     {
         string role = Routing.RoleOf(order);
         return RouteOf(model, goal, status, ledger, role, Routing.ReservedAction(role), assignments, Routing.AsksAbout(model, goal, order), runs, machine, null,
-            sessionExposure: Routing.SessionExposure(model, goal, order, Routing.StepRecords(model, assignments)));
+            sessionExposure: Routing.SessionExposure(model, goal, order, Routing.StepRecords(model, Routing.Assignments(model, order))));
     }
 
     /// <summary>
