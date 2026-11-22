@@ -54,7 +54,7 @@ public class FormatOneFixtureTests
             (UpgradeResponse? check, Problem? refused) = service.Upgrade(new UpgradeRequest("0.9.0", null, true));
             Assert.Null(refused);
             Assert.Equal(["record-format-2"], check!.Migrations);
-            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
+            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false) { OneWay = true });
             Assert.Null(problem);
             Assert.True(applied!.Applied);
 
@@ -103,13 +103,13 @@ public class FormatOneFixtureTests
             (UpgradeResponse? check, Problem? planned) = service.Upgrade(new UpgradeRequest("0.9.0", null, true));
             Assert.Null(planned);
             Assert.Equal([unsigned.Written.Id], check!.Anchored);
-            (UpgradeResponse? byBuilder, Problem? refused) = service.Upgrade(new UpgradeRequest("0.9.0", Builder, false));
+            (UpgradeResponse? byBuilder, Problem? refused) = service.Upgrade(new UpgradeRequest("0.9.0", Builder, false) { OneWay = true });
             Assert.Null(byBuilder);
             Assert.Contains("operator", refused!.Message, StringComparison.Ordinal);
             Assert.Equal(1, service.Session.Load().Manifest!.RecordFormat);
 
             // The operator's upgrade signs the migration that lists it, and the builder's device stays admitted at format 2.
-            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
+            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false) { OneWay = true });
             Assert.Null(problem);
             Assert.True(applied!.Applied);
             EstateModel moved = service.Session.Load();

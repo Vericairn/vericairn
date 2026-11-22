@@ -1,7 +1,7 @@
 # Exact action revisions permitted in this repository's workflows, each with its owner's and repository's GitHub ids
 # (owner=<id> repository=<id>, from https://api.github.com/repos/<owner>/<repository>). See README.md beside this file.
 actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 owner=44036562 repository=197814629 # v7.0.1
-actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 owner=44036562 repository=192625306 # v6.0.0
+actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 owner=44036562 repository=192625306 # v6.1.0
 actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 owner=44036562 repository=192625955 # v7.0.2
 actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 owner=44036562 repository=192626254 # v8.0.2
 NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 owner=968310 repository=1037624552 # v1.2.0

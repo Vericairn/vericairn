@@ -77,8 +77,15 @@ public static partial class EstateChecks
             {
                 ScanText(file, relative, findings, model);
             }
+
+            // From 0.9.4 (FIX-139): the owner's instruction files at the root are read for hooks, approvals and secret-like values.
+            if (EstateLayout.OwnerInstructionFiles.Contains(relative))
+            {
+                ScanInstructions(file, relative, findings);
+            }
         }
 
+        InstructionFileChecks.CheckRepositories(model, findings);
         CheckRetirements(model, findings);
         CheckDocuments(model, findings);
         CheckLivingDocuments(model, findings);
@@ -154,6 +161,52 @@ public static partial class EstateChecks
     }
 
     private static void ScanText(string file, string relative, FindingList findings, EstateModel model) => ScanText(File.ReadAllBytes(file), relative, findings, model);
+
+    // A binary or non-UTF-8 file is already reported by the text scan, and is not read as instructions.
+    private static void ScanInstructions(string file, string relative, FindingList findings) =>
+        ScanInstructions(file, relative, findings, InstructionFileChecks.Scan);
+
+    /// <summary>
+    /// Reads one owner's instruction file with the given scan. A failure of the scan itself never fails the whole check: the file gets
+    /// one finding, instructions.unreadable, naming the file and the kind of failure and never its content, and none of the scan's
+    /// partial findings.
+    /// </summary>
+    internal static void ScanInstructions(string file, string relative, FindingList findings, Action<string, string, FindingList> scan)
+    {
+        byte[] bytes = File.ReadAllBytes(file);
+        if (Array.IndexOf(bytes, (byte)0) >= 0)
+        {
+            return;
+        }
+
+        string text;
+        try
+        {
+            text = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            // layout.encoding already names the file.
+            return;
+        }
+
+        var scanned = new FindingList();
+        try
+        {
+            scan(text, relative, scanned);
+        }
+        catch (Exception exception)
+        {
+            // Any failure of one file's heuristic scan becomes that file's finding; the rest of the check goes on.
+            findings.Warning(InstructionFileChecks.UnreadableCode, relative, $"The check could not read this file for hooks, approvals and secret-like values ({exception.GetType().Name}), so nothing in it was checked for them. Review it by hand, and report the failure.");
+            return;
+        }
+
+        foreach (Finding finding in scanned)
+        {
+            findings.Add(finding);
+        }
+    }
 
     private static void ScanText(byte[] bytes, string relative, FindingList findings, EstateModel? model = null)
     {
@@ -497,7 +550,10 @@ public static partial class EstateChecks
             }
             if (actual != hash)
             {
-                findings.Error("document.drift", path, $"The file changed after revision record {revision.Id} pinned it ({actual}). Record a new document-revision that supersedes it.");
+                // Both values are labeled: the one the revision pinned and the one the file has now. An authored-content pin hashes
+                // the file without its generated revision history, so its message says what the two digests cover.
+                string covers = RevisionLines.IsAuthored(revision) ? " Both digests cover the authored content, not the generated revision history." : "";
+                findings.Error("document.drift", path, $"The file changed after revision record {revision.Id} pinned it. The revision pinned {hash}; the file now has {actual}.{covers} Record a new document-revision that supersedes it.");
             }
         }
     }

@@ -30,13 +30,15 @@ internal sealed class PolicyKindRegistry(IEnumerable<PolicyKindRegistration> reg
     internal static PolicyKindRegistry Foundation(string implementationDigest) => new(new[]
     {
         FoundationPolicyKinds.Placement, FoundationPolicyKinds.Staleness, FoundationPolicyKinds.KeyFamily, FoundationPolicyKinds.RevisionLine, FoundationPolicyKinds.Consistency,
-        FoundationPolicyKinds.Blocked, FoundationPolicyKinds.FlowSteps,
+        FoundationPolicyKinds.Blocked, FoundationPolicyKinds.FlowSteps, FoundationPolicyKinds.Messages,
     }.Select(kind => new PolicyKindRegistration(kind, 1, implementationDigest,
-        kind == FoundationPolicyKinds.RevisionLine ? ["repository", "product"] : kind == FoundationPolicyKinds.FlowSteps ? ["estate", "product"] : ["estate", "product", "work-orders"],
+        kind == FoundationPolicyKinds.RevisionLine ? ["repository", "product"] : kind == FoundationPolicyKinds.FlowSteps ? ["estate", "product"]
+            : kind == FoundationPolicyKinds.Messages ? ["estate"] : ["estate", "product", "work-orders"],
         kind == FoundationPolicyKinds.RevisionLine ? [PolicyBasis.RepositoryContract] : [], 100000, 100000,
         FoundationPolicyKinds.Validate, FoundationPolicyKinds.Evaluate)).Append(new(Vericairn.Records.Types.DutyRecords.Kind, 1, implementationDigest,
             ["estate", "product"], [], 100000, RecurringDuty.MaximumOccurrences, RecurringDuty.ValidateRegistration, RecurringDuty.Evaluate))
-        .Append(new(ReleaseEntry.Kind, 1, implementationDigest, ["estate", "product", "repository"], [], 100000, 100000, ReleaseEntry.Validate, ReleaseEntry.Evaluate)));
+        .Append(new(ReleaseEntry.Kind, 1, implementationDigest, ["estate", "product", "repository"], [], 100000, 100000, ReleaseEntry.Validate, ReleaseEntry.Evaluate))
+        .Append(ConcurrentPaths.Registration(implementationDigest)));
 
     internal IReadOnlyList<PolicyFinding> Evaluate(PolicyRuleContext context)
     {

@@ -42,7 +42,7 @@ public class PolicyCanonicalVectorTests
         PolicyEvaluation evaluation = PolicyEvaluator.Evaluate(basis, Kinds);
         Assert.Equal(10, evaluation.Findings.Length);
         Assert.Equal(2, WritingEvaluation.Evaluate(basis).WarningCount);
-        Check(basis, "sha256:653f17b82da54e92f49dbffa03c91c4632198ebc242c03c958aef8796e3db9dd", writing: true);
+        Check(basis, "sha256:ad24784787cbc845a1a30ceecddd8d6222bacdacdd8e4af7400019af06ac0b1d", writing: true);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class PolicyCanonicalVectorTests
         Assert.True(evaluation.Complete);
         Assert.Equal(4, evaluation.Findings.Length);
         Assert.Equal(2, evaluation.Holds);
-        Check(basis, "sha256:fc793c86c8d25e701643d1427370516d372b055c6674f53442d7e7292f65eb47", writing: false);
+        Check(basis, "sha256:c380769ad8e290ee1c3917ca765abfab26e527156ae8dda492d62c8e29aa064f", writing: false);
     }
 
     private static void Check(PolicyBasis basis, string expected, bool writing)

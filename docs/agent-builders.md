@@ -49,6 +49,8 @@ vericairn devices admit <agent device id> --by <operator id> --note "The agent's
 
 When a presence prompt expires, is refused or times out while you create or admit a device, [enrollment troubleshooting](enrollment-troubleshooting.md) tells the endings apart and reconciles from what the estate holds: inspect before running anything again, and keep the principals, devices and admissions it already has.
 
+From 0.9.4, when a signed command your agent runs fails at once, before any dialog, [a signed command that fails at once](enrollment-troubleshooting.md#a-signed-command-that-fails-at-once-094) tells a sandbox that keeps the process from the Secure Enclave apart from a missing helper and a refused or expired prompt, by `vericairn doctor` run in the same context. A working `status` or a device that reads `heldHere` does not mean the process can sign: keep the failed command and its output, inspect, and make any authorized retry once, from a context where `doctor` reports the enclave available, never automatically.
+
 `records new principal` warns that no installed launcher routes to the agent's product: that is expected, since your agent runs in your own code, not through Vericairn's worker. Give it a work order and an assignment:
 
 ```sh

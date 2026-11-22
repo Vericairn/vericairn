@@ -242,7 +242,7 @@ public class SoftwareFlowTests
                 Assert.Equal(3, plan.ToFormat);
                 Assert.False(File.Exists(Path.Combine(estate.Root, "docs", "migrated.txt")));
 
-                (UpgradeResponse? applied, Problem? failure) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
+                (UpgradeResponse? applied, Problem? failure) = service.Upgrade(new UpgradeRequest("0.9.0", op, false) { OneWay = true });
                 Assert.Null(failure);
                 Assert.True(applied!.Applied);
                 Assert.NotNull(applied.Migration);
@@ -283,7 +283,7 @@ public class SoftwareFlowTests
 
         using (var service = EstateService.Open(estate.Root))
         {
-            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
+            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false) { OneWay = true });
             Assert.Null(problem);
             Assert.Equal(["record-format-2"], applied!.Migrations);
             Assert.Equal(2, applied.ToFormat);
@@ -327,7 +327,7 @@ public class SoftwareFlowTests
         using (EstateUpgrade.UseMigrations([new SyntheticMigration(1, 2, fail: true)]))
         using (var service = EstateService.Open(estate.Root))
         {
-            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
+            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false) { OneWay = true });
             Assert.Null(applied);
             Assert.Contains("nothing changed", problem!.Message, StringComparison.Ordinal);
             Assert.Equal(manifestBefore, File.ReadAllBytes(Path.Combine(estate.Root, "estate", "manifest.json")));

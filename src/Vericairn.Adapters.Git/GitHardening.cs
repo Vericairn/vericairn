@@ -180,6 +180,17 @@ internal sealed class GitHardening : IDisposable
         SetEnvironment(info, [.. Configuration()]);
     }
 
+    /// <summary>
+    /// Sets the hardened environment as <see cref="ApplyEnvironment(ProcessStartInfo)"/> does, with the caller's own settings (each
+    /// key=value, none naming a program) carried after the hardening's.
+    /// </summary>
+    internal void ApplyEnvironment(ProcessStartInfo info, IEnumerable<string> additional)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        ArgumentNullException.ThrowIfNull(additional);
+        SetEnvironment(info, [.. Configuration(), .. additional]);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

@@ -114,6 +114,9 @@ internal sealed class WorkerOperations(CommandContext context)
                 context.Output.WriteLine("  " + started.Message);
             }
 
+            // From 0.9.4 (CODE-73): the overlaps run admission found, beside the run's output.
+            foreach (string notice in started.Notices ?? []) context.Error.WriteLine(notice);
+
             if (options.Detach)
             {
                 if (json)

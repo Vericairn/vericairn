@@ -35,6 +35,11 @@ public sealed class RepositoryProgramIsolationTests
         ReleaseSourceObservation? releaseAfter = adapter.InspectRelease(probe.Repository);
         // The policy source's working-tree read of a registered clone goes through the same runner.
         Assert.Equal(0, GitFileSource.RunIsolated(probe.Repository, out _, "ls-files", "--cached", "--others", "--exclude-standard", "-z"));
+        // So do the overlap check's reads of a registered clone.
+        Assert.NotNull(adapter.TrackedPaths(probe.Repository, "main"));
+        Assert.True(adapter.Reachable(probe.Repository, before.RootCommit, "main"));
+        Assert.True(adapter.Precedes(probe.Repository, before.RootCommit, before.Commit));
+        Assert.NotNull(adapter.ChangedPaths(probe.Repository, before.RootCommit, before.Commit));
         Assert.False(probe.Ran, $"Observing the repository ran the program its {kind} configuration names.");
 
         Assert.Equal((before.Commit, before.Branch, before.Remote, before.RootCommit, before.Clean, before.Modified, before.Untracked),
@@ -220,6 +225,23 @@ public sealed class RepositoryProgramIsolationTests
         }
     }
 
+    // The overlap check's reads of a registered clone start as every hardened read does, and read grafts from a file that does not exist.
+    [Fact]
+    public void TheOverlapReadsStartHardened()
+    {
+        using GitHardening hardening = GitHardening.Create();
+        ProcessStartInfo info = GitCommandAdapter.OverlapRead(Path.GetTempPath(), hardening, ["rev-parse", "HEAD"]);
+        Assert.Equal("--no-pager", info.ArgumentList[0]);
+        Assert.Contains("core.hooksPath=" + Path.Combine(hardening.Control, "hooks"), info.ArgumentList);
+        Assert.All(GitHardening.Settings, setting => Assert.Contains(setting, info.ArgumentList));
+        Assert.Equal(["rev-parse", "HEAD"], info.ArgumentList.TakeLast(2));
+        Assert.Equal("1", info.Environment["GIT_CONFIG_NOSYSTEM"]);
+        Assert.Equal("1", info.Environment["GIT_ATTR_NOSYSTEM"]);
+        Assert.StartsWith(hardening.Control, info.Environment["GIT_CONFIG_GLOBAL"], StringComparison.Ordinal);
+        string grafts = info.Environment["GIT_GRAFT_FILE"]!;
+        Assert.True(Path.IsPathFullyQualified(grafts) && !File.Exists(grafts));
+    }
+
     [Fact]
     public void TheSecretScannerAndItsReadabilityCheckRunHardened()
     {
@@ -241,11 +263,15 @@ public sealed class RepositoryProgramIsolationTests
             Assert.Equal(setting.Split('=', 2)[1], carried[setting.Split('=', 2)[0]]);
         Assert.True(carried.ContainsKey("core.hooksPath"));
 
-        (_, string[] gitArguments, Dictionary<string, string?> gitEnvironment) = calls.Single(c => c.File == "git");
-        Assert.Contains("core.fsmonitor=false", gitArguments);
-        Assert.Contains("log.showSignature=false", gitArguments);
-        Assert.Contains("protocol.allow=never", gitArguments);
-        Assert.Equal("1", gitEnvironment["GIT_CONFIG_NOSYSTEM"]);
+        Assert.Contains(calls, c => c.File == "git");
+        Assert.All(calls.Where(c => c.File == "git"), call =>
+        {
+            Assert.Contains("core.fsmonitor=false", call.Arguments);
+            Assert.Contains("log.showSignature=false", call.Arguments);
+            Assert.Contains("protocol.allow=never", call.Arguments);
+            Assert.Equal("1", call.Environment["GIT_CONFIG_NOSYSTEM"]);
+            Assert.Equal("false", Configuration(call.Environment)["core.fsmonitor"]);
+        });
     }
 
     // A committed repository with an inside/ and an outside/ directory and a file at its root, for the layout tests.
@@ -308,7 +334,10 @@ public sealed class RepositoryProgramIsolationTests
 
     private static Dictionary<string, string> Configuration(Dictionary<string, string?> environment)
     {
+        // A setting given twice takes its last value, as git reads it.
         int count = int.Parse(environment["GIT_CONFIG_COUNT"]!, System.Globalization.CultureInfo.InvariantCulture);
-        return Enumerable.Range(0, count).ToDictionary(i => environment["GIT_CONFIG_KEY_" + i]!, i => environment["GIT_CONFIG_VALUE_" + i]!, StringComparer.Ordinal);
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (int i in Enumerable.Range(0, count)) settings[environment["GIT_CONFIG_KEY_" + i]!] = environment["GIT_CONFIG_VALUE_" + i]!;
+        return settings;
     }
 }

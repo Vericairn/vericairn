@@ -114,6 +114,12 @@ public sealed partial class EstateService
             var claim = new WorkProgressClaim(attempt.Id, request.By, request.Phase, request.Note, at, request.Completed, written?.Id)
                 { Progress = request.Progress?.Clone(), StatusText = request.StatusText };
             session.Live.SetMeta("work-progress:" + attempt.Id, JsonSerializer.Serialize(claim, ProtocolJson.Options));
+            // From 0.9.4 (ID-11): the claimant's live sessions hold the attempt's assignment.
+            if (assignment is not null)
+            {
+                HoldForSessionsLocked(model, request.By, assignment);
+            }
+
             MarkEventsDirty();
             return new WorkProgressResponse(claim, written);
         }

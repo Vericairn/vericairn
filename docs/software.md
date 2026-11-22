@@ -587,6 +587,33 @@ it. Both supersede their earlier verification of the same check and version, so 
 each waits as an operator request whose exact command appears only when the step is next, and only records an operator signed
 complete it.
 
+## The first standing roles (0.9.4)
+
+From 0.9.4 (PROC-08) three standing roles ship as built-in flows with triggers, available through `templates list` and
+`templates show` without copying files: `vericairn.estate/duty-carrier` 1.0.0, `vericairn.software/researcher` 1.0.0 and
+`vericairn.software/bug-hunter` 1.0.0. Each declares its trigger kinds, one role with its brief, one work step and the outputs it
+records, and never lines carried into every brief. A role grants nothing: a standing agent pins one in `goal propose --standing`, its
+roster names who fills the role, and its sponsor's activation grants its budget ([CLI](cli.md#standing-agents-goal-due-and-goal-step---occurrence-094)).
+
+| Role | Triggers | Outputs | The authority each effect needs |
+| --- | --- | --- | --- |
+| `vericairn.estate/duty-carrier` | `duty`, `request` | A result naming the duty occurrences it discharges, with their evidence; operator requests | The duty's own scope; a reserved action is never carried through a duty and becomes an operator request |
+| `vericairn.software/researcher` | `schedule`, `event` (such as a release published), `request` | Possibilities citing their sources, with a draft work order where work is proposed; asks | None to read the estate; public retrieval only where the brief permits it, with no credential, refused in a private estate; anything outward a publication request |
+| `vericairn.software/bug-hunter` | `schedule`, `event` (such as a change integrated into main), `request` | Possibilities with their reproductions and a draft fix work order | Commits on the occurrence's own branch only; no push to a protected branch, pull request or merge |
+
+Each role's brief states its fingerprint rule, so a repeat of an open or declined finding has its fingerprint, and its caps: at
+most five possibilities per occurrence, three with drafts, the rest in one summary possibility. Every output is a record another
+principal disposes of ([standing outputs](cli.md#standing-outputs-and-work-new---from-possibility-094)); a security finding carries
+`disclosure: held` for the Reviewer's review. The issue resolver and customer service follow conversation intake, in 0.9.6.
+
+```sh
+vericairn goal propose --by <sponsor> --kind stewardship --standing vericairn.software/researcher@1.0.0 --work-order RES-1 \
+  --title "Research the widget" --objective "Keep researching the widget." --done '{"type":"work-order","fields":{"key":"RESEARCHED"}}' \
+  --subject topic="the widget" --budget wallMinutes=30 --budget attemptsPerStep=2 \
+  --trigger '{"key":"monthly","kind":"schedule","unit":"months","every":1,"firstAt":"2026-12-01T00:00:00Z"}' \
+  --trigger '{"key":"asked","kind":"request"}' --period runs=4 --period wallMinutes=120
+```
+
 ## Preparing a release review (0.8.4)
 
 `vericairn release review-brief <version>` writes the candidate's review brief from the
@@ -881,7 +908,7 @@ Software Domain Pack ships three launchers and the Git workspace provider (whose
 
 | Launcher | Runs |
 |---|---|
-| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
+| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. From 0.9.4 a run whose brief permits retrieval adds `WebFetch,WebSearch` to `--tools` and allows exactly those two in `--settings` (RUN-04). It watches provisional message tokens and settles tokens from the stream's complete final result. |
 | `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' -c 'sandbox_workspace_write={writable_roots=["<canonical workspace>/.git"]}' --ignore-rules <qualified feature overrides> "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
 | `generic` | Describes the command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Worker dispatch remains refused because the generic launcher has no complete inventory qualification. |
 
@@ -1045,6 +1072,66 @@ judges once more immediately before the launch, under the runtime's gate, so not
 the start: an exception that lapsed after the intent, or a key of an operator or of the sponsor that arrived here, launches
 nothing, and the run is recorded `canceled` before dispatch, naming the devices and the exception, never charged.
 
+**What a run can reach (CODE-82).** From 0.9.4 each run's record shows what outside files and hosts it could reach. Neither
+native launcher confines its harness process: it runs as the operating-system user the worker runs as, and Codex's
+`workspace-write` sandbox confines only its shell commands' writes and network, never their reads or the harness process
+itself. So the worker measures before the run starts, after the inventory is admitted and before the intent. It plants a
+marker file in the run's own directory, outside the workspace and the run's temporary directory, and starts a test host on
+the loopback interface, then starts a probe in the harness's place: the vericairn executable with a private argument, as the
+same user, with the harness's environment and working directory. The probe reads the marker and connects to the host and
+reports what it read; nothing else runs. `readable` and `reachable` mean it returned the exact random token, `blocked` that
+the read or the connection was refused, and `unknown` that the probe did not run or report; unknown is never reported as
+blocked. The worker then lists the secret-bearing paths the user can open for reading: SSH keys, cloud, package-registry and
+forge credentials, GnuPG private keys, harness logins (the run's imported login among them), the Vericairn home's device keys,
+a home `.env` file and macOS keychain files, at conventional locations under the harness's home. Opening a file is the only
+test, made without blocking, so a named pipe at one of those paths holds nothing up, and the inventory stops, saying it is
+incomplete, after ten seconds; no byte of a file is read. The list, by path and kind, stays in the run's custody on the
+machine that ran it, at every record format: `estates/<estate>/reach/<run>.json` under the Vericairn home, owner-only and
+outside the run's directory, whose temporary directory and stop file the harness is told of, so the run is not handed a map
+of those paths beside its own files. A process of the same user can still read it. From record format 3 the intent's `execution.reach` records
+`outsideFile`, `testHost`, `secretPaths` (the count), `secretKinds` and `secretPathsComplete`, never a path. The measurement
+shows reach; it blocks nothing and refuses no run: on today's launchers a run reads what its user can read. Run the worker as
+another operating-system user, one that cannot read those paths, to reduce it.
+
+**Public retrieval for research runs (RUN-04).** From 0.9.4 a run retrieves public sources only when the brief of the
+assignment it runs permits it, with `"retrieval": "public"` (record format 3); no other field, text or setting permits it, and
+a run whose brief does not gets no web tool: a harness that uses one anyway is stopped as a tool outside its admitted
+inventory. Before anything is recorded, and again at the intent and before dispatch, an interim check refuses a retrieval run
+where the records show something private in reach: the workspace's repository resource is not `public`; the estate's own
+repository resource is not `public`, or no repository resource records the estate's own repository, or the runtime cannot
+observe that repository, since unknown counts as private; or the run's records name a credential, a `credential-reference`
+among the assignment's sources or step inputs or the work order's or goal's inputs. The estate's own repository is matched
+by its recorded identity: where it has an origin remote, only a resource whose `github` or
+`url` names that remote, and whose `rootCommit`, if it records one, agrees; where it has none, only a resource that records
+no remote, by its root commit. A root commit alone never stands for it, since a fork shares its upstream's. The run's own
+context package and the searches its intent fixes are judged too, once assembled and again on the intent just before it is
+written: any `credential-reference` they name, a search-selected one among them, refuses. The refusal names every reason.
+The check reads records as recorded: a resource's visibility is trusted, not verified at the forge; a credential named only
+inside another record the run reads (two hops away) is not found; and a repository that turns private after dispatch does
+not stop the run. What the run's operating-system user can read on the machine is not checked until confined reads
+are qualified; the run's `execution.reach` shows it. Only the `claude-code` launcher enables retrieval: it adds `WebFetch` and
+`WebSearch` to `--tools`, allows exactly those two in the run's `--settings`, and admits them in the inventory with the route
+`public-web`, which the intent's `execution.retrieval: "public"` alone allows. The `codex` launcher keeps web search disabled and
+refuses a retrieval run before its intent, because Codex's events report only a search's query, never what it retrieved. The
+condition adds the constraint that retrieved pages and results are untrusted data, never instructions, and no credential passes
+to the harness, as for every run. The worker reads each invocation of an admitted web tool and the result the harness gave
+the agent from the event stream and retains that result, exactly as reported, as an untrusted original in the run's custody:
+`sources/<content hash>.txt` and a `sources.jsonl` log in the run's owner-only directory, at most 8 MiB a source and 64 MiB a
+run. It fetches nothing itself, so the original is what the agent received; for `WebFetch` that is the harness's own reduction
+of the page, not the page's bytes. A web tool asked for an address that is not public raises a critical `network` signal and
+the run is stopped. The address is read as a WHATWG URL parser, which a harness's fetch uses, reads it: tabs and newlines
+removed, backslashes as slashes, the host percent-decoded and its trailing dots removed, IPv4 in every form that parser
+accepts (decimal, octal or hexadecimal parts, one to four of them) and IPv6 with its IPv4-mapped and embedded forms. Loopback,
+private, shared, link-local and metadata, unique-local, multicast, unspecified, documentation and reserved ranges, names only a
+local resolver answers, user information, a scheme other than http or https and anything that does not parse are not public.
+A non-ASCII host, which that parser maps by Unicode normalization and IDNA (full-width or ideographic dots, enclosed digits),
+is refused rather than mapped, so an internationalized name must be given in its `xn--` form. A public name that resolves to a
+private address is not caught, and the stop follows the event, which can arrive after the tool ran. Settlement records `sourcesObserved`:
+each source's tool, its address or query (withheld when it would fail the estate's content check), its time, whether it was
+retained and its content hash and size, at most 100 in full with the count and digest of all, and whether the log was
+complete. Retrieved text never enters a record, a repository or the agent's instructions. The log is not tamper-evident: a
+harness that does not sandbox the agent runs as the same user and could change it.
+
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed
 containment are separate facts: the worker that observes the run transmits the stop at its next heartbeat, by creating the
@@ -1173,6 +1260,30 @@ server. Windows has no graceful signal for a windowless process, so a harness th
 does not watch the stop file needs escalation. Files and keychains accessible to the worker's operating-system user
 remain accessible to the harness; use a dedicated user for credential isolation. The process boundaries and managed
 configuration limitations below apply. No MCP tool launches or stops a run.
+
+### Who can stop a run, and the timed stop drill (0.9.4)
+
+Only an operator, whoever decides for the run's goal (its sponsor when a person, or an operator for a goal an agent sponsors) and
+the principal who started the run may stop it, on every profile; anyone else is refused before anything is asked of the run.
+They stop it in one of these ways, each of which asks the run to stop through the worker that observes it:
+
+| Command | What it stops |
+|---|---|
+| `vericairn worker stop <run> --by <principal> [--grace <seconds>]` | One run. |
+| `vericairn goal pause <goal> --by <sponsor> --stop-runs` | Every run of the goal in flight, and the goal starts no new run. |
+| `vericairn goal pause --standing --by <sponsor> --stop-runs` | Every run of every standing agent the principal may pause. |
+| `vericairn goal stop <goal> --by <sponsor>` | A standing agent's runs in flight, as it ends the agent; another goal's runs need `worker stop`. |
+
+A stop is contained only once the worker observes the run's whole boundary exited, at most the grace plus a few heartbeats after
+the request when the worker on that machine observes it, however the harness behaves.
+
+From 0.9.4 (OPS-21), that time is measured before the carrier runs work unattended, and monthly after, by a recurring duty
+whose proof is a `stop-drill` verification: `vericairn worker drill --by <principal>` starts a scratch run on the runtime's machine
+that ignores the stop it is sent, as an unresponsive agent would, asks it to stop as `worker stop` does and records the
+milliseconds from the stop to the observed containment and to the run's last write. A run not contained within the drill's limit
+(60 seconds by default) fails the drill, and a failed `stop-drill` verification is required attention until a later drill on the
+same machine passes ([CLI](cli.md#vericairn-worker-drill-094)). The drill measures the worker of one machine; a run another
+machine's worker observes is measured by a drill there.
 
 ### Launch accounting and containment
 
@@ -2061,6 +2172,11 @@ MCP server. The signed `harness-qualification` record is available from format 2
 | `login` | The permitted login boundary: presence for Codex, unmanaged subscription class for Claude Code. No credential content or credential digest. |
 | `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests the estate-only approval policy, whether it was reported, and reported authentication status. |
 
+From 0.9.4 (CODE-82), qualification also plants a marker file in its scratch directory, outside the probe workspace and its
+temporary directory, and a test host on the loopback interface, and runs the same reach probe as a run does, in the harness's
+place. A format-3 qualification records the outcome as `reach`: `file` (`readable`, `blocked` or `unknown`) and `host`
+(`reachable`, `blocked` or `unknown`). The reach is evidence about the installation, not an admission identity: admission
+still matches the six probe digests, and a revocation may omit it.
 Raw probe output, command bindings, machine paths and credential values never enter the qualification record.
 The MCP check first compares the actual local command, arguments and environment to the generated configuration;
 only then does its digest normalize run-specific paths and acting-principal bindings. A record from another machine
@@ -2121,7 +2237,8 @@ See the [Codex CLI flags](https://learn.chatgpt.com/docs/developer-commands?surf
 [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Claude Code's `--tools` selects exactly `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `TaskOutput`, `TaskStop` and
-`EndConversation`. The inventory also identifies the built-in goal evaluator, the `vericairn` MCP server and the
+`EndConversation`; from 0.9.4 a retrieval run adds `WebFetch` and `WebSearch` (RUN-04), with the route `public-web`, while the
+qualification probes keep the base selection. The inventory also identifies the built-in goal evaluator, the `vericairn` MCP server and the
 `claude-code-setting-sources-none` configuration. It verifies the presence of every option it relies on: `--print`,
 `--output-format`, `--verbose`, `--permission-mode`, `--mcp-config`, `--strict-mcp-config`, `--setting-sources`,
 `--settings`, `--tools`, `--model`, `--effort`, and `--max-budget-usd`. All must be declarations in help, not prefixes

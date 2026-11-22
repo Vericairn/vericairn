@@ -57,11 +57,18 @@ public sealed partial class EstateService
                     JsonSerializer.Deserialize<CommunicationValues>(r.Body.GetProperty("values"), ProtocolJson.Options)!,
                     r.Id, r.ComputedHash, r.By, EstateModel.BodyString(r, "basis"), model.IsCurrent(r), r.Supersedes,
                     EstateModel.BodyString(r, "authority"), EstateModel.BodyString(r, "authorityHash"), EstateModel.BodyString(r, "basisHash"))).ToList();
+                DateTimeOffset observed = CommunicationClock.GetUtcNow();
+                // From 0.9.4 (GOAL-11): availability and quiet hours come from the person's one current own-scope revision.
+                List<CommunicationLayer> own = layers.Where(l => l.Current && l.Scope == "person").ToList();
+                CommunicationValues? declared = own.Count == 1 ? own[0].Values : null;
                 return CommunicationResolution.Resolve(recipient, assignment, layers, view) with
                 {
-                    ObservedAt = RecordParser.FormatTimestamp(CommunicationClock.GetUtcNow()),
+                    ObservedAt = RecordParser.FormatTimestamp(observed),
                     RevisionHash = ContentHash.Sha256(Encoding.UTF8.GetBytes(string.Join('\n', layers.Select(r => r.Hash)))),
                     Template = PresentationUse(model, Vericairn.Records.Templates.PresentationTemplates.Communication),
+                    Availability = declared?.Availability,
+                    QuietHours = declared?.QuietHours,
+                    AvailabilityNow = declared?.Availability is null && declared?.QuietHours is null ? null : AvailabilityRules.StateAt(declared.Availability, declared.QuietHours, observed),
                 };
             }
             catch (Exception exception) when (exception is ArgumentException or JsonException or InvalidOperationException or KeyNotFoundException)
@@ -121,6 +128,41 @@ public sealed partial class EstateService
                 {
                     values[field] = value;
                 }
+            }
+
+            // From 0.9.4 (GOAL-11): a person's availability and quiet hours, on their own scope, from record format 3.
+            if (request.Values.Availability is not null || request.Values.QuietHours is not null)
+            {
+                if (request.Scope != "person")
+                {
+                    return Refuse("Availability and quiet hours are a person's own, on their person scope; estate defaults and assignment overrides carry neither.");
+                }
+
+                if (session.Manifest.RecordFormat < 3)
+                {
+                    return Refuse("Availability and quiet hours belong to record format 3; this estate writes an earlier format until it is upgraded.");
+                }
+            }
+
+            if (request.Values.Availability is CommunicationAvailability availability)
+            {
+                var declared = new JsonObject { ["state"] = availability.State };
+                if (availability.Until is not null) declared["until"] = availability.Until;
+                if (availability.From is not null) declared["from"] = availability.From;
+                values["availability"] = declared;
+            }
+
+            if (request.Values.QuietHours is QuietHoursSetting quiet)
+            {
+                var windows = new JsonArray(quiet.Windows.Select(w => (JsonNode)new JsonObject
+                {
+                    ["days"] = new JsonArray(w.Days.Select(d => (JsonNode)d).ToArray()),
+                    ["start"] = w.Start,
+                    ["end"] = w.End,
+                }).ToArray());
+                var hours = new JsonObject { ["zone"] = quiet.Zone, ["windows"] = windows };
+                if (quiet.Breakthrough is not null) hours["breakthrough"] = new JsonArray(quiet.Breakthrough.Select(c => (JsonNode)c).ToArray());
+                values["quietHours"] = hours;
             }
 
             var body = new JsonObject { ["scope"] = request.Scope, ["values"] = values };

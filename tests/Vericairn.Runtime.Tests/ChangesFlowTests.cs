@@ -771,6 +771,35 @@ public sealed class ChangesFlowTests
         Assert.NotEmpty(Vericairn.Runtime.Changes.ChangeGate.QueuedRefusals(Merged, Required, queue, false));
     }
 
+    // FIX-154: a push refused after its dispatch has recorded its basis. Its retry keeps that basis, as a reader before 0.9.4 requires of
+    // every target fact of a retry but its base and heads: it offers the adapter only that basis, and is refused where it no longer applies.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ARetryAfterARefusalAtThePushKeepsTheBasisItRecorded(bool stillHeld)
+    {
+        using var f = new Fixture();
+        string earlier = new('d', 40);
+        ChangeResponse first = f.Service.ChangesPush(f.Push with { Head = earlier });
+        Assert.True(first.Ok, first.Message);
+        f.Adapter.ChooseBase = recorded => recorded.Count > 0 ? recorded[0] : Basis;
+        int pushes = 0;
+        f.Adapter.BeforePush = () => { if (pushes++ == 0) throw new ProviderRefusedException("The remote branch moved."); };
+        ChangeResponse refused = f.Service.ChangesPush(f.Push);
+        Assert.Equal("known-failure", refused.Status);
+        Assert.Equal(first.Operation!.Id, f.Current("change-push").Body.GetProperty("target").GetProperty("basis").GetString());
+        if (!stillHeld) f.Adapter.ChooseBase = _ => Basis;
+        ChangeResponse retried = f.Service.ChangesPush(f.Push with { Reconciliation = "The remote branch was observed; nothing was pushed." });
+        Assert.Equal(stillHeld, retried.Ok);
+        Assert.Equal([earlier], f.Adapter.Recorded[^1]);
+        if (!stillHeld) Assert.Contains("no longer applies", retried.Message, StringComparison.Ordinal);
+        EstateModel model = f.Service.Session.Load();
+        IReadOnlyList<string> chain = model.Chain(model.ById[retried.Operation!.Id]);
+        Assert.All(chain.Select(id => model.ById[id]).Where(r => r.Body.GetProperty("target").TryGetProperty("basis", out _)),
+            r => Assert.Equal(first.Operation.Id, r.Body.GetProperty("target").GetProperty("basis").GetString()));
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
     [Fact]
     public void AMergeOfAHeadNoScannedPushRecordsIsRefusedBeforeTheMerge()
     {
@@ -778,7 +807,7 @@ public sealed class ChangesFlowTests
         f.SeedPull(pushed: false);
         ChangeResponse result = f.Service.ChangesMerge(f.Merge);
         Assert.False(result.Ok);
-        Assert.Contains("No successful scanned push of this exact head", result.Message, StringComparison.Ordinal);
+        Assert.Contains("No complete checked push of this exact head", result.Message, StringComparison.Ordinal);
         Assert.Null(f.Provider.MergedHead);
     }
 
@@ -847,10 +876,21 @@ public sealed class ChangesFlowTests
         internal int Preparations { get; private set; }
         internal int Pushes { get; private set; }
         internal string? RemoteHead { get; set; }
-        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) { BeforePrepare?.Invoke(); Preparations++; return new(branch, target, head, Basis, null, Basis); }
-        public void Push(string directory, string remote, PushPlan plan, SecretScan scan)
+        // The records' heads each preparation and push was given (FIX-154), and the base a test chooses from them.
+        internal List<IReadOnlyList<string>> Recorded { get; } = [];
+        internal Func<IReadOnlyList<string>, string>? ChooseBase { get; set; }
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head) =>
+            throw new InvalidOperationException("The runtime prepares a push with the records' heads.");
+        public PushPlan Prepare(string directory, string remote, string branch, string target, string head, IReadOnlyList<string> recorded)
         {
-            BeforePush?.Invoke(); Pushes++;
+            BeforePrepare?.Invoke(); Preparations++; Recorded.Add(recorded);
+            return new(branch, target, head, ChooseBase?.Invoke(recorded) ?? Basis, null, Basis);
+        }
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan) =>
+            throw new InvalidOperationException("The runtime pushes with the records' heads.");
+        public void Push(string directory, string remote, PushPlan plan, SecretScan scan, IReadOnlyList<string> recorded)
+        {
+            BeforePush?.Invoke(); Pushes++; Recorded.Add(recorded);
             Assert.True(scan.Passed(plan));
             if (Uncertain) throw new ProviderUncertainException("Unconfirmed request.");
             RemoteHead = plan.Head;
@@ -858,6 +898,20 @@ public sealed class ChangesFlowTests
         public string? Observe(string directory, string remote, string branch) => RemoteHead;
         internal string? Text { get; set; } = "";
         public string? PublishedText(string directory, PushPlan plan) => Text;
+        internal IReadOnlyList<PushedCommit>? Commits { get; set; } = [];
+        internal int MessageReads { get; private set; }
+        public IReadOnlyList<PushedCommit>? CommitMessages(string directory, PushPlan plan) { MessageReads++; return Commits; }
+        internal IReadOnlyDictionary<string, IReadOnlyList<string>>? Paths { get; set; }
+        internal int PathReads { get; private set; }
+        public IReadOnlyDictionary<string, IReadOnlyList<string>>? ChangedPaths(string directory, PushPlan plan) { PathReads++; return Paths; }
+        internal Dictionary<(string Commit, string Path), string> Files { get; } = [];
+        internal int FileReads { get; private set; }
+        public string? FileText(string directory, PushPlan plan, string commit, string path)
+        {
+            FileReads++;
+            Assert.True(commit == plan.Head || commit == plan.TargetHead);
+            return Files.TryGetValue((commit, path), out string? text) ? text : null;
+        }
     }
 
     internal sealed class ControlledProvider : IPullRequestProvider
@@ -881,6 +935,8 @@ public sealed class ChangesFlowTests
         { Read(); return Memory.Observe(destination, numberOrBranch); }
         public ChangeReceipt Merge(string destination, string number, string head)
         { Effect("change-merge"); MergedHead = head; ChangeReceipt result = Memory.Merge(destination, number, head); AfterEffect?.Invoke(); return result; }
+        public ChangeReceipt Merge(string destination, string number, string head, string message)
+        { Effect("change-merge"); MergedHead = head; ChangeReceipt result = Memory.Merge(destination, number, head, message); AfterEffect?.Invoke(); return result; }
         public TargetObservation ObserveTarget(string destination, string branch, string commit)
         { Read(); ObservedTarget = commit; return Memory.ObserveTarget(destination, branch, commit); }
         internal string? EnqueuedHead { get; private set; }

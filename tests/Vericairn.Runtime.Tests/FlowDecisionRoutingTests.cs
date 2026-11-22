@@ -25,7 +25,7 @@ public class FlowDecisionRoutingTests
         using var run = new RunEstate(recordFormat: 3);
         string op = run.Estate.OperatorId;
         string goal = FlowStepRoutingTests.Run(run, Gate(), body => Roles(body, op, op));
-        GoalStepResponse drafting = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse drafting = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(drafting.Ok, drafting.Message);
         RecordWritten lyrics = FlowStepRoutingTests.Done(run, drafting.Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
 
@@ -36,7 +36,7 @@ public class FlowDecisionRoutingTests
         Assert.Contains("No assignment holds step gate for this round", early.Problem!.Message, StringComparison.Ordinal);
         Assert.Equal(before, run.Estate.Load().Records.Count);
 
-        GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(asked.Ok, asked.Message);
         Assert.Equal(("ask", "gate", "person", op), (asked.Outcome, asked.Step, asked.Route, asked.Principal));
         RecordEnvelope question = run.Estate.Load().ById[asked.Ask!.Id];
@@ -62,7 +62,7 @@ public class FlowDecisionRoutingTests
         Assert.Equal(("done", "taken", "person"), (gate.GetProperty("state").GetString(), gate.GetProperty("decision").GetProperty("state").GetString(), gate.GetProperty("decision").GetProperty("decidedBy").GetString()));
 
         // goal step takes the path chosen; the path not chosen ends nothing, and a second decision is refused.
-        GoalStepResponse next = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse next = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(next.Ok, next.Message);
         Assert.Equal(("ask", "release"), (next.Outcome, next.Step));
         WriteOutcome again = run.Service.GoalDecide(goal, new GoalDecideRequest(op, "gate", ["drop"], "Changed my mind."));
@@ -77,7 +77,7 @@ public class FlowDecisionRoutingTests
         {
             string op = run.Estate.OperatorId;
             string goal = FlowStepRoutingTests.Run(run, Gate(), body => Roles(body, op, run.Estate.BuilderId));
-            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
             JsonElement route = Route(run, goal, "gate");
             Assert.Equal(("agent", run.Estate.BuilderId), (route.GetProperty("state").GetString(), route.GetProperty("principal").GetString()));
         }
@@ -88,7 +88,7 @@ public class FlowDecisionRoutingTests
             JsonObject flow = Gate();
             flow["steps"]![1]!["transition"]!["person"] = true;
             string goal = FlowStepRoutingTests.Run(run, flow, body => Roles(body, op, run.Estate.BuilderId, op));
-            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
             JsonElement route = Route(run, goal, "gate");
             Assert.Equal(("person", op), (route.GetProperty("state").GetString(), route.GetProperty("principal").GetString()));
             Assert.Contains(route.GetProperty("candidates").EnumerateArray(), c => c.GetProperty("principal").GetString() == run.Estate.BuilderId && !c.GetProperty("available").GetBoolean()
@@ -107,13 +107,13 @@ public class FlowDecisionRoutingTests
         {
             string op = run.Estate.OperatorId;
             string goal = FlowStepRoutingTests.Run(run, RuleThenRole(), body => Configured(body, op));
-            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
-            GoalStepResponse kind = run.Service.GoalStep(goal, new GoalStepRequest(op));
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            GoalStepResponse kind = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
             Assert.True(kind.Ok, kind.Message);
             Assert.Equal(("decided", "gate"), (kind.Outcome, kind.Step));
             Assert.Contains("round is its role's: no rule held", kind.Message, StringComparison.Ordinal);
             Assert.Equal("none", run.Estate.Load().ById[kind.Decision!.Id].Body.GetProperty("facts").GetProperty("rule").GetString());
-            GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op));
+            GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
             Assert.Equal(("ask", "gate", "person"), (asked.Outcome, asked.Step, asked.Route));
             WriteOutcome decided = run.Service.GoalDecide(goal, new GoalDecideRequest(op, "gate", ["ship"], "No rule settled it; ship."));
             Assert.True(decided.Ok, decided.Problem?.Message);
@@ -125,9 +125,9 @@ public class FlowDecisionRoutingTests
         {
             string op = run.Estate.OperatorId;
             string goal = FlowStepRoutingTests.Run(run, RuleThenRole(), body => Configured(body, op));
-            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
             RecordEnvelope order = run.Estate.Load().Current("work-order").Single(w => EstateModel.BodyString(w, "key") == "SONG-1");
-            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("assignment", op, JsonSerializer.SerializeToElement(FlowFixture.AssignmentBody("gate", op)), Subject: $"work-order:{order.Id}:{order.ComputedHash}")));
+            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("assignment", op, JsonSerializer.SerializeToElement(FlowFixture.AssignmentBody("gate", op, repository: run.Resource)), Subject: $"work-order:{order.Id}:{order.ComputedHash}")));
             Assert.DoesNotContain(run.Estate.Load().Current("observation"), o => EstateModel.BodyString(o, "kind") == FlowDecisions.ObservationKind);
             WriteOutcome decided = run.Service.GoalDecide(goal, new GoalDecideRequest(op, "gate", ["ship"], "No rule settled it; ship."));
             Assert.True(decided.Ok, decided.Problem?.Message);
@@ -150,8 +150,8 @@ public class FlowDecisionRoutingTests
             string op = run.Estate.OperatorId;
             RecordWritten ship = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, Marker("SHIP"))));
             string goal = FlowStepRoutingTests.Run(run, Planned(), body => Configured(body, op, "rule"));
-            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
-            GoalStepResponse ruled = run.Service.GoalStep(goal, new GoalStepRequest(op));
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            GoalStepResponse ruled = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
             Assert.Equal(("decided", "gate"), (ruled.Outcome, ruled.Step));
             Assert.Contains("its rule 1: path ship", ruled.Message, StringComparison.Ordinal);
 
@@ -168,7 +168,7 @@ public class FlowDecisionRoutingTests
             RecordWritten ship = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, Marker("SHIP"))));
             RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-status", op, RunEstate.Json("""{"status":"active","note":"Started."}"""), Subject: "work-order:" + ship.Id)));
             string goal = FlowStepRoutingTests.Run(run, Planned(), body => Configured(body, op, "rule"));
-            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
             EstateModel model = run.Estate.Load();
             FlowPosition.StepInstance pending = FlowPosition.Derive(model, model.ById[goal], DateTimeOffset.UtcNow).Steps.Single(s => s.Step.Key == "gate");
             Assert.Equal("default", pending.Decision!.Rule);

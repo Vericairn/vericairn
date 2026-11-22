@@ -24,6 +24,9 @@ public sealed class EstateModel
     private Dictionary<string, CurrentUse>? currentOperationIdentities;
     private IReadOnlyList<LivingDocuments.State>? livingDocuments;
     private Lazy<RecordEnvelope?>? resultAcceptancesBegan;
+    private Lazy<RecordEnvelope?>? overlapCheckBegan;
+    private Lazy<IReadOnlyList<AssignmentOverlaps.Overlap>>? recordOverlaps;
+    private ILookup<string, RecordEnvelope>? workOrdersByCarrier;
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -56,8 +59,37 @@ public sealed class EstateModel
     /// <summary>Repository root.</summary>
     public string Root { get; }
 
-    /// <summary>All parsed records in path order, those that do not count among them: they are kept as evidence and reported.</summary>
+    /// <summary>
+    /// All parsed records in path order, those that do not count among them: they are kept as evidence and reported. From 0.9.4 (FIX-156)
+    /// a record whose identifier another record file also carries, and every record of its line, is not among them
+    /// (<see cref="UnreadableLines"/>).
+    /// </summary>
     public IReadOnlyList<RecordEnvelope> Records { get; }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-156): the records the loader left out because their line holds an identifier more than one record file carries, each
+    /// line's records in path order, every copy among them. No lookup, chain or supersession of this model reads them; only the readings
+    /// that count what they cannot read against the principal it would favor do (the standing agents' failures, open outputs, ties and
+    /// hold). Empty for an estate with no such identifier.
+    /// </summary>
+    internal IReadOnlyList<IReadOnlyList<RecordEnvelope>> UnreadableLines
+    {
+        get => unreadableLines;
+        init
+        {
+            unreadableLines = value;
+            unreadableIds = value.SelectMany(line => line).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        }
+    }
+
+    private readonly IReadOnlyList<IReadOnlyList<RecordEnvelope>> unreadableLines = [];
+    private readonly HashSet<string> unreadableIds = new(StringComparer.Ordinal);
+
+    /// <summary>From 0.9.4 (FIX-156): every record of <see cref="UnreadableLines"/>, in path order within each line.</summary>
+    internal IEnumerable<RecordEnvelope> Unreadable => unreadableLines.SelectMany(line => line);
+
+    /// <summary>From 0.9.4 (FIX-156): whether an identifier is that of a record left out of this model as unreadable.</summary>
+    internal bool IsUnreadable(string? id) => id is not null && unreadableIds.Contains(id);
 
     /// <summary>
     /// The records that count, in path order (design/signed-history.md § 6). Type and subject lookups, currency and supersession read
@@ -65,7 +97,7 @@ public sealed class EstateModel
     /// </summary>
     public IReadOnlyList<RecordEnvelope> CountingRecords { get; private set; }
 
-    /// <summary>Records by id, those that do not count among them.</summary>
+    /// <summary>Records by id, those that do not count among them; from 0.9.4 (FIX-156) no unreadable record (<see cref="UnreadableLines"/>).</summary>
     public IReadOnlyDictionary<string, RecordEnvelope> ById { get; }
 
     /// <summary>Superseded record id to the id of its counting successor; a record that does not count supersedes nothing.</summary>
@@ -73,6 +105,12 @@ public sealed class EstateModel
 
     /// <summary>Reads an object of the estate by content hash, or null when it is not held: what checkpoint inventories are read through.</summary>
     internal Func<string, byte[]?>? ObjectReader { get; set; }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-148): the loader's use of the signature tables while it judged this model, naming the tables and the context its
+    /// verifications are counted in; null for a model judged outside a loader, which reads the process's tables uncounted.
+    /// </summary>
+    internal Signing.SignatureTables.Judgment? Signatures { get; init; }
 
     /// <summary>The repository paths the loader read, for telling an unreadable witnessed file from an absent one.</summary>
     internal IReadOnlySet<string>? FilePaths { get; set; }
@@ -132,6 +170,9 @@ public sealed class EstateModel
         currentOperationIdentities = null;
         livingDocuments = null;
         resultAcceptancesBegan = null;
+        overlapCheckBegan = null;
+        recordOverlaps = null;
+        workOrdersByCarrier = null;
         if (excluded.Count == 0) return;
         notCounting = excluded;
         CountingRecords = Records.Where(r => !excluded.Contains(r.Id)).ToList();
@@ -151,6 +192,8 @@ public sealed class EstateModel
             manifest = value;
             livingDocuments = null;
             resultAcceptancesBegan = null;
+            overlapCheckBegan = null;
+            recordOverlaps = null;
             // The record format the manifest states decides which admissions, and so which records, count.
             lock (trustGate)
             {
@@ -239,6 +282,20 @@ public sealed class EstateModel
     internal RecordEnvelope? ResultAcceptancesBegan(Func<EstateModel, RecordEnvelope?> find) =>
         LazyInitializer.EnsureInitialized(ref resultAcceptancesBegan, () => new Lazy<RecordEnvelope?>(() => find(this))).Value;
 
+    /// <summary>
+    /// The first record the overlap check's build wrote (<see cref="AssignmentOverlaps.Began"/>), found the first time it is asked once
+    /// the model is loaded and kept with it.
+    /// </summary>
+    internal RecordEnvelope? OverlapCheckBegan(Func<EstateModel, RecordEnvelope?> find) =>
+        LazyInitializer.EnsureInitialized(ref overlapCheckBegan, () => new Lazy<RecordEnvelope?>(() => find(this))).Value;
+
+    /// <summary>
+    /// The overlaps among active assignments as the records alone show them (<see cref="AssignmentOverlaps.Overlaps(EstateModel, IRepositoryView?)"/>
+    /// with no clone), derived the first time status or progress asks once the model is loaded and kept with it.
+    /// </summary>
+    internal IReadOnlyList<AssignmentOverlaps.Overlap> RecordOverlaps(Func<EstateModel, IReadOnlyList<AssignmentOverlaps.Overlap>> derive) =>
+        LazyInitializer.EnsureInitialized(ref recordOverlaps, () => new Lazy<IReadOnlyList<AssignmentOverlaps.Overlap>>(() => derive(this))).Value;
+
     /// <summary>The first current record using a value, and whether one with another id uses it too.</summary>
     private readonly record struct CurrentUse(string First, bool Shared);
 
@@ -274,6 +331,28 @@ public sealed class EstateModel
         }
 
         return current;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-149): the current work orders placed in a release carrier, which a placement names by its identity, in path
+    /// order, the carrier itself never among them. Read from one index of the current work orders by their placement's carrier, built once
+    /// for a judged model, so counting each carrier's placements reads the work orders once whatever the number of carriers.
+    /// </summary>
+    internal IEnumerable<RecordEnvelope> PlacedIn(RecordEnvelope carrier)
+    {
+        ArgumentNullException.ThrowIfNull(carrier);
+        ILookup<string, RecordEnvelope> index = LazyInitializer.EnsureInitialized(ref workOrdersByCarrier, () => Current("work-order")
+            .Select(order => (Order: order, Carrier: CarrierOf(order)))
+            .Where(placed => placed.Carrier is not null && placed.Carrier != Chain(placed.Order)[0])
+            .ToLookup(placed => placed.Carrier!, placed => placed.Order, StringComparer.Ordinal));
+        return index[Chain(carrier)[0]];
+
+        string? CarrierOf(RecordEnvelope order) =>
+            order.Body.TryGetProperty("placement", out JsonElement placement) && placement.ValueKind == JsonValueKind.Object
+                && placement.TryGetProperty("kind", out JsonElement kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "release"
+                && placement.TryGetProperty("carrier", out JsonElement named) && named.ValueKind == JsonValueKind.String
+                ? LivingDocuments.ProductIdentity(this, named.GetString()!)
+                : null;
     }
 
     /// <summary>All record ids in this record's supersedes chain, earliest first, ending with the record itself.</summary>

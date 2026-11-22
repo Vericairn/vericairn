@@ -64,6 +64,8 @@ public sealed partial class EstateService
             if (request.Adopt && !request.Check && AdoptionRefusal(model, request.By!) is string refusal)
                 return (null, new Problem("refused", refusal, []));
             if (!request.Check && RequestDeviceRefusal(model) is Problem denied) return (null, denied);
+            // From 0.9.4 (FIX-159): no checkpoint is signed while the estate leaves records unread.
+            if (!request.Check && ActingRefusal.BeforeSigning(model, request.Adopt ? "signing the adoption checkpoint" : "signing a history checkpoint") is Problem unread) return (null, unread);
             if (!request.Check && requestDevice.Value is { Closed: false, Signing: not null })
                 return (null, new Problem("refused", "A history checkpoint is signed on the runtime's machine by a device it holds; a device-signed request cannot write one.", []));
 

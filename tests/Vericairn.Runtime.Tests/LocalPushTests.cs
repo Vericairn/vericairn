@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using Vericairn.Adapters.Git;
+using Vericairn.Records.Estate;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -94,6 +95,180 @@ public sealed class LocalPushTests : IDisposable
         Assert.False(File.Exists(marker));
     }
 
+    // FIX-137: a checked push reads one file at its head or its target branch's head, absent as null and never through the clone's filters.
+    [Fact]
+    public void APushReadsAFileAtItsHeadOrTargetOnly()
+    {
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "docs/set");
+        Directory.CreateDirectory(Path.Combine(repository, "docs", "releases", "1.0.0"));
+        File.WriteAllText(Path.Combine(repository, "docs", "releases", "1.0.0", "manifest.json"), "{\"format\":\"vericairn.docs/1\"}\n");
+        File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.json filter=rewrite\n");
+        Git(repository, "add", ".");
+        Git(repository, "commit", "-m", "Add the set");
+        string head = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "config", "filter.rewrite.smudge", "echo rewritten");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "docs/set", "main", head);
+        Assert.Equal("{\"format\":\"vericairn.docs/1\"}\n", adapter.FileText(repository, plan, plan.Head, "docs/releases/1.0.0/manifest.json"));
+        Assert.Null(adapter.FileText(repository, plan, plan.TargetHead, "docs/releases/1.0.0/manifest.json"));
+        Assert.Null(adapter.FileText(repository, plan, plan.Head, "docs/releases/1.0.0"));
+        Assert.Null(adapter.FileText(repository, plan, plan.Head, "docs/releases/2.0.0/manifest.json"));
+        Assert.Throws<ProviderRefusedException>(() => adapter.FileText(repository, plan, new string('e', 40), "readme.txt"));
+        Assert.Throws<ProviderRefusedException>(() => adapter.FileText(repository, plan, plan.Head, "docs/../readme.txt"));
+    }
+
+    // CODE-81: a checked push reads every commit of its range, merge commits included, with its whole message, trailers included.
+    [Fact]
+    public void APushReadsEveryCommitMessageOfItsRangeIncludingMerges()
+    {
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        File.WriteAllText(Path.Combine(repository, "addition.txt"), "Checked addition.\n");
+        Git(repository, "add", "addition.txt");
+        Git(repository, "commit", "-m", "Add checked content\n\nWhy it changed.\n\nSigned-off-by: Test <test@example.invalid>");
+        string first = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "checkout", "main");
+        File.WriteAllText(Path.Combine(repository, "other.txt"), "Other content.\n");
+        Git(repository, "add", "other.txt");
+        Git(repository, "commit", "-m", "Other content");
+        string other = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "checkout", "work/change");
+        Git(repository, "merge", "--no-ff", "-m", "Merge main into the change\n\nSigned-off-by: Test <test@example.invalid>", "main");
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        IReadOnlyList<PushedCommit> commits = adapter.CommitMessages(repository, plan)!;
+        // The remote's main is still the initial commit, so the range holds both sides of the merge and the merge itself.
+        Assert.Equal(new[] { head, other, first }.Order(StringComparer.Ordinal), commits.Select(c => c.Commit).Order(StringComparer.Ordinal));
+        Assert.Equal("Merge main into the change\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == head).Message);
+        Assert.Equal("Add checked content\n\nWhy it changed.\n\nSigned-off-by: Test <test@example.invalid>\n", Assert.Single(commits, c => c.Commit == first).Message);
+        // FIX-137: each commit's paths, read on their own, a clean merge naming none, since none differs from every one of its parents.
+        IReadOnlyDictionary<string, IReadOnlyList<string>> paths = adapter.ChangedPaths(repository, plan)!;
+        Assert.Equal(new[] { head, other, first }.Order(StringComparer.Ordinal), paths.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["addition.txt"], paths[first]);
+        Assert.Equal(["other.txt"], paths[other]);
+        Assert.Empty(paths[head]);
+    }
+
+    // FIX-137: a path is kept exactly as git names it with -z: a directory whose name begins with a line break is not docs/.
+    [Fact]
+    public void APathIsReadExactlyAsGitNamesIt()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows file names cannot hold a line break.");
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "docs/set");
+        Directory.CreateDirectory(Path.Combine(repository, "\ndocs"));
+        File.WriteAllText(Path.Combine(repository, "\ndocs", "code.cs"), "class Code { }\n");
+        Directory.CreateDirectory(Path.Combine(repository, "docs"));
+        File.WriteAllText(Path.Combine(repository, "docs", "guide.md"), "A guide.\n");
+        Git(repository, "add", "--", "\ndocs/code.cs");
+        Git(repository, "commit", "-m", "Add code under a line-break directory");
+        string first = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "add", "--", "docs/guide.md");
+        Git(repository, "commit", "-m", "Add a guide");
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "docs/set", "main", head);
+        IReadOnlyDictionary<string, IReadOnlyList<string>> paths = adapter.ChangedPaths(repository, plan)!;
+        Assert.Equal(["\ndocs/code.cs"], paths[first]);
+        Assert.Equal(["docs/guide.md"], paths[head]);
+    }
+
+    // CODE-81: a commit the target branch already holds is in the repository already, so a pushed branch that takes in a newer target
+    // carries none of its commits to the message check, such as the merge commits a checked merge creates without the push's trailer.
+    [Fact]
+    public void AMessageReadLeavesOutTheCommitsTheTargetAlreadyHolds()
+    {
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        File.WriteAllText(Path.Combine(repository, "addition.txt"), "Checked addition.\n");
+        Git(repository, "add", "addition.txt");
+        Git(repository, "commit", "-m", "Add checked content\n\nSigned-off-by: Test <test@example.invalid>");
+        string pushed = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "push", remote, "work/change");
+        Git(repository, "checkout", "main");
+        File.WriteAllText(Path.Combine(repository, "other.txt"), "Other content.\n");
+        Git(repository, "add", "other.txt");
+        Git(repository, "commit", "-m", "Merge pull request #2 from Example/work/other");
+        string landed = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "push", remote, "main");
+        Git(repository, "checkout", "work/change");
+        Git(repository, "merge", "--no-ff", "-m", "Take in main\n\nSigned-off-by: Test <test@example.invalid>", "main");
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        // The branch's pushed head is the head of a complete recorded push, so the range continues from it (FIX-154).
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head, [pushed]);
+        Assert.Equal((pushed, landed), (plan.Base, plan.TargetHead));
+        Assert.Equal(head, Assert.Single(adapter.CommitMessages(repository, plan)!).Commit);
+    }
+
+    // FIX-154: a recorded head counts only when the remote branch, observed now, still holds it; otherwise, as when the clone lacks it
+    // or nothing is recorded, the scan starts at the merge base with the target, never at the remote branch's head.
+    [Theory]
+    [InlineData("held")]
+    [InlineData("none")]
+    [InlineData("missing")]
+    [InlineData("beside")]
+    public void TheScanBaseIsARecordedHeadTheRemoteBranchHoldsOrTheMergeBase(string recorded)
+    {
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        string start = Git(repository, "rev-parse", "HEAD");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "beside");
+        File.WriteAllText(Path.Combine(repository, "beside.txt"), "Beside.\n");
+        Git(repository, "add", "beside.txt");
+        Git(repository, "commit", "-m", "A commit on another line");
+        string beside = Git(repository, "rev-parse", "HEAD");
+        Git(repository, "checkout", "-b", "work/change", start);
+        File.WriteAllText(Path.Combine(repository, "one.txt"), "One.\n");
+        Git(repository, "add", "one.txt");
+        Git(repository, "commit", "-m", "Add one");
+        string one = Git(repository, "rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(repository, "two.txt"), "Two.\n");
+        Git(repository, "add", "two.txt");
+        Git(repository, "commit", "-m", "Add two");
+        Git(repository, "push", remote, "work/change");
+        File.WriteAllText(Path.Combine(repository, "three.txt"), "Three.\n");
+        Git(repository, "add", "three.txt");
+        Git(repository, "commit", "-m", "Add three");
+        string head = Git(repository, "rev-parse", "HEAD");
+        string[] heads = recorded switch
+        {
+            "held" => [one],
+            "missing" => [new string('e', 40), "not a commit"],
+            "beside" => [beside],
+            _ => [],
+        };
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head, heads);
+        Assert.Equal(recorded == "held" ? one : start, plan.Base);
+        // The push prepares again from the same heads; other heads give another plan, which refuses before anything is pushed.
+        var scan = new SecretScan("test-scanner", "1.0.0", plan.Range, "passed", 0);
+        if (recorded == "held") Assert.Throws<ProviderRefusedException>(() => adapter.Push(repository, remote, plan, scan, []));
+        adapter.Push(repository, remote, plan, scan, heads);
+        Assert.Equal(head, adapter.Observe(repository, remote, "work/change"));
+    }
+
     // The adapter isolates its own git processes. Only its read of the user's credential settings sees this test's stand-in
     // for the user's global configuration.
     private GitPushAdapter Adapter() => new(info =>
@@ -165,6 +340,296 @@ public sealed class LocalPushTests : IDisposable
             () => adapter.Prepare(repository, remote, "work/change", "main", head));
         Assert.Contains("not a known ancestor", refused.Message, StringComparison.Ordinal);
         Assert.Equal(remoteOnly, Git(remote, "rev-parse", "refs/heads/work/change"));
+    }
+
+    // CODE-81: a clone's info/grafts rewrites parents as replace objects do, and turning replace objects off does not disable it. A graft
+    // making the head's parent the base must not hide the middle commit, whose message carries a blocked term, from the message read,
+    // while the push, which reads the real objects, would still deliver it.
+    [Fact]
+    public void AGraftCannotHideACommitFromTheMessageRead()
+    {
+        CommitAt("2026-01-01T00:00:00Z", "readme.txt", "Initial content.\n", "init", "init", "--initial-branch=main");
+        string basis = Git(repository, "rev-parse", "HEAD");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        CommitAt("2026-01-02T00:00:00Z", "addition.txt", "First local commit.\n", "Add the widget\n\nWritten in a Tern session.");
+        string middle = Git(repository, "rev-parse", "HEAD");
+        CommitAt("2026-01-03T00:00:00Z", "addition.txt", "Second local commit.\n", "Tidy the widget");
+        string head = Git(repository, "rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(repository, ".git", "info", "grafts"), head + " " + basis + "\n");
+        Assert.Equal(basis, Git(repository, "rev-parse", "HEAD^"));
+
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        IReadOnlyList<PushedCommit> commits = adapter.CommitMessages(repository, plan)!;
+        Assert.Equal(new[] { head, middle }.Order(StringComparer.Ordinal), commits.Select(c => c.Commit).Order(StringComparer.Ordinal));
+        Assert.Equal(new[] { head, middle }.Order(StringComparer.Ordinal), adapter.ChangedPaths(repository, plan)!.Keys.Order(StringComparer.Ordinal));
+        Assert.Contains("Written in a Tern session.", adapter.PublishedText(repository, plan), StringComparison.Ordinal);
+        var settings = new Vericairn.Records.Estate.CommitMessages.Settings(Vericairn.Records.Estate.CommitMessages.Refuse, [],
+            [new("terms", Vericairn.Records.Estate.BlockedTerms.TermsOf(System.Text.Json.JsonSerializer.SerializeToElement(new { terms = TernOnly })))], []);
+        Assert.Equal(middle, Vericairn.Records.Estate.CommitMessages.Check(settings, commits.Select(c => (c.Commit, c.Message))).Refusal?.Commit);
+    }
+
+    // The same graft class against the fast-forward check: a graft claiming the remote branch's head as the middle commit's parent must
+    // not make a non-ancestor pass, so the leased push never overwrites the remote branch.
+    [Fact]
+    public void AGraftCannotMakeANonAncestorPassTheFastForwardCheck()
+    {
+        CommitAt("2026-01-01T00:00:00Z", "readme.txt", "Initial content.\n", "init", "init", "--initial-branch=main");
+        Git(repository, "checkout", "-b", "remote-only");
+        CommitAt("2026-01-01T00:00:01Z", "remote-only.txt", "A remote commit not in the local head.\n", "Remote-only commit");
+        string remoteOnly = Git(repository, "rev-parse", "HEAD");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(remote, "update-ref", "refs/heads/work/change", remoteOnly);
+        Git(repository, "checkout", "main");
+        Git(repository, "checkout", "-b", "work/change");
+        CommitAt("2026-01-02T00:00:00Z", "addition.txt", "First local commit.\n", "First local commit");
+        string middle = Git(repository, "rev-parse", "HEAD");
+        CommitAt("2026-01-03T00:00:00Z", "addition.txt", "Second local commit.\n", "Second local commit");
+        string head = Git(repository, "rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(repository, ".git", "info", "grafts"), middle + " " + remoteOnly + "\n");
+        Assert.Equal(remoteOnly, Git(repository, "rev-parse", middle + "^"));
+
+        var adapter = Adapter();
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(repository, remote, "work/change", "main", head));
+        Assert.Contains("not a known ancestor", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(remoteOnly, Git(remote, "rev-parse", "refs/heads/work/change"));
+    }
+
+    private static readonly string[] TernOnly = ["Tern"];
+
+    // FIX-137: the disclosure hold reads every added line and every message the push carries, whatever the clone's settings and
+    // attributes: a file git would call binary (a NUL byte, a -diff attribute committed or the clone's own, a big-file threshold below
+    // its size), an added line whose own text begins with "++", and messages under a clone's UTF-16 output encoding.
+    [Theory]
+    [InlineData("nul-byte")]
+    [InlineData("committed-attribute")]
+    [InlineData("clone-attribute")]
+    [InlineData("big-file-threshold")]
+    [InlineData("plus-plus-line")]
+    [InlineData("utf16-messages")]
+    [InlineData("utf16le-with-bom")]
+    [InlineData("utf16be")]
+    [InlineData("utf16le-without-bom")]
+    [InlineData("utf32")]
+    public void ThePublishedTextHoldsEveryAddedFormWhateverTheClonesSettings(string form)
+    {
+        const string held = "the held phrase of FIX-90";
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        switch (form)
+        {
+            case "nul-byte":
+                File.WriteAllBytes(Path.Combine(repository, "data.txt"), [.. System.Text.Encoding.UTF8.GetBytes("prefix\0\n" + held + "\n")]);
+                break;
+            case "committed-attribute":
+                File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.txt -diff\n");
+                File.WriteAllText(Path.Combine(repository, "data.txt"), held + "\n");
+                break;
+            case "clone-attribute":
+                File.WriteAllText(Path.Combine(repository, ".git", "info", "attributes"), "*.txt -diff\n");
+                File.WriteAllText(Path.Combine(repository, "data.txt"), held + "\n");
+                break;
+            case "big-file-threshold":
+                Git(repository, "config", "core.bigFileThreshold", "16");
+                File.WriteAllText(Path.Combine(repository, "data.txt"), held + "\n");
+                break;
+            case "plus-plus-line":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "++ " + held + "\n");
+                break;
+            case "utf16-messages":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Unrelated content.\n");
+                break;
+            // A file stored in UTF-16 or UTF-32 reads, as UTF-8, with NUL characters between its letters.
+            case "utf16le-with-bom":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nIt closes " + held + ".\n", new System.Text.UnicodeEncoding(false, true));
+                break;
+            case "utf16be":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nIt closes " + held + ".\n", new System.Text.UnicodeEncoding(true, true));
+                break;
+            case "utf16le-without-bom":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nIt closes " + held + ".\n", new System.Text.UnicodeEncoding(false, false));
+                break;
+            case "utf32":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nIt closes " + held + ".\n", new System.Text.UTF32Encoding(false, true));
+                break;
+        }
+        Git(repository, "add", "--all");
+        Git(repository, "commit", "-m", form == "utf16-messages" ? "Add content\n\nIt closes " + held + "." : "Add content");
+        if (form == "utf16-messages") Git(repository, "config", "i18n.logOutputEncoding", "UTF-16LE");
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        string? text = adapter.PublishedText(repository, plan);
+        Assert.NotNull(text);
+        Assert.Contains(held, text, StringComparison.Ordinal);
+        if (form.StartsWith("utf16le", StringComparison.Ordinal) || form is "utf16be" or "utf32")
+            Assert.DoesNotContain(held, text.Split('\n').First(l => l.Contains('\0', StringComparison.Ordinal)), StringComparison.Ordinal);
+        IReadOnlyList<DisclosureHolds.Hold> holds = [new("FIX-90", "order", [])];
+        Assert.Equal("FIX-90", DisclosureHolds.Disclosed(holds, text));
+    }
+
+    // FIX-137: the hold's reads do not depend on the clone's display settings. A root commit an unrelated history brings in by a merge
+    // shows its patch whatever log.showRoot says, and its paths too; the merge's combined diff leaves out the lines the root already
+    // holds, so only the root's own patch carries them. Prefix, color, signature and ordering settings change nothing read, and a
+    // submodule change is read though the clone ignores submodules; a commit whose tree changed but whose patch showed nothing would
+    // refuse the read.
+    [Theory]
+    [InlineData("show-root-off")]
+    [InlineData("display-settings")]
+    [InlineData("ignored-submodules")]
+    public void ThePublishedTextDoesNotDependOnTheClonesDisplaySettings(string setting)
+    {
+        const string held = "the held phrase of FIX-90";
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        string initial = Git(repository, "rev-parse", "HEAD");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        string? root = null;
+        switch (setting)
+        {
+            case "show-root-off":
+                Git(repository, "checkout", "--orphan", "orphan");
+                Git(repository, "rm", "-q", "-r", "--cached", ".");
+                File.Delete(Path.Combine(repository, "readme.txt"));
+                File.WriteAllText(Path.Combine(repository, "orphan.txt"), "Orphan notes.\n" + held + "\n");
+                Git(repository, "add", "orphan.txt");
+                Git(repository, "commit", "-m", "An unrelated root");
+                root = Git(repository, "rev-parse", "HEAD");
+                Git(repository, "checkout", "-f", "work/change");
+                Git(repository, "merge", "--allow-unrelated-histories", "--no-edit", "orphan");
+                Git(repository, "config", "log.showRoot", "false");
+                break;
+            case "display-settings":
+                File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\n" + held + "\n");
+                Git(repository, "add", "data.txt");
+                Git(repository, "commit", "-m", "Add notes");
+                foreach ((string key, string value) in new[] { ("diff.noprefix", "true"), ("diff.mnemonicPrefix", "true"), ("diff.relative", "true"),
+                    ("diff.orderFile", "readme.txt"), ("color.diff", "always"), ("color.ui", "always"), ("log.showSignature", "true"), ("diff.context", "9") })
+                    Git(repository, "config", key, value);
+                break;
+            case "ignored-submodules":
+                Git(repository, "update-index", "--add", "--cacheinfo", "160000," + initial + ",vendor/module");
+                Git(repository, "commit", "-m", "Pin a module");
+                Git(repository, "config", "diff.ignoreSubmodules", "all");
+                break;
+        }
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        string? text = adapter.PublishedText(repository, plan);
+        Assert.NotNull(text);
+        IReadOnlyDictionary<string, IReadOnlyList<string>> paths = adapter.ChangedPaths(repository, plan)!;
+        Assert.NotNull(paths);
+        if (setting == "ignored-submodules")
+        {
+            Assert.Contains("Subproject commit " + initial, text, StringComparison.Ordinal);
+            Assert.Equal(["vendor/module"], paths[head]);
+            return;
+        }
+        Assert.Equal("FIX-90", DisclosureHolds.Disclosed([new("FIX-90", "order", [])], text));
+        Assert.DoesNotContain("\u001b[", text, StringComparison.Ordinal);
+        if (root is not null) Assert.Equal(["orphan.txt"], paths[root]);
+    }
+
+    // FIX-137: the hold's read has a bound of its own, here a test's small one: a commit within it is read, one beyond it refuses, and so
+    // do commits each within it whose patches add up to more.
+    [Theory]
+    [InlineData(16, 1, true)]
+    [InlineData(256, 1, false)]
+    [InlineData(40, 2, false)]
+    public void ThePublishedTextReadsWithinItsOwnBound(int kibibytes, int commits, bool readable)
+    {
+        const int limit = 64 * 1024;
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        for (int commit = 0; commit < commits; commit++)
+        {
+            var lines = new System.Text.StringBuilder();
+            while (lines.Length < kibibytes * 1024) lines.Append("A line of the documentation set, long enough to add up quickly.\n");
+            File.WriteAllText(Path.Combine(repository, "set-" + commit + ".md"), lines + "the held phrase of FIX-90\n");
+            Git(repository, "add", "set-" + commit + ".md");
+            Git(repository, "commit", "-m", "Add part " + commit + " of the set");
+        }
+        string head = Git(repository, "rev-parse", "HEAD");
+        GitPushAdapter standard = Adapter();
+        var adapter = new GitPushAdapter(info => BoundedProcess.Run(info, TestTiming.HangTimeout), info => BoundedProcess.Run(info, TestTiming.HangTimeout, limit), limit);
+        PushPlan plan = standard.Prepare(repository, remote, "work/change", "main", head);
+        string? text = adapter.PublishedText(repository, plan);
+        Assert.Equal(readable, text is not null);
+        if (readable) Assert.Equal("FIX-90", DisclosureHolds.Disclosed([new("FIX-90", "order", [])], text!));
+        // The other reads keep their own bound.
+        Assert.Equal(commits, adapter.CommitMessages(repository, plan)!.Count);
+    }
+
+    // FIX-137: each commit's own added lines are read, so text one commit adds and a later one removes, which the push still publishes
+    // in its history, is read; an evil merge's own lines are read, even once a later commit removes them, while a line its target
+    // parent already holds is not; and a clean push of several commits discloses nothing.
+    [Theory]
+    [InlineData("added-then-removed", true)]
+    [InlineData("evil-merge", true)]
+    [InlineData("clean", false)]
+    public void ThePublishedTextReadsEveryCommitsOwnAddedLines(string history, bool discloses)
+    {
+        const string held = "the held phrase of FIX-90";
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(repository, "checkout", "-b", "work/change");
+        File.WriteAllText(Path.Combine(repository, "data.txt"), history == "added-then-removed" ? "Notes.\n" + held + "\n" : "Notes.\n");
+        Git(repository, "add", "data.txt");
+        Git(repository, "commit", "-m", "Add notes");
+        if (history == "added-then-removed")
+        {
+            File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\n");
+            Git(repository, "commit", "-am", "Tidy notes");
+        }
+        if (history == "evil-merge")
+        {
+            // The target moves on with a line of its own, already in the remote; the branch takes it in by a merge that adds a line
+            // neither parent holds.
+            Git(repository, "checkout", "main");
+            File.WriteAllText(Path.Combine(repository, "main.txt"), "The target's own line.\n");
+            Git(repository, "add", "main.txt");
+            Git(repository, "commit", "-m", "Target change");
+            Git(repository, "push", remote, "main");
+            Git(repository, "checkout", "work/change");
+            Git(repository, "merge", "--no-ff", "--no-commit", "main");
+            File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\n" + held + "\n");
+            Git(repository, "add", "data.txt");
+            Git(repository, "commit", "-m", "Take in main");
+            // A later commit removes the merge's own line, so only the merge's own diff shows it.
+            File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\n");
+            Git(repository, "commit", "-am", "Tidy notes");
+        }
+        if (history == "clean")
+        {
+            File.WriteAllText(Path.Combine(repository, "data.txt"), "Notes.\nMore notes.\n");
+            Git(repository, "commit", "-am", "More notes");
+        }
+        string head = Git(repository, "rev-parse", "HEAD");
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        string text = adapter.PublishedText(repository, plan)!;
+        Assert.NotNull(text);
+        IReadOnlyList<DisclosureHolds.Hold> holds = [new("FIX-90", "order", [])];
+        Assert.Equal(discloses ? "FIX-90" : null, DisclosureHolds.Disclosed(holds, text));
+        Assert.Contains("Notes.", text, StringComparison.Ordinal);
+        if (history == "evil-merge") Assert.DoesNotContain("The target's own line.", text, StringComparison.Ordinal);
+        if (history == "clean") Assert.Contains("More notes.", text, StringComparison.Ordinal);
     }
 
     // Commit one file at an exact author and committer date, so the commit-graph's generation numbers are predictable.

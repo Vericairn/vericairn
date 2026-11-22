@@ -20,7 +20,8 @@
       "in progress",
       "awaiting review",
       "accepted",
-      "accepted (earlier revision)"
+      "accepted (earlier revision)",
+      "displaced"
     ],
     "ask": [
       "open",
@@ -166,6 +167,24 @@
       "closed",
       "queued",
       "outside"
+    ],
+    "standing": [
+      "proposed",
+      "active",
+      "paused",
+      "lapsed",
+      "held",
+      "unavailable",
+      "stopped"
+    ],
+    "occurrence": [
+      "due",
+      "deferred",
+      "running",
+      "assigned",
+      "settled",
+      "disposed",
+      "held"
     ]
   }
 }

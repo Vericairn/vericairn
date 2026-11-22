@@ -4,6 +4,7 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Estate;
@@ -18,7 +19,7 @@ namespace Vericairn.Records.Estate;
 /// reaches only a person who holds that action, an operator or the grantee of a grant in force, or an agent such a grant covers.
 /// When none is available the step is an ask; nothing here ever falls back to a principal the roster does not name.
 /// </summary>
-public static class Routing
+public static partial class Routing
 {
     /// <summary>The role a work order is carried in when it names none.</summary>
     public const string DefaultRole = "builder";
@@ -39,7 +40,30 @@ public static class Routing
     /// <param name="Holds">Whether a key store of this machine holds a device's key, by the device's identity.</param>
     /// <param name="Custody">The custody guard here for an unattended run of a goal by an agent: one reason per device of an operator or of the goal's sponsor whose key signs here without its owner's presence; empty when none does.</param>
     /// <param name="Now">When availability is judged: the grants and the custody exceptions in force then.</param>
-    public sealed record Machine(IReadOnlyList<(string Launcher, string? Harness)> Launchers, Func<string, bool> Holds, Func<RecordEnvelope, string, IReadOnlyList<string>> Custody, DateTimeOffset Now);
+    public sealed record Machine(IReadOnlyList<(string Launcher, string? Harness)> Launchers, Func<string, bool> Holds, Func<RecordEnvelope, string, IReadOnlyList<string>> Custody, DateTimeOffset Now)
+    {
+        /// <summary>From 0.9.4 (GOAL-11): the agent sessions this runtime registered whose leases are live, for the session route; none when it keeps no presence.</summary>
+        public IReadOnlyList<LiveSession> Sessions { get; init; } = [];
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11; design/events-and-presence.md § 10): an agent session registered with this runtime whose lease is live,
+    /// which routing may give a step of a role it offers while it holds fewer steps than its capacity.
+    /// </summary>
+    /// <param name="Session">The session's public identity.</param>
+    /// <param name="Principal">The principal it acts for, by the id of its first record.</param>
+    /// <param name="Label">Its label.</param>
+    /// <param name="Roles">The roles it offers; empty for every role the roster names its principal for.</param>
+    /// <param name="Capacity">How many steps it takes at once.</param>
+    /// <param name="Holding">How many open steps it holds now.</param>
+    public sealed record LiveSession(string Session, string Principal, string? Label, IReadOnlyList<string> Roles, int Capacity, int Holding)
+    {
+        /// <summary>The open assignments it holds, by the id of each one's first record.</summary>
+        public IReadOnlyList<string> Assignments { get; init; } = [];
+
+        /// <summary>True when it offers a role and has room for another step.</summary>
+        public bool Takes(string role) => Holding < Capacity && (Roles.Count == 0 || Roles.Contains(role, StringComparer.Ordinal));
+    }
 
     /// <summary>Where a role's principals come from.</summary>
     /// <param name="Roster">The roster record at its current revision; null when the goal's own roles name them, or when there is no roster.</param>
@@ -60,6 +84,12 @@ public static class Routing
 
         /// <summary>True for a person: a human principal.</summary>
         public bool IsPerson => Kind == "human";
+
+        /// <summary>From 0.9.4 (GOAL-11): for a person away now, as their communication setting declares, when they are back.</summary>
+        public string? AwayUntil { get; init; }
+
+        /// <summary>From 0.9.4 (GOAL-11): for an agent available through a live session rather than a launcher, the session's identity.</summary>
+        public string? Session { get; init; }
     }
 
     /// <summary>The role a work order is carried in: the role it names, or builder.</summary>
@@ -84,6 +114,13 @@ public static class Routing
 
         if (FlowRuns.StepOf(assignment) is not FlowRuns.StepRef step)
         {
+            // From 0.9.4 (GOAL-07) an occurrence of a standing agent is carried in the role of its flow's work step; null when that flow
+            // does not resolve here, which nothing runs.
+            if (StandingAgents.KeyOf(assignment) is not null && StandingAgents.StandingOf(model, order) is RecordEnvelope standing)
+            {
+                return StandingAgents.Resolve(model, standing).Flow is Templates.FlowDefinition flow && StandingAgents.WorkStep(flow) is Templates.FlowStep work ? work.Role : null;
+            }
+
             return RoleOf(model.Latest(order));
         }
 
@@ -193,7 +230,8 @@ public static class Routing
 
     /// <summary>
     /// When an assignment is a hand-over (design/goals.md § 6, step 4), the assignment it takes the step over from: the latest assignment
-    /// of the same work order, by any revision, and of the same flow step for a run's, recorded before it, when that one's contributor is
+    /// of the same work order, by any revision, and of the same flow step for a run's, or from 0.9.4 of the same occurrence for a standing
+    /// agent's, recorded before it, when that one's contributor is
     /// an agent or a service and this one's is a person. Null for any other assignment.
     /// </summary>
     public static RecordEnvelope? TakesOverFrom(EstateModel model, RecordEnvelope assignment)
@@ -207,7 +245,7 @@ public static class Routing
 
         IReadOnlyList<string> orders = model.Chain(model.Latest(order));
         RecordEnvelope? previous = model.OfType("assignment")
-            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && FlowRuns.StepOf(a) == FlowRuns.StepOf(assignment) && GoalRules.Before(a, assignment) && !Stranded(model, a, assignment))
+            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && FlowRuns.StepOf(a) == FlowRuns.StepOf(assignment) && StandingAgents.KeyOf(a) == StandingAgents.KeyOf(assignment) && GoalRules.Before(a, assignment) && !Stranded(model, a, assignment))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
             .LastOrDefault();
         string kind = previous is not null && model.CurrentPrincipal(EstateModel.BodyString(previous, "contributor")) is RecordEnvelope holder ? EstateModel.BodyString(holder, "kind") ?? "?" : "?";
@@ -259,7 +297,24 @@ public static class Routing
     /// principal record, the operator role for the decider role, and for a reserved action to hold it. Whether the goal is active, and
     /// the runs in flight, decide when a run starts, not who carries the step.
     /// </summary>
-    public static Candidate Evaluate(EstateModel model, RecordEnvelope goal, AgentRuns.Ledger ledger, string principal, string role, RecordEnvelope? assignment, Machine machine)
+    public static Candidate Evaluate(EstateModel model, RecordEnvelope goal, AgentRuns.Ledger ledger, string principal, string role, RecordEnvelope? assignment, Machine machine) =>
+        Evaluate(model, goal, ledger, principal, role, assignment, machine, null);
+
+    /// <summary>
+    /// <see cref="Evaluate(EstateModel, RecordEnvelope, AgentRuns.Ledger, string, string, RecordEnvelope?, Machine)"/>, and from 0.9.4
+    /// (GOAL-11): a person away now is unavailable, and an agent without a launcher here is available through a live session that offers
+    /// the role and has room, when the step's exposure reads nothing. <paramref name="sessionExposure"/> says why it reads (empty when it
+    /// reads nothing); null when it is not known, and then no session takes the step (design/holds-reads-sends.md § 7).
+    /// </summary>
+    /// <param name="model">The estate.</param>
+    /// <param name="goal">The goal.</param>
+    /// <param name="ledger">The goal's agent-run ledger.</param>
+    /// <param name="principal">The principal the roster names.</param>
+    /// <param name="role">The step's role.</param>
+    /// <param name="assignment">The assignment that holds the step, when one does.</param>
+    /// <param name="machine">What this machine offers routing.</param>
+    /// <param name="sessionExposure">Why the step's exposure reads, from <see cref="SessionExposure"/>; null when unknown.</param>
+    public static Candidate Evaluate(EstateModel model, RecordEnvelope goal, AgentRuns.Ledger ledger, string principal, string role, RecordEnvelope? assignment, Machine machine, IReadOnlyList<string>? sessionExposure)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
@@ -287,7 +342,14 @@ public static class Routing
                 reasons.Add($"the step is a reserved action, {Describe(action)}, and it holds neither the operator role nor a grant of {action} in force");
             }
 
-            return new Candidate(principal, name, kind, reasons.Count == 0, null, reasons);
+            // From 0.9.4 (GOAL-11): a person declares an absence; routing passes over them while it lasts.
+            string? away = AwayUntil(model, principal, machine.Now);
+            if (away is not null)
+            {
+                reasons.Add($"away until {away}, as their communication setting declares");
+            }
+
+            return new Candidate(principal, name, kind, reasons.Count == 0, null, reasons) { AwayUntil = away };
         }
 
         if (kind != "agent")
@@ -302,10 +364,11 @@ public static class Routing
 
         string? product = record.Body.TryGetProperty("agent", out JsonElement agent) && agent.ValueKind == JsonValueKind.Object && agent.TryGetProperty("product", out JsonElement p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
         string? launcher = machine.Launchers.FirstOrDefault(l => product is not null && (string.Equals(l.Harness, product, StringComparison.OrdinalIgnoreCase) || string.Equals(l.Launcher, product, StringComparison.OrdinalIgnoreCase))).Launcher;
+        var launching = new List<string>();
         if (launcher is null)
         {
             List<string> named = machine.Launchers.Where(l => l.Harness is not null).Select(l => $"{l.Launcher} for {l.Harness}").ToList();
-            reasons.Add($"no launcher for its harness, {product ?? "which its principal record does not name"}, is available on this machine ({(named.Count == 0 ? "none is" : string.Join(", ", named))})");
+            launching.Add($"no launcher for its harness, {product ?? "which its principal record does not name"}, is available on this machine ({(named.Count == 0 ? "none is" : string.Join(", ", named))})");
         }
 
         List<RecordEnvelope> admitted = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == principal && SignatureChecks.IsAdmitted(model, d)).ToList();
@@ -315,12 +378,181 @@ public static class Routing
         }
         else if (!admitted.Any(d => machine.Holds(model.Chain(d)[0])))
         {
-            reasons.Add("no key of its admitted devices is held on this machine, so the MCP server here would list only the read-only tools");
+            launching.Add("no key of its admitted devices is held on this machine, so the MCP server here would list only the read-only tools");
         }
 
+        // From 0.9.4 (GOAL-11): without a launcher here, a live session registered for the role carries the step, unless the step's
+        // exposure reads: the runtime cannot see a session's own facts (design/holds-reads-sends.md § 7).
+        string? session = null;
+        if (launching.Count > 0 && admitted.Count > 0 && machine.Sessions.FirstOrDefault(s => s.Principal == principal && s.Takes(role)) is LiveSession live)
+        {
+            if (sessionExposure is { Count: 0 })
+            {
+                session = live.Session;
+                launching.Clear();
+            }
+            else
+            {
+                launching.Add($"its live session {live.Label ?? live.Session} takes no step whose exposure reads, and this one's does: {(sessionExposure is null ? "its exposure is not known here, which counts as reading" : string.Join("; ", sessionExposure))}");
+            }
+        }
+
+        reasons.AddRange(launching);
         reasons.AddRange(AgentRuns.Exhausted(model, ledger, assignment?.Id));
-        return new Candidate(principal, name, kind, reasons.Count == 0, launcher, reasons);
+        return new Candidate(principal, name, kind, reasons.Count == 0, session is null ? launcher : null, reasons) { Session = session };
     }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11): when a person is away at a time, as their current own-scope communication setting declares, when they are
+    /// back; null when they are available, declare nothing, or have divergent current revisions, which declare nothing until reconciled.
+    /// </summary>
+    public static string? AwayUntil(EstateModel model, string? person, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        if (model.CurrentPrincipal(person) is not RecordEnvelope who)
+        {
+            return null;
+        }
+
+        string identity = model.Chain(who)[0];
+        List<RecordEnvelope> settings = model.Current("communication-setting")
+            .Where(r => EstateModel.BodyString(r, "scope") == "person" && model.CurrentPrincipal(EstateModel.BodyString(r, "recipient")) is { } recipient && model.Chain(recipient)[0] == identity)
+            .ToList();
+        if (settings.Count != 1 || !settings[0].Body.TryGetProperty("values", out JsonElement values) || values.ValueKind != JsonValueKind.Object
+            || !values.TryGetProperty("availability", out JsonElement availability) || availability.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        string? Text(string name) => availability.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        string? until = Text("until");
+        string? from = Text("from");
+        string now = Model.RecordParser.FormatTimestamp(at);
+        return Text("state") == "away" && until is not null && string.CompareOrdinal(now, until) < 0 && (from is null || string.CompareOrdinal(now, from) >= 0) ? until : null;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11; design/holds-reads-sends.md § 7): why a step's exposure reads, so that no live session takes it, since the
+    /// runtime cannot see a session's own facts; empty when it reads nothing. Until the exposure algorithm is built (RUN-06) this judges
+    /// conservatively from what the records show: a step reads when its goal, a record the goal names among its inputs, its work order, a
+    /// record the work order names among its inputs, or a record the step carries (a record it pins, and for a step already held its
+    /// assignments, their attempts and results and the reviews of those results) was written by any principal that is not a person
+    /// (an agent's or a service's records are outside-derived, a session's exposure being unknown), is a conversation observation
+    /// (outside text), or cannot be resolved here (unknown counts as present).
+    /// </summary>
+    public static IReadOnlyList<string> SessionExposure(EstateModel model, RecordEnvelope goal, RecordEnvelope? order, IEnumerable<RecordEnvelope?>? pinned = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        var reasons = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        void Judge(RecordEnvelope? record, string what)
+        {
+            if (record is null)
+            {
+                reasons.Add($"{what} cannot be resolved here, which counts as reading");
+                return;
+            }
+
+            if (!seen.Add(record.Id))
+            {
+                return;
+            }
+
+            if (!GoalRules.IsPerson(model, record.By))
+            {
+                reasons.Add($"{what} ({record.Type} {record.Id}) was written by {NameOf(model, record.By)}, which is no person, so it is outside-derived");
+            }
+            else if (record.Type == "observation" && EstateModel.BodyString(record, "kind") == "conversation")
+            {
+                reasons.Add($"{what} ({record.Type} {record.Id}) is a conversation observation, outside text");
+            }
+        }
+
+        RecordEnvelope latest = model.Latest(goal);
+        Judge(latest, "the goal");
+        foreach (JsonElement input in TJson.Array(latest.Body, "inputs"))
+        {
+            Judge(TJson.Text(input, "id") is string id && model.ById.TryGetValue(id, out RecordEnvelope? named) ? model.Latest(named) : null, "an input of the goal");
+        }
+
+        if (order is not null)
+        {
+            RecordEnvelope current = model.Latest(order);
+            Judge(current, "the work order");
+            foreach (string id in GoalRules.Inputs(current))
+            {
+                Judge(model.ById.TryGetValue(id, out RecordEnvelope? input) ? model.Latest(input) : null, "an input of the work order");
+            }
+        }
+
+        foreach (RecordEnvelope? record in pinned ?? [])
+        {
+            Judge(record, "a record the step carries");
+        }
+
+        return reasons;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11): what a step already held carries for its exposure: each assignment, its attempts, their results and the
+    /// reviews of those results, which a session would read when the step goes on with it.
+    /// </summary>
+    public static IEnumerable<RecordEnvelope> StepRecords(EstateModel model, IEnumerable<RecordEnvelope> assignments)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignments);
+        foreach (RecordEnvelope assignment in assignments)
+        {
+            yield return assignment;
+            foreach (RecordEnvelope attempt in WorkView.AttemptsOf(model, assignment))
+            {
+                yield return attempt;
+                if (WorkView.ResultOf(model, attempt) is RecordEnvelope result)
+                {
+                    yield return result;
+                    foreach (RecordEnvelope review in model.About(result.Id, "review").Where(model.IsCurrent))
+                    {
+                        yield return review;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11; design/events-and-presence.md § 10): true when an ask is a standing lapse ask about an assignment, as of a
+    /// record when one is given: the ask the runtime's presence sweep records when the session holding the assignment lapsed, about that
+    /// exact assignment and signed by the principal that recorded it (the sweep signs with no other key), in the sweep's words, still
+    /// open or notified, neither withdrawn nor answered by a decision. A hand-over's basis is such an ask; an ask any other principal
+    /// wrote, a withdrawn one and an answered one are not.
+    /// </summary>
+    public static bool LapseAsk(EstateModel model, RecordEnvelope ask, RecordEnvelope assignment, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(ask);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (ask.Type != "ask" || !model.ById.ContainsKey(ask.Id))
+        {
+            return false;
+        }
+
+        IReadOnlyList<string> revisions = model.Chain(model.Latest(ask));
+        RecordEnvelope first = model.ById[revisions[0]];
+        RecordEnvelope? standing = revisions.Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>().LastOrDefault(r => before is null || GoalRules.Before(r, before));
+        if (standing is null || first.Subject is not { Type: "assignment" } about || !model.Chain(model.Latest(assignment)).Contains(about.Id)
+            || !model.ById.TryGetValue(about.Id, out RecordEnvelope? named) || first.By != named.By
+            || EstateModel.BodyString(first, "question") is not string question || !LapseQuestion().IsMatch(question) || !question.Contains($" assignment {about.Id} ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return EstateModel.BodyString(standing, "state") is "open" or "notified"
+            && !model.DecisionsAnswering(revisions).Any(d => before is null || GoalRules.Before(d, before));
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\ASession .+ (?:which holds|was given) assignment [0-9A-HJKMNP-TV-Z]{26} .+ Hand the step to another principal of its role\?\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex LapseQuestion();
 
     /// <summary>
     /// Who decides for a goal: its sponsor when the sponsor is a person, and otherwise the operator who activated it, or the estate's
@@ -361,8 +593,10 @@ public static class Routing
     }
 
     /// <summary>
-    /// The current assignments of a work order that hold its step, any revision of it, oldest first; the last one holds the step. An
-    /// assignment routing stored without the record it was routed with holds nothing (<see cref="Stranded"/>).
+    /// The current assignments of a work order, any revision of it, oldest first by the time each states: the step's whole history, which
+    /// authorship, review independence, a basis's lookup and attention read. An assignment routing stored without the record it was
+    /// routed with is not among them (<see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/>). From 0.9.4 (ID-11) who holds a
+    /// step now is a separate question, which <see cref="Holding(EstateModel, RecordEnvelope)"/> answers.
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order)
     {
@@ -374,14 +608,236 @@ public static class Routing
     }
 
     /// <summary>
-    /// The current assignments that hold one step: of a run's work order, those that name that flow step and item; of any other work
-    /// order, those that name no step. Oldest first; the last one holds the step.
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): of a work order's assignments, those that hold their step under the holder
+    /// rule, oldest first; for each step the last of them holds it now. The fence, the displaced label, routing, a flow's holder and the
+    /// hand-over read it; everything that reads a step's history reads <see cref="Assignments(EstateModel, RecordEnvelope)"/>.
+    /// </summary>
+    public static IReadOnlyList<RecordEnvelope> Holding(EstateModel model, RecordEnvelope order) => HoldingOf(model, Assignments(model, order));
+
+    /// <summary>From 0.9.4 (ID-11): <see cref="Holding(EstateModel, RecordEnvelope)"/> for one step: of a run's work order, one flow step and item.</summary>
+    public static IReadOnlyList<RecordEnvelope> Holding(EstateModel model, RecordEnvelope order, FlowRuns.StepRef? step)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        return [.. Holding(model, order).Where(a => FlowRuns.StepOf(a) == step)];
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): of a work order's assignments in order, those that hold their step, judged
+    /// for each step by the kind of principal that recorded each, never by stated times across kinds:
+    /// <list type="bullet">
+    /// <item>When a person has assigned the step (a hand-over, which a lapse ask's basis also needs, an operator's or a sponsor's
+    /// assignment, the record rules checking each one's authority), the person's assignments hold it, the last of them by its time,
+    /// whoever held it before: a person always moves a step again, to anyone, themselves included. An agent's or a service's assignment
+    /// of that step, whatever time it states, holds nothing, except one to the principal the last person's assignment gave the step to,
+    /// recorded after it, which goes on holding for that principal.</item>
+    /// <item>When no person has assigned the step, chronology counts among the assignments agents and services recorded: the first holds
+    /// it, a later one to the same principal goes on holding it, and a later one to another principal holds nothing, so an agent never
+    /// takes a step another principal holds; a holder routing had stored without its record when a later one was written held nothing
+    /// then, and that later one holds the step.</item>
+    /// </list>
+    /// An assignment that holds nothing never makes its author or contributor the holder, and its writes are fenced as a displaced
+    /// holder's are.
+    /// </summary>
+    private static List<RecordEnvelope> HoldingOf(EstateModel model, IEnumerable<RecordEnvelope> ordered)
+    {
+        var holding = new List<RecordEnvelope>();
+        foreach (IGrouping<string, RecordEnvelope> step in ordered.GroupBy(a => HoldingKey(a.Body), StringComparer.Ordinal))
+        {
+            List<RecordEnvelope> all = [.. step];
+            List<RecordEnvelope> persons = [.. all.Where(a => GoalRules.IsPerson(model, Identity(model, a.By)))];
+            if (persons.Count == 0)
+            {
+                holding.AddRange(AgentsHolding(model, all));
+                continue;
+            }
+
+            RecordEnvelope last = persons[^1];
+            string? holder = Identity(model, EstateModel.BodyString(last, "contributor"));
+            holding.AddRange(persons);
+            holding.AddRange(all.Where(a => !persons.Contains(a) && GoalRules.Before(last, a) && Identity(model, EstateModel.BodyString(a, "contributor")) == holder));
+        }
+
+        return [.. holding.OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11): the holder rule over some of a work order's assignments, as a reading as of a record passes them, those recorded
+    /// before it: of them, those that hold their step, oldest first, the last of each step's holding it as of that record.
+    /// </summary>
+    internal static IReadOnlyList<RecordEnvelope> HoldingAmong(EstateModel model, IEnumerable<RecordEnvelope> assignments) =>
+        HoldingOf(model, assignments.OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal));
+
+    /// <summary>The holding assignments of a step no person has assigned, in order: chronology among agents' and services' assignments.</summary>
+    private static List<RecordEnvelope> AgentsHolding(EstateModel model, List<RecordEnvelope> ordered)
+    {
+        var holding = new List<RecordEnvelope>();
+        RecordEnvelope? holder = null;
+        string? principal = null;
+        foreach (RecordEnvelope assignment in ordered)
+        {
+            string? contributor = Identity(model, EstateModel.BodyString(assignment, "contributor"));
+            if (holder is null || contributor == principal || Stranded(model, holder, assignment))
+            {
+                holder = assignment;
+                principal = contributor;
+                holding.Add(assignment);
+            }
+        }
+
+        return holding;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11): the latest assignment of the step a new assignment would carry, by the time it states, whoever recorded it and
+    /// whether or not it holds the step; null when the step has none. A new assignment is never dated before it.
+    /// </summary>
+    internal static RecordEnvelope? LatestOfStep(EstateModel model, RecordEnvelope order, JsonElement body)
+    {
+        string key = HoldingKey(body);
+        IReadOnlyList<string> chain = model.Chain(model.Latest(order));
+        return model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && HoldingKey(a.Body) == key)
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11): the step an assignment body carries, as the holder rule tells steps apart: its flow step and item, a review's
+    /// subject and items, and a standing agent's occurrence; the same for every assignment of a work order that is neither.
+    /// </summary>
+    internal static string HoldingKey(JsonElement body)
+    {
+        JsonElement step = TJson.Object(body, "step");
+        JsonElement review = TJson.Object(step, "review");
+        return string.Join('\n', TJson.Text(step, "key") ?? string.Empty, TJson.Text(step, "instance") ?? string.Empty, review.ValueKind == JsonValueKind.Object ? "review" : string.Empty,
+            TJson.Text(TJson.Object(review, "subject"), "id") ?? string.Empty, string.Join(',', TJson.Strings(review, "items").Order(StringComparer.Ordinal)),
+            TJson.Text(TJson.Object(body, "occurrence"), "key") ?? string.Empty);
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11): the assignment that holds the step a new assignment would carry, when it is another principal's and the new
+    /// assignment's author is no person, so that it would take nothing and hold nothing; null otherwise.
+    /// </summary>
+    internal static RecordEnvelope? WouldHoldNothing(EstateModel model, RecordEnvelope order, string by, JsonElement body)
+    {
+        string key = HoldingKey(body);
+        RecordEnvelope? holder = Holding(model, order).LastOrDefault(a => HoldingKey(a.Body) == key);
+        string? contributor = TJson.Text(body, "contributor");
+        return holder is not null && Identity(model, EstateModel.BodyString(holder, "contributor")) != Identity(model, contributor) && !GoalRules.IsPerson(model, Identity(model, by))
+            ? holder : null;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11), for the wording of a refusal only: true when an assignment held its step at some time: it holds under the
+    /// holder rule, or it held among the agents' and services' assignments of the step dated before any person's assignment of it.
+    /// </summary>
+    internal static bool EverHeld(EstateModel model, RecordEnvelope assignment)
+    {
+        if (WorkView.OrderOfAssignment(model, assignment) is not RecordEnvelope order)
+        {
+            return false;
+        }
+
+        IReadOnlyList<string> chain = model.Chain(model.Latest(assignment));
+        string key = HoldingKey(model.Latest(assignment).Body);
+        List<RecordEnvelope> step = [.. Assignments(model, order).Where(a => HoldingKey(a.Body) == key)];
+        RecordEnvelope? person = step.FirstOrDefault(a => GoalRules.IsPerson(model, Identity(model, a.By)));
+        return HoldingOf(model, step).Any(a => chain.Contains(a.Id))
+            || AgentsHolding(model, [.. step.Where(a => !GoalRules.IsPerson(model, Identity(model, a.By)) && (person is null || GoalRules.Before(a, person)))]).Any(a => chain.Contains(a.Id));
+    }
+
+    private static string? Identity(EstateModel model, string? principal) =>
+        model.CurrentPrincipal(principal) is RecordEnvelope record ? model.Chain(record)[0] : principal;
+
+    /// <summary>
+    /// The current assignments of one step: of a run's work order, those that name that flow step and item; of any other work order,
+    /// those that name no step. Oldest first, by the time each states; from 0.9.4 (ID-11) <see cref="Holding(EstateModel, RecordEnvelope, FlowRuns.StepRef?)"/>
+    /// gives those that hold it.
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order, FlowRuns.StepRef? step)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
         return Assignments(model, order).Where(a => FlowRuns.StepOf(a) == step).ToList();
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): the current assignment that holds the step an assignment carries, the
+    /// last of the current assignments of its work order, by any revision, that carry the same step: for a run's work order the same
+    /// flow step and item (and for a review before hand-off the same reviewed subject and items), for a standing agent's the same
+    /// occurrence, and for any other work order the work order itself. Null when none holds it, as when routing stored the only one
+    /// without the record it was routed with.
+    /// </summary>
+    public static RecordEnvelope? HolderOf(EstateModel model, RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (WorkView.OrderOfAssignment(model, assignment) is not RecordEnvelope order)
+        {
+            return null;
+        }
+
+        RecordEnvelope latest = model.Latest(assignment);
+        FlowRuns.StepRef? step = FlowRuns.StepOf(latest);
+        string? occurrence = StandingAgents.KeyOf(latest);
+        FlowRuns.ReviewRef? review = FlowRuns.ReviewOf(latest);
+        return Holding(model, order, step).LastOrDefault(a => StandingAgents.KeyOf(a) == occurrence && SameReview(FlowRuns.ReviewOf(a), review));
+
+        static bool SameReview(FlowRuns.ReviewRef? one, FlowRuns.ReviewRef? other) =>
+            one is null ? other is null
+            : other is not null && one.Subject.Id == other.Subject.Id && one.Items.Order(StringComparer.Ordinal).SequenceEqual(other.Items.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): the assignment that displaced an assignment, or null while it holds its
+    /// step: the step's current holder (<see cref="HolderOf"/>) when that is a later assignment of the same step to another principal, as a
+    /// hand-over is. A later assignment of the step to the same principal keeps that principal the holder, so it displaces nothing.
+    /// </summary>
+    public static RecordEnvelope? DisplacedBy(EstateModel model, RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (HolderOf(model, assignment) is not RecordEnvelope holder || model.Chain(model.Latest(assignment)).Contains(holder.Id))
+        {
+            return null;
+        }
+
+        string? Identity(RecordEnvelope record) =>
+            EstateModel.BodyString(record, "contributor") is string contributor && model.CurrentPrincipal(contributor) is { } principal ? model.Chain(principal)[0] : EstateModel.BodyString(record, "contributor");
+        return Identity(holder) == Identity(model.Latest(assignment)) ? null : holder;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): true when an assignment no longer holds its step because a later assignment
+    /// of the same step to another principal holds it (<see cref="DisplacedBy"/>): a hand-over, or any later assignment of that step to
+    /// someone else. Only the step's current holder acts: the runtime refuses an attempt, progress claim or result on a displaced assignment
+    /// whatever time it states, and a result another runtime recorded on one before the hand-over reached it is labeled displaced, and
+    /// review routing skips it.
+    /// </summary>
+    public static bool Displaced(EstateModel model, RecordEnvelope assignment) => DisplacedBy(model, assignment) is not null;
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md §§ 8 and 12): how long a lapsed session holding a step of a goal stays lapsed
+    /// before the runtime asks about reassignment: the goal's limits.watch.reassignAfterSeconds, else its roster's (the roster the goal
+    /// names, or the estate's), else 600 seconds. Without a goal, the estate's roster's, else 600.
+    /// </summary>
+    public static int ReassignAfterSeconds(EstateModel model, RecordEnvelope? goal)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        if (goal is not null && ReassignAfter(model.Latest(goal).Body) is int own)
+        {
+            return own;
+        }
+
+        RecordEnvelope? roster = goal is not null && EstateModel.BodyString(model.Latest(goal), "roster") is string named && model.ById.TryGetValue(named, out RecordEnvelope? record) && record.Type == "roster"
+            ? model.Latest(record)
+            : model.Current("roster").OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+        return roster is not null && ReassignAfter(roster.Body) is int inherited ? inherited : 600;
+
+        static int? ReassignAfter(JsonElement body) =>
+            body.TryGetProperty("limits", out JsonElement limits) && limits.ValueKind == JsonValueKind.Object
+            && limits.TryGetProperty("watch", out JsonElement watch) && watch.ValueKind == JsonValueKind.Object
+            && watch.TryGetProperty("reassignAfterSeconds", out JsonElement seconds) && seconds.ValueKind == JsonValueKind.Number && seconds.TryGetInt32(out int value)
+            && value is >= 60 and <= 86_400 ? value : null;
     }
 
     /// <summary>
@@ -394,13 +850,22 @@ public static class Routing
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(assignment);
+        return Stranded(model, assignment, model.Chain(model.Latest(assignment)), before);
+    }
+
+    /// <summary>
+    /// <see cref="Stranded(EstateModel, RecordEnvelope, RecordEnvelope?)"/> over an explicit chain of the assignment's revisions: a
+    /// reconciliation judges each assignment it names on its own chain, not on the kept one's that a withdrawal folds it into.
+    /// </summary>
+    internal static bool Stranded(EstateModel model, RecordEnvelope assignment, IReadOnlyList<string> chain, RecordEnvelope? before)
+    {
         string? with = EstateModel.BodyString(assignment, "routedWith");
-        if (with is null)
+        // From 0.9.4 (GOAL-11) an assignment routed to a live session is stored alone, so it holds its step at once.
+        if (with is null or "session")
         {
             return false;
         }
 
-        IReadOnlyList<string> chain = model.Chain(model.Latest(assignment));
         bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
         return with switch
         {
@@ -447,7 +912,8 @@ public static class Routing
         return model.CurrentPrincipal(principal) is RecordEnvelope record ? EstateModel.BodyString(record, "name") ?? principal ?? "?" : principal ?? "?";
     }
 
-    private static List<string>? Named(JsonElement body, string role)
+    /// <summary>The principals a body's roles name for a role, in order, once each; null when they do not name it.</summary>
+    internal static List<string>? Named(JsonElement body, string role)
     {
         if (!body.TryGetProperty("roles", out JsonElement roles) || roles.ValueKind != JsonValueKind.Array)
         {

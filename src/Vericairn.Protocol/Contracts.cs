@@ -48,6 +48,13 @@ public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TriggeredCheckpoint? Checkpoint { get; init; }
 
+    /// <summary>
+    /// From 0.9.4 (CODE-73): what the write reports beside its record, each a sentence: the overlaps of a recorded assignment with the
+    /// active assignments, and the write boundary's warnings, such as a completed result that names no change; absent when there is none.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Notices { get; init; }
+
     /// <summary>A written outcome.</summary>
     public static WriteOutcome Success(RecordWritten written) => new(written, null);
 
@@ -150,6 +157,13 @@ public sealed record AssignRequest(string WorkOrder, string Contributor, string 
 {
     /// <summary>An optional exact saved prompt, recorded as a comment with this new assignment.</summary>
     public PromptSelection? Prompt { get; init; }
+
+    /// <summary>
+    /// From 0.9.4 (CODE-73): the repository the work changes, when the brief names none: a repository resource's id or estate. A brief
+    /// with a path pattern names its repository; without one, the estate's own repository fills it when the estate names no other.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Repository { get; init; }
 }
 
 /// <summary>Record the start of an attempt.</summary>
@@ -368,6 +382,34 @@ public sealed record GoalResponse(string Text, JsonElement Json)
 public sealed record NextResponse(string Text, JsonElement Json);
 
 /// <summary>
+/// From 0.9.4: a standing agent's occurrences as of an explicit UTC time (goal due): its state, its triggers and when each is next due,
+/// its period's caps and spend, its concurrency and failure pause, and each occurrence with its key and state (due, deferred with its
+/// reason, running, assigned, settled, disposed or held). The same on every machine for the same records and time; reading it records
+/// nothing.
+/// </summary>
+/// <param name="Text">Human form.</param>
+/// <param name="Json">Machine form, canonical: format vericairn.due/1.</param>
+public sealed record GoalDueResponse(string Text, JsonElement Json);
+
+/// <summary>
+/// From 0.9.4 (CODE-73; the estate's design/measured-work.md § 5): the overlap check's view. The active assignments by repository, each
+/// with its effective permitted paths (its interpretable patterns less its exclusions, and in the estate's own repository less records/
+/// and objects/) and why it is active, and every overlap of two of them with its patterns, its witnesses (up to 20 tracked paths at the
+/// registered clone's main line, else the shortest valid path either could create), its resolution and the concurrent-paths policies whose
+/// selection it meets. Reading it records nothing; the clone's answers are this machine's, labeled so.
+/// </summary>
+/// <param name="Text">The view in words.</param>
+/// <param name="Json">The view as JSON of format vericairn.overlaps/1.</param>
+public sealed record OverlapResponse(string Text, JsonElement Json);
+
+/// <summary>
+/// From 0.9.4 (CODE-73): preview a draft brief's overlaps with the active assignments before it is recorded. Reading it records nothing.
+/// </summary>
+/// <param name="Brief">The draft brief, as work assign takes it.</param>
+/// <param name="Repository">The repository it would change, a repository resource's id or estate, when the brief names none.</param>
+public sealed record OverlapPreviewRequest(JsonElement Brief, string? Repository = null);
+
+/// <summary>
 /// Take a goal's next step, one at a time (the smallest form of Community's conductor): the first eligible step whose route acts, routed
 /// from the runtime's machine. An agent's step is assigned to the agent when no assignment holds it and its run starts through the
 /// worker, within the custody precondition; a person's step is assigned to the person and asked of them; a step no principal is
@@ -388,11 +430,25 @@ public sealed record GoalStepRequest(string By, string? Repository = null, IRead
 {
     /// <summary>For an agent's step, up to five search queries whose top three new candidates each join the run's package as optional sources.</summary>
     public IReadOnlyList<string>? Search { get; init; }
+
+    /// <summary>
+    /// From 0.9.4, for a standing agent: the occurrence to carry, by its key as goal due lists it, or request for an occurrence of its
+    /// request trigger made now; the oldest due occurrence when omitted.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Occurrence { get; init; }
+
+    /// <summary>
+    /// From 0.9.4, for a standing agent: the explicit UTC time its triggers are evaluated at, never later than the runtime's clock; the
+    /// runtime's clock when omitted.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Now { get; init; }
 }
 
 /// <summary>What taking a goal's next step did: what was recorded and started, never more. A problem means nothing was dispatched.</summary>
 /// <param name="Goal">The goal's current revision.</param>
-/// <param name="Outcome">run (an agent's run started), ask (an ask recorded, with an assignment for a person), request (an operator request recorded for a run's reserved act, from 0.9.2), or none (nothing to dispatch).</param>
+/// <param name="Outcome">run (an agent's run started), ask (an ask recorded, with an assignment for a person), request (an operator request recorded for a run's reserved act, from 0.9.2), session (from 0.9.4, an assignment given to an agent's live session), or none (nothing to dispatch).</param>
 /// <param name="Message">What happened and what follows, in words.</param>
 /// <param name="Ok">Whether the step was taken as routed, or there was nothing to take.</param>
 /// <param name="Step">The step taken: its work order's key.</param>
@@ -411,14 +467,32 @@ public sealed record GoalStepResponse(string Goal, string Outcome, string Messag
     /// <summary>From 0.9.4, for a decision step its rule decides, the flow-decision observation this call wrote, recording the rule's decision, or a missed deadline's default, as the run derived it.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public RecordWritten? Decision { get; init; }
+
+    /// <summary>
+    /// From 0.9.4 (CODE-73): the overlaps the step's assignment has with the active assignments, each a sentence, and for an overlap a
+    /// refuse-level concurrent-paths policy holds, that the step was recorded to run after the earlier assignment; absent when there is none.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Notices { get; init; }
 }
 
-/// <summary>Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming its assignment.</summary>
+/// <summary>
+/// Take over a step an agent holds: the hand-over is a new assignment of the step, carrying the agent's brief and naming its assignment.
+/// From 0.9.4 (GOAL-11) a person may hand the step to any principal the roster names for its role, citing the lapse ask.
+/// </summary>
 /// <param name="Assignment">The agent's assignment, which holds the step.</param>
 /// <param name="By">The person recording the hand-over: the one taking over, the goal's sponsor or an operator; never an agent. A device-signed request names its device's principal.</param>
-/// <param name="Contributor">The person who takes the step over; the recording principal when omitted.</param>
+/// <param name="Contributor">Who takes the step over: the recording principal when omitted; from 0.9.4 any principal the roster names for the step's role.</param>
 /// <param name="Note">Why; a sentence naming the hand-over when omitted.</param>
-public sealed record TakeoverRequest(string Assignment, string By, string? Contributor = null, string? Note = null);
+public sealed record TakeoverRequest(string Assignment, string By, string? Contributor = null, string? Note = null)
+{
+    /// <summary>
+    /// From 0.9.4 (GOAL-11): the lapse ask the hand-over answers, an ask about the agent's assignment, recorded in the hand-over as its
+    /// basis. Required when the step goes to anyone but a person; a person taking a step over needs none.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Basis { get; init; }
+}
 
 /// <summary>What a hand-over did: the assignment written, and the stop asked of every run of the agent's assignment still in flight.</summary>
 /// <param name="Message">What happened, in words.</param>
@@ -455,7 +529,15 @@ public sealed record GoalProposeRequest(string By, JsonElement Body, string? Sup
 /// <summary>Activate, pause, resume or stop a goal.</summary>
 /// <param name="By">The principal acting: the goal's sponsor, or an operator for a goal an agent sponsors.</param>
 /// <param name="Note">Why, and what remains; a sentence naming the action when omitted.</param>
-public sealed record GoalActionRequest(string By, string? Note = null);
+public sealed record GoalActionRequest(string By, string? Note = null)
+{
+    /// <summary>
+    /// From 0.9.4, with a pause: also ask every run of the goal in flight to stop. A standing agent's stop always asks them, and retires its
+    /// work order.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool StopRuns { get; init; }
+}
 
 /// <summary>Evaluate a goal: the runtime gives each record predicate its verdict, and the evaluator each evidence statement.</summary>
 /// <param name="By">The evaluating principal, who authored none of the goal's steps.</param>
@@ -753,7 +835,12 @@ public sealed record RunStop(string RequestedAt, string RequestedBy, string? Rea
 /// <param name="Cap">The run's cap, as its intent records it.</param>
 /// <param name="Workspace">The workspace, a repository and branch.</param>
 /// <param name="Problem">Why start was refused or failed, when reported.</param>
-public sealed record RunResponse(string Run, string Status, string Message, bool Ok, RecordWritten? Operation = null, JsonElement? Cap = null, string? Workspace = null, Problem? Problem = null);
+public sealed record RunResponse(string Run, string Status, string Message, bool Ok, RecordWritten? Operation = null, JsonElement? Cap = null, string? Workspace = null, Problem? Problem = null)
+{
+    /// <summary>From 0.9.4 (CODE-73): the overlaps run admission found between the run's assignment and the active assignments, each a sentence; absent when there is none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Notices { get; init; }
+}
 
 /// <summary>What asking a run to stop observed: the stop's facts, the furthest one its state.</summary>
 /// <param name="Run">The run.</param>
@@ -858,6 +945,9 @@ public sealed record UpgradeRequest(string Version, string? By, bool Check)
 
     /// <summary>The invoking command line's full build identity, checked against the runtime before observing a dependency.</summary>
     public string? ClientBuild { get; init; }
+
+    /// <summary>From 0.9.4 (FIX-145): the explicit confirmation of a one-way upgrade, which the previous release cannot read after; refused without it.</summary>
+    public bool OneWay { get; init; }
 }
 
 /// <summary>An upgrade plan, and whether it was applied.</summary>
@@ -888,6 +978,13 @@ public sealed record UpgradeResponse(string FromPin, string ToPin, long FromForm
     /// exactly what an earlier implementation of its generator wrote for the same sources. A member edited by hand is never listed or rewritten.
     /// </summary>
     public IReadOnlyList<string> Regenerated { get; init; } = [];
+
+    /// <summary>
+    /// From 0.9.4 (FIX-145): whether the release the estate was pinned to before can still read it after, and how to return to that release,
+    /// with the restore point an applied upgrade recorded. Absent from older runtimes.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpgradeReturn? Return { get; init; }
 }
 
 /// <summary>A reconcile task.</summary>

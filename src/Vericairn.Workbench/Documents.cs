@@ -126,6 +126,12 @@ public sealed class GoalsWorkspace : Document
     /// <summary>True while the goal shown is a run with a stop to show.</summary>
     public bool HasStops => Stops.Count > 0;
 
+    /// <summary>From 0.9.4 (GOAL-07), for a standing agent, its state, next occurrence, deferrals and period spend.</summary>
+    public ObservableCollection<StandingRow> Standing { get; } = [];
+
+    /// <summary>True while the goal shown is a standing agent.</summary>
+    public bool HasStanding => Standing.Count > 0;
+
     /// <summary>From 0.9.4 (PROC-18), for a run, each step whose timing gates its start with its due time, before it runs.</summary>
     public ObservableCollection<DueRow> Due { get; } = [];
 
@@ -192,9 +198,11 @@ public sealed class GoalsWorkspace : Document
         Asks.Clear();
         Evaluations.Clear();
         Stops.Clear();
+        Standing.Clear();
         Due.Clear();
         Decisions.Clear();
         Proposed.Clear();
+        Raise(nameof(HasStanding));
         Raise(nameof(HasStops));
         Raise(nameof(HasDue));
         Raise(nameof(HasDecisions));
@@ -256,6 +264,11 @@ public sealed class GoalsWorkspace : Document
             Stops.Add(row);
         }
 
+        foreach (StandingRow row in view.Standing)
+        {
+            Standing.Add(row);
+        }
+
         foreach (DueRow row in view.Due)
         {
             Due.Add(row);
@@ -272,6 +285,7 @@ public sealed class GoalsWorkspace : Document
         }
 
         Raise(nameof(HasStops));
+        Raise(nameof(HasStanding));
         Raise(nameof(HasDue));
         Raise(nameof(HasDecisions));
         Raise(nameof(HasProposed));

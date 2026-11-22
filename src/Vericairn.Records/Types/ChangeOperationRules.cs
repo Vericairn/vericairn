@@ -81,6 +81,8 @@ internal static class ChangeOperationRules
 
         string? action = EstateModel.BodyString(context.Record, "action");
         string? status = EstateModel.BodyString(context.Record, "status");
+        if (target.ValueKind == JsonValueKind.Object && target.TryGetProperty("basis", out _))
+            Basis(context, action, target);
         if (status == "canceled" && (!context.HasRole(context.Record.By, Roles.Operator)
             || string.IsNullOrWhiteSpace(EstateModel.BodyString(context.Record, "reconciliation"))))
             context.Error("operation.change-cancel", "Only the operator can cancel a repository intent, recording an explicit no-effect reconciliation.");
@@ -116,6 +118,36 @@ internal static class ChangeOperationRules
             }
         }
     }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-154) a push records where its scan began, beside its base, from its dispatch on: <c>merge-base</c>, or the id of the
+    /// observed checked push of the same repository, destination, branch and target that it continued, whose head is its base. Which pushes
+    /// are complete is derived from these records by the runtime. Like every target fact other than a retry's base and heads, a recorded
+    /// basis is never changed or dropped by a later revision, a retry's included, so a reader before 0.9.4, whose rule lets a retry change
+    /// only <c>base</c>, <c>remoteHead</c> and <c>targetHead</c>, keeps it as one more target fact and ignores it; a push refused before
+    /// its dispatch records none, so its retry may record one.
+    /// </summary>
+    private static void Basis(ValidationContext context, string? action, JsonElement target)
+    {
+        string? basis = Text(target, "basis");
+        if (action != "change-push" || basis is null)
+        {
+            context.Error(BasisCode, "Only a checked push records a basis.");
+            return;
+        }
+        if (basis == "merge-base") return;
+        // A retry's revision before its dispatch keeps the basis without the base it finds again; the dispatch records both.
+        string? scanBase = Text(target, "base");
+        RecordEnvelope? continued = Identity.Ulid.IsValid(basis) ? context.Find(basis) : null;
+        JsonElement other = continued is not null && continued.Body.TryGetProperty("target", out JsonElement found) ? found : default;
+        if (continued is not { Type: "operation" } || EstateModel.BodyString(continued, "action") != "change-push"
+            || EstateModel.BodyString(continued, "status") != "observed-success" || scanBase is not null && Text(other, "head") != scanBase
+            || Text(other, "repository") != Text(target, "repository") || Text(other, "destination") != Text(target, "destination")
+            || Text(other, "branch") != Text(target, "branch") || Text(other, "target") != Text(target, "target"))
+            context.Error(BasisCode, "A push's basis is merge-base or the observed checked push of the same repository, branch and target whose head is its base.");
+    }
+
+    internal const string BasisCode = "operation.change-basis";
 
     private static string? Text(JsonElement value, string key) => value.ValueKind == JsonValueKind.Object
         && value.TryGetProperty(key, out JsonElement text) && text.ValueKind == JsonValueKind.String ? text.GetString() : null;

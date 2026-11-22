@@ -26,7 +26,7 @@ public sealed partial class EstateService
     /// <summary>How long an unused per-principal projection is kept; longer than the journal's retention, so no live cursor outlives it.</summary>
     private static readonly TimeSpan RegistrationLifetime = TimeSpan.FromDays(8);
 
-    private static readonly string[] GlobalProjections = ["ask", "request", "step", "run"];
+    private static readonly string[] GlobalProjections = ["ask", "request", "step", "run", "presence"];
 
     private readonly ConcurrentDictionary<string, byte> writtenHere = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<EventSubscription, byte> listening = new();
@@ -69,10 +69,13 @@ public sealed partial class EstateService
             }
 
             eventClock = time ?? TimeProvider.System;
+            // From 0.9.4 (ID-11) presence is kept beside the journal, judged by the same clock.
+            PresenceClock = eventClock;
             journal = EventJournal.Open(Path.Combine(directory, EventJournal.FileName), eventClock, capacity, retention);
             session.Written = id =>
             {
                 writtenHere.TryAdd(id, 0);
+                presenceWritten.Enqueue(id);
                 MarkEventsDirty();
             };
             audience = EventAudience.From(session.Load());
@@ -97,7 +100,7 @@ public sealed partial class EstateService
         lock (gate)
         {
             EstateModel model = session.Load();
-            var pass = new EventPass { Asks = Consumed("ask"), Requests = Consumed("request"), Steps = Consumed("step"), Runs = Consumed("run") };
+            var pass = new EventPass { Asks = Consumed("ask"), Requests = Consumed("request"), Steps = Consumed("step"), Runs = Consumed("run"), Presence = Consumed("presence") };
             foreach (EventSubscription subscription in readers.Where(s => s.Admits("attention")))
             {
                 pass.Attention.TryAdd(subscription.Principal, null);
@@ -670,6 +673,12 @@ public sealed partial class EstateService
             Compare("run", RunItems(model, relations), events.Baseline("run"), initialize);
         }
 
+        // From 0.9.4 (ID-11): a lapsed session holding work, and the end of that lapse.
+        if (full || pass.Presence)
+        {
+            Compare("presence", PresenceItems(model, relations), events.Baseline("presence"), initialize);
+        }
+
         var touched = new List<string>();
         foreach ((string named, AttentionResponse? computed) in pass.Attention)
         {
@@ -775,6 +784,8 @@ public sealed partial class EstateService
         // step settled once the step is done or withdrawn once the step no longer waits on it (design/release-procedure.md § 6).
         global::Vericairn.Records.Estate.OperatorRequests.Waiting queue = global::Vericairn.Records.Estate.OperatorRequests.WaitingOf(model, null, eventClock.GetUtcNow());
         var delivered = queue.Open.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        // From 0.9.4 (OPS-22) an optional request is open as a possible todo, which needs no decision of anyone.
+        var optional = queue.Optional.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
         Dictionary<string, string> held = queue.Withdrawn.ToDictionary(h => h.Request.Id, h => h.State, StringComparer.Ordinal);
         foreach (RecordEnvelope request in model.Current("operator-request"))
         {
@@ -786,9 +797,9 @@ public sealed partial class EstateService
 
             string state = global::Vericairn.Records.Estate.OperatorRequests.Closures(model, request).Any() ? "closed"
                 : held.TryGetValue(request.Id, out string? undelivered) ? undelivered
-                : delivered.Contains(request.Id) ? "open" : "closed";
+                : delivered.Contains(request.Id) || optional.Contains(request.Id) ? "open" : "closed";
             items[model.Chain(request)[0]] = new EventItem("request", new EventReference(request.Type, request.Id, request.ComputedHash), sources, state,
-                EstateModel.BodyString(request, "to"), state == "open" ? "decision-needed" : "information", false, relations.Of(request));
+                EstateModel.BodyString(request, "to"), state == "open" && !optional.Contains(request.Id) ? "decision-needed" : "information", false, relations.Of(request));
         }
 
         return items;
@@ -929,6 +940,9 @@ public sealed partial class EstateService
 
         /// <summary>The runs, as a progress read shows them.</summary>
         public bool Runs { get; init; }
+
+        /// <summary>From 0.9.4 (ID-11): the lapsed sessions holding work.</summary>
+        public bool Presence { get; init; }
 
         /// <summary>One goal's flow steps, as a goal read shows them.</summary>
         public string? StepsOfGoal { get; init; }

@@ -67,7 +67,11 @@ public sealed class CliBoundaryTests
         ClientFailure failure = ClientFailure.FromException(expected)!;
         Assert.Equal(cancel ? 130 : 124, code);
         Assert.Equal(failure.ExitCode, code);
-        Assert.Equal("error: " + failure.Message + error.NewLine, error.ToString());
+        // From 0.9.4 (FIX-152) a read stopped at its request limit also names the limit, what its runtime reported judging (a daemon
+        // reports nothing to its client) and the lighter reads; a write's timeout and a cancellation keep the shared diagnostic alone.
+        string stopped = cancel || effect ? string.Empty : " The health read stopped at its 30-second request limit; the runtime did not report "
+            + "what it was judging. Lighter reads to use meanwhile: vericairn operator list, vericairn goal and vericairn estate check.";
+        Assert.Equal("error: " + failure.Message + stopped + error.NewLine, error.ToString());
         Assert.Empty(output.ToString());
         Assert.Equal(1, calls);
     }

@@ -32,6 +32,11 @@ public static class ApiRoutes
             PresencePromptsResponse response = await service.PresencePromptsAsync(request, context.RequestAborted).ConfigureAwait(false);
             return Results.Json(response, ProtocolJson.Options, statusCode: response.Problem?.Code == "invalid" ? StatusCodes.Status400BadRequest : StatusCodes.Status200OK);
         });
+        // From 0.9.4 (ID-11): presence leases, renewed by agent sessions' transports; runtime state, never a record.
+        app.MapPost($"{v}/presence", (PresenceRegisterRequest request) => Results.Json(service.PresenceRegister(request), ProtocolJson.Options));
+        app.MapPost($"{v}/presence/{{lease}}/heartbeat", (string lease) => Results.Json(service.PresenceHeartbeat(lease), ProtocolJson.Options));
+        app.MapDelete($"{v}/presence/{{lease}}", (string lease) => Results.Json(service.PresenceRelease(lease), ProtocolJson.Options));
+        app.MapGet($"{v}/presence", (string? principal) => Results.Json(service.Presence(principal), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
         app.MapPost($"{v}/estate-policies/hash", (PolicyHashRequest request) =>
@@ -104,6 +109,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/release-bases/{{hash}}", (string hash) => service.ReleaseBasis(hash) is { } basis ? Results.Json(basis, ProtocolJson.Options) : Results.NotFound());
         app.MapPost($"{v}/work/review", (ResultReviewRequest request) => Outcome(service.ReviewResult(request)));
         app.MapPost($"{v}/work/amend", (AmendRequest request) => Outcome(service.Amend(request)));
+        app.MapPost($"{v}/standing/outputs", (StandingOutputRequest request) => Outcome(service.StandingOutput(request)));
         app.MapPost($"{v}/work/takeover", (TakeoverRequest request) => Results.Json(service.WorkTakeover(request), ProtocolJson.Options));
         app.MapGet($"{v}/devices", () => Results.Json(service.Devices(), ProtocolJson.Options));
         app.MapPost($"{v}/devices", (DeviceCreateRequest request) => Outcome(service.DeviceCreate(request)));
@@ -133,12 +139,21 @@ public static class ApiRoutes
         app.MapPost($"{v}/operator/record", async (OperatorRecordRequest request, HttpContext context) => Results.Json(await service.OperatorRecordAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/operator/unfinished", () => Results.Json(service.OperatorUnfinished(), ProtocolJson.Options));
         app.MapPost($"{v}/operator/unfinished", async (OperatorFinishRequest request, HttpContext context) => Results.Json(await service.OperatorFinishAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
+        // From 0.9.4 (OPS-16): the asks an act may answer with their recommendations, and the act itself.
+        app.MapGet($"{v}/operator/answers", (string? to) => Results.Json(service.OperatorAnswerCandidates(to), ProtocolJson.Options));
+        app.MapPost($"{v}/operator/answers", async (OperatorAnswerRequest request, HttpContext context) => Results.Json(await service.OperatorAnswerAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
+        // From 0.9.4 (OPS-24): every ready operator item with what its signature records, and the reviewed act that signs the chosen ones.
+        app.MapGet($"{v}/operator/act", (string? by) => Results.Json(service.OperatorActItems(by), ProtocolJson.Options));
+        app.MapPost($"{v}/operator/act", async (OperatorActRequest request, HttpContext context) => Results.Json(await service.OperatorActAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/operator/close", () => Results.Json(service.OperatorCloseCandidates(), ProtocolJson.Options));
         app.MapPost($"{v}/operator/close", async (OperatorCloseRequest request, HttpContext context) => Results.Json(await service.OperatorCloseAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/goals", () => Results.Json(service.Goals(), ProtocolJson.Options));
         app.MapPost($"{v}/goals", (GoalProposeRequest request) => Outcome(service.GoalPropose(request)));
         app.MapGet($"{v}/goals/{{id}}", (string id) => service.Goal(id) is GoalResponse goal ? Results.Json(goal, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/goals/{{id}}/next", (string id) => service.GoalNext(id) is NextResponse next ? Results.Json(next, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/goals/{{id}}/due", (string id, string? asOf) => service.GoalDue(id, string.IsNullOrWhiteSpace(asOf) ? null : asOf) is GoalDueResponse due ? Results.Json(due, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/overlaps", (string? repository) => Results.Json(service.WorkOverlap(string.IsNullOrWhiteSpace(repository) ? null : repository), ProtocolJson.Options));
+        app.MapPost($"{v}/overlaps/preview", (OverlapPreviewRequest request) => Results.Json(service.WorkOverlapPreview(request), ProtocolJson.Options));
         app.MapPost($"{v}/goals/{{id}}/step", (string id, GoalStepRequest request) => Results.Json(service.GoalStep(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/goals/{{id}}/activate", (string id, GoalActionRequest request) => Outcome(service.GoalActivate(id, request)));
         app.MapPost($"{v}/goals/{{id}}/pause", (string id, GoalActionRequest request) => Outcome(service.GoalPause(id, request)));
@@ -154,6 +169,8 @@ public static class ApiRoutes
         app.MapGet($"{v}/runs", () => Results.Json(service.Runs(), ProtocolJson.Options));
         app.MapPost($"{v}/runs/prepare", (RunStartRequest request) => Results.Json(service.RunPrepare(request), ProtocolJson.Options));
         app.MapPost($"{v}/runs", (RunStartRequest request) => Results.Json(service.RunStart(request), ProtocolJson.Options));
+        // From 0.9.4 (OPS-21): the timed stop drill, run by the runtime's own worker on its machine.
+        app.MapPost($"{v}/runs/drill", (StopDrillRequest request) => Results.Json(service.StopDrill(request), ProtocolJson.Options));
         app.MapPost($"{v}/runs/{{id}}/stop", (string id, RunStopRequest request) => Results.Json(service.RunStop(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/runs/{{id}}/settle", (string id, RunSettleRequest request) => Results.Json(service.RunSettle(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/work/{{key}}/move-plan", (string key, WorkMovePlanRequest request) => Results.Json(service.WorkMovePlan(key, request), ProtocolJson.Options));
@@ -172,6 +189,11 @@ public static class ApiRoutes
         app.MapPost($"{v}/packages/deprecate", (PackagesDeprecateRequest request) => Results.Json(service.PackagesDeprecate(request), ProtocolJson.Options));
         app.MapPost($"{v}/security-reports/poll", async (SecurityReportsPollRequest request, CancellationToken cancellationToken) => Results.Json(await service.SecurityReportsPollAsync(request, cancellationToken).ConfigureAwait(false), ProtocolJson.Options));
         app.MapPost($"{v}/security-reports/triage", (SecurityReportTriageRequest request) => Results.Json(service.SecurityReportsTriage(request), ProtocolJson.Options));
+        // From 0.9.4 (OPS-20): the automated observers declared on the runtime's machine and their reports.
+        app.MapGet($"{v}/observers", () => Results.Json(service.Observers(), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/declare", (ObserverDeclareRequest request) => Results.Json(service.ObserverDeclare(request), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/report", (ObserverReportRequest request) => Results.Json(service.ObserverReport(request), ProtocolJson.Options));
+        app.MapPost($"{v}/observers/withdraw", (ObserverWithdrawRequest request) => Results.Json(service.ObserverWithdraw(request), ProtocolJson.Options));
 
         app.MapPost($"{v}/estate/upgrade", (UpgradeRequest request) =>
         {

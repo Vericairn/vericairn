@@ -57,6 +57,28 @@ internal sealed class GoalOperations(CommandContext context)
         return Clean;
     });
 
+    /// <summary>
+    /// From 0.9.4: a standing agent's occurrences as of an explicit time: the one named, or the one goal neither achieved nor ended; with
+    /// none or several, the list. It records and starts nothing.
+    /// </summary>
+    public int GoalDue(string root, string? id, string? asOf, bool json) => context.WithApi(root, api =>
+    {
+        id ??= OpenGoal(api, json);
+        if (id is null)
+        {
+            return Clean;
+        }
+
+        GoalDueResponse? due = api.GoalDue(id, asOf);
+        if (due is null)
+        {
+            return context.Fail($"No goal has id {id}.");
+        }
+
+        context.Output.Write(json ? CanonicalJson.SerializePretty(due.Json) : due.Text);
+        return due.Json.TryGetProperty("problem", out _) ? HasErrors : Clean;
+    });
+
     /// <summary>Proposes a goal from its options: the conditions as JSON, the caps as unit=value, the inputs as type:id.</summary>
     public int GoalPropose(string root, GoalProposal proposal, bool json)
     {
@@ -144,14 +166,25 @@ internal sealed class GoalOperations(CommandContext context)
             body["limits"] = new Json.JsonObject { ["deadline"] = proposal.Deadline };
         }
 
-        if (proposal.Flow is null && ((proposal.Subject?.Length ?? 0) > 0 || (proposal.FlowOptions?.Length ?? 0) > 0 || proposal.Until is not null))
+        bool standing = proposal.Standing is not null;
+        if (proposal.Flow is not null && standing)
         {
-            return context.Fail("--subject, --flow-option and --until configure a run, and go with --flow.");
+            return context.Fail("--flow proposes a run, and --standing a standing agent, which runs its flow once per occurrence: give one of them.");
+        }
+
+        if (proposal.Flow is null && !standing && ((proposal.Subject?.Length ?? 0) > 0 || (proposal.FlowOptions?.Length ?? 0) > 0 || proposal.Until is not null))
+        {
+            return context.Fail("--subject, --flow-option and --until configure a run, and go with --flow or --standing.");
+        }
+
+        if (!standing && ((proposal.Triggers?.Length ?? 0) > 0 || (proposal.Period?.Length ?? 0) > 0 || proposal.RunsOn is not null || proposal.AwaitingReview is not null || (proposal.Outputs?.Length ?? 0) > 0))
+        {
+            return context.Fail("--trigger, --period, --awaiting-review, --outputs and --runs-on configure a standing agent, and go with --standing.");
         }
 
         return context.WithApi(root, api =>
         {
-            if (proposal.Flow is not null)
+            if (proposal.Flow is not null || standing)
             {
                 string? problem = RunPlan(api, proposal, body);
                 if (problem is not null)
@@ -160,7 +193,15 @@ internal sealed class GoalOperations(CommandContext context)
                 }
             }
 
-            return context.ReportOutcome(api.GoalPropose(new GoalProposeRequest(proposal.By, CommandJson.Element(body), proposal.Supersedes)), json);
+            WriteOutcome outcome = api.GoalPropose(new GoalProposeRequest(proposal.By, CommandJson.Element(body), proposal.Supersedes));
+            int code = context.ReportOutcome(outcome, json);
+            // A standing agent's preview: its triggers, what would be due and its caps, before its sponsor activates it.
+            if (standing && outcome.Ok && !json && outcome.Written is RecordWritten written && api.GoalDue(written.Id) is GoalDueResponse due)
+            {
+                context.Output.Write(due.Text);
+            }
+
+            return code;
         });
     }
 
@@ -170,9 +211,12 @@ internal sealed class GoalOperations(CommandContext context)
     /// </summary>
     private static string? RunPlan(IEstateApi api, GoalProposal proposal, Json.JsonObject body)
     {
-        int at = proposal.Flow!.LastIndexOf('@');
-        string id = at > 0 ? proposal.Flow[..at] : proposal.Flow;
-        string? version = at > 0 ? proposal.Flow[(at + 1)..] : null;
+        bool standing = proposal.Standing is not null;
+        string chosen = proposal.Standing ?? proposal.Flow!;
+        string option = standing ? "--standing" : "--flow";
+        int at = chosen.LastIndexOf('@');
+        string id = at > 0 ? chosen[..at] : chosen;
+        string? version = at > 0 ? chosen[(at + 1)..] : null;
         TemplatesResponse templates = api.Templates();
         if (templates.Problem is not null)
         {
@@ -184,13 +228,13 @@ internal sealed class GoalOperations(CommandContext context)
         if (flows.Count != 1)
         {
             return flows.Count == 0
-                ? $"--flow names no flow this runtime offers: {proposal.Flow}; vericairn templates list shows the templates, flows among them."
-                : $"--flow {proposal.Flow} names several versions of the flow; name one as id@version.";
+                ? $"{option} names no flow this runtime offers: {chosen}; vericairn templates list shows the templates, flows among them."
+                : $"{option} {chosen} names several versions of the flow; name one as id@version.";
         }
 
         if (proposal.WorkOrders.Length != 1)
         {
-            return "A run's work is one work order: give exactly one --work-order with --flow.";
+            return standing ? "A standing agent's work is one work order: give exactly one --work-order with --standing." : "A run's work is one work order: give exactly one --work-order with --flow.";
         }
 
         TemplateDto flow = flows[0];
@@ -201,7 +245,7 @@ internal sealed class GoalOperations(CommandContext context)
         }
         catch (Exception error) when (error is InvalidOperationException or JsonException)
         {
-            return $"--flow {proposal.Flow} does not resolve with every base it extends: {error.Message}";
+            return $"{option} {chosen} does not resolve with every base it extends: {error.Message}";
         }
 
         Dictionary<string, (string Type, string? RecordType)> fields = declared.ValueKind == JsonValueKind.Object && declared.TryGetProperty("fields", out JsonElement named) && named.ValueKind == JsonValueKind.Array
@@ -225,6 +269,11 @@ internal sealed class GoalOperations(CommandContext context)
                 "list" => new Json.JsonArray(value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(i => (Json.JsonNode)i).ToArray()),
                 _ => value,
             };
+        }
+
+        if (standing)
+        {
+            return StandingPlan(proposal, body, flow, subject);
         }
 
         var options = new Json.JsonObject();
@@ -259,6 +308,115 @@ internal sealed class GoalOperations(CommandContext context)
     }
 
     /// <summary>
+    /// The plan of a standing agent (from 0.9.4, GOAL-07; the estate's design/standing-agents.md § 5): the flow's exact pin, the subject,
+    /// the triggers as JSON, the period's caps as unit=value, the until time (thirty days from now when omitted) and the dispatching
+    /// runtime; null, or what is wrong.
+    /// </summary>
+    private static string? StandingPlan(GoalProposal proposal, Json.JsonObject body, TemplateDto flow, Json.JsonObject subject)
+    {
+        if (proposal.Kind != "stewardship")
+        {
+            return "A standing agent is a stewardship goal: give --kind stewardship with --standing.";
+        }
+
+        if ((proposal.FlowOptions?.Length ?? 0) > 0)
+        {
+            return "--flow-option configures a run; a standing agent takes --trigger, --period, --until and --runs-on.";
+        }
+
+        var triggers = new Json.JsonArray();
+        foreach (string trigger in proposal.Triggers ?? [])
+        {
+            try
+            {
+                if (Json.JsonNode.Parse(trigger) is not Json.JsonObject entry)
+                {
+                    return $"--trigger '{trigger}' is not a JSON object.";
+                }
+
+                triggers.Add(entry);
+            }
+            catch (JsonException exception)
+            {
+                return $"--trigger '{trigger}' is not JSON: {exception.Message}";
+            }
+        }
+
+        if (triggers.Count == 0)
+        {
+            return "A standing agent has at least one --trigger, as JSON with its own key and kind, such as a monthly schedule: key monthly, kind schedule, unit months, every 1 and firstAt a UTC time.";
+        }
+
+        var period = new Json.JsonObject();
+        foreach (string cap in proposal.Period ?? [])
+        {
+            int equals = cap.IndexOf('=', StringComparison.Ordinal);
+            string unit = equals > 0 ? cap[..equals] : string.Empty;
+            string value = equals > 0 ? cap[(equals + 1)..] : string.Empty;
+            string[] currency = value.Split(':');
+            if (unit == "unit" && value is "days" or "months")
+            {
+                period[unit] = value;
+            }
+            else if (unit == "currency" && currency.Length == 2 && long.TryParse(currency[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long amount))
+            {
+                period[unit] = new Json.JsonObject { ["amount"] = amount, ["unit"] = currency[1] };
+            }
+            else if (unit is "every" or "runs" or "wallMinutes" or "tokens" && long.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long number))
+            {
+                period[unit] = number;
+            }
+            else
+            {
+                return $"A period cap is unit=months|days, every, runs, wallMinutes or tokens as a number, or currency=<amount in minor units>:<unit>: '{cap}'.";
+            }
+        }
+
+        if (!period.ContainsKey("unit"))
+        {
+            period["unit"] = "months";
+        }
+
+        var plan = new Json.JsonObject
+        {
+            ["pin"] = new Json.JsonObject { ["id"] = flow.Pin.Id, ["version"] = flow.Pin.Version, ["hash"] = flow.Pin.Hash },
+            ["subject"] = subject,
+            ["triggers"] = triggers,
+            ["period"] = period,
+            ["until"] = proposal.Until ?? RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddDays(Vericairn.Records.Estate.StandingAgents.DefaultDays)),
+        };
+        if (proposal.RunsOn is not null)
+        {
+            plan["runsOn"] = proposal.RunsOn;
+        }
+
+        if (proposal.AwaitingReview is long awaiting)
+        {
+            plan["awaitingReview"] = awaiting;
+        }
+
+        if (proposal.Outputs is { Length: > 0 } outputs)
+        {
+            var caps = new Json.JsonObject();
+            foreach (string cap in outputs)
+            {
+                string[] parts = cap.Split('=', 2);
+                if (parts.Length != 2 || parts[0] is not ("possibilities" or "drafts" or "open") || !long.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long value))
+                {
+                    return $"An output cap is possibilities, drafts or open as name=number: '{cap}'.";
+                }
+
+                caps[parts[0]] = value;
+            }
+
+            plan["outputs"] = caps;
+        }
+
+        body["plan"]!["standing"] = plan;
+        return null;
+    }
+
+    /// <summary>
     /// The subject a run of a flow binds: the flow resolved with every base it extends, as the goal's validation and its view read it, so
     /// an extension binds the subject it inherits. Each base is read by its exact pin from this build's own templates or from those the
     /// runtime offers.
@@ -266,6 +424,54 @@ internal sealed class GoalOperations(CommandContext context)
     private static JsonElement ResolvedSubject(IReadOnlyList<TemplateDto> offered, TemplateDto flow) =>
         FlowDefinition.Resolve(TemplateDefinition.Read(flow.Definition), pin => TemplateCatalog.Resolve(pin, offered
             .Where(t => t.Pin.Id == pin.Id && t.Pin.Version == pin.Version && t.Pin.Hash == pin.Hash).Select(t => TemplateDefinition.Read(t.Definition)))).Subject;
+
+    /// <summary>
+    /// Pauses one goal, or from 0.9.4 with <paramref name="standing"/> every active standing agent the acting principal may pause, each
+    /// pause asking the goal's runs in flight to stop with <paramref name="stopRuns"/>.
+    /// </summary>
+    public int GoalPause(string root, string? goal, string by, string? note, bool standing, bool stopRuns, bool json)
+    {
+        if (standing == (goal is not null))
+        {
+            return context.Fail(standing ? "--standing pauses every standing agent you may pause; name no goal with it." : "Name the goal to pause, or pause every standing agent you may pause with --standing.");
+        }
+
+        if (!standing)
+        {
+            return context.WithApi(root, api => context.ReportOutcome(api.GoalPause(goal!, new GoalActionRequest(by, note) { StopRuns = stopRuns }), json));
+        }
+
+        return context.WithApi(root, api =>
+        {
+            var paused = new List<object>();
+            foreach (GoalRow row in api.Goals().Where(g => g.Status == "active"))
+            {
+                if (api.Goal(row.Id) is not GoalResponse shown || !shown.Json.TryGetProperty("standing", out _))
+                {
+                    continue;
+                }
+
+                WriteOutcome outcome = api.GoalPause(row.Id, new GoalActionRequest(by, note) { StopRuns = stopRuns });
+                paused.Add(new { goal = row.Id, title = row.Title, paused = outcome.Ok, record = outcome.Written?.Id, notices = outcome.Notices, problem = outcome.Problem?.Message });
+                if (!json)
+                {
+                    context.Output.WriteLine(outcome.Ok ? $"paused  {row.Id}  {row.Title}  goal-status {outcome.Written!.Id}" : $"not paused  {row.Id}  {row.Title}: {outcome.Problem?.Message}");
+                    foreach (string notice in outcome.Notices ?? []) context.Output.WriteLine("  " + notice);
+                }
+            }
+
+            if (json)
+            {
+                context.Output.WriteLine(JsonSerializer.Serialize(new { standing = paused }, ProtocolJson.Options));
+            }
+            else if (paused.Count == 0)
+            {
+                context.Output.WriteLine("No standing agent is active.");
+            }
+
+            return Clean;
+        });
+    }
 
     /// <summary>Activates, pauses, resumes or stops a goal.</summary>
     public int GoalAction(string root, string action, string goal, string by, string? note, bool json) => context.WithApi(root, api =>
@@ -326,7 +532,7 @@ internal sealed class GoalOperations(CommandContext context)
             }
 
             GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(options.By, options.Repository, settings.Count == 0 ? null : settings, options.WallMinutes, options.Branch, options.Base,
-                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage) { Search = options.Choices?.Search });
+                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage) { Search = options.Choices?.Search, Occurrence = options.Occurrence, Now = options.Now });
             if (!step.Ok)
             {
                 // From 0.9.4 (CODE-80) the runtime's problem is shown as its own words, marked and escaped.
@@ -335,6 +541,8 @@ internal sealed class GoalOperations(CommandContext context)
                 return Failed;
             }
 
+            // From 0.9.4 (CODE-73): the overlaps the step's assignment has, and any after routing recorded, beside the step's output.
+            foreach (string notice in (step.Notices ?? []).Concat(step.Run?.Notices ?? [])) context.Error.WriteLine(notice);
             RunRow? row = step.Outcome == "run" && !options.Detach ? RunConsole.Follow(context, api, step.Run!.Run, options.By) : null;
             if (json)
             {

@@ -92,7 +92,12 @@ internal sealed partial class RunDispatchService(
                 previous["executionObserved"] = new RunExecutionObservation(Element(plan.Selection)).Snapshot();
                 if (admitted.Efficiency is not null) previous["executionObserved"]!["adapter"] = admitted.Efficiency.Measurement();
             });
-            return Refused(new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} The run is recorded as a known failure; nothing ran and nothing is charged.", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, [])));
+            // From 0.9.4 (FIX-159): the message says what was recorded. A launch refused while the estate reports an error, as when a
+            // duplicate lands between admission and launch, cannot record its known failure either, so its intent stays not-started.
+            string failure = failed.Ok
+                ? "The run is recorded as a known failure; nothing ran and nothing is charged."
+                : $"Its known failure could not be recorded either ({failed.Problem?.Code ?? "refused"}), so its intent stays not-started: nothing ran, and the run stays in flight, charged at its cap, until a revision settles it.";
+            return Refused(new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} {failure}", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, [])));
         }
 
         if (supervisor is null)
@@ -107,7 +112,10 @@ internal sealed partial class RunDispatchService(
                 previous["observed"] = new JsonObject { ["summary"] = $"Cancelled before dispatch: when the harness was about to start, {devices} on the machine that ran the worker, with no custody exception in force for the goal{named}. Nothing was launched and nothing is charged.", ["at"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
             });
             string refusal = RunAdmissionService.CustodyRefusal(plan.Goal, lapsed);
-            return Refused(new RunResponse(run, canceled.Ok ? "canceled" : "not-started", $"Run {run} was cancelled before dispatch: {refusal} Its intent is recorded as canceled; nothing was launched and nothing is charged.", false, canceled.Written ?? intent, Element(plan.Cap), where, new Problem("refused", refusal, [])));
+            string kept = canceled.Ok
+                ? "Its intent is recorded as canceled; nothing was launched and nothing is charged."
+                : $"Its cancellation could not be recorded ({canceled.Problem?.Code ?? "refused"}), so its intent stays not-started: nothing was launched, and the run stays in flight, charged at its cap, until a revision settles it.";
+            return Refused(new RunResponse(run, canceled.Ok ? "canceled" : "not-started", $"Run {run} was cancelled before dispatch: {refusal} {kept}", false, canceled.Written ?? intent, Element(plan.Cap), where, new Problem("refused", refusal, [])));
         }
 
         WriteOutcome dispatched;
@@ -122,9 +130,11 @@ internal sealed partial class RunDispatchService(
         }
 
         var abandon = new CancellationTokenSource();
+        // A runtime that supervises a run is long-lived from here on: it judges at every load, as the daemon does (FIX-148).
+        session.KeepsJudgment = false;
         supervisions[run] = (Task.Run(() =>
         {
-            try { Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token, admitted.Efficiency); }
+            try { Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token, admitted.Efficiency, Excluded(plan.Assignment)); }
             finally { admitted.Efficiency?.Dispose(); }
         }), abandon);
         string generic = launcher.Generic ? $" The {launcher.Launcher} launcher is labeled: {IAgentLauncher.GenericLabel}." : string.Empty;
@@ -134,7 +144,10 @@ internal sealed partial class RunDispatchService(
         }
 
         string recorded = dispatched.Ok ? string.Empty : $" Its dispatch could not be recorded ({dispatched.Problem?.Message}); the worker records what it observes when the run ends.";
-        return new RunResponse(run, dispatched.Ok ? "dispatched" : "not-started", $"Run {run}: the intent was recorded with its cap before {launcher.Launcher} started as {plan.AgentName} in {where}; the worker observes it until it exits and records its usage. Its result is a claim another principal reviews; nothing is accepted.{generic}{recorded}", true, dispatched.Written ?? intent, Element(plan.Cap), where);
+        return new RunResponse(run, dispatched.Ok ? "dispatched" : "not-started", $"Run {run}: the intent was recorded with its cap before {launcher.Launcher} started as {plan.AgentName} in {where}; the worker observes it until it exits and records its usage. Its result is a claim another principal reviews; nothing is accepted.{generic}{recorded}", true, dispatched.Written ?? intent, Element(plan.Cap), where)
+        {
+            Notices = plan.Notices,
+        };
     }
 
     /// <summary>Returns the current runs and their budget ledgers.</summary>
@@ -536,7 +549,11 @@ internal sealed partial class RunDispatchService(
     };
 
     /// <summary>Observes a run until its exit, then records its settlement, and marks its goal budget-limited when it crossed a cap.</summary>
-    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon, EfficiencyRun? efficiency = null)
+    // From 0.9.4 (CODE-73), the brief's exclusions, which the settlement's scope audit counts as outside.
+    private static List<string> Excluded(RecordEnvelope assignment) =>
+        assignment.Body.TryGetProperty("brief", out JsonElement brief) && brief.ValueKind == JsonValueKind.Object && brief.TryGetProperty("excludedChanges", out _) ? Strings(brief, "excludedChanges") : [];
+
+    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon, EfficiencyRun? efficiency = null, IReadOnlyList<string>? excluded = null)
     {
         RunOutcome? outcome;
         try
@@ -558,7 +575,7 @@ internal sealed partial class RunDispatchService(
         RunScope scope;
         try
         {
-            scope = workspaces.CheckScope(workspace, baseline, permitted);
+            scope = excluded is { Count: > 0 } ? workspaces.CheckScope(workspace, baseline, permitted, excluded) : workspaces.CheckScope(workspace, baseline, permitted);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException or RegexMatchTimeoutException)
         {
@@ -572,6 +589,7 @@ internal sealed partial class RunDispatchService(
             outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal] };
         }
         supervisor.RetainSettlement(outcome, scope);
+        string? seen = null;
 
         try
         {
@@ -579,9 +597,16 @@ internal sealed partial class RunDispatchService(
             {
                 EstateModel model = session.Load();
                 AgentRuns.Run? found = AgentRuns.Find(model, run);
-                if (found is not null && !model.OfType("attempt").Any(a => a.Subject?.Id == found.Assignment && a.By == found.Principal
-                    && !priorAttempts.Contains(a.Id) && string.CompareOrdinal(a.At, RecordParser.FormatTimestamp(outcome.LaunchedAt)) >= 0
-                    && string.CompareOrdinal(a.At, RecordParser.FormatTimestamp(outcome.ExitedAt)) <= 0))
+                bool During(RecordEnvelope record) => string.CompareOrdinal(record.At, RecordParser.FormatTimestamp(outcome.LaunchedAt)) >= 0
+                    && string.CompareOrdinal(record.At, RecordParser.FormatTimestamp(outcome.ExitedAt)) <= 0;
+                List<RecordEnvelope> attempts = found is null ? [] : [.. model.OfType("attempt").Where(a => a.Subject?.Id == found.Assignment && a.By == found.Principal && !priorAttempts.Contains(a.Id) && During(a))];
+
+                // From 0.9.4 (FIX-155), the settlement names the completed or partial result the agent recorded during the run, on an attempt
+                // of this run, as seen at its exit: the one sign of a standing agent's success its failure pause reads, so that no result
+                // written after the settlement, whatever date it claims, makes the run a success.
+                seen = attempts.SelectMany(a => model.About(a.Id, "result")).Where(r => r.By == found!.Principal && During(r) && EstateModel.BodyString(r, "outcome") is "completed" or "partial")
+                    .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault()?.Id;
+                if (found is not null && attempts.Count == 0)
                 {
                     var signal = new RunSignal("attempt-missing", "warning", RecordParser.FormatTimestamp(outcome.ExitedAt),
                         "The run settled without the agent's attempt on its assignment during the run. A clean harness exit does not establish that the agent did the work.");
@@ -602,7 +627,7 @@ internal sealed partial class RunDispatchService(
             lock (gate)
             {
                 string? status = null;
-                WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome, scope)["status"]?.GetValue<string>());
+                WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome, scope, result: seen)["status"]?.GetValue<string>());
                 if (!settled.Ok)
                 {
                     supervisor.Settled(null, settled.Problem?.Message);
@@ -639,8 +664,11 @@ internal sealed partial class RunDispatchService(
         previous["dispatchedAt"] = RecordParser.FormatTimestamp(launchedAt);
     });
 
-    /// <summary>The settlement of a run: its observed effect, its usage unit by unit, the units not reported, and a stop's facts.</summary>
-    private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope, TimeSpan? minute = null, double? heartbeatSeconds = null)
+    /// <summary>
+    /// The settlement of a run: its observed effect, its usage unit by unit, the units not reported, and a stop's facts; for an observed
+    /// success, the result its agent recorded during the run, when the worker saw one at its exit, in observed.reference.
+    /// </summary>
+    private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope, TimeSpan? minute = null, double? heartbeatSeconds = null, string? result = null)
     {
         JsonElement cap = body["cap"] is JsonNode node ? Element(node.AsObject()) : default;
         TimeSpan elapsed = outcome.Elapsed ?? (outcome.ExitedAt - outcome.LaunchedAt);
@@ -673,6 +701,11 @@ internal sealed partial class RunDispatchService(
         body["scope"] = JsonSerializer.SerializeToNode(scope, RunRecordJson);
         body["signals"] = JsonSerializer.SerializeToNode(outcome.Signals ?? [], RunRecordJson);
         body["observed"] = new JsonObject { ["summary"] = summary, ["at"] = RecordParser.FormatTimestamp(outcome.ExitedAt) };
+        if (result is not null && body["status"]?.GetValue<string>() == "observed-success")
+        {
+            body["observed"]!["reference"] = result;
+        }
+
         body["dispatchedAt"] ??= RecordParser.FormatTimestamp(outcome.LaunchedAt);
         body["usage"] = usage;
         if (outcome.Liveness is not null)
@@ -766,6 +799,7 @@ internal sealed partial class RunDispatchService(
             JsonObject body = JsonNode.Parse(found.Latest.Body.GetRawText())!.AsObject();
             change(body);
             ObserveSearches(found, body);
+            ObserveSources(found, body);
             var draft = new RecordDraft("operation", by, Element(body), found.Latest.Subject, found.Latest.Id);
             if (body["status"]?.GetValue<string>() is not ("observed-success" or "known-failure" or "canceled"))
             {
@@ -790,6 +824,23 @@ internal sealed partial class RunDispatchService(
             or Records.Canonical.CanonicalJsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {
             body["searchesObserved"] = Search.ObservedSearches.Incomplete();
+        }
+    }
+
+    // A retrieval run's sources (RUN-04) are recorded once, with whichever revision settles the run, from its log in the run's custody. A
+    // log this machine cannot read, or a run directory it does not hold, never holds the settlement: the list says it is incomplete.
+    private void ObserveSources(AgentRuns.Run run, JsonObject body)
+    {
+        if (session.Manifest.RecordFormat < 3 || body["sourcesObserved"] is not null || body["status"]?.GetValue<string>() is not ("observed-success" or "known-failure")
+            || EstateModel.BodyString(run.Latest, "status") is "observed-success" or "known-failure" or "canceled" || body["execution"]?["retrieval"] is null) return;
+        try
+        {
+            body["sourcesObserved"] = RunSources.Read(WorkerOptions.OpenRunDirectory(session.Manifest.Estate, run.Id)) ?? RunSources.Incomplete();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or JsonException
+            or Records.Canonical.CanonicalJsonException or InvalidOperationException or KeyNotFoundException or FormatException)
+        {
+            body["sourcesObserved"] = RunSources.Incomplete();
         }
     }
 

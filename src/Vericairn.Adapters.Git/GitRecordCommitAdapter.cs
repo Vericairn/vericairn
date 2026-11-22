@@ -61,8 +61,16 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
         Commit(directory, branch, basis, files, receipts, NoneCarried);
 
     /// <inheritdoc />
-    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts, IReadOnlyDictionary<string, string> carried)
+    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts, IReadOnlyDictionary<string, string> carried) =>
+        Commit(directory, branch, basis, files, receipts, carried, []);
+
+    /// <inheritdoc />
+    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts,
+        IReadOnlyDictionary<string, string> carried, IReadOnlyList<string> trailers)
     {
+        ArgumentNullException.ThrowIfNull(trailers);
+        if (trailers.Any(t => string.IsNullOrWhiteSpace(t) || t.Any(char.IsControl) || t != t.Trim()))
+            throw new ProviderRefusedException("A required trailer is one line of text; nothing was committed.");
         ArgumentNullException.ThrowIfNull(receipts);
         string record = ValidateFiles(files);
         Dictionary<string, string> all = WithCarried(files, carried);
@@ -88,7 +96,8 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
         // --only names precisely the prepared record and members, and any carried trail records. Each record already carries its device signature.
         WithoutHooks(directory, ["add", "--intent-to-add", "--", .. paths]);
         string message = "Record operator action " + Path.GetFileNameWithoutExtension(record)
-            + (carried.Count == 0 ? string.Empty : $" and carry {carried.Count} trail {(carried.Count == 1 ? "record" : "records")} of earlier actions");
+            + (carried.Count == 0 ? string.Empty : $" and carry {carried.Count} trail {(carried.Count == 1 ? "record" : "records")} of earlier actions")
+            + (trailers.Count == 0 ? string.Empty : "\n\n" + string.Join('\n', trailers));
         WithoutHooks(directory, ["commit", "--only", "--no-gpg-sign", "-m", message, "--", .. paths]);
         head = Head(directory);
         Verify(directory, head, basis, files, carried);
@@ -176,6 +185,8 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
 
     private static readonly IReadOnlyDictionary<string, string> NoneCarried = new Dictionary<string, string>(StringComparer.Ordinal);
 
+    private static readonly string NoGrafts = Path.Combine(Path.GetTempPath(), "vericairn-no-grafts-" + Guid.NewGuid().ToString("N"), "grafts");
+
     // The action's own record and members with the carried trail records of earlier actions: each carried path a canonical record path
     // with its byte hash, none of them the action's own files.
     private static Dictionary<string, string> WithCarried(IReadOnlyDictionary<string, string> files, IReadOnlyDictionary<string, string> carried)
@@ -231,6 +242,9 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
         foreach (string argument in Isolation.Concat(arguments)) info.ArgumentList.Add(argument);
         info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
         info.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        // The clone's info/grafts would rewrite the parents the recovered-commit check reads, as replace objects would; grafts are read
+        // from a file that never exists instead, as the checked push's reads do (FIX-137).
+        info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
         ProcessResult result = run(info);
         if (result.Outcome != ProcessOutcome.Exited || result.ExitCode != 0)
             throw new ProviderRefusedException("The local git step did not complete. Inspect the retained branch and rerun the same operator command; its existing commit will be verified before any retry.");

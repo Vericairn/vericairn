@@ -13,6 +13,22 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 43, November 21, 2026. Add availability and quiet hours to `communication set` (`--availability`, `--away-until`, `--away-from`, `--quiet-hours`) and their state to `communication show`, `--basis` on `work takeover`, which hands a lapsed step to another principal of its role, the session route of `goal step`, presence leases kept by `mcp serve`, and `presence` events in `events watch`, in the development build.
+
+Revision 42, November 21, 2026. `estate upgrade` says whether the previous release can read the estate after it, refuses a one-way upgrade without `--one-way`, records a restore point and states the way back, in the development build.
+
+Revision 41, November 21, 2026. Add `worker drill`, the timed stop drill, which stops a scratch run and records the time from the stop to containment and to the run's last write as a `stop-drill` verification, in the development build.
+
+Revision 40, November 21, 2026. Add `observers list`, `declare`, `report` and `withdraw`, which declare the automated observers on this machine with their intervals and graces and keep their reports, and the `Observers (this machine):` lines that end human `status`, in the development build.
+
+Revision 39, November 21, 2026. Add `progress target set`, `list`, `remove`, `refresh` and `follow`, which keep the estate's progress at a target such as a pinned GitHub discussion, in the development build.
+
+Revision 38, November 20, 2026. Say that under a `concurrent-paths` policy at `refuse`, `work assign`, `work attempt`, `records new assignment` and `worker run` refuse work that leaves an unmet or unavailable pair, naming each pair and the remedies that apply to the write, in the development build.
+
+Revision 37, November 17, 2026. Add standing agents: `goal propose --kind stewardship --standing <flow>` with `--trigger`, `--period`, `--until`, `--awaiting-review` and `--runs-on`, `goal due`, which lists a standing agent's occurrences as of an explicit time, `--occurrence` and `--now` on `goal step`, which carries one occurrence per command within the agent's caps and asks once for renewal before its until time, `--standing` and `--stop-runs` on `goal pause`, and a standing agent's `goal stop` asking its runs to stop and retiring its work order, in the development build.
+
+Revision 36, November 17, 2026. Add `work overlap`, which lists the active assignments by repository and every overlap of their effective permitted paths, and previews a draft brief's with `--brief`, `--repository` on `work assign`, and the overlaps that `work assign`, `work attempt`, `worker run` and `goal step` report on standard error; an assignment is released only by its own change integrated into its repository's main line, in the development build.
+
 Revision 35, November 16, 2026. Fold every line taken from the runtime to the terminal's width with `runtime:` on every row, make its runs of spaces one space, and show a presence-related command's problems from the runtime the same way, in the development build.
 
 Revision 34, November 16, 2026. Mark every line taken from the runtime with `runtime:`, its control characters shown escaped, name the action and references as a session's terms state them, and refuse `devices presence` over a settings file that does not read, in the development build.
@@ -137,7 +153,9 @@ exit questions, result summaries, passing-review summaries and independence, and
 From 0.9.4 (FIX-141), a result an acceptance of its work order's current revision was recorded
 after, before the estate's first acceptance of a result by an operator, counts as accepted and is
 not listed, so `--all` never signs that work again; a result recorded after such an acceptance is
-listed ([details](operator-actions.md#close-finished-steps-in-one-action)).
+listed ([details](operator-actions.md#close-finished-steps-in-one-action)). From 0.9.4 (OPS-24), a result is listed only when
+every current review of it passes; one with a failed review or findings beside a passing review is not. From 0.9.4 (FIX-159), an
+estate that reports an error refuses the closing, naming the finding.
 
 | Option | Meaning |
 |---|---|
@@ -158,6 +176,70 @@ sessions are on, up to 16 acceptances are listed by exact hash and signed under 
 1 a selection or record refusal, and 2 invalid arguments or a client failure. The
 [operator actions guide](operator-actions.md#close-finished-steps-in-one-action) describes saved
 listings, API/SDK counterparts and recovery after interrupted storage.
+
+## `vericairn operator answer` (0.9.4)
+
+From 0.9.4 (OPS-16), the operator answers open asks with their recommendations in one signed act. Without a
+selection the command lists every ask waiting on an operator, or on `--by`, each by its exact revision and hash with its
+recommendation and that recommendation's SHA-256 first, then its question, the consequence of leaving it unanswered and its
+options. It writes nothing.
+
+| Option | Meaning |
+|---|---|
+| `--select <ask-id>` | Answer that ask with its recommendation; repeat for several asks. |
+| `--all` | Answer every ask waiting on `--by`; cannot be combined with `--select`. |
+| `--by <operator-id>` | Required with a selection: the operator the asks are put to, a person, acting on their own admitted device. Narrows the listing. |
+| `--stake <stake>` | Each decision's stake: `low` (the default), `medium`, `high` or `critical`. |
+| `--from <file>` | Use a saved `operator answer --json` listing with a selection; `-` reads standard input. |
+| `--json` | Print one typed response. The act is shown on standard error before signing. |
+| `--estate <root>`, `-e <root>` | Select the estate. |
+
+Each selected ask gets its own decision, signed by the operator's device and naming the act in its `act` member, with
+`decidedAt` the act's time; all are stored together. A changed ask or recommendation, an ask answered, withdrawn or carried in
+the meantime, a changed membership with `--all`, an agent or anyone but the operator the asks are put to refuses the whole act
+without a decision. Where presence sessions are on, up to 16 decisions are listed by exact hash and signed under one presence
+check, a list for each 16 ([presence sessions on standard error](#presence-sessions-on-standard-error-094)). Exit 0 means every
+selected ask was answered, 1 a refusal, and 2 invalid arguments or a client failure. The
+[operator actions guide](operator-actions.md#answer-open-asks-with-their-recommendations-in-one-act-094) describes the
+decisions, the API and SDK counterparts and Remote.
+
+## `vericairn operator act --ready` (0.9.4)
+
+From 0.9.4 (OPS-24), the operator signs every ready item in one reviewed act. With `--ready` alone the command lists every
+operator item whose command is ready for `--by`, or the root operator: acceptances of reviewed results, answers with their
+recommendations, a goal's acceptance, a release candidate's, a milestone's and a milestone result's acceptance whose exact revision
+has only passing reviews, and action requests' closes, each with what its signature records, its exact subject and basis, and an
+acceptance's reviews. It writes nothing.
+
+| Option | Meaning |
+|---|---|
+| `--ready` | Required: list, or act on, the items whose command is ready. |
+| `--all` | Sign every listed item except those skipped or dismissed; refuses if the list changes. Cannot be combined with `--select`. |
+| `--select <item>` | Sign that item; repeat for several. Every other item waits. |
+| `--skip <item>` | With `--all`, leave that item waiting; repeatable. |
+| `--dismiss <item>=<reason>` | Dismiss that request with your reason; repeatable. Only a request is dismissed. |
+| `--by <operator-id>` | Required to act: the operator, a person, acting on their own admitted device. |
+| `--stake <stake>` | Each answer's decision stake: `low` (the default), `medium`, `high` or `critical`. |
+| `--from <file>` | The saved `operator act --ready --json` listing you read; `-` reads standard input. Required to act unless you type `yes` in a terminal to the listing shown. |
+| `--json` | Print one typed response. The reviewed act is shown on standard error before signing. |
+| `--estate <root>`, `-e <root>` | Select the estate. |
+
+A chosen item that changed or is no longer ready, a changed list with `--all` since the listing you read, a dismissal of an item that
+is not a request, an act without `--from` and without a terminal, an agent or anyone but the acting operator refuses the whole act
+without a record. Where presence sessions are on, the act's records sign under one presence check, under the session action
+`operator act`, whose announced list names each, up to 16 to a list, a list for each 16
+([presence sessions on standard error](#presence-sessions-on-standard-error-094)). Exit 0 means every chosen record was stored, 1 a
+refusal, and 2 invalid arguments or a client failure. See the
+[operator actions guide](operator-actions.md#sign-every-ready-item-in-one-reviewed-act-094).
+
+## `vericairn operator fetch` (0.9.4)
+
+From 0.9.4 (OPS-22), `vericairn operator fetch <request-revision> --to <folder>` writes the current request's pinned files, under
+their names, read from the estate's objects and checked against their hashes, and its guide, `guide.md`, into the folder, created
+when missing. It refuses, writing nothing, when an object is missing or does not match its hash, a name is not a plain file name or
+is the guide's, a file it would write exists already, or the revision is superseded. It signs and records nothing. `--json` prints
+the request, its hash, the guide's name and each file's name, hash and size. Exit 0 means the kit was written, 1 a refusal, and 2
+invalid arguments or a client failure. See [optional requests](operator-requests.md#optional-requests-possible-todos-094).
 
 ## `vericairn decisions new`
 
@@ -529,6 +611,28 @@ run, goes to stderr as a `warning:`, and the exit code stays 0, since the upgrad
 `unreachable` or `unchecked`; `served` and `started` give a daemon's `processId` and `release`, or null; `done` and `warning`
 carry the two texts, or null. See the [operator's guide](operator-guide.md#the-serving-runtime-after-an-upgrade-092).
 
+From 0.9.4 (FIX-145), an upgrade first says whether the release the estate is pinned to before it can still read the estate after
+it: `readable`; `one-way`, when the upgrade moves the record format, or adds a manifest field or a kind of record the previous release
+predates (the manifest's verified-dependency pin and the `vericairn-release` observation from 0.8.3, the followed line and channel from
+0.9.0, the first authority and history checkpoints from 0.9.2); or `unconfirmed`, when the previous pin is a source build whose release
+is unknown and the upgrade adds such a thing. `--check` and an applied upgrade print the verdict with each reason, and a one-way upgrade
+is refused (`one-way`), with nothing changed, unless `--one-way` confirms it. Before it writes anything, an applied upgrade records a
+restore point: the estate repository's checked-out commit (none for a local-only estate) and an export of this machine's local state for
+the clone, a consistent copy of its live store and the files beside it, under `restore-points/<id>` beside the live store, with an
+inventory of their hashes in `restore-point.json`. The migration record's changes name the restore point's id, commit and inventory
+hash and the verdict, never its directory. The output then states the way back to the previous release, step by step with this
+machine's paths: stop the runtime, return the estate's files to the commit with their exact bytes (`git -c core.autocrlf=false stash
+--include-untracked` before the upgrade is committed, `git -c core.autocrlf=false revert` of its commit after, so that no line
+ending changes on Windows), copy the exported state back beside the live store, and run the previous release. With
+`--json`, the response adds `return`: `previousPin`, `readability`, `oneWay`, `reasons`, `steps` and, once applied, `restorePoint`
+(`id`, `createdAt`, `commit`, `clean`, `directory`, `stateHash`, `files`). A restore point is removed again when the upgrade is not
+applied.
+
+```sh
+vericairn estate upgrade --to <published-version> --check
+vericairn estate upgrade --to <published-version> --by <principal id> --one-way
+```
+
 `vericairn runtime status` adds a `release` line with the serving daemon's release against the estate's pin and, while they
 differ, a `mismatch:` line with the commands that settle it. Its `--json` adds `servingRelease`, `pin` (the manifest's pin as
 `estate upgrade` describes it), `pinnedRelease` (null for a source pin) and `mismatch` (null when they agree or no daemon
@@ -572,6 +676,9 @@ vericairn events watch --subject <goal id> --after <cursor>
 
 A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
+
+From 0.9.4 the daemon raises `presence` events: a session holding work lapsed, the runtime asked about it, or the lapse
+is over (see [events and presence](events-and-presence.md)). `due` stays reserved for reminders, which are planned.
 
 ## Network MCP: `runtime configure --mcp` and `mcp serve --connection` (0.9.2)
 
@@ -951,7 +1058,7 @@ vericairn --json doctor
 
 The text report is unchanged, and the release check's disclosure and notices stay on standard error with or without `--json`.
 `version --json` writes `{"version": "..."}`. `records describe --json` writes the type list (`reads`, `writesAtMost`, `types` with
-`name`, `sinceFormat` and `summary`, and `reserved`) or one type with its `fields`. `records hash --json` writes `{"hash": "..."}`,
+`name`, `sinceFormat` and `summary`, and `reserved`) or one type with its `fields`. From 0.9.4 (DOCS-46) a field of fixed members, such as an assignment's `brief`, adds `members`, each with `name`, `kind`, `required`, `sinceFormat` and `description`, `emptyAllowed` for an array, `limits` where one applies, and its own `members`; the text output lists them under the field. `records hash --json` writes `{"hash": "..."}`,
 `records format --json` writes the files it `formatted` and those left `unchanged`, and `recover compare --json` writes
 `thisEstate`, `otherEstate`, `sameEstate` and the `onlyHere`, `onlyThere` and `differing` records by `type` and `id`.
 
@@ -1057,6 +1164,397 @@ when it opened, how many records were signed under it and when and why it ended;
 type, id and hash, and each refusal with its code. `--json` writes each session with its `terms`, `nonce`, `fingerprint`, `openedAt`,
 `signed` and `refused` lists, `ended` reason and the rest. The ledger is owner-only machine state, a diagnostic that a process of the
 same operating-system user could alter; it is never a record, and no export or support bundle carries it.
+
+## `vericairn work overlap` (0.9.4)
+
+From 0.9.4 (CODE-73), before two assignments run at once in one repository the runtime compares their effective permitted
+paths: a brief's interpretable patterns (`permittedChanges` entries with the `path:` prefix or no whitespace) less its
+`excludedChanges`, and in the estate's own repository less `records/` and `objects/`, where every write is a new file named by its
+id or hash. Prose grants nothing and is not compared.
+
+```sh
+vericairn work overlap
+vericairn work overlap --repository <resource id>
+vericairn work overlap --brief brief.json --repository estate
+vericairn work overlap --json
+```
+
+It lists the active assignments by repository, each with its patterns, its exclusions, its `after` and why it is active, and every
+overlap of two of them: their patterns, their witnesses, the resolution and each `vericairn.estate/concurrent-paths` policy whose
+selection the overlap meets, with its level. `--repository` shows one repository's, a repository resource's id or `estate`;
+`--brief <file>` previews a draft brief, as `work assign` takes it, against the active assignments before it is recorded, in the
+repository its brief or `--repository` names. The draft is first held to what the write boundary holds a recorded brief to: each
+`permittedChanges` and `excludedChanges` entry 1 to 2,000 characters, each exclusion a pattern, and at most 20 distinct assignment
+ids in `after`; a draft that falls short answers with `problem` and is compared with nothing. It records nothing, and the runtime
+compares a snapshot of the records without holding its other operations. `--json` writes the view as `vericairn.overlaps/1`:
+`assignments`, each with `assignment`, `key`, `repository`, `repositoryFrom` (`brief`, `run` or `unknown`), `patterns`, `excluded`,
+`leftOut`, `after`, `active`, `state`, `labels`, `result` and, for a result that names one, `change` with its `integration`
+(`merged`, `reachable`, `not-integrated`, `mismatched` or `unknown`), the `mainLine` it was compared with, the `problem` that makes
+it `mismatched`, and its `paths`, each `path` with its `change` (`added`, `modified` or `removed`), read from this machine's
+registered clone by name without rename detection, or `pathsUnavailable` when a commit is missing there; `overlaps`, each with
+`first` and `second`, `repository`, `determined`,
+`witnesses`, `witnessKind` (`tracked` or `possible`), `branch`, `resolution` (`none` or `sequence`), `held`, `policies` and
+`labels`; and, for a preview, `draft`.
+
+An assignment is active while it is current and its work order is neither accepted nor retired, until it is released: its current
+result is abandoned; it is completed and names a `change` that is integrated, shown by a `change-merge` operation observed at the
+change's head, or by the head being reachable from the main line of this machine's registered clone (origin's `HEAD`, else `main`,
+else `master`, as a local branch), labeled as observed here; it is completed and its brief holds no path pattern, whatever change
+it names; or it is completed and was recorded before the overlap check, labeled, since nothing recorded its integration. A change
+releases only its own assignment's work: it is in the repository the assignment's brief names, or for an older brief the one its
+agent runs named, and where the clone shows them, its base is a proper ancestor of its head and one of the paths it changed is in
+the assignment's effective permitted paths. A head reachable from the main line needs the clone to show both; a head a
+`change-merge` operation merged stands as the records show it where no clone shows otherwise, so `status` and `progress`, which
+read the records alone, can show released what `work overlap` on a machine with the clone shows `mismatched`. A change in another
+repository, with the same commit as base and head, whose base is no ancestor of its head in the clone, or that changed none of the
+assignment's paths is `mismatched` and keeps the assignment active, and the branch a result names as its `target` never shows
+integration: only the main line does, and never a branch an agent run worked on. A range on the main line that touches one of the
+assignment's paths is taken as the result states it, a signed claim of its contributor that may be mistaken as well as false: a
+result naming its fork point and the main line's tip while its own work is still unmerged releases the assignment whenever
+another change in that range touched one of its paths. From 0.9.4 a completed result whose brief holds a path pattern and that
+names no `change` keeps its assignment active until acceptance. Before the check's first record in an estate (the first brief
+naming a repository, exclusions or `after`, or result naming a change), results count as recorded before it by the times the
+records state, which the command line and the API take from the caller. An assignment whose brief names no repository is compared
+under the one its agent runs named, or, with none, as possibly in any repository, which the view labels. A reading asks the clone
+only about completed results of work that is still open, once for each change, so its cost grows with the open assignments whose
+completed results name distinct changes, and `work assign` and `work attempt` pay it while the runtime holds its other operations.
+
+Two active assignments overlap when some valid path, by the worker's rules for a repository-relative path with nonempty components
+and no leading or trailing slash, matches a pattern of each and no exclusion of either. The comparison is exact over the patterns'
+grammar: a search of their automata, bounded at 100,000 states, the patterns' own automata included, and at 5,000,000 steps of
+work, each character a state is stepped by and each move of an automaton followed, that reports a pair it cannot decide within
+either bound as overlapping and undetermined. A state is stepped only by the characters its automata name there and one
+representative of the rest, so characters the patterns name elsewhere add no work. A shortest path longer than 2,000 characters
+means no valid overlap. Each overlap shows up to 20 tracked paths in the intersection at the main line of the registered clone,
+sought within a bound of their own, else the shortest path either could create, labeled so. Matching is ordinal, as the worker's
+is; on a case-insensitive filesystem two paths that differ only in case name one file, and the view says so for a clone there.
+
+An overlap is resolved by sequence, the later assignment's brief naming the earlier in `after`, or by one owner, every other
+party's brief excluding the shared paths in `excludedChanges`. Adding an exclusion or an `after` grants less and needs no
+amendment; a revision that changes an assignment's `repository`, `permittedChanges`, `excludedChanges` or `after` is refused while
+a run of it is in flight, so that the run keeps working where admission checked it and is compared there. `goal step` records the
+later of two assignments whose overlap a `concurrent-paths` policy at `refuse` holds with `after` naming the earlier, and for an
+agent's step records that assignment alone, so that its run starts from a later `goal step` once the earlier is released; it
+reports every other overlap and starts the work. `goal next` shows the overlaps of the goal's work and those a new assignment of
+its next step would have. `worker run`, `goal step` and a new attempt refuse while an assignment named in `after` is not released,
+and a run is refused in another repository than its brief names, so register a repository with `sources adopt` before you assign
+work in it.
+
+From 0.9.4 (POLICY-08), under a [`concurrent-paths` policy](policies.md#concurrent-paths-094) at `refuse`, `work assign`,
+`records new assignment`, `work attempt` and `worker run` refuse work that leaves a pair of active assignments unresolved within
+the policy's selection, `unmet` or `unavailable`, before writing anything: the refusal (`assignment.concurrent-paths`, or
+`attempt.concurrent-paths` for an attempt) names each pair, its policy and rule and the remedies that apply to the write.
+A new assignment or a revision is told to name the earlier assignment in `after` or to narrow its paths with `excludedChanges`, so
+that it is recorded resolved. `work attempt` and `worker run`, on assignments already recorded, are told to record the later with
+`after` naming the earlier or to exclude the shared paths from every brief but the owner's, or, for an unmet pair, that the operator
+may grant an exception for the exact pair of assignment revisions, which lets work on it start: an exception pins revisions that
+already exist, so it is offered only for recorded pairs. An unavailable pair is resolved by naming each brief's repository or
+narrowing the patterns, never excepted. A `concurrent-paths` finding never holds a release submission.
+
+`work assign --repository <resource id or estate>` names the repository a brief with a path pattern changes when the brief names
+none; without it, the estate's own repository fills it when the estate names no repository resource, and otherwise the write is
+refused with the candidates. `work assign`, `work attempt`, `records new assignment`, `worker run` and `goal step` print each
+overlap of the assignment with the active assignments on standard error, and a completed result whose brief holds a path pattern
+prints the write boundary's warning there when the records alone show it keeps its assignment active: it names no change, or a
+change in another repository, with the same commit as base and head, or for an older brief that names no repository and whose
+runs named none. A change only a clone shows `mismatched`, such as one
+whose base is no ancestor of its head or whose paths are none of the assignment's, is written without a warning and shown so by
+`work overlap`. The record's own output, and its JSON, are unchanged. `status` and `progress` show the open overlaps under the work
+from the records alone, and their canonical JSON gains `overlaps` while one is open. The same view is `GET /v1/overlaps` and
+`POST /v1/overlaps/preview`, the SDK's `WorkOverlap` and `WorkOverlapPreview`, and the MCP read tool `work_overlap`
+([MCP](mcp.md#tool-annotations-and-definitions-094)).
+
+## Standing agents: `goal due` and `goal step --occurrence` (0.9.4)
+
+From 0.9.4 (GOAL-07), a standing agent is a stewardship goal whose plan carries `standing`: a flow that declares its trigger kinds
+and one routed work step, the subject it binds, its triggers, its caps per UTC-anchored period, an until time and, optionally, the
+runtime that dispatches it unattended. Each occurrence a trigger makes due is carried as one assignment of the goal's one ordinary
+work order, naming the occurrence. A flow, a trigger and a proposal grant nothing; the sponsor's activation grants the budget.
+
+```sh
+vericairn goal propose --by <sponsor> --kind stewardship --standing example/researcher@1.0.0 --work-order RES-1 \
+  --title "Research the widget" --objective "Keep researching the widget." --done '{"type":"work-order","fields":{"key":"RESEARCHED"}}' \
+  --subject topic="the widget" --budget wallMinutes=30 --budget attemptsPerStep=2 \
+  --trigger '{"key":"monthly","kind":"schedule","unit":"months","every":1,"firstAt":"2026-12-01T00:00:00Z"}' \
+  --trigger '{"key":"asked","kind":"request"}' --period runs=4 --period wallMinutes=120
+vericairn goal due <goal>
+vericairn goal due <goal> --as-of 2027-01-15T00:00:00Z --json
+vericairn goal step <goal> --by <sponsor> --repository <repository id>
+vericairn goal step <goal> --by <sponsor> --repository <repository id> --occurrence <key> --now 2027-01-15T00:00:00Z
+vericairn goal step <goal> --by <sponsor> --repository <repository id> --occurrence request
+```
+
+A trigger has its own `key` and a `kind`: `schedule` (`unit` days or months, `every`, a UTC `firstAt`; a day is 86,400 seconds, a
+month keeps the anchor's day or the last day of a shorter month, and ticks missed while nothing carried them coalesce into the
+latest), `duty` (`policy` and `rule` of a recurring duty; each occurrence the policy evaluation owes stays due until the duty's own
+evidence discharges it, and a trigger never discharges a duty), `event` (`recordType`, optional string `fields` and optional
+`roles`; each such record recorded after the trigger was activated, never one of the agent's own, and an agent's record only for a
+trigger naming that agent's standing role, from an agent no agent's records trigger), `condition` (`record`, a record predicate as
+`--done` takes it; once for each new set of records it reads while it fails) or `request` (an occurrence on demand, `--occurrence
+request`, keyed by its time and requester). `--period` caps what the runs started in each UTC-anchored period spend together:
+`unit=months` (calendar months, the default) or `unit=days` (days counted from 1970-01-01), `every`, `runs` and `wallMinutes`, and
+`tokens` and `currency` where the budget caps them; the budget is then each run's caps. `--until` is when the agent returns to its
+sponsor, thirty days from now when omitted. The proposal prints what `goal due` shows.
+
+An occurrence's key is the goal's identity, the trigger's key, the trigger's revision (the earliest goal revision from which its
+declaration is unchanged, so a renewal that keeps a trigger keeps its keys) and the item; a duty trigger's key is the duty
+occurrence's own identity, so two agents never both carry one deadline. `goal due` evaluates the triggers from the records at
+`--as-of`, this runtime's clock when omitted, and lists the agent's state (`active`, `paused`, `lapsed`, `held`, `unavailable`,
+`stopped` or the goal's status), each trigger and when it is next due, the period's caps and spend, the runs in flight and the
+consecutive failed runs, and each occurrence with its key and state: `due`; `deferred`, with its reason; `running`; `assigned` to a
+person; `settled`, its result awaiting review; `disposed`, its result reviewed; or `held`, its attempts spent. With `--json` it
+writes `vericairn.due/1`. It records nothing.
+
+`goal step` on a standing agent evaluates the triggers again at `--now`, never later than the runtime's clock, and carries one
+occurrence: the one `--occurrence` names, a request made now, or the oldest due one. Its assignment names the occurrence's key,
+trigger, revision and item, and its brief carries the flow's role brief, the records that made it due quoted among its sources as
+untrusted content, the goal's constraints, the flow's never lines and every reserved effect; an agent's run works on a branch of
+its own for the occurrence. Whatever `--now` names, an agent past its until time at the runtime's clock dispatches nothing.
+
+A key holds one assignment whoever records it, `records new assignment` included: a second one is refused (`standing.duplicate`)
+unless a person takes the occurrence over with `work takeover`, and a revision of an assignment keeps its occurrence exactly, so it
+never frees the key. Two clones that each recorded one leave both flagged `standing.duplicate`, which `status` lists among its
+reconcile tasks: record a reconciliation about either one that keeps one and withdraws the other (`records new reconciliation`, by
+the operator or under `local-engineering`). A reconciliation settles only such a duplicate, two or more assignments holding the key
+that are not stranded, and keeps one of them; a result on any assignment of the key, a withdrawn one included, still settles it. A
+new occurrence is carried only as its trigger makes it, while its agent is active and before its until time at the assignment's own
+time: a schedule's latest due interval (missed ticks coalesce), an event's record of the trigger's type and filters recorded after
+the trigger was activated, never the agent's own, a condition failing over the records its item names, a duty occurrence's exact
+identity with its due time and deadline, and a request by its own requester. A settled occurrence, its result completed or partial
+and not returned by a review, runs again only when a review returns its result, on the assignment that holds it; a blocked or
+abandoned result settles nothing, and its assignment goes on within its attempts.
+
+Every assignment of the standing work order names an occurrence. Nothing is dispatched while the goal is not active or past its
+until time; when a period's cap is reached its occurrences defer and `goal step` asks the sponsor once in the period; while results
+awaiting review reach the plan's `awaitingReview` (`--awaiting-review`, three when unset) dispatch defers; while the runs in flight
+fill the budget's concurrency (one when it states none) occurrences wait; and after the goal's `limits.consecutiveFailures` failed
+runs in a row (three when it sets none) `goal step` asks the sponsor once and dispatches nothing until a decision answers it. Each
+settled run counts once, in the order the runs settled: it succeeded when it settled as an observed success whose settlement names
+the completed or partial result its agent recorded during the run; otherwise it failed when a blocked or abandoned result was
+recorded on its assignment after it started and before the assignment's next run started, whatever a later result or a correction
+says, or when it settled as a known failure, unless its sponsor (when a person) or an operator asked it to stop (`--stop-runs`,
+`goal stop`, `worker stop`; a stop by anyone else, the dispatcher that started it included, counts); any other run, one whose
+harness exited cleanly with no result included, counts for nothing. A run's intent is refused at the record, whatever
+route starts it, for a run on no occurrence or on a settled one, past the until time, during the failure pause, past the period's
+runs or while results awaiting review reach their cap, each judged by the records before the intent. A second standing agent of one
+role over one subject is never activated, nor one past its until time.
+
+From 0.9.4 (FIX-155), no agent ends its own failure pause by any record it writes, whatever date the record claims. Two events
+end failures, and only these. A success ends the failures before it while they are fewer than the limit: a run the runtime
+observed succeed, whose intent and settlement a principal not tied to the goal recorded (tied as a question's answer reads it,
+below), and whose settlement names the completed or partial result its agent recorded during the run on an attempt of that run, as
+the worker names the one it sees at the run's exit. Once the failures reach the limit, a success ends nothing, a run already in
+flight when they did included, and only the answer to the pause's ask ends them: a decision of the person it was put to, or one a
+principal not tied to the goal records for that person, after which no run settled before the ask, or before that answer when it
+came first, counts. A run whose harness exits cleanly with no result counts for nothing, so it leaves the failures as they were and
+nothing to review. A completed or partial result, and the attempt it closes, is a claim another principal reviews, and it never
+makes a run succeed by itself, whether recorded with `work result`, `records new` or by hand: only a settlement names it, and
+nothing written after the settlement, whatever date it claims, so after three failed runs the carrying agent's own attempt and
+completed result leave the pause held and the failures at three. A run settled from the worker's retained observation, or by hand,
+names no result unless its writer names one. A run is read from all of its records, every revision on every branch, whatever a
+fork, the order of identifiers or a reconciliation makes its current revision. Where a record that no agent tied to the goal wrote
+settles or cancels the run, the records tied agents wrote count for nothing: their revisions and divergent records take back no
+failure and turn no success into a failure. From 0.9.4 (FIX-156) the run is then decided by its latest untied records: each record
+no tied agent wrote that no other such record follows on its own chain of revisions, however many records a tied agent put between
+them. On one chain that is the latest untied record, so an untied principal's correction, such as the operator's, written on the
+settlement it corrects counts as written (when it leaves the run canceled or unsettled, the run counts for nothing). Where such
+records on different branches read differently, the reading least favorable to the agent decides, a failure over nothing and
+nothing over a success; neither a record's place in the run's history nor its date ranks one over another. Only where no record by an
+untied principal settles or cancels the run does a known-failure settlement a tied agent wrote count, as a failure, as for an agent
+that steps its own goal. A run whose intent or settlement an agent tied to the goal recorded never succeeds, a stop such an agent
+records names no one who decides for the goal, and its runs never take a result off a run another principal recorded.
+
+From 0.9.4 (FIX-156), a record carrying another record's identifier is never read in its place, whatever its date or path: the estate
+reads neither of them, nor any record of their line (`record.duplicate-id`, `record.duplicate-line`), and refuses every write until
+all but one is removed. Such records count against the agent: a run of the goal that cannot be read counts as failed, a run an
+unread record names counts as its own records decide it or as failed, an output that cannot be read stays open, and an answer that
+cannot be read answers nothing. An unread device, admission, principal or grant leaves the records resting on it counting for
+nothing, so while any record is unread, a record that does not count is read against the agent and never for it: its blocked
+results and runs count toward failures and its outputs stay open. Every standing agent then reads `held` in `goal due`, naming
+the unread record, and `goal step` dispatches nothing of it ([record format 3](record-format-v3.md#identifiers-more-than-one-record-carries-094)).
+
+From 0.9.4 (FIX-159), no record counts because the record that would refuse it is unread: while records are unread, a record counts
+only when it counts with them left out and with them read each way they can be, so an unsigned record in the operator's name stays
+refused when the charter's requirement is unread, and a closed device's backdated records stay refused when the closing is unread
+(`record.duplicate-refused`; past 16 readings no record counts, `record.duplicate-unsettled`). A goal whose own line is unread is not
+reported missing: `goal due` says its state, failures and open outputs are not established, naming the duplicate, and exits 1. While records are unread `goal step` refuses before it records or dispatches,
+naming the finding, and an agent run's intent is refused for the hold whatever the failures read. `release submit`, every command
+that signs a record or a checkpoint, and `worker run` refuse the same way, and so do every goal's `goal step`, whatever its route, and
+`changes push`, `open`, `merge` and `observe`, naming the finding; while the estate reports any other error, `release submit`, `worker
+run`, `goal step` and the `changes` commands refuse too, and a record is written only when it clears every error, as before.
+
+```sh
+vericairn goal pause --standing --by <sponsor> [--stop-runs]
+vericairn goal pause <goal> --by <sponsor> --stop-runs
+vericairn goal stop <goal> --by <sponsor>
+```
+
+`goal pause --standing` pauses every active standing agent the acting principal may pause and names each, and `--stop-runs` also
+asks each run of a paused goal in flight to stop; on resume, missed ticks coalesce and duty occurrences stay owed. `goal stop` on a
+standing agent records it abandoned, shown as stopped, asks each of its runs in flight to stop and retires its work order. Within
+three days of its until time, or half of its term when that is shorter, `goal step` asks the sponsor once for the revision, before
+carrying anything, whether to renew it, with the period's runs and minutes, its occurrences by state and the current evaluation;
+a renewal is a revision with a later until time, activated again, and without one the agent lapses.
+
+`goal next` routes each due occurrence by the role of the flow's work step; `goal show`, `status` and `progress` show each agent's
+state, next occurrence, occurrences by state and period spend, and canonical status and progress JSON gain `standingAgents` while
+one exists, derived as of the estate's newest record, so an agent past its until time shows active there until a later record is
+written, as a live read shows at once. The same view is `GET /v1/goals/{id}/due`, the SDK's `GoalDue`, and the MCP read tool
+`goal_due`; `GoalStepRequest` gains `occurrence` and `now`, and `GoalActionRequest` gains `stopRuns`. Community carries one
+occurrence per command, by hand or by the owner's script; unattended dispatch is the carrier's, which honors `runsOn`.
+
+## Standing outputs and `work new --from-possibility` (0.9.4)
+
+From 0.9.4 (GOAL-08), every output of a standing agent's occurrence is a record another principal disposes of. The contributor of
+the assignment that carries the occurrence records it, through the MCP tools `standing_possibility`, `standing_question` and
+`standing_publication`, `POST /v1/standing/outputs` or the SDK's `StandingOutput`, and the runtime names in its `raisedBy` the goal,
+the occurrence, the assignment and, for an agent, its run in flight. No standing agent adopts, declines, parks, answers or withdraws
+its own output. From 0.9.4 (FIX-155), a disposition reads as an answer does: a decline, park or adoption of a possibility that its
+raiser or any agent tied to the standing agent records disposes of nothing, whatever date it claims, so the possibility stays open
+and counted, reads open to `work new --from-possibility` and the agent's next brief, and is disposed of by the next revision a
+person or a principal not tied to the goal records. Such a disposition is an error where what ties its author was written first
+(`standing.own-output`) and is otherwise reported (`standing.output-now`), which the record write refuses for a new one. In the same
+way, a withdrawal of the agent's ask leaves it waiting, and a close or observation of its publication request by anyone but an
+operator who is a person closes nothing.
+
+- **A recommendation** is an open possibility with a `fingerprint`, the flow's rule for what makes two the same, and its sources;
+  optionally evidence for and against (no scores), review triggers, links to possibilities it duplicates or supersedes, and
+  `disclosure: held` for a security finding. A second open possibility of the agent with the same fingerprint is refused, and a
+  declined one is raised again only by naming it in `raisesAgain` with new evidence. Its raiser may revise an open one, keeping its
+  `raisedBy` and fingerprint, to add evidence; a revision is judged by the `raisedBy` of the record it revises, so leaving it out
+  changes no rule. No agent declines, parks or adopts a held finding: a person does, only an operator who is a person adopts it or
+  ends its hold, and the same holds for a held possibility no standing agent raised.
+- **Proposed work** is a possibility with a `draft` work order. `vericairn work new --from-possibility <id> --by <planner>` adopts it:
+  the draft supplies every field the command leaves out, the possibility joins the work order's inputs, and the possibility's revision
+  adopting it as the new work order is stored with it. Its author, whoever raised it, and any agent tied to the standing agent (as
+  a question's answer reads it, below), is refused, and a possibility revision recording its author's adoption is refused as well;
+  a held finding is adopted only by an operator who is a person, and its work order carries `disclosure: held`, so the checked push
+  keeps its key and text out of a public repository until its release is published.
+- **A question** is an ask to a person, who decides for the goal when none is named; a decision of that person answers it. A
+  decision recorded by the agent that asked, or by any agent tied to the standing agent, is refused, whatever `decidedBy` it
+  names, and answers nothing; the same holds for the renewal, period-cap and failure-pause asks goal step puts about the agent,
+  so no agent's decision lifts its own failure pause, and from FIX-155 no attempt, result or run it records ends the pause
+  either (above). An agent is tied when any assignment of the goal's work has named it as contributor,
+  or any revision of the goal's role, in the goal's own roles or the roster, has named it, whatever date a record claims and
+  whatever the roster names now. Both only grow, so a roster or assignment change can re-open an answered ask for the person and
+  never closes one: a decision an agent recorded before it was tied stops answering once it is. Any principal nothing ties to the
+  agent, such as the estate's builder, still records the person's decision for them, on the renewal and failure-pause asks its
+  own goal step wrote as well.
+- **Words outside the estate** are a publication request to an operator: the exact text, labeled the agent's draft, pinning the
+  agent's work order. It dispatches nothing, and only an operator who is a person closes it, directly: no agent closes it, citing
+  the operator's words or not.
+
+```sh
+vericairn work new --from-possibility <possibility id> --by <planner> --key IDX-1
+vericairn goal propose ... --standing example/researcher@1.0.0 --outputs possibilities=5 --outputs drafts=3 --outputs open=10
+```
+
+An occurrence records at most `--outputs possibilities` possibilities (five when omitted), of which at most `drafts` (three) carry a
+draft work order; further ideas join one summary possibility, which lists them in `extras`. Each output, and each revision that adds a
+draft or extras, is judged against the caps of the goal revision in force when the output was raised, so lowering the caps judges only
+what is raised afterwards. While the agent's open outputs, its possibilities still open, asks still waiting and publication requests
+not closed, reach `open` (ten when omitted), its occurrences defer and no run of it starts. `goal due`, `status` and `progress` show
+its open outputs; an occurrence's brief states its output caps and names the agent's earlier open and declined possibilities among
+its sources.
+
+## Presence, availability and hand-overs (0.9.4)
+
+`vericairn mcp serve --as <principal>` registers its session's presence with the daemon and renews the lease while it
+runs (`ID-11`); see [the MCP server](mcp.md#presence-094). A person declares availability and quiet hours on their own
+communication setting (`GOAL-11`), in an estate at record format 3:
+
+| Option of `communication set` | Meaning |
+|---|---|
+| `--availability available\|away\|inherit` | Declare yourself available, or away; `inherit` removes the declaration. |
+| `--away-until <time>` | With `away`: when you are back, a UTC time such as `2026-12-02T09:00:00Z`. Required for `away`. |
+| `--away-from <time>` | With `away`: when the absence begins; at once when omitted. |
+| `--quiet-hours <file>\|-\|inherit` | A JSON file of quiet hours: `zone`, `windows` (each `days`, `start`, `end` as `HH:MM`) and optional `breakthrough` categories; `-` reads standard input; `inherit` removes them. |
+
+A change keeps the values it does not name. `communication show --recipient <person>` adds the availability and quiet
+hours in force and whether quiet hours hold notifications now. Both belong to a person's own scope only.
+
+```sh
+vericairn communication set --as <person> --availability away --away-until 2026-12-02T09:00:00Z
+vericairn communication set --as <person> --quiet-hours quiet.json
+```
+
+`goal next` and `goal step` pass over an away person, and give a step to an agent's live session when no launcher here
+starts its harness and the step's exposure reads nothing: `goal step` then records the assignment with `routedWith:
+session` and reports the outcome `session`. `work takeover <assignment> --by <person> --contributor <principal>
+--basis <ask>` hands a step an agent holds to any principal the roster names for its role, citing the lapse ask;
+handing it to anyone but a person requires `--basis`. See [events and presence](events-and-presence.md#routing-and-reassignment-094).
+
+## `vericairn worker drill` (0.9.4)
+
+From 0.9.4 (OPS-21), `vericairn worker drill --by <principal> [--grace <seconds>] [--limit <seconds>]` measures how long stopping
+and containing a run takes before the carrier runs work unattended. The worker on the runtime's machine starts a scratch run, the
+vericairn executable with a private argument that appends the time to a file in its own scratch directory every 50 milliseconds
+and ignores the stop it is sent (the stop file and, on Linux and macOS, SIGTERM), as an unresponsive agent would. Once it is
+writing, the drill asks it to stop through its run directory exactly as `worker stop` does, naming the grace (the worker's
+default, ten seconds, when omitted), and the worker transmits the stop at its next heartbeat and escalates it after the grace.
+The drill records a verification of the estate, method `stop-drill`, command `vericairn worker drill`, environment `platform` and
+`device` (the signing device, so each machine's drill stands for that machine), signed by the principal's admitted device held on
+the runtime's machine: its evidence gives the milliseconds from the stop request to the observed containment of the scratch run's
+whole boundary and to its last write, with the stop's transmission and escalation. A scratch run not contained within the limit
+(60 seconds when omitted, 1 to 3600) fails the drill; the drill then escalates the stop itself, waits for containment and records
+the failure, which is required attention until a later drill on the same machine passes. The scratch run is never an agent run
+and records nothing; its directory is removed once it is contained.
+
+The command prints the verification's path, id and hash, the stop's time, grace and limit, both times and whether the drill
+passed; with `--json`, the runtime's `StopDrillResponse` (`ok`, `message`, `passed`, `requestedAt`, `containedAt`,
+`stopToContainedMilliseconds`, `lastWriteAt`, `stopToLastWriteMilliseconds`, `graceSeconds`, `limitSeconds`, `verification` and
+`problem`). Exit 0 means a drill that passed and was recorded, 1 a failed drill or a refusal, and 2 an invalid argument. It is
+refused, before anything starts, without an admitted device of the principal held on the runtime's machine, while the estate
+reports an error (naming the finding, as a run's admission does), and over the local network: run it on the runtime's machine. A recurring duty whose discharge names a `stop-drill` verification runs it monthly; see
+[who can stop a run](software.md#who-can-stop-a-run-and-the-timed-stop-drill-094).
+
+```sh
+vericairn worker drill --by <principal>
+vericairn worker drill --by <principal> --grace 10 --limit 60 --json
+```
+
+## `vericairn observers` (0.9.4)
+
+From 0.9.4 (OPS-20), the automated observers declared on this machine, such as CI on the main line, scheduled workflows,
+intake watching and status refresh, each report at a declared interval, and silence past the interval plus a grace is
+attention. See [Automated observers](observers.md).
+
+| Command | What it does |
+|---|---|
+| `observers list` | Each observer declared on this machine: its kind, interval and grace, its latest report and its state now (`awaiting`, `observing`, `failed`, `not-observing` or `silent`). |
+| `observers declare <name> --kind <kind> --interval <duration> [--grace <duration>] [--summary <text>] --by <operator>` | Declares an observer, or declares it again. The kind is `ci`, `scheduled-workflow`, `intake`, `status-refresh` or `other`; durations are ISO 8601, the interval from `PT1M` to `P31D`, the grace up to `P7D` and a quarter of the interval when omitted. The operator's. |
+| `observers report <name> --outcome <passed\|failed\|not-observing> [--reason <reason>] [--at <time>] [--detail <text>] --by <principal>` | Keeps one report. `not-observing` requires `--reason` (`quota-exhausted`, `schedule-disabled` or `unavailable`) and is attention, never a pass; `--at` is when the observation was made, never more than a minute ahead. |
+| `observers withdraw <name> --reason <text> --by <operator>` | Withdraws an observer, so that its silence stops being attention. The operator's. |
+
+Each prints every observer's line and a summary; `--json` prints the runtime's `ObserversResponse` (`ok`, `message`, `asOf`,
+`observers`, each with `name`, `kind`, `intervalSeconds`, `graceSeconds`, `summary`, `declaredAt`, `declaredBy`, `lastReport`,
+`state`, `expectedBy`, `attention` and `why`, and `problem`). Exit 0 means a valid read or a kept change, 1 a refusal and 2 an
+invalid argument. Human `status` ends with `Observers (this machine):` and one line per observer; `status --json` is unchanged.
+A silent, failed or not-observing observer is a `failed check` in the operator's attention. Nothing is recorded: declarations
+and reports are kept beside the clone's live store on this machine.
+
+```sh
+vericairn observers declare ci-main --kind ci --interval PT1H --grace PT15M --by <operator>
+vericairn observers report ci-main --outcome not-observing --reason quota-exhausted --by <principal>
+vericairn status
+```
+
+## `vericairn progress target` (0.9.4)
+
+Keeps the estate's progress at a target, such as a pinned GitHub discussion, through the adapter its configuration on this
+machine chooses (`WATCH-06`): `set`, `list` and `remove` configure targets and send nothing; `refresh <name>` brings one equal to
+the estate's progress now, creating its place once and replacing its text only when it differs, and `--dry-run` shows the text
+and sends nothing; `follow <name>` follows the daemon's event journal and refreshes and comments only on the events the target's
+triggers name, until interrupted or after `--count` outcomes. A destination anyone may read always takes the public form, which
+carries nothing a disclosure rule holds. `refresh` exits 0 when the target is equal, 2 when it refused and sent nothing, and 1
+when an effect was stopped or not confirmed; `--json` writes `vericairn.progress-target-outcome/1`, naming every record the text
+carries. See [Progress targets](progress-targets.md).
+
+```sh
+vericairn progress target set status --adapter github-discussions --setting repository=Example/example-estate --form private
+vericairn progress target refresh status --dry-run
+vericairn progress target follow status
+```
 
 ## `vericairn estate first-authority` (0.9.3)
 

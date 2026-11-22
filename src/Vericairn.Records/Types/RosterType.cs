@@ -31,7 +31,7 @@ public sealed class RosterType : IRecordType
     [
         new("execution", "object", false, "Explicit execution choices and cumulative restrictions; launcher, roster, goal, assignment, then run precedence. Role restrictions remain binding.", 2),
         new("roles", "object[]", true, "Each role (a lower-case name such as builder or decider), its principals (ulid[]) in order of preference, and an optional note; the decider role is held by operators. From format 3 a roster entry may carry an optional progressRequest (types, statusText, cadence), replacing the estate default.", 2),
-        new("limits", "object", false, "stallSeconds (event-stream silence limit, 1–86400 seconds) and watch (bounded rate and loop thresholds), inherited by goals using this roster. Goal fields override these; omitted fields keep the launcher defaults.", 2),
+        new("limits", "object", false, "stallSeconds (event-stream silence limit, 1–86400 seconds) and watch (bounded rate and loop thresholds), inherited by goals using this roster. Goal fields override these; omitted fields keep the launcher defaults. From 0.9.4, additive in format 3, watch.reassignAfterSeconds (60–86400, 600 by default) is how long a lapsed session holding a step stays lapsed before the runtime asks about reassignment; a reader before 0.9.4 refuses it as an unknown key.", 2),
     ];
 
     /// <inheritdoc />

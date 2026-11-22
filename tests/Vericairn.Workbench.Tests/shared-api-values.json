@@ -69,7 +69,8 @@
     "batch.incomplete",
     "batch.unreadable",
     "communication.conflict",
-    "operation.duplicate-identity"
+    "operation.duplicate-identity",
+    "standing.duplicate"
   ],
   "Vericairn.Records.Estate.FlowPosition.AttentionKinds": [
     "uncertain",
@@ -174,6 +175,20 @@
     "requested",
     "closed",
     "queued"
+  ],
+  "Vericairn.Records.Estate.OperatorActs.Choices": [
+    "sign",
+    "wait",
+    "dismiss"
+  ],
+  "Vericairn.Records.Estate.OperatorActs.Kinds": [
+    "close",
+    "answer",
+    "goal-acceptance",
+    "release-acceptance",
+    "milestone-acceptance",
+    "milestone-result-acceptance",
+    "request"
   ],
   "Vericairn.Records.Model.RecordParser.HashExcludedKeys": [
     "hash",
@@ -341,7 +356,8 @@
   ],
   "Vericairn.Records.Types.AssignmentType.RoutedWith": [
     "run",
-    "ask"
+    "ask",
+    "session"
   ],
   "Vericairn.Records.Types.Caps.UnitNames": [
     "wallMinutes",
@@ -444,6 +460,16 @@
   "Vericairn.Records.Types.GoalType.PlanPolicies": [
     "proposed-by-planner",
     "given"
+  ],
+  "Vericairn.Records.Types.HarnessQualificationType.FileReach": [
+    "readable",
+    "blocked",
+    "unknown"
+  ],
+  "Vericairn.Records.Types.HarnessQualificationType.HostReach": [
+    "reachable",
+    "blocked",
+    "unknown"
   ],
   "Vericairn.Records.Types.HarnessQualificationType.ProbeNames": [
     "version",

@@ -113,7 +113,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         timeout-minutes: 10
         with:
           global-json-file: global.json
@@ -149,7 +149,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         timeout-minutes: 10
         with:
           global-json-file: global.json
@@ -184,7 +184,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         timeout-minutes: 10
         with:
           global-json-file: global.json
@@ -271,8 +271,8 @@ jobs:
       - name: Measure status at 10,000 records
         if: matrix.share == 1
         # FIX-136's cost test, on each platform beside the suites: opening the runtime and reading status on a generated estate of
-        # 10,000 records judges it twice and repeats no removed pass, counted; each phase's time is written to this step's log and
-        # bounds nothing.
+        # 10,000 records judges it once, the opening's judgment kept for status (FIX-148), and repeats no removed pass, counted; each
+        # phase's time is written to this step's log and bounds nothing.
         env:
           VERICAIRN_COST_TESTS: "1"
         run: dotnet artifacts/bin/Vericairn.Runtime.Tests/release/Vericairn.Runtime.Tests.dll --filter-class Vericairn.Runtime.Tests.StatusCostTests --show-live-output on

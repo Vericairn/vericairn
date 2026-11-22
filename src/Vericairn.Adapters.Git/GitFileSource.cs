@@ -164,9 +164,15 @@ public sealed partial class GitFileSource : IDocumentSource
     }
 
     /// <summary>Runs one hardened git process in the clone under the caller's <see cref="GitHardening"/>; -1 when git could not run.</summary>
-    internal static int RunIsolated(GitHardening hardening, string clone, out byte[] output, params string[] arguments)
+    internal static int RunIsolated(GitHardening hardening, string clone, out byte[] output, params string[] arguments) =>
+        Run(StartInfo(clone, hardening, arguments), out output);
+
+    /// <summary>
+    /// Runs git as <see cref="StartInfo"/> prepared it, with the caller's additions, and reads its bounded output; -1 when git could not
+    /// run. The hardening the start was prepared with must outlive this call.
+    /// </summary>
+    internal static int Run(ProcessStartInfo info, out byte[] output)
     {
-        ProcessStartInfo info = StartInfo(clone, hardening, arguments);
         try
         {
             using Process process = Start(info);

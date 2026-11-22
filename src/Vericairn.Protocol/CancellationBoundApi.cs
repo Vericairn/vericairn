@@ -429,6 +429,30 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     public Task<NextResponse?> GoalNextAsync(string goal, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.GoalNextAsync(goal, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public OverlapResponse WorkOverlap(string? repository = null) => inner.WorkOverlapAsync(repository, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<OverlapResponse> WorkOverlapAsync(string? repository = null, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WorkOverlapAsync(repository, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public OverlapResponse WorkOverlapPreview(OverlapPreviewRequest request) => inner.WorkOverlapPreviewAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<OverlapResponse> WorkOverlapPreviewAsync(OverlapPreviewRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WorkOverlapPreviewAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public GoalDueResponse? GoalDue(string goal, string? asOf = null) => inner.GoalDueAsync(goal, asOf, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<GoalDueResponse?> GoalDueAsync(string goal, string? asOf = null, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.GoalDueAsync(goal, asOf, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome StandingOutput(StandingOutputRequest request) => inner.StandingOutputAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> StandingOutputAsync(StandingOutputRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.StandingOutputAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => inner.GoalStepAsync(goal, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

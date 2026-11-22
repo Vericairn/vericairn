@@ -202,6 +202,12 @@ public static class GoalView
             text.Append(FlowPosition.RenderText(model, FlowPosition.Derive(model, goal, at), commands));
         }
 
+        // From 0.9.4 (GOAL-07): a standing agent's state, next occurrence, deferrals and period spend; goal due lists each occurrence.
+        if (StandingAgents.IsStanding(goal))
+        {
+            text.Append("Standing agent: ").Append(StandingView.Line(StandingAgents.Derive(model, goal, at))).Append("; vericairn goal due ").Append(goal.Id).Append(" lists each occurrence\n");
+        }
+
         if (view.Acceptance is not null)
         {
             text.Append("Achieved: acceptance ").Append(view.Acceptance.Id).Append(" by ").Append(PrincipalName(model, view.Acceptance.By) ?? view.Acceptance.By).Append(" at ").Append(view.Acceptance.At).Append('\n');
@@ -289,6 +295,11 @@ public static class GoalView
         if (FlowRuns.IsRun(goal))
         {
             json["flow"] = FlowPosition.RenderJson(model, FlowPosition.Derive(model, goal, at), commands);
+        }
+
+        if (StandingAgents.IsStanding(goal))
+        {
+            json["standing"] = StandingView.Summary(model, StandingAgents.Derive(model, goal, at));
         }
 
         // Work proposed for a goal whose plan says sponsor-approves, waiting for its sponsor's approval; absent when there is none.

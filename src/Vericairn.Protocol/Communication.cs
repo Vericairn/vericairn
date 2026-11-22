@@ -13,6 +13,17 @@ public sealed record CommunicationValues(string? Progress = null, string? Status
     {
         ["progress"] = Progress, ["status"] = Status, ["decision"] = Decision, ["result"] = Result, ["handoff"] = Handoff,
     };
+
+    /// <summary>
+    /// From 0.9.4 (GOAL-11), on a person's own scope only and from record format 3: available, or away with until and an optional from.
+    /// Routing passes over an away person where the roster names another available principal.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public CommunicationAvailability? Availability { get; init; }
+
+    /// <summary>From 0.9.4 (GOAL-11), on a person's own scope only and from record format 3: the weekly windows that hold notifications.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public QuietHoursSetting? QuietHours { get; init; }
 }
 
 /// <summary>An attributable revision at a scope; historical revisions remain inspectable but do not select values.</summary>
@@ -27,6 +38,18 @@ public sealed record CommunicationProfile(string? Recipient, string? Assignment,
     /// <summary>Absent until the estate explicitly adopts an exact communication template.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public PresentationTemplateUse? Template { get; init; }
+
+    /// <summary>From 0.9.4 (GOAL-11): the person's declared availability, from their current own-scope revision; absent when none declares it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public CommunicationAvailability? Availability { get; init; }
+
+    /// <summary>From 0.9.4 (GOAL-11): the person's quiet hours, from their current own-scope revision; absent when none declares them.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public QuietHoursSetting? QuietHours { get; init; }
+
+    /// <summary>From 0.9.4 (GOAL-11): whether the person is away and whether quiet hours hold notifications, as of the read; absent when neither is declared.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public AvailabilityState? AvailabilityNow { get; init; }
 }
 
 /// <summary>Deterministic, field-by-field precedence shared by runtime and client previews.</summary>
@@ -112,6 +135,12 @@ public static class CommunicationResolution
             {
                 throw new ArgumentException($"Unsupported communication {field} '{value}'.", nameof(values));
             }
+        }
+
+        // From 0.9.4 (GOAL-11): availability and quiet hours are checked as their record's validation checks them.
+        if ((AvailabilityRules.Refusal(values.Availability) ?? AvailabilityRules.Refusal(values.QuietHours)) is string refused)
+        {
+            throw new ArgumentException(refused, nameof(values));
         }
     }
 }

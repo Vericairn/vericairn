@@ -14,6 +14,16 @@ public interface IClientOperationLifetime
     IDisposable RetainClientOperation();
 }
 
+/// <summary>
+/// From 0.9.4 (FIX-152): a runtime whose embedded client operations observe their deadlines on a clock it names, so that a test can stop
+/// one at its limit without waiting; every runtime outside a test names the system's clock.
+/// </summary>
+internal interface IClientOperationClock
+{
+    /// <summary>The clock this runtime's embedded operations measure their deadlines on.</summary>
+    TimeProvider OperationClock { get; }
+}
+
 /// <summary>A client operation failed; its cause alone does not establish whether an effect happened.</summary>
 public interface IClientOperationFailure
 {
@@ -35,6 +45,74 @@ public sealed class ClientTimeoutException(bool outcomeUnknown, Exception? inner
 {
     /// <inheritdoc />
     public bool OutcomeUnknown { get; } = outcomeUnknown;
+
+    /// <summary>
+    /// From 0.9.4 (FIX-152): the read that stopped at its own deadline, with that deadline and what its runtime last reported it was
+    /// judging; null for an operation that may write and for a timeout that was not the operation's deadline, such as a transport's.
+    /// </summary>
+    internal StoppedRead? Read { get; init; }
+}
+
+/// <summary>
+/// From 0.9.4 (FIX-152): a read that stopped at its request limit: the operation's name, the limit, and what the runtime serving it last
+/// reported it was judging, or null when it reported nothing (a daemon in another process reports nothing to its client).
+/// </summary>
+internal sealed record StoppedRead(string Operation, TimeSpan Limit, string? Judging);
+
+/// <summary>
+/// From 0.9.4 (FIX-152): what one client operation's runtime reports it is judging, as far as it knows, so that a read stopped at its
+/// request limit can say so. Each operation opens its own for the work it starts, and a runtime in this process reports each stage of
+/// its derivation through <see cref="Stage"/>, which finds the operation of the calling flow, so concurrent requests never read each
+/// other's stage. It changes no answer and is read only when the operation stops at its limit.
+/// </summary>
+internal sealed class ClientOperationActivity
+{
+    private static readonly AsyncLocal<ClientOperationActivity?> Current = new();
+    private string? judging;
+
+    /// <summary>What the operation's runtime last reported it was judging, or null.</summary>
+    internal string? Judging => Volatile.Read(ref judging);
+
+    /// <summary>Opens the activity of an operation for the flow that starts its work.</summary>
+    internal static ClientOperationActivity Begin()
+    {
+        var activity = new ClientOperationActivity();
+        Current.Value = activity;
+        return activity;
+    }
+
+    /// <summary>
+    /// Reports what the calling flow's operation is judging until the result is disposed, when the stage it replaced is reported again.
+    /// Outside an operation, such as a request a daemon serves, or without a stage, it reports nothing.
+    /// </summary>
+    internal static IDisposable Stage(string? judging)
+    {
+        if (judging is null || Current.Value is not { } activity) return Unreported.Instance;
+        return new Scope(activity, Interlocked.Exchange(ref activity.judging, judging));
+    }
+
+    /// <summary>Replaces what the current stage reports as it learns more, such as how many records it judges; nothing outside an operation.</summary>
+    internal static void Report(string judging)
+    {
+        if (Current.Value is { } activity) Volatile.Write(ref activity.judging, judging);
+    }
+
+    private sealed class Scope(ClientOperationActivity activity, string? previous) : IDisposable
+    {
+        private ClientOperationActivity? owner = activity;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref owner, null) is { } ended) Volatile.Write(ref ended.judging, previous);
+        }
+    }
+
+    private sealed class Unreported : IDisposable
+    {
+        internal static readonly Unreported Instance = new();
+
+        public void Dispose() { }
+    }
 }
 
 /// <summary>The transport lost the response; a possible effect remains uncertain.</summary>
@@ -123,7 +201,7 @@ public static class ClientOperation
         "ObjectsVerify" or "ObjectGet" or "ObjectPut" or "Export" or "Upgrade" or "DocumentReview" or "DocumentPin" or "DecisionFromAsk" or "DocumentPass" or "DocumentPassAssign" or
         "Policies" or "Policy" or "PolicyEvaluate" or "WritingExceptions" or "WritingException" or
         "PolicyDeclare" or "PolicyRevise" or "PolicyRetire" or "PolicyExcept" or "PolicyRevokeException" or "WritingExceptionAdd" or "WritingExceptionRemove" or "WorkPlace" or "WorkMovePlan" or "ReleaseWithdraw" or "ReleaseReviewAssign" or "Result" or "ReviewResult" or "ReleaseBasis" or
-        "QualifyHarness" or "RunPrepare" or "RunStart" or "GoalStep" or "ReleaseSubmit" or "ReleaseObserve" or "OperatorRecord" or "OperatorFinish" or "OperatorClose" => TimeSpan.FromMinutes(15),
+        "QualifyHarness" or "RunPrepare" or "RunStart" or "GoalStep" or "ReleaseSubmit" or "ReleaseObserve" or "OperatorRecord" or "OperatorFinish" or "OperatorClose" or "OperatorAnswer" or "OperatorAct" => TimeSpan.FromMinutes(15),
         "PackagesObserve" or "ReleaseCheck" or "SecurityReportsPoll" => TimeSpan.FromMinutes(3),
         // A long poll waits up to 25 seconds before it answers, and may first derive what changed.
         "Events" or "EventsSelect" or "PresencePrompts" => TimeSpan.FromMinutes(1),
@@ -148,7 +226,7 @@ public static class ClientOperation
             using IDisposable? retained = lifetime?.RetainClientOperation();
             // Cleanup follows actual task completion, including cancellation before the queued work starts.
             return await Task.Run(action, token).ConfigureAwait(false);
-        }, mayHaveEffect, cancellationToken: cancellationToken);
+        }, () => mayHaveEffect, null, (lifetime as IClientOperationClock)?.OperationClock ?? TimeProvider.System, cancellationToken);
 
     /// <summary>Runs one operation with an explicit deadline and preserves uncertainty if observation is interrupted.</summary>
     public static Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, bool mayHaveEffect,
@@ -177,6 +255,13 @@ public static class ClientOperation
         using var deadline = new CancellationTokenSource(budget, clock);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         bool DeadlineElapsed() => budget != Timeout.InfiniteTimeSpan && clock.GetElapsedTime(started) >= budget;
+        // From 0.9.4 (FIX-152) the work this operation starts reports its stages to this operation alone, and a read stopped at its own
+        // deadline names it, the deadline and the stage its runtime last reported; a timeout that was not this deadline names none.
+        ClientOperationActivity activity = ClientOperationActivity.Begin();
+        ClientTimeoutException TimedOut(bool outcomeUnknown, Exception? inner = null) => new(outcomeUnknown, inner)
+        {
+            Read = !mayHaveEffect() && (deadline.IsCancellationRequested || DeadlineElapsed()) ? new StoppedRead(operation, budget, activity.Judging) : null,
+        };
         Task<T>? pending = null;
         try
         {
@@ -185,7 +270,7 @@ public static class ClientOperation
             // A completed task can beat an overdue timer callback (or bypass WaitAsync's cancelled token).
             // Decide at observation using monotonic elapsed time, preserving caller cancellation's precedence.
             cancellationToken.ThrowIfCancellationRequested();
-            if (deadline.IsCancellationRequested || DeadlineElapsed()) throw new ClientTimeoutException(mayHaveEffect());
+            if (deadline.IsCancellationRequested || DeadlineElapsed()) throw TimedOut(mayHaveEffect());
             return result;
         }
         catch (OperationCanceledException exception)
@@ -196,14 +281,14 @@ public static class ClientOperation
             }
 
             if (deadline.IsCancellationRequested || DeadlineElapsed() || (exception is not IClientOperationFailure && ClientFailure.TimedOut(exception)))
-                throw new ClientTimeoutException(mayHaveEffect(), exception);
+                throw TimedOut(mayHaveEffect(), exception);
             if (exception is ClientCancelledException) throw;
             // An unrelated transport cancellation is neither proof of a deadline nor a person's cancellation.
             throw new ClientUnavailableException(mayHaveEffect(), exception);
         }
         catch (TimeoutException exception) when (exception is not ClientTimeoutException)
         {
-            throw new ClientTimeoutException(mayHaveEffect(), exception);
+            throw TimedOut(mayHaveEffect(), exception);
         }
         catch (HttpRequestException exception) when (exception is not IClientOperationFailure &&
             exception.StatusCode is null && ClientFailure.Refusal(exception) is Exception refusal)
@@ -213,7 +298,7 @@ public static class ClientOperation
         catch (HttpRequestException exception) when (exception.StatusCode is null && exception is not IClientOperationFailure)
         {
             bool dispatched = exception.HttpRequestError is not (HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError);
-            if (ClientFailure.TimedOut(exception)) throw new ClientTimeoutException(mayHaveEffect() && dispatched, exception);
+            if (ClientFailure.TimedOut(exception)) throw TimedOut(mayHaveEffect() && dispatched, exception);
             throw new ClientUnavailableException(mayHaveEffect() && dispatched, exception);
         }
         catch (HttpRequestException exception) when (exception is not IClientOperationFailure && mayHaveEffect() && exception.StatusCode >= HttpStatusCode.InternalServerError)

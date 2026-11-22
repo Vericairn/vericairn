@@ -98,6 +98,29 @@ public sealed class DocumentCheckDetailTests : IDisposable
         Assert.DoesNotContain("missing-25.md", message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ExampleMarkdownInCodeClearsAndABrokenLinkOutsideCodeIsStillRefused()
+    {
+        // FIX-138 (decision 01M7BMNRGSG44FXFZMRD9SY44R): the owner's file shown as an example, its link meant for an estate's root, in a
+        // fence, an inline code span and an indented block.
+        string reviewer = Initialize();
+        Write("docs/overview.md", "# Overview\n");
+        string example = "# Guide\n\nThe owner's file at the root, for example:\n\n```markdown\nRead [the orientation](docs/vericairn-orientation/AGENTS.md) first.\n```\n\n"
+            + "Or write `[the orientation](docs/vericairn-orientation/AGENTS.md)` inline:\n\n    [the orientation](docs/vericairn-orientation/AGENTS.md)\n\nSee [the overview](overview.md).\n";
+        Write("docs/guide.md", example);
+        string cleared = CliHarness.Ok("--estate", root, "--json", "docs", "review", "docs/guide.md", "--by", reviewer, "--outcome", "current", "--summary", "The examples are code.").Id;
+        Assert.Equal(cleared, Row().GetProperty("clearance").GetString());
+
+        // A broken link outside code is still refused, at its own line and column.
+        Write("docs/guide.md", example + "And [a plan](plan.md).\n");
+        CliHarness.Outcome refused = Review(reviewer, "current");
+        Assert.Equal(1, refused.Code);
+        JsonElement detail = Assert.Single(Findings(refused), f => f.GetProperty("Code").GetString() == "document.check-detail");
+        Assert.Equal("docs/guide.md:14:14", detail.GetProperty("Location").GetString());
+        Assert.Equal("links-resolve: plan.md does not resolve, which names docs/plan.md, not in the repository.", detail.GetProperty("Message").GetString());
+        Assert.Equal(cleared, Row().GetProperty("clearance").GetString());
+    }
+
     public void Dispose() => CliHarness.Delete(root, scratch);
 
     private string Initialize()

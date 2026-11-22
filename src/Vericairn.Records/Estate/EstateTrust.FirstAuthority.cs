@@ -56,12 +56,12 @@ internal sealed partial class EstateTrust
     /// the first authority is one the estate already makes when the manifest names a candidate. It costs a judgment of the estate for
     /// each candidate, so it serves that command alone. The manifest is read from the bytes given, which the command has checked.
     /// </summary>
-    internal static FirstAuthorityReading ReadFirstAuthority(string root, IReadOnlyList<RecordFile> files, byte[] manifestBytes, Func<string, byte[]?>? objects)
+    internal static FirstAuthorityReading ReadFirstAuthority(string root, IReadOnlyList<RecordFile> files, byte[] manifestBytes, Func<string, byte[]?>? objects, JudgmentContext? context = null)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(manifestBytes);
         // Judged from a model that holds every record, as the loader judges one before it keeps only the records that count.
-        EstateModel model = EstateLoader.Load(root, files, null, manifestBytes, objects, judge: false);
+        EstateModel model = EstateLoader.Load(root, files, null, manifestBytes, objects, judge: false, context: context);
         EstateManifest? manifest = model.Manifest;
         EstateTrust trust = Build(model, manifest, model.ObjectReader, model.FilePaths);
         bool history = model.OfType("history-checkpoint").Any();

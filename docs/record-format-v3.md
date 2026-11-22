@@ -563,6 +563,401 @@ flow shows the result and reads the step undecided. `records describe result`
 includes this contract, and the generic record reader advances to
 `vericairn.records/readers/9`.
 
+## Concurrent assignments compared by their permitted paths (0.9.4)
+
+CODE-73 adds three optional fields to an assignment's `brief` and one optional
+field to `result` within format 3, and no record type. An assignment or result
+without them behaves as before: none is refused or warned for lacking one, and
+the write-boundary rules below apply only to new records.
+
+| Record | Additive contract |
+| --- | --- |
+| `assignment` | `brief.repository`: the identity of the repository the work changes, the estate's own (its first charter's id) or a repository resource's (its first record's id). `brief.excludedChanges`: patterns in the grammar of `permittedChanges` that the work leaves out, each an interpretable pattern, never prose, since prose excludes nothing. `brief.after`: at most 20 assignment ids whose work this one waits for; each is followed to its current revision, and validation refuses one that names the assignment itself, names it twice or makes a cycle (`assignment.after`), and an exclusion that is prose (`assignment.excluded`) or a repository that is no such identity (`assignment.repository`). |
+| `result` | Optional `change: {repository, base, head, target}`: the repository's identity as above, the base and head commits (40 lower-case hex digits) and the branch the change integrates into, a plain branch name (`result.change`). The runtime derives the change's paths from the registered clone, by name without rename detection, so a rename is a removal and an addition; a clone missing either commit makes them unavailable, never empty. The change releases its assignment only as that assignment's work: in the repository its brief names (for an older brief, the one its runs named), merged by a `change-merge` operation at that head or reachable from the main line of the registered clone, never from the branch named as `target`, and, where the clone shows them, with a base that is a proper ancestor of its head and touching one of the assignment's effective permitted paths; a reachable head needs the clone to show both, and a merge the records show stands where no clone shows otherwise. Any other change keeps the assignment active. An assignment whose brief holds no path pattern is released when its result is completed, whatever change it names. |
+
+From 0.9.4 the runtime's write boundary refuses a new format-3 assignment whose
+permitted changes hold a path pattern and whose brief names no repository
+(`assignment.repository-required`); `work assign`, `goal step`, routing and
+flows fill it from the run's repository, the one named with `--repository`,
+or, when the estate names no repository resource, the estate's own. It refuses
+a revision that changes an assignment's `repository`, `permittedChanges`,
+`excludedChanges` or `after` while a run of it is in flight
+(`assignment.narrowing-in-flight`), and a new attempt on an assignment while one
+it names in `after` is not released (`attempt.after`). Narrowing by exclusion or
+`after` grants less, so it needs no amendment. A new completed result whose
+assignment holds a path pattern and that names no `change`, or a `change` in
+another repository, with the same commit as base and head, or for an older
+assignment that names no repository, is written with a warning in the write's
+notices, since its assignment then stays active until acceptance; a result the
+check counts as released at completion, recorded before the check's first
+record, is not warned.
+
+The overlap check reads these fields; status and progress show its open
+overlaps from the records alone, and `vericairn work overlap` adds what this
+machine's registered clones show ([CLI](cli.md#vericairn-work-overlap-094)). A
+reader of format 3 that predates the fields refuses an assignment or a result
+that carries one as an unknown key, as any later format-3 field, so the estate's
+pin keeps every machine on a release that reads them; an older reader keeps
+reading every record without them. A format-2 estate refuses them, as every
+format-3 field. `records describe assignment` and `records describe result`
+include this contract, and the generic record reader advances to
+`vericairn.records/readers/10`.
+
+POLICY-08 adds a rule kind and a policy-exception target within format 3, and no
+field or record type. An `estate-policy` rule of the foundation kind
+`vericairn.estate/concurrent-paths`, version 1, with empty `parameters` and a
+`repository` selection, holds the unresolved pairs of active assignments whose
+effective permitted paths meet within its selectors
+([policies](policies.md#concurrent-paths-094)); a runtime without the kind reports
+the rule unavailable. A `policy-exception` target of kind `pair` carries
+`assignments`, the exact references of two revisions of two different
+assignments, and no `submission`; a concurrent-paths rule takes only pair targets
+and only such a rule takes one (`exception.pair`). A reader of format 3 that
+predates the target refuses an exception carrying it (`body.enum`), so readers
+upgrade before an estate writes one; every other record keeps its reading.
+
+## What a worker run can reach (0.9.4)
+
+CODE-82 adds one optional field to `harness-qualification` and one to an
+`agent-run` operation's `execution` within format 3, and no record type. A
+record without them is unchanged, and none is refused or warned for lacking one.
+
+| Record | Additive contract |
+| --- | --- |
+| `harness-qualification` | `reach: {file, host}`: what a probe in the harness's place reached during qualification. `file`, a marker planted outside the probe workspace and its temporary directory, is `readable`, `blocked` or `unknown`; `host`, a test host on the loopback interface, is `reachable`, `blocked` or `unknown`. It is no admission identity, so a revocation may omit it. |
+| `operation` (agent-run) | `execution.reach: {outsideFile, testHost, secretPaths, secretKinds, secretPathsComplete}`, fixed at intent with the rest of `execution`: the same measurement made before the run started, the count of secret-bearing paths its operating-system user could open for reading (at most 512), their kinds (`ssh-key`, `cloud-credentials`, `registry-credentials`, `forge-credentials`, `signing-key`, `harness-login`, `device-key`, `environment-file`, `keychain`; each named once and counted at least once) and whether that inventory was complete. The paths themselves stay in the run's custody on the machine that ran it, never in a record. |
+
+`unknown` means the probe did not run or report, never that it was blocked. A
+reader of format 3 that predates the fields refuses a record that carries one as
+an unknown key, as any later format-3 field, so the estate's pin keeps every
+machine on a release that reads them; a format-2 estate refuses them. `records
+describe harness-qualification` and `records describe operation` include these
+contracts.
+
+## Public retrieval for research runs (0.9.4)
+
+RUN-04 adds one optional field to an assignment's `brief`, one to an `agent-run`
+operation's `execution` and one top-level field to that operation within format
+3, and no record type. A record without them is unchanged.
+
+| Record | Additive contract |
+| --- | --- |
+| `assignment` | `brief.retrieval: "public"`: the work's runs may retrieve public sources with their harness's web tools, never with credentials. It is the only value, and nothing else permits retrieval. |
+| `operation` (agent-run) | `execution.retrieval: "public"`, fixed at intent: the run's web tools were admitted. Validation refuses it unless the brief of the assignment revision the operation names permits retrieval (`operation.retrieval`), and only with it may an inventory component name the route `public-web` (`operation.execution`). |
+| `operation` (agent-run) | `sourcesObserved: {sources, count, complete, digest}`, recorded at settlement only, on an `observed-success` or `known-failure` revision of a run whose execution admitted retrieval, and kept by every later revision (`operation.sources-observed`): each source, in the order invoked, with its `tool`, exactly one of `address` (absolute http or https, no user information), `query` or `withheld: true`, `at`, `retained`, and its content's `hash` and `bytes` when received (a retained source names both); at most 100 in full, `count` of every source, `complete` (false when the run's log was missing, unreadable or could not be written) and `digest`, SHA-256 of the canonical JSON array of every entry. The retrieved text stays in the run's custody, never in a record. |
+
+A reader of format 3 that predates these fields refuses a record that carries
+one as an unknown key, as any later format-3 field, so the estate's pin keeps
+every machine on a release that reads them; a format-2 estate refuses them.
+`records describe assignment` and `records describe operation` include these
+contracts.
+
+## Standing agents (0.9.4)
+
+GOAL-07 adds a goal's `plan.standing` and an assignment's `occurrence` within
+format 3, and no record type: a standing agent is a stewardship goal, which
+already carries its sponsor, budget, lifecycle and ledger. A goal or assignment
+without them behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `goal` | Optional `plan.standing: {pin, subject, triggers, period, until, runsOn?}`, on a stewardship goal only and never beside `plan.flow`, with a `given` plan of exactly one ordinary work order (`standing.kind`, `standing.flow`, `standing.work`). `pin` is the exact `{id, version, hash}` of a flow that declares the trigger kinds the plan uses and exactly one routed step, of kind work (`standing.flow`, `standing.trigger`); `subject` binds the flow's subject as a run's does (`standing.subject`); each trigger has its own slug `key` and a `kind`: `schedule {unit: days|months, every, firstAt}`, `duty {policy, rule}`, `event {recordType, fields?, roles?}`, `condition {record}` with a record predicate, or `request` (`standing.trigger`); `period {unit: days|months, every?, runs, wallMinutes, tokens?, currency?}` caps the units the budget caps, which are then each run's caps (`standing.period`); `until` is after the goal is recorded (`standing.until`); optional `awaitingReview` (1 to 100, three when absent) is how many results may await review before dispatch defers; `runsOn` is a runtime identity's public-key hash. A flow's `triggers` declare kinds from the same five. |
+| `assignment` | Optional `occurrence: {key, trigger, revision, item}` on, and only on, an assignment of a standing agent's work order (`assignment.occurrence`). `revision` is the goal revision the trigger's declaration originates from; `item` is `{interval, dueAt}`, `{record: {type, id, hash}}`, `{failing, records}`, `{at, by}` or the duty's `{occurrence, policy, rule, dueAt, deadline, schedule}`; `key` is the goal's identity, the trigger, the revision and the item joined by `/`, or `duty/` and the duty occurrence's identity. A revision keeps its assignment's occurrence exactly, and a person's hand-over carries it exactly. A new occurrence is refused unless its agent is active and before its `until` at the assignment's time, and its item is one its trigger makes then: a schedule's latest due interval with its `dueAt`; an event's record of the trigger's type and filters, at its exact hash, recorded after the trigger was activated and before the assignment; a request by the assignment's author, no later than it; a duty occurrence's exact identity from the trigger's policy at its originating revision, its rule, its subject's identity and the duty's own schedule item (`{kind, number}`, `{kind, at}` or `{kind, publication}`, built from the policy's schedule, which the item's `schedule` equals exactly in canonical form; for a release schedule, the first published revision of a release of the schedule's product, published within the schedule's window, as the duty's evaluation opens one), with the schedule's due time, due by then, and its deadline. Any other current assignment naming the same key refuses it (`standing.duplicate`, a reconcile task) unless one is a person's hand-over of the other's step or holds nothing (an earlier revision, withdrawn by a reconciliation, or stored without the record it was routed with). |
+
+The runtime's write boundary also refuses a new assignment, with
+`assignment.occurrence-now`, whose event record is the agent's own or an agent's
+the trigger does not admit, or whose condition does not fail over the records its
+item names, read as the records stand; assignments already in the estate keep
+their reading. A `reconciliation` whose subject is an assignment naming an
+occurrence, keeping and withdrawing assignments of that occurrence (the latest
+revision of each, none a revision of the subject), settles `standing.duplicate`,
+recorded by the operator or under `local-engineering`, only while two or more of
+them hold the key (recorded before it, withdrawn by no earlier reconciliation and
+not stranded) and the one kept is one of those (`reconciliation.occurrence`). An
+occurrence's settlement is its key's: the latest result on any assignment of the
+key, a withdrawn one included, settles it and counts toward `awaitingReview`.
+
+`goal-status` with status `active` is refused for a standing agent past its
+`until`, or while another active standing agent of the same flow or work role
+carries the same subject (`goal-status.standing`). An `agent-run` operation whose
+goal is a standing agent is refused, judged by the records before it, past
+`until`, while its consecutive failed runs reach the goal's
+`limits.consecutiveFailures` (three when unset; counted as below) and no
+answered ask of the pause lets it go on, past the period's
+`runs`, for an assignment naming no occurrence or a settled one, while results
+awaiting review reach `awaitingReview` (`operation.standing`, `operation.budget`),
+or with a cap above the budget's per-run cap; the ledger of a standing agent
+charges each period's runs against the period's caps.
+
+The consecutive failed runs count each settled `agent-run` of the goal once, in
+the order the runs settled (each at the later of its intent and its first
+settling revision no tied agent wrote, first by the number of revisions no tied
+agent wrote above it on its own `supersedes` chain, then by `at` and identifier;
+or, without one, its first settling revision). A run is read
+from its lineage: every `operation` whose `supersedes` chain reaches the run's
+intent, on every branch, whatever divergent successors, the order of identifiers
+or a `reconciliation` make current. Where a revision no agent tied to the goal (as
+the `ask` row of the standing outputs below reads ties) wrote settles the run or
+cancels it, the run's untied heads decide it and the revisions tied agents wrote
+count for nothing. From 0.9.4 (FIX-156) an untied head is a revision no tied
+agent wrote that no other such revision follows on its own `supersedes` chain,
+directly or through revisions tied agents wrote. Each head reads as the run
+would by it alone: a success, a failure, or nothing when it leaves the run
+canceled or unsettled. On one line, as the worker and `records new` write every
+revision on the run's latest, the head is its latest untied revision, so an
+untied principal's correction written on the settlement it corrects counts as
+written, however many revisions a tied agent put between them. Where heads on
+different branches read differently, the reading least favorable to the agent
+decides: a failure over nothing, nothing over a success. Neither the number of
+`supersedes` steps nor `at` ranks one untied revision over another, so a branch a
+tied agent padded with revisions of its own ranks nothing. Only where no such revision settles
+or cancels the run does a `known-failure` revision a tied agent wrote count, as a
+failure. A head reads as a success when it is `observed-success` with
+`observed.reference` naming a `completed` or `partial` result on an attempt of
+its assignment, recorded after its intent, and no tied agent wrote its intent;
+otherwise as a failure when a `result` with outcome `blocked` or `abandoned` was
+recorded on an attempt on its assignment, any revision of either, after its intent
+and before the intent of the assignment's next run, whatever a later result or a
+correction says, or when it is `known-failure`, unless its stop
+was requested by the goal's sponsor, when a person, or an operator, as they stood
+when the stop was recorded, in a revision no tied agent wrote; any other
+principal's stop and the worker's for a cap count. Any other run counts for
+nothing, one that exited cleanly with no result included. Records the estate
+leaves unread because their line holds an identifier more than one record carries
+(see [Identifiers more than one record carries](#identifiers-more-than-one-record-carries-094))
+count against the agent: a line of the goal's `agent-run` operations that is not
+read counts as one failed run for each intent it holds, at least one, at the
+latest `at` among its records; a run that an unread record names, by its
+assignment, an attempt or result on it or a record of its lineage, counts as its
+own records decide it when they make it a success or a failure, and otherwise as
+failed; and while any record is unread, a record that does not count, whose
+device, admission, principal or grant may be the unread one, is read as a tied
+agent's record: an intent, a revision, an attempt or a blocked or abandoned
+result counts toward a failure, and none makes a success, cancels, corrects or
+stops a run. From 0.9.4 the worker
+names in `observed.reference` of an observed success the latest `completed` or
+`partial` result its agent recorded during the run, on an attempt recorded during
+the run, as it sees them at the run's exit, and names none otherwise; a reader
+that predates this reads it as the free text the field already was. A `completed`
+or `partial` result never makes a run succeed by itself: only the settlement names
+it, so no result written after the settlement, whatever its `at`, does. A later
+run whose intent a tied agent wrote never ends the window of a run no tied agent
+wrote. From 0.9.4 (FIX-155) the failures end in two ways only: a success ends the
+failures before it while they are fewer than the limit, and once they reach it
+only an answer of the pause's ask ends them, an `ask` goal step recorded naming one
+of the failures, answered by a decision the `ask` row counts, after which no run
+settled before the earlier of the ask and that decision counts. So no attempt,
+result, run revision, divergent revision, reconciliation or decision a tied agent
+writes ends the pause or turns a success an untied settlement names into a
+failure, whatever its `at`, and no record carrying another's identifier does,
+whatever its `at` or path.
+
+A reader of format 3 that predates these fields refuses an assignment that
+carries `occurrence` as an unknown key and refuses a goal whose plan carries
+`standing` as an unknown key of `plan`, as any later format-3 field, so the
+estate's pin keeps every machine on a release that reads them: such a reader
+shows neither record and dispatches nothing of the agent. A reader that reads
+them but cannot resolve the flow shows the goal with a warning
+(`standing.unavailable`) and dispatches none of its occurrences. A format-2
+estate refuses them. `records describe goal` and `records describe assignment`
+include this contract, and the generic record reader advances to
+`vericairn.records/readers/11`, which carries the fields of this section and the
+two before it.
+
+## Standing outputs (0.9.4)
+
+GOAL-08 adds fields to `possibility`, `ask` and `operator-request`, and a goal's
+`plan.standing.outputs`, within format 3, and no record type: every output of a
+standing agent's occurrence is a record another principal disposes of. A record
+without them behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `possibility` | Optional `raisedBy: {goal, occurrence, assignment, run?}` names a standing agent's goal by its first revision, the occurrence key, the assignment of the goal's work order that carries that key, recorded before it, whose contributor is the record's author, and, for an agent, the agent run of that assignment by the author, in flight when the record is written; a result that already settles the occurrence refuses it (`standing.raised-by`). Such a possibility is raised `open` with a `fingerprint` and at least one source (`standing.possibility`); its occurrence records at most `plan.standing.outputs.possibilities` (five when unset) possibilities, of which at most `drafts` (three) carry a `draft`, and one summary possibility, the one with `extras`, read in the goal revision in force when the possibility was first raised (the latest activated before it) and counting each other possibility of the occurrence at its revision as it stood, a revision counting for the draft or extras it adds (`standing.output-cap`); a second open possibility of the same agent with the same fingerprint, read as each stood when it is written, is refused (`standing.duplicate-output`); and where one with that fingerprint was declined, a new one names it in `raisesAgain` with at least one `evidence` item (`standing.raises-again`). A revision keeps exactly the `raisedBy` and `fingerprint` its chain's first revision names, and a revision of a possibility no standing agent raised names no `raisedBy` (`standing.raised-by`); the rules apply by the first revision's `raisedBy`, whatever the revision's body says. One that changes the disposition or `adoptedAs` is refused by the possibility's author and by an agent tied to the goal, as the `ask` row reads ties (`standing.own-output`; `standing.output-now` where only records written after it tie the agent), and from 0.9.4 (FIX-155) such a revision disposes of nothing whatever its `at`: the possibility reads as the last revision of its chain by another principal set its disposition, open until one does, counted among the open outputs and adopted only while it reads open. On any possibility, a revision of one whose revision before it carries `disclosure: held` that changes its disposition or `adoptedAs` is refused for an agent, adopting it takes an operator who is a person, and so does a revision that drops `disclosure` (`standing.held`). On any possibility, at any format, a revision that adopts it, recorded by the author of its first revision, is refused (`standing.own-output`) when its chain carries a field of this section; otherwise the write boundary refuses it (`standing.output-now`), and an adoption already in the estate keeps its reading. Optional on any possibility: `fingerprint` (lower-case letters, digits and `. : / _ -`, up to 200 characters); `sources`, each `{address, retrievedAt?, hash?, extents?}`; `evidence`, each `{stance: for|against, statement, sources?}`, the sources by index, with no scores (`possibility.evidence`); `reviewTriggers`, each `{at}` or `{condition}` (`possibility.review-trigger`); `links`, each `{relation: duplicate-of|supersedes, possibility, hash}` naming another possibility at its exact hash (`possibility.link`); `draft: {key?, title, intent, scope, deliverables, exitQuestion}`; `disclosure: held`; `extras`; `raisesAgain`. |
+| `ask` | Optional `raisedBy`, as a possibility's, kept by every revision as its first revision names it (`standing.raised-by`). Such an ask is put to a person other than its author, names a revision of the agent's goal in `goal`, and does not open with the words of the runtime's own asks about a goal (`standing.ask`); no revision withdraws it, with `raisedBy` or without (`standing.own-output`): a decision of the person asked disposes of it, and from FIX-155 a withdrawal reads as the state its chain recorded before it, so a decision of the person asked still answers it (`decision.answers` refuses an answer only to an ask that reads withdrawn). A `decision` whose `answers` names such an ask, or one of the runtime's own asks about a standing agent's goal below, answers nothing when its author raised the ask or is an agent tied to the goal, whatever its `decidedBy` names, so the ask stays waiting, counted among the open outputs, and a failure pause holds. An agent is tied when any `assignment` of the work order of any revision of the goal names it as `contributor`, or any revision of the goal's `roles`, or of the `roster` where the goal's roles do not name its work step's role, has named it for that role; ties are read from the records whatever their `at`, and only grow. Such a decision is an error (`standing.own-output`) when its author raised the ask or a record tying it was written before the later of the decision and the ask revision it names, and otherwise reported (`standing.output-now`). The author of one of the runtime's asks is not refused for being its author: a principal nothing ties to the goal, such as the builder whose goal step wrote the ask, records the person's decision on it. |
+| `operator-request` | Optional `raisedBy`, as a possibility's, kept by every revision as its first revision names it (`standing.raised-by`). Such a request, and each revision of it, is of kind `publication`, pins the agent's work order and is put to an operator other than its author (`standing.publication`): its exact text, labeled the agent's draft. An `operator-request-close` or an `operator-request` observation of it is recorded by an operator who is a person, never by its author or `askedBy` (`standing.own-output`) and never by an agent, whatever `operatorWords` it cites (`standing.publication`); from FIX-155 one by anyone else closes nothing. |
+| `goal` | Optional `plan.standing.outputs: {possibilities?, drafts?, open?}`: possibilities per occurrence (1 to 20, five when unset), drafts among them (no more than the possibilities, three when unset; `standing.outputs`) and open outputs (1 to 1,000, ten when unset). |
+
+A standing agent's open outputs are its possibilities still open, its asks still
+waiting and its publication requests not closed. While they reach `open`, its due
+occurrences are deferred, and an `agent-run` operation of the goal is refused,
+judged by the records before it (`operation.standing`). The runtime's write
+boundary also refuses, with `standing.output-now`, a new disposition of a
+standing agent's possibility, or a new decision answering a standing agent's ask
+or one of the runtime's asks about its goal, by an agent tied to the goal only by
+records written after it. Because ties only grow, a later roster or
+assignment change makes no record already in the estate an error and is never
+refused for one; it can make an answered ask wait again for the person, as a
+decision by an agent it ties answers nothing from then on, and it never makes a
+waiting ask answered. The runtime takes
+an ask for its own renewal, period-cap or failure-pause ask only when its first
+revision names no `raisedBy`, it is put to a person and its author took the
+goal's steps as the records stood when it was written (an operator, the sponsor
+when a person, a holder of `local-engineering` or a dispatcher whose grant names
+the goal); another principal's ask in the same words holds back none of them.
+goal step writes and signs these asks as its caller, so an agent that carries the
+occurrences and may itself take the goal's steps can write one in their words, as
+it could by calling goal step; its own answer to one answers nothing.
+
+A reader of format 3 that predates these fields refuses a record that carries
+one of them as an unknown key, as any later format-3 field, so the estate's pin
+keeps every machine on a release that reads them. A format-2 estate refuses them.
+`records describe possibility`, `records describe ask` and `records describe
+operator-request` include this contract.
+
+## Events and presence (0.9.4)
+
+ID-11 and GOAL-11 add fields within format 3 and no record type; each is optional:
+
+- `goal` and `roster`: `limits.watch.reassignAfterSeconds`, 60 to 86,400, how long a lapsed session holding a step stays lapsed
+  before the runtime asks about reassignment (600 when neither sets it).
+- `communication-setting`, person scope only: `values.availability` (`state` `available`, or `away` with `until` and an optional
+  earlier `from`) and `values.quietHours` (`zone`, an IANA time zone; `windows`, 1 to 14 of `days`, `start` and `end` as `HH:MM`;
+  `breakthrough`, attention categories).
+- `assignment`: `routedWith` `session` (routing gave the step to a live session; stored alone, it holds its step at once) and
+  `basis`, the lapse ask a hand-over answers, recorded by a person and about an assignment of the same step.
+
+A format-2 record cannot carry them. A reader of format 3 that predates them refuses each as an unknown key or value, as any later
+format-3 field, so the estate's pin keeps every machine on a release that reads them. The generic record reader advances to
+`vericairn.records/readers/12`, which carries `basis` and the session value. See [events and presence](events-and-presence.md).
+
+## Answering asks in one act (0.9.4)
+
+OPS-16 adds one optional field to `decision` within format 3, and no record type. A decision without `act` behaves as before.
+
+| Type | Field |
+| --- | --- |
+| `decision` | Optional `act: {id, ask, hash, recommendation, count}` names the operator's act that answered this ask with its recommendation: `id`, the act's ULID, which each of its decisions names; `ask` and `hash`, the exact ask revision `answers` names; `recommendation`, the SHA-256 of that revision's recommendation as UTF-8; and `count`, 1 to 256, how many asks the act set out to answer: those it showed and the operator chose before its first signature. An act that stops part-way, as a phone's may, writes fewer decisions than its count, never more. `decidedAt` is the act's time. |
+
+Validation refuses an `act` whose `answers` is not exactly its ask, whose hash is not that revision's or whose recommendation
+hash is not that revision's recommendation's; one recorded by anyone but its `decidedBy`, or whose decider is not a person; an
+unsigned one; one carrying `answer`, `changeSet`, `documents`, `obligations`, `policies`, `releaseReview` or `promptUse`; decisions
+of one act that differ in `decidedBy`, `decidedAt` or `count`, answer one ask twice or number more than `count`; and `act` in an
+earlier format. That the ask revision is still the current one and still waits on its operator is the runtime's to check when it
+writes the decision. A reader before 0.9.4 refuses a decision carrying `act`, since a decision admits no other member, so an estate
+records an act only after every writer upgrades.
+
+## Optional requests (0.9.4)
+
+OPS-22 adds one optional field to `operator-request` within format 3, and no record type. A request without `optional` behaves as
+before.
+
+| Type | Field |
+| --- | --- |
+| `operator-request` | Optional `optional: true` marks the request a possible todo: shown in its own section, never holding a release's closing or a goal's evaluation, closed, done or dismissed, whenever the operator chooses. Its requester may create it optional; a required request becomes optional only by a revision the operator it is put to, a person, writes, changing nothing but the mark. |
+
+Validation refuses `optional: true` on a run's step request (`flowStep`), whose step says whether it is required, and a value that
+is not a boolean; a revision by the requester that turns a required request optional; and a revision by the operator it is put to
+that changes anything but the mark, or by an operator who is not a person. Reading counts a turn to optional only when that operator
+wrote it, so a refused mark holds nothing back; a revision back to required always counts. That every file a request pins is held
+by the estate's objects is the runtime's to check when it writes the request. A reader before 0.9.4 refuses a request carrying
+`optional`, since a request admits no other member, so an estate marks requests optional only after every writer upgrades. See
+[operator requests](operator-requests.md#optional-requests-possible-todos-094).
+
+## Identifiers more than one record carries (0.9.4)
+
+A record's identifier is its own: the write boundary refuses a record whose
+identifier the estate already holds, so two record files carry one identifier only
+when one was written by hand or a copy was left behind. Before 0.9.4 the loader
+read the first of them in path order, so a record dated in an earlier month, whose
+path sorts first, was read in place of the record it copied. From 0.9.4 (FIX-156)
+such an identifier is unread, whatever the records' `at`, paths or contents, and so
+is every record of its line: every record joined to one of those files through
+`supersedes`, either way, including the record each copy names as the one it
+supersedes. None of them enters the estate as read. No chain, lineage, lookup or
+supersession reads any of them, so no copy is read in another's place, no earlier
+revision of the line reads as its latest, and no later one reads as a line of its
+own. Each copy is reported (`record.duplicate-id`, an error and a reconcile task)
+and each other record of its line noted (`record.duplicate-line`, a warning), so
+the estate refuses every write while they stand; removing all but one of the
+records carrying the identifier makes the line read again. An estate with no such
+identifier reads exactly as before.
+
+From 0.9.4 (FIX-159) leaving a record unread never makes another count. A record
+can refuse others when read: a charter's signature requirement refuses unsigned
+records and its operator roots every admission; a revocation ends what its device
+signs; a history checkpoint's closing refuses what its device, key, grant or person
+signs and it does not witness; an adoption refuses unsigned records no anchoring
+checkpoint lists; a witnessed listing refuses other bytes under its identifier.
+Left out, such a record refuses nothing. So while records are unread the loader
+judges counting again with the unread records read each way they can be: each
+identifier more than one file carries read as one of the records carrying it (copies
+with the same content and signatures once) or as none of them, with the rest of its
+line. A record counts only when it counts in the reading that leaves the unread
+records out and in every such reading. One of those readings is the estate as it
+was before the copies were written, so whatever it refused stays refused, by every
+reading, check and write; and since the reading that leaves them out is among them,
+a copy can only take counting away. That reading is the earlier estate exactly only
+for the files that share an identifier: a new file with an identifier of its own
+that joins an unread line, as one superseding a record of it does, is in every
+reading, and it gains nothing its writer could not gain by writing it without a
+duplicate. The records that count for nothing only for
+this reason are reported once (`record.duplicate-refused`, a warning). Past 16
+readings which records a reading would refuse is not established, and no record
+counts (`record.duplicate-unsettled`, an error) until all but one record carrying
+each identifier is removed. Only counting is judged this way; in every other respect
+the records read keep the reading that leaves the unread records out.
+
+What holds while records are unread:
+
+- no record counts that a reading of the unread records refuses, so an unsigned
+  record in the operator's name stays refused when a copy of the charter's or its
+  revision's identifier leaves the requirement unread, and a record a closed
+  device signed stays refused when a copy of the closing's identifier, or two new
+  files superseding it, leaves the closing unread;
+- a record left unread can make others stop counting: the device, admission,
+  principal or grant a record's signature or authority rests on may be the unread
+  one, and a copy of a device's identifier, or two new files superseding it, leaves
+  every record that device signed counting for nothing; with the charter left
+  unread no admission counts, so no signed record does;
+- an answer an unread record carried answers nothing, so its ask stays waiting, and
+  a disposition of a standing agent's output it carried disposes of nothing;
+- a standing agent's failures count an unread line of the goal's agent runs as
+  failed, and a run an unread record names as its own records decide it or as
+  failed (above); a standing agent's output whose line is unread stays among its
+  open outputs, one for each first revision the line holds, and is adopted by
+  nobody; an output or an ask of a standing agent whose goal is unread is disposed
+  of and answered by nobody; an unread assignment of the goal's work, or revision
+  of a roster, ties the agents it names to the goal, as if it were read;
+- a record that does not count is read against standing agents as a tied agent's
+  record is, and never for them: its blocked or abandoned results, intents and
+  revisions count toward failures, its outputs stay open until a revision that
+  counts disposes of them, its assignments and roster revisions tie, and it makes
+  no success, cancellation, correction, stop, answer or disposition;
+- every standing agent reads `held` while the estate leaves any record unread,
+  whatever its status reads, unless it is stopped or not dispatched here: what its
+  records rest on reaches, through their devices, admissions, principals and grants,
+  records anywhere in the estate. `goal due` names the unread record (one that names
+  a record of the agent when there is one), and no run of the agent starts: goal
+  step dispatches nothing of it and an agent run's intent is refused for the hold
+  (`operation.standing`), whatever its failures read. A goal whose own line is
+  unread is not shown as missing: `goal due` says its state, failures and open
+  outputs are not established;
+- nothing acts: release submission, every record a device signs on the runtime's
+  machine or that is prepared for a device elsewhere to sign, a pairing code, run
+  admission, preparation and launch, a goal's step by any route and a repository
+  operation (a checked push, opening or merge, or its observation) refuse before
+  they act, naming the finding, and so does every MCP tool and daemon route that
+  reaches them. While the estate reports any other error, release submission, run
+  admission and launch, a goal's step and a repository operation refuse the same
+  way, and a record is judged by the write boundary with the estate as it would be with
+  the record, as before, and stored only when it clears every error, so that an
+  estate can still be repaired by its records. Stopping a run is never refused.
+
+Outside counting an unread line reads as absent, as if its files had been removed:
+no reading takes any of its records, or any copy's content, in another's place. What
+an unread record would restrict other than by refusing to count a record, such as a
+goal status, a review or a reconciliation's withdrawal, restricts nothing in the
+readings while it is unread, and a reading outside a standing agent's that counts
+records against a principal, such as a flow goal's ledger of runs, does not count
+it; nothing acts on such a reading while the duplicate stands, since every acting
+surface refuses.
+
+This adds no field and no record type within format 3. A reader that predates it
+reads the first of the records in path order, as before, and reports the others; a
+development build before FIX-159 counts a record a reading of the unread records
+refuses, and does not refuse acts while the estate reports an error.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

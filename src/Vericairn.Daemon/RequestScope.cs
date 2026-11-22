@@ -64,6 +64,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         bool write = signing?.Mode != DeviceSigningMode.Prepare && HttpMethods.IsPost(context.HttpContext.Request.Method) &&
             !operation.Equals("POST /v1/resources/read", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/events/select", StringComparison.OrdinalIgnoreCase) &&
+            // From 0.9.4 (ID-11): a presence lease is runtime state, never a record, and asks no signer on this machine.
+            !operation.Equals("POST /v1/presence", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/presence/{lease}/heartbeat", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/templates/render", StringComparison.OrdinalIgnoreCase) &&
@@ -71,6 +74,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/records/prepare", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/context/prepare", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/context/brief", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/overlaps/preview", StringComparison.OrdinalIgnoreCase) &&
             // The index is derived machine-local state, never a record: updating it is part of reading.
             !operation.Equals("POST /v1/search", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/search/index", StringComparison.OrdinalIgnoreCase) &&
@@ -151,6 +155,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
             OperatorRecordResponse { Record: RecordWritten record } => record,
             OperatorCloseResponse close => close.Written.Count == 0 ? null : close.Written[^1],
+            // From 0.9.4 (OPS-16, OPS-24): an act names its last stored record, as operator close does.
+            OperatorAnswerResponse answers => answers.Written.Count == 0 ? null : answers.Written[^1],
+            OperatorActResponse act => act.Written.Count == 0 ? null : act.Written[^1].Record,
             DocumentPassAssignResponse pass => pass.Written.Count == 0 ? null : pass.Written[^1],
             PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
             SecurityReportsResponse reports => reports.Triage,
@@ -160,8 +167,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false } and not SecurityReportsResponse { Ok: false };
-        if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false } and not SecurityReportsResponse { Ok: false } and not ObserversResponse { Ok: false } and not StopDrillResponse { Ok: false };
+        if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or OperatorAnswerResponse { Ok: false } or OperatorActResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -246,6 +253,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/work/result"] = typeof(ResultRequest),
         ["POST /v1/work/review"] = typeof(ResultReviewRequest),
         ["POST /v1/work/amend"] = typeof(AmendRequest),
+        ["POST /v1/standing/outputs"] = typeof(StandingOutputRequest),
         ["POST /v1/work/takeover"] = typeof(TakeoverRequest),
         ["GET /v1/devices"] = null,
         ["POST /v1/devices"] = typeof(DeviceCreateRequest),
@@ -273,6 +281,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/events/{key}"] = null,
         ["POST /v1/events/select"] = typeof(EventSelectRequest),
         ["POST /v1/presence/prompts"] = typeof(PresencePromptsRequest),
+        ["POST /v1/presence"] = typeof(PresenceRegisterRequest),
+        ["POST /v1/presence/{lease}/heartbeat"] = null,
+        ["DELETE /v1/presence/{lease}"] = null,
+        ["GET /v1/presence"] = null,
         ["GET /v1/operator/actions"] = null,
         ["GET /v1/operator/requests"] = null,
         ["POST /v1/operator/requests"] = typeof(OperatorRequestWriteRequest),
@@ -282,12 +294,19 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/operator/record"] = typeof(OperatorRecordRequest),
         ["GET /v1/operator/unfinished"] = null,
         ["POST /v1/operator/unfinished"] = typeof(OperatorFinishRequest),
+        ["GET /v1/operator/answers"] = null,
+        ["POST /v1/operator/answers"] = typeof(OperatorAnswerRequest),
+        ["GET /v1/operator/act"] = null,
+        ["POST /v1/operator/act"] = typeof(OperatorActRequest),
         ["GET /v1/operator/close"] = null,
         ["POST /v1/operator/close"] = typeof(OperatorCloseRequest),
         ["GET /v1/goals"] = null,
         ["POST /v1/goals"] = typeof(GoalProposeRequest),
         ["GET /v1/goals/{id}"] = null,
         ["GET /v1/goals/{id}/next"] = null,
+        ["GET /v1/goals/{id}/due"] = null,
+        ["GET /v1/overlaps"] = null,
+        ["POST /v1/overlaps/preview"] = typeof(OverlapPreviewRequest),
         ["POST /v1/goals/{id}/step"] = typeof(GoalStepRequest),
         ["POST /v1/goals/{id}/activate"] = typeof(GoalActionRequest),
         ["POST /v1/goals/{id}/pause"] = typeof(GoalActionRequest),
@@ -303,6 +322,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/runs"] = typeof(RunStartRequest),
         ["POST /v1/runs/prepare"] = typeof(RunStartRequest),
         ["POST /v1/harness-qualifications"] = typeof(HarnessQualifyRequest),
+        ["POST /v1/runs/drill"] = typeof(StopDrillRequest),
         ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
         ["POST /v1/runs/{id}/settle"] = typeof(RunSettleRequest),
         ["POST /v1/work/{key}/move-plan"] = typeof(WorkMovePlanRequest),
@@ -321,6 +341,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/packages/deprecate"] = typeof(PackagesDeprecateRequest),
         ["POST /v1/security-reports/poll"] = typeof(SecurityReportsPollRequest),
         ["POST /v1/security-reports/triage"] = typeof(SecurityReportTriageRequest),
+        ["GET /v1/observers"] = null,
+        ["POST /v1/observers/declare"] = typeof(ObserverDeclareRequest),
+        ["POST /v1/observers/report"] = typeof(ObserverReportRequest),
+        ["POST /v1/observers/withdraw"] = typeof(ObserverWithdrawRequest),
 
         ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
         ["POST /v1/history/checkpoints"] = typeof(HistoryCheckpointRequest),
@@ -377,8 +401,12 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PromptUseRequest)] = (_, r, d) => Acting(((PromptUseRequest)r).By, d),
         [typeof(PromptQuery)] = (_, _, _) => null,
         [typeof(ResourceRequest)] = (_, _, _) => null,
+        // From 0.9.4 (CODE-73): a preview reads a draft brief and records nothing.
+        [typeof(OverlapPreviewRequest)] = (_, _, _) => null,
         // A selecting read (MCP-05) reads for the device's own principal; the route refuses another and judges every delivery again.
         [typeof(EventSelectRequest)] = (_, r, d) => Optional(((EventSelectRequest)r).Principal, d),
+        // From 0.9.4 (ID-11): a device registers presence for its own principal; its lease answers only that device.
+        [typeof(PresenceRegisterRequest)] = (_, r, d) => Optional(((PresenceRegisterRequest)r).Principal, d),
         // From 0.9.3 (FIX-124): presence notices name what the person at the runtime's machine is asked to sign there; no device reads them.
         [typeof(PresencePromptsRequest)] = (_, _, _) => "Presence notices belong to the person at the runtime's machine and are read over its local socket only.",
         // A search, or a package, may be asked for a principal only to narrow what it reads: a device's request names its own or none.
@@ -396,6 +424,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(OperatorRecordRequest)] = (_, r, d) => Acting(((OperatorRecordRequest)r).By, d) ?? DeviceRecord(((OperatorRecordRequest)r).Type, d),
         [typeof(OperatorFinishRequest)] = (_, r, d) => Acting(((OperatorFinishRequest)r).By, d),
         [typeof(OperatorCloseRequest)] = (_, r, d) => Acting(((OperatorCloseRequest)r).By, d),
+        [typeof(OperatorAnswerRequest)] = (_, r, d) => Acting(((OperatorAnswerRequest)r).By, d),
+        [typeof(OperatorActRequest)] = (_, r, d) => Acting(((OperatorActRequest)r).By, d),
         [typeof(OperatorRequestWriteRequest)] = (_, r, d) => Acting(((OperatorRequestWriteRequest)r).By, d),
         [typeof(OperatorRequestCarryRequest)] = (_, r, d) => Acting(((OperatorRequestCarryRequest)r).By, d),
         [typeof(OperatorRequestCloseRequest)] = (_, r, d) => Acting(((OperatorRequestCloseRequest)r).By, d),
@@ -408,6 +438,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(ResultRequest)] = (_, r, d) => Acting(((ResultRequest)r).By, d),
         [typeof(ResultReviewRequest)] = (_, r, d) => Acting(((ResultReviewRequest)r).By, d),
         [typeof(AmendRequest)] = (_, r, d) => Acting(((AmendRequest)r).By, d),
+        [typeof(StandingOutputRequest)] = (_, r, d) => Acting(((StandingOutputRequest)r).By, d),
         [typeof(DeviceCreateRequest)] = (_, r, d) => Acting(((DeviceCreateRequest)r).Principal, d),
         [typeof(AdmitRequest)] = (_, r, d) => Acting(((AdmitRequest)r).By, d) ?? Recovery(((AdmitRequest)r).Recovery, d),
         [typeof(RevokeRequest)] = (_, r, d) => Acting(((RevokeRequest)r).By, d) ?? Recovery(((RevokeRequest)r).Recovery, d),
@@ -440,6 +471,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PackagesDeprecateRequest)] = (_, r, d) => Acting(((PackagesDeprecateRequest)r).By, d),
         [typeof(SecurityReportsPollRequest)] = (_, r, d) => Acting(((SecurityReportsPollRequest)r).By, d),
         [typeof(SecurityReportTriageRequest)] = (_, r, d) => Acting(((SecurityReportTriageRequest)r).By, d),
+        [typeof(ObserverDeclareRequest)] = (_, r, d) => Acting(((ObserverDeclareRequest)r).By, d),
+        [typeof(ObserverReportRequest)] = (_, r, d) => Acting(((ObserverReportRequest)r).By, d),
+        [typeof(ObserverWithdrawRequest)] = (_, r, d) => Acting(((ObserverWithdrawRequest)r).By, d),
 
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
         [typeof(HistoryCheckpointRequest)] = (_, r, d) => ((HistoryCheckpointRequest)r).Check ? Optional(((HistoryCheckpointRequest)r).By, d) : Acting(((HistoryCheckpointRequest)r).By, d) ?? Adoption((HistoryCheckpointRequest)r, d),
@@ -450,6 +484,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
         [typeof(HarnessQualifyRequest)] = (_, r, d) => Acting(((HarnessQualifyRequest)r).By, d),
         [typeof(RunStopRequest)] = (_, r, d) => Acting(((RunStopRequest)r).By, d),
+        // From 0.9.4 (OPS-21): the drill starts a scratch run on the runtime's machine and signs its verification there.
+        [typeof(StopDrillRequest)] = (_, _, _) => "The stop drill starts a scratch run on the runtime's machine and signs its verification with a device held there; run it over the local socket on that machine.",
         [typeof(RunSettleRequest)] = (_, r, d) => Acting(((RunSettleRequest)r).By, d),
         [typeof(PairingIssueRequest)] = (_, r, d) => Acting(((PairingIssueRequest)r).By, d),
 

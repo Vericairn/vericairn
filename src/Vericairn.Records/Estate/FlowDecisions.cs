@@ -186,7 +186,8 @@ public static partial class FlowDecisions
     /// <summary>
     /// The principals' decisions that count on record for a step, oldest first: each a completed result of one of the step's assignments,
     /// by its contributor, naming paths its transition offers as the flow allows, by a person where only a person decides, and recorded under
-    /// the step's current assignment when it was recorded, never a displaced one.
+    /// the step's current assignment when it was recorded, never a displaced one; from 0.9.4 (ID-11) the current assignment by the holder
+    /// rule, so never one that holds nothing.
     /// </summary>
     public static List<Recorded> PrincipalDecisions(EstateModel model, FlowDefinition flow, FlowStep step, IReadOnlyList<RecordEnvelope> assignments)
     {
@@ -215,13 +216,34 @@ public static partial class FlowDecisions
         return found.OrderBy(d => d.Record.At, StringComparer.Ordinal).ThenBy(d => d.Record.Id, StringComparer.Ordinal).ToList();
     }
 
-    /// <summary>True when a later assignment of the step, recorded before a decision, displaced the assignment it was recorded under.</summary>
-    private static bool Displaced(EstateModel model, IReadOnlyList<RecordEnvelope> assignments, RecordEnvelope assignment, RecordEnvelope decided)
+    /// <summary>
+    /// True when the assignment a decision was recorded under did not hold its step as the decision was recorded: another assignment of
+    /// the step held it then (<see cref="HeldBy"/>).
+    /// </summary>
+    private static bool Displaced(EstateModel model, IReadOnlyList<RecordEnvelope> assignments, RecordEnvelope assignment, RecordEnvelope decided) =>
+        HeldBy(model, assignments, assignment, decided) is not null;
+
+    /// <summary>
+    /// From 0.9.4 (ID-11; design/events-and-presence.md § 10): the assignment that held the step an assignment carries as a decision was
+    /// recorded, when it is not that assignment (any revision of it); null while that assignment held it. Judged by the holder rule over
+    /// the step's assignments recorded before the decision, so an assignment that holds nothing, as an agent's of a step a person
+    /// assigned, never takes the decision from the step's holder, and never decides.
+    /// </summary>
+    private static RecordEnvelope? HeldBy(EstateModel model, IReadOnlyList<RecordEnvelope> assignments, RecordEnvelope assignment, RecordEnvelope decided)
     {
-        IReadOnlyList<string> own = model.Chain(model.Latest(assignment));
-        RecordEnvelope? current = assignments.Where(a => GoalRules.Before(a, decided)).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
-        return current is not null && !own.Contains(current.Id);
+        RecordEnvelope latest = model.Latest(assignment);
+        IReadOnlyList<string> own = model.Chain(latest);
+        string key = Routing.HoldingKey(latest.Body);
+        RecordEnvelope? current = HolderAsOf(model, assignments.Where(a => GoalRules.Before(a, decided) && Routing.HoldingKey(a.Body) == key));
+        return current is not null && !own.Contains(current.Id) ? current : null;
     }
+
+    /// <summary>
+    /// From 0.9.4 (ID-11): the assignment that holds a run's step as a record is read, by the holder rule over the step's assignments
+    /// recorded before it, or no later than a time; null when the step has none then.
+    /// </summary>
+    private static RecordEnvelope? HolderAsOf(EstateModel model, IEnumerable<RecordEnvelope> assignments) =>
+        Routing.HoldingAmong(model, assignments) is { Count: > 0 } holding ? holding[^1] : null;
 
     /// <summary>The rule's decisions on record for a run's step: current flow-decision observations about any revision of its goal naming the step, oldest first.</summary>
     public static List<Recorded> RuleDecisions(EstateModel model, RecordEnvelope goal, string step)
@@ -418,11 +440,15 @@ public static partial class FlowDecisions
             context.Error("result.decision", $"Step {step.Key}'s decision is a person's{(step.Transition!.Undelegable is string act ? $", an act the operating-modes design never delegates ({act})" : step.Transition.PersonOnly ? ", as the flow requires" : $", since the flow marks the {step.Role} role a person's")}, and {Routing.NameOf(context.Model, context.Record.By)} is not a person.");
         }
 
-        // Only the step's current assignment decides: a decision under a displaced one counts for nothing.
+        // Only the step's current assignment decides: a decision under a displaced one, or from 0.9.4 (ID-11) under one that holds nothing
+        // by the holder rule, counts for nothing.
         IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(context.Model, order!, named).Where(a => GoalRules.Before(a, context.Record)).ToList();
-        if (Displaced(context.Model, assignments, assignment!, context.Record))
+        if (HeldBy(context.Model, assignments, assignment!, context.Record) is RecordEnvelope holder)
         {
-            context.Error("result.decision", $"Assignment {assignment!.Id} no longer holds step {step.Key}: a later assignment of it displaced it before this decision, and only the step's current assignment decides.");
+            IReadOnlyList<string> own = context.Model.Chain(context.Model.Latest(assignment!));
+            context.Error("result.decision", Routing.HoldingAmong(context.Model, assignments.Where(a => Routing.HoldingKey(a.Body) == Routing.HoldingKey(holder.Body))).Any(a => own.Contains(a.Id))
+                ? $"Assignment {assignment!.Id} no longer holds step {step.Key}: a later assignment of it, {holder.Id}, displaced it before this decision, and only the step's current assignment decides."
+                : $"Assignment {assignment!.Id} holds nothing of step {step.Key}: assignment {holder.Id} holds it by the holder rule as this decision is recorded, and only the step's current assignment decides.");
             return;
         }
 
@@ -588,7 +614,7 @@ public static partial class FlowDecisions
         {
             FlowRuns.StepRef named = new(step.Key, null);
             List<RecordEnvelope> assignments = Routing.Assignments(context.Model, order, named).Where(a => GoalRules.Before(a, context.Record)).ToList();
-            RecordEnvelope? holding = assignments.OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+            RecordEnvelope? holding = HolderAsOf(context.Model, assignments);
             List<Recorded> held = holding is null ? [] : PrincipalDecisions(context.Model, flow, step, assignments)
                 .Where(d => context.Model.Chain(context.Model.Latest(d.Assignment!)).Contains(holding.Id) && d.At <= began).ToList();
             if (holding is not null && Open(context.Model, goal, flow, step, held, context.Record, null) is Recorded stood && !IsHold(step, stood)
@@ -704,11 +730,13 @@ public static partial class FlowDecisions
         return refusals;
     }
 
-    /// <summary>True when a flow decision's author holds the run's step by its latest assignment made no later than the decision.</summary>
+    /// <summary>
+    /// True when a flow decision's author holds the run's step, by the holder rule over its assignments made no later than the decision
+    /// (from 0.9.4, ID-11; before, by the latest of them).
+    /// </summary>
     private static bool HoldsStep(EstateModel model, RecordEnvelope goal, FlowStep step, Recorded decision) =>
         FlowRuns.Work(model, model.Latest(goal)) is RecordEnvelope order
-        && Routing.Assignments(model, order, new FlowRuns.StepRef(step.Key, null)).Where(a => a.AtTime <= decision.At)
-            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault() is RecordEnvelope holding
+        && HolderAsOf(model, Routing.Assignments(model, order, new FlowRuns.StepRef(step.Key, null)).Where(a => a.AtTime <= decision.At)) is RecordEnvelope holding
         && EstateModel.BodyString(holding, "contributor") == decision.By;
 
     /// <summary>The time a flow-decision observation read the records as of, its asOf; null when it names none.</summary>

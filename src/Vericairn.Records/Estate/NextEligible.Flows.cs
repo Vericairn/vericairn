@@ -137,8 +137,10 @@ public static partial class NextEligible
                 continue;
             }
 
-            IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(model, position.Work, instance.Ref);
-            var held = assignments.SelectMany(a => model.Chain(a)).ToHashSet(StringComparer.Ordinal);
+            // From 0.9.4 (ID-11) the step's holder is the holder rule's; its history, every assignment, names the asks and its exposure.
+            IReadOnlyList<RecordEnvelope> history = Routing.Assignments(model, position.Work, instance.Ref);
+            IReadOnlyList<RecordEnvelope> assignments = Routing.Holding(model, position.Work, instance.Ref);
+            var held = history.SelectMany(a => model.Chain(a)).ToHashSet(StringComparer.Ordinal);
             IReadOnlyList<RecordEnvelope> asks = AsksNaming(model, goals, held);
 
             // A stale, reopened or rerun step reruns from a fresh assignment whose brief pins its inputs as they are now, once no run of
@@ -156,8 +158,8 @@ public static partial class NextEligible
                 ? $"step {instance.Step.Key}'s decision is a person's{(transition.Undelegable is string act ? $", an act never delegated ({act})" : ", as the flow requires")}, and an agent never decides it"
                 : null;
             Route route = RouteOf(model, current, status, ledger, role, Routing.ReservedAction(role), assignments, asks, runs, machine, candidate => (person || personal is not null) && candidate.IsAgent
-                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, personal ?? $"the flow marks the {role} role a person's, and an agent never holds it"] }
-                : candidate);
+                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, personal ?? $"the flow marks the {role} role a person's, and an agent never holds it"], Session = null }
+                : candidate, sessionExposure: Routing.SessionExposure(model, current, position.Work, instance.Inputs.Select(i => i.Carrier).Concat(Routing.StepRecords(model, history))));
             steps.Add(new FlowStepRoute(instance, route));
         }
 
@@ -224,6 +226,9 @@ public static partial class NextEligible
     }
 
     /// <summary>The current asks of a goal that name one of a step's assignments, oldest first.</summary>
+    /// <summary>The words that open the ask required attention becomes, which goal step records.</summary>
+    internal const string AttentionQuestion = "Required attention in goal ";
+
     private static List<RecordEnvelope> AsksNaming(EstateModel model, IReadOnlyList<string> goals, HashSet<string> held) =>
         model.Current("ask")
             .Where(a => EstateModel.BodyString(a, "goal") is string g && goals.Contains(g) && EstateModel.BodyString(a, "assignment") is string named && held.Contains(named))
@@ -251,11 +256,14 @@ public static partial class NextEligible
     /// The route of required attention (design/flow.md §§ 7 and 8): an ask to who decides for the goal, the sponsor, about the record
     /// that raised it; asked while an ask about that record waits, and answered once one is answered, so it is asked once.
     /// </summary>
-    private static Route AttentionOf(EstateModel model, RecordEnvelope goal, string status, string role, FlowPosition.Attention attention, Routing.Machine machine)
+    private static Route AttentionOf(EstateModel model, RecordEnvelope goal, string status, string role, FlowPosition.Attention attention, Routing.Machine machine, bool attentionOnly = false)
     {
         string? sponsor = Routing.Asked(model, goal, null, machine.Now);
         IReadOnlyList<string> trigger = model.Chain(attention.Trigger);
-        List<RecordEnvelope> asks = Routing.AsksOf(model, goal).Where(a => model.Latest(a).Subject is RecordReference subject && trigger.Contains(subject.Id)).ToList();
+        // From 0.9.4 (GOAL-07) a standing agent's failure pause counts only the ask goal step recorded for it, never another ask about the run;
+        // from GOAL-08 recognized by who wrote it (StandingAgents.RuntimeAsk), never by its words alone.
+        List<RecordEnvelope> asks = Routing.AsksOf(model, goal).Where(a => model.Latest(a).Subject is RecordReference subject && trigger.Contains(subject.Id)
+            && (!attentionOnly || ((EstateModel.BodyString(model.Latest(a), "question") ?? string.Empty).StartsWith(AttentionQuestion, StringComparison.Ordinal) && StandingAgents.RuntimeAsk(model, goal, a)))).ToList();
         IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
         var source = new Routing.Source(null, "who decides for the goal, its sponsor");
         RecordEnvelope? waiting = asks.LastOrDefault(a => Asks.IsWaiting(Asks.State(model, a).State));
@@ -381,7 +389,7 @@ public static partial class NextEligible
         Route? route = step.Route;
         RecordEnvelope? assignment = step.Review is null ? step.Step.Assignment : step.Review.Assignments.Count == 0 ? null : step.Review.Assignments[^1];
         string? contributor = assignment is null ? null : EstateModel.BodyString(assignment, "contributor");
-        return new JsonObject
+        var json = new JsonObject
         {
             ["key"] = step.Step.Step.Key,
             ["instance"] = step.Step.Instance,
@@ -419,8 +427,14 @@ public static partial class NextEligible
                     ["refusals"] = Strings(route.Custody),
                     ["exception"] = route.Exception is RecordEnvelope exception ? new JsonObject { ["id"] = exception.Id, ["by"] = exception.By, ["expires"] = EstateModel.BodyString(exception, "expires"), ["reason"] = EstateModel.BodyString(exception, "reason") } : null,
                 } : null,
-                ["candidates"] = new JsonArray(route.Candidates.Select(c => (JsonNode)new JsonObject { ["principal"] = c.Principal, ["name"] = c.Name, ["kind"] = c.Kind, ["available"] = c.Available, ["launcher"] = c.Launcher, ["reasons"] = Strings(c.Reasons) }).ToArray()),
+                ["candidates"] = new JsonArray(route.Candidates.Select(c => (JsonNode)CandidateJson(c)).ToArray()),
             },
         };
+        if (route?.Session is string session && json["route"] is JsonObject routed)
+        {
+            routed["session"] = session;
+        }
+
+        return json;
     }
 }

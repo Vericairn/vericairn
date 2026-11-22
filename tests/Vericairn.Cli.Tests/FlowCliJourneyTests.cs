@@ -98,7 +98,8 @@ public class FlowCliJourneyTests
             string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Releases.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
             string[] flows = CliHarness.Ok("--estate", root, "--json", "templates", "list").Json.GetProperty("templates").EnumerateArray()
                 .Select(t => t.GetProperty("pin").GetProperty("id").GetString()!).Where(id => id.StartsWith("vericairn.software/", StringComparison.Ordinal) && id != "vericairn.software/commit").Order(StringComparer.Ordinal).ToArray();
-            Assert.Equal(["vericairn.software/release", "vericairn.software/upgrade"], flows);
+            // From 0.9.4 (PROC-08) the software pack's standing roles ship beside them.
+            Assert.Equal(["vericairn.software/bug-hunter", "vericairn.software/release", "vericairn.software/researcher", "vericairn.software/upgrade"], flows);
             string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", ReleaseLineFixture.ProductBody().ToJsonString())).Id;
             string carrier = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "carrier.json",
                 """{"key":"REL-1","kind":"ordinary","title":"Release 1.2.0","intent":"Release the product.","scope":["release"],"exitQuestion":"Is 1.2.0 released?","inputs":[],"deliverables":["the release"]}""")).Id;

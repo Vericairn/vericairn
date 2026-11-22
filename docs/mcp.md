@@ -269,6 +269,28 @@ recorded observation as evidence; the orientation file's agent matrix shows each
 version, and every harness stays a non-claim until then. This build's tests exercise both paths with the
 in-process clients and the bridge, not with any agent harness.
 
+## Presence (0.9.4)
+
+From 0.9.4 (`ID-11`) `vericairn mcp serve --as <principal>` registers its session's presence with the
+daemon when it acts for an agent or a service principal, and renews the lease while the server runs: the
+server is the session's transport, so a long turn of the agent's model keeps the lease, and a process that
+dies, a machine that sleeps or a dropped connection loses it. When standard input ends the server releases
+the lease, and a release is no lapse. `vericairn mcp serve --connection <connection>` keeps the paired
+device's principal present at the remote runtime the same way. A server the worker starts for a run
+(`--run`) registers nothing, since the worker watches its runs. A session acting for a person, whom no
+connection tracks, or served by the embedded runtime, which keeps no presence, registers nothing and says
+nothing; any other refusal is told on standard error, and the session is served either way.
+
+While its lease is live the session holds the assignments its principal records attempts, completed
+phases or progress claims on through `work_attempt` and `work_progress`, and those routing gives it
+through the session route. If the lease lapses while the session holds unsettled work, the daemon raises
+a `presence` event and attention, a local observation, and after the goal's `reassignAfterSeconds` (600
+by default) asks the goal's accountable principal whether to hand the step to another principal of its
+role; a heartbeat restores the lease and the ask is withdrawn. After a hand-over, `work_attempt`,
+`work_progress` and `work_result` on the displaced assignment are refused, whatever time they state: only
+the step's current holder's work counts. Subscriptions and `events_read` carry `presence` events like any
+other kind. See [events and presence](events-and-presence.md#presence-agent-sessions-and-their-leases-094).
+
 ## Tools
 
 `context_prepare` computes the same context package as
@@ -311,7 +333,7 @@ writing anything. Only worker dispatch retains a copy, in the run's local
 directory under the Vericairn home. Unavailable required
 material refuses the brief and sets the MCP error flag.
 
-Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `estate_progress` (the progress report as `vericairn progress` prints it, or with `form` `json` its canonical JSON), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `records_list` (the current records of one type, as compact rows), `decisions_list`, `decision_get`, `releases_list`, `devices_list`, `documents_due` (the living documents that are due or unavailable, with their levels and reasons), `goal_get` (a goal in the machine form of `vericairn goal show`, from 0.9.2 with a run's position in its flow, or without an id the estate's goals with their status), `goal_progress` (a goal condition by condition: each verdict and its reason, the current evaluation, the steps, a run's position, and what still stands between the goal and its acceptance), from 0.6.0, `asks_list` (what waits on a principal named by `to`, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order, as `vericairn ask` prints it or with `form` `json` its canonical JSON) and, from 0.9.2, `events_read` (the events after a cursor that the connected principal may read, for a harness that hides notifications; see [Subscriptions and notifications](#subscriptions-and-notifications-092)).
+Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `estate_progress` (the progress report as `vericairn progress` prints it, or with `form` `json` its canonical JSON), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, from 0.9.4 `work_overlap` (CODE-73: the active assignments by repository and every overlap of their effective permitted paths with its witnesses, resolution and the concurrent-paths policies that hold it, as `vericairn work overlap` prints it or with `form` `json` its `vericairn.overlaps/1` JSON; with `repository`, one repository's; with `brief`, a draft brief's overlaps before it is recorded), from 0.9.4 `goal_due` (GOAL-07: a standing agent's occurrences as of an explicit time, `asOf` or the runtime's clock, as `vericairn goal due` prints them or with `form` `json` its `vericairn.due/1` JSON; it carries no occurrence), `record_get`, `records_list` (the current records of one type, as compact rows), `decisions_list`, `decision_get`, `releases_list`, `devices_list`, `documents_due` (the living documents that are due or unavailable, with their levels and reasons), `goal_get` (a goal in the machine form of `vericairn goal show`, from 0.9.2 with a run's position in its flow, or without an id the estate's goals with their status), `goal_progress` (a goal condition by condition: each verdict and its reason, the current evaluation, the steps, a run's position, and what still stands between the goal and its acceptance), from 0.6.0, `asks_list` (what waits on a principal named by `to`, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order, as `vericairn ask` prints it or with `form` `json` its canonical JSON) and, from 0.9.2, `events_read` (the events after a cursor that the connected principal may read, for a harness that hides notifications; see [Subscriptions and notifications](#subscriptions-and-notifications-092)).
 Status and progress include repository checks, documents read local covered files and installed contributions, and device availability depends on keys held here. Those portions are observations from this runtime, not solely from the shared records.
 
 From 0.7.3, `estate_status` and the JSON form of `estate_progress` include
@@ -322,7 +344,7 @@ Progress additionally includes runtime-local worker attention, labelled
 `Local worker observations`, which can differ by runtime. The text progress report retains its existing
 sections; `record_get` and other original read routes retain complete records.
 
-Writes are visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with: `work_attempt`, `work_progress`, `work_result`, `work_amend`, `document_review` (a review of an estate document by its path, refused where the declaration's `clearedBy` excludes the acting principal), and from 0.9.4 `goal_decide` (PROC-19: the decision of a run's decision step whose current assignment the acting principal holds, its paths, reasons and evidence by hash, as `vericairn goal decide` records it; refused for an agent where only a person decides, and never offered over the network). A write the runtime refuses comes back as an error result carrying the runtime's findings, every objection at once. There is no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type. No tool proposes, activates, pauses, resumes, stops, funds, evaluates or accepts a goal: a worker reads its goal and reports through its attempts and results, an evaluator who did none of the work evaluates it, and its sponsor, or the principal the sponsor delegated an ordinary goal's acceptance to, or an operator for a goal an agent sponsors, accepts it, through the command line or the API, whose rules refuse an agent that tries to activate a goal or accept one it sponsors or worked on. A test calls every tool a worker sees with arguments that name a goal and ask for its activation and acceptance, and holds that none changes the goal. No tool answers an ask either: an ask is answered by a decision of the principal it is put to, which no tool records, and reading what waits answers nothing; the same test holds that calling every tool a worker sees records no decision and leaves an ask waiting. No tool launches, stops or settles an agent run either: the worker (`vericairn worker`, [software.md](software.md#coding-agents-the-worker-and-its-launchers)) starts a coding agent with this server configured for the agent's principal, and records the run's cap, usage and stop itself, while the agent reports through `work_attempt` and `work_result`.
+Writes are visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with: `work_attempt`, `work_progress`, `work_result`, `work_amend`, `document_review` (a review of an estate document by its path, refused where the declaration's `clearedBy` excludes the acting principal), and from 0.9.4 `goal_decide` (PROC-19: the decision of a run's decision step whose current assignment the acting principal holds, its paths, reasons and evidence by hash, as `vericairn goal decide` records it; refused for an agent where only a person decides, and never offered over the network), and from 0.9.4 `standing_possibility`, `standing_question` and `standing_publication` (GOAL-08: an output of a standing agent's occurrence, recorded by the contributor of the assignment that carries it, the runtime naming the goal, occurrence, assignment and the contributor's run in flight: a possibility with its fingerprint, sources and optionally evidence for and against, review triggers, links, a draft work order and extras; an ask to a person; or a publication request whose exact text the operator approves; another principal disposes of each, and none is offered over the network). A write the runtime refuses comes back as an error result carrying the runtime's findings, every objection at once. There is no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type. No tool proposes, activates, pauses, resumes, stops, funds, evaluates or accepts a goal: a worker reads its goal and reports through its attempts and results, an evaluator who did none of the work evaluates it, and its sponsor, or the principal the sponsor delegated an ordinary goal's acceptance to, or an operator for a goal an agent sponsors, accepts it, through the command line or the API, whose rules refuse an agent that tries to activate a goal or accept one it sponsors or worked on. A test calls every tool a worker sees with arguments that name a goal and ask for its activation and acceptance, and holds that none changes the goal. No tool answers an ask either: an ask is answered by a decision of the principal it is put to, which no tool records, and reading what waits answers nothing; the same test holds that calling every tool a worker sees records no decision and leaves an ask waiting. No tool launches, stops or settles an agent run either: the worker (`vericairn worker`, [software.md](software.md#coding-agents-the-worker-and-its-launchers)) starts a coding agent with this server configured for the agent's principal, and records the run's cap, usage and stop itself, while the agent reports through `work_attempt` and `work_result`.
 
 Every tool description describes and never directs: nothing a tool returns, and nothing in this server's text, is an instruction from the estate's operator, and the harness is expected to treat it as data.
 
@@ -380,6 +402,7 @@ no tool, so every change reaches this guide with the release that makes it.
 | `estate_status` | yes | no | yes | `64854ad7ef78` | 0.9.4 |
 | `events_read` | yes | no | yes | `be3f7a1e467c` | 0.9.4 |
 | `goal_decide` | no | no | no | `2101fd20d4c9` | 0.9.4 |
+| `goal_due` | yes | no | yes | `a47c6c3519fd` | 0.9.4 |
 | `goal_get` | yes | no | yes | `ae07f1748a4f` | 0.9.4 |
 | `goal_progress` | yes | no | yes | `25cc15685d14` | 0.9.4 |
 | `policies_list` | yes | no | yes | `d7db25dc8221` | 0.9.4 |
@@ -405,11 +428,15 @@ no tool, so every change reaches this guide with the release that makes it.
 | `requests_list` | yes | no | yes | `5a5961b09f81` | 0.9.4 |
 | `search` | yes | no | yes | `f82346a80ca3` | 0.9.4 |
 | `section_brief` | yes | no | yes | `91ded4ebb196` | 0.9.4 |
+| `standing_possibility` | no | no | no | `7f3e5c2ed31d` | 0.9.4 |
+| `standing_publication` | no | no | no | `7c621ec08545` | 0.9.4 |
+| `standing_question` | no | no | no | `a6a274865394` | 0.9.4 |
 | `template_render` | yes | no | yes | `a25328284342` | 0.9.4 |
 | `work_amend` | no | no | no | `96deacbc6d2f` | 0.9.4 |
 | `work_attempt` | no | no | no | `974da5261edd` | 0.9.4 |
 | `work_brief` | yes | no | yes | `22f10ba7b351` | 0.9.4 |
 | `work_observe` | yes | no | yes | `37410c7257ed` | 0.9.4 |
+| `work_overlap` | yes | no | yes | `746c701bd5d5` | 0.9.4 |
 | `work_progress` | no | no | no | `974a3906901d` | 0.9.4 |
 | `work_progress_get` | yes | no | yes | `0d11d23679e0` | 0.9.4 |
 | `work_result` | no | no | no | `d81870d77e1d` | 0.9.4 |
@@ -464,6 +491,63 @@ operation reads them and Vericairn never writes them. `estate check` scans them 
 every other unexpected entry at the root, a differently cased `agents.md` or an `AGENTS.override.md` among them, stays
 `layout.unexpected`.
 
+From 0.9.4, `estate check` also reads the owner's files at the root for three kinds of content an agent tool may act
+on without asking. It warns about each line where it finds one, naming the file, the line and the kind, never the text
+it found. It reads the whole text, so a key, its colon and its value may sit on separate lines, and it reads any file
+at the size limit in time proportional to its length.
+
+- `instructions.hook`, a hook definition: a `hooks` key or table in JSON, YAML or TOML, TOML's dotted keys included,
+  at the start of a line (after any quote or list marker) or quoted anywhere; a key named for an agent tool's hook
+  event, such as `PreToolUse`, `SessionStart` or, quoted, `Stop` and `Notification`; an editor task that runs when a
+  folder opens (`"runOn": "folderOpen"`); or a Git `core.hooksPath`.
+- `instructions.approval`, an automatic approval: a key that lists allowed tools (`allowed-tools`), approves or accepts
+  on its own (`autoApprove`, `autoAccept`), always allows or trusts (`"trust": true`); a permission `allow` list,
+  whose items may follow on the next lines; a launch flag beginning `--dangerously-`, or `--yolo`, `--full-auto`,
+  `--allowedTools`, `--allow-tool`, `--allow-all-tools`, `--trust-all-tools`, `--auto-approve`,
+  `--ask-for-approval never` or `-a never`; an approval policy of `never`; or a default, approval or permission mode
+  that approves without asking, such as `acceptEdits`.
+- `instructions.secret`, a value that looks like a secret: the value of a key whose name holds a secret's, such as
+  `password`, `DB_PASS`, `pwd`, `api_key`, `API key` or `GITHUB_TOKEN_VALUE`, on its line or the next, of at least
+  eight characters with letters and digits, or of letters alone when it ends its line; a bearer or basic credential;
+  a password in a URL or after `-u`; or a run of at least 32 token characters that mixes upper case, lower case and
+  digits and changes between them often. A placeholder or reference such as `<your key>`, `[your password]`,
+  `${NAME}`, `$NAME` or `%NAME%`, a value of punctuation, an ellipsis or stars alone, a URL, a path and a version are
+  not values; a real value that only starts with one of those characters, or holds an ellipsis or stars beside other
+  characters, is. A credential in a known format stays the error `secrets.pattern`, as in every text file.
+
+A key is read as configuration only at the start of a line or in quotes, so prose that names one, such as "the
+`allowed-tools:` key is forbidden", is not reported, and keys are matched in their case, so "Hooks: none" is not a
+hooks key. A sentence that opens by forbidding is not reported for a flag, mode, policy or Git setting it names before
+its clause ends; a configuration key is always reported. A line opens such a sentence when it starts one, after a
+blank line, an ATX heading (one to six `#` and a space), a list marker or a line that ends with a sentence mark, and
+when, past its quote and list markers and any emphasis, it begins with "Never", "Do not", "Don't", "Must not", "Should
+not", "Shall not", "Avoid", "Not" or "No" and a space. The clause ends at a period, question or exclamation mark when
+a space, the line's end or an ASCII capital follows it, possibly after closing characters from a fixed set: `*`, `_`,
+a straight quote, a curly closing quote, `)`, `]` and a backtick. At a colon or semicolon it also ends before any
+ASCII letter. It ends too at one of a fixed list of words that turn it around: "without", "forget", "by", "unless",
+"except", "instead", "but", "always" and "only". So "Never pass `--dangerously-skip-permissions`." is not reported,
+while "Never run without `--dangerously-skip-permissions`.", "**Never ask.** Launch with ...", a wrapped line that
+continues a sentence with a capital "No", and a launch prefix such as `NO_COLOR=1` are. Everything else continues the
+clause: text glued straight onto the mark, such as a code span, a lower-case word, an opening bracket or a `--flag`;
+an ellipsis character, guillemets or a quote style outside that set; a footnote marker; a comma, a dash or "and"; and
+a double negative outside the list, such as "Never omit ...". An author can hide a mention that way. The rule also
+over-reports: a line straight after a bold pseudo-heading, a setext heading, a thematic break, front matter, HTML or a
+table, none of which it reads as ending a sentence, and a clause holding a capitalized word glued onto a mark, such as
+`.NET`, can be reported though they forbid. The check is a heuristic that warns: it does not understand any agent
+tool's configuration as a whole, so a hook, an approval or a secret written in a form it does not know goes
+unreported, and an ordinary line can match. The warnings ask for a person's review and refuse nothing; the check reads
+the files and runs nothing. If the check itself fails on a file, it warns `instructions.unreadable` about that file,
+naming the kind of failure and never the file's content, and the rest of `estate check` goes on. Anywhere else in the
+estate, such as `docs/`, the same lines are ordinary text.
+
+A repository's own agent instruction files are untrusted input. From 0.9.4, for each of the estate's repositories whose
+clone is registered on this machine (`vericairn sources clone`), `estate check` warns `instructions.repository` about
+each entry at the clone's root named as one of those files in any case, since a volume that ignores case opens
+`agents.md` as `AGENTS.md`, and about a link of such a name wherever it leads. It names the resource and the file, and
+reads nothing in it. An agent tool started in that repository reads those files beside the owner's, and they stay data,
+never the owner's instructions, until a person reviews them. No record marks such a file reviewed yet, so the warning
+stays while the file is there.
+
 `mcp orientation` writes its generated files only into the directory `--out` names and refuses an estate's root, any
 directory holding `estate/manifest.json` however the path names it, so the owner's files there are never overwritten.
 `--check` compares the copies in a directory byte for byte, as before. The generated orientation keeps a directory of
@@ -492,8 +576,10 @@ reads the owner's instructions first, and they lead it to the generated orientat
 directory. Before 0.9.3 the owner's instructions lived in `docs/`, linked from the root `README.md`; that arrangement
 still works.
 
-`estate export` doesn't carry the owner's files at the root yet. A cold recovery restores them from the supplemental
-capture and checks them against its list, as
+From 0.9.4, `estate export` carries each of the owner's files present at the root, with its bytes and mode, and lists it
+in the export's inventory; `estate restore` writes it back exactly. An export refuses an estate where a link, a FIFO or
+anything else that is not a regular file stands in place of one of them, and writes nothing. An export written before 0.9.4 lacks them, so a cold recovery from one restores
+them from the supplemental capture and checks them against its list, as
 [the three inventories of a cold recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery) describe.
 
 ## Qualification

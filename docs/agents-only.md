@@ -39,6 +39,8 @@ each person's own device and the strongest available custody, with presence wher
 supported; follow [devices and admission](operator-guide.md#3-principals-devices-and-admission).
 When a presence prompt expires, is refused or times out while you enroll a device, follow
 [enrollment troubleshooting](enrollment-troubleshooting.md) and inspect before running anything again.
+When a signed command fails at once, before any dialog, as one run from a sandboxed process can, tell a sandbox limit from
+a missing helper or a refusal with [a signed command that fails at once](enrollment-troubleshooting.md#a-signed-command-that-fails-at-once-094).
 Keep signing keys outside the repository and never give an agent a person's key.
 
 From 0.9.4 a person's Mac device may ask one presence check for an operator action's announced list, a presence

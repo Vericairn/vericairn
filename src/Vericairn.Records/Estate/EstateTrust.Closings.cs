@@ -553,15 +553,29 @@ internal sealed partial class EstateTrust
         lock (gate)
         {
             if (keyVerdicts.TryGetValue((key, hash, signature), out bool known)) return known;
-            closedKeyVerifications++;
-            bool value;
-            if (closedKeys is null) value = RecordSigning.Verify(key, digest, signature);
-            else
+            // A verdict another judgment in the process verified is read from the process's table; a closed key keeps its own import,
+            // made for this judgment alone (FIX-148).
+            if (signatureTables.Kept(key, hash, signature))
             {
-                if (!closedKeys.TryGetValue(key, out RecordSigning.ImportedKey? imported)) closedKeys[key] = imported = RecordSigning.ImportedKey.Import(key);
-                value = imported.Verify(digest, signature);
+                keyVerdicts[(key, hash, signature)] = true;
+                return true;
             }
 
+            closedKeyVerifications++;
+            JudgmentContext? context = signatureJudgment?.Context;
+            bool value;
+            if (closedKeys is null)
+            {
+                using RecordSigning.ImportedKey once = RecordSigning.ImportedKey.Import(key, context);
+                value = once.Verify(digest, signature, context);
+            }
+            else
+            {
+                if (!closedKeys.TryGetValue(key, out RecordSigning.ImportedKey? imported)) closedKeys[key] = imported = RecordSigning.ImportedKey.Import(key, context);
+                value = imported.Verify(digest, signature, context);
+            }
+
+            if (value) signatureTables.Keep(key, hash, signature, context);
             keyVerdicts[(key, hash, signature)] = value;
             return value;
         }

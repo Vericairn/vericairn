@@ -48,6 +48,9 @@ public static class EstateStatus
         return Reading(model, order).Basis;
     }
 
+    /// <summary>A work order's derived status, as <see cref="WorkItems"/> gives it, for one work order's current revision.</summary>
+    internal static string StatusOf(EstateModel model, RecordEnvelope order) => Reading(model, order).Status;
+
     /// <summary>
     /// A work order's derived status and the record it rests on. It is accepted when the latest acceptance of its revisions names its
     /// current revision, or one that differs from it only in placement, or, for ordinary work, when an acceptance names its current
@@ -267,6 +270,8 @@ public static class EstateStatus
             }
         }
 
+        // From 0.9.4 (CODE-73), the open overlaps of active assignments' effective permitted paths, from the records alone.
+        text.Append(AssignmentOverlaps.StatusText(model, AssignmentOverlaps.Overlaps(model)));
         IReadOnlyList<OperationItem> operations = OperationItems(model);
         if (operations.Count > 0)
         {
@@ -289,10 +294,21 @@ public static class EstateStatus
         }
 
         OperatorRequests.Waiting queue = OperatorRequests.WaitingOf(model, null, at);
-        if (queue.Open.Count > 0 || queue.Withdrawn.Count > 0) text.Append(OperatorRequests.RenderText(model, null, at));
+        if (queue.Open.Count > 0 || queue.Withdrawn.Count > 0 || queue.Optional.Count > 0) text.Append(OperatorRequests.RenderText(model, null, at));
 
         // A run's position and its stops (design/flow.md § 8), as a live read shows them.
         text.Append(FlowStops.RunsText(model, FlowStops.Runs(model, at)));
+        // From 0.9.4 (GOAL-07; design/standing-agents.md § 11), each standing agent's state, next occurrence, deferrals and period spend.
+        IReadOnlyList<StandingAgents.Agent> standing = Standing(model, at);
+        if (standing.Count > 0)
+        {
+            text.Append("Standing agents: ").Append(standing.Count.ToString(CultureInfo.InvariantCulture)).Append('\n');
+            foreach (StandingAgents.Agent agent in standing)
+            {
+                text.Append("  ").Append(StandingView.Line(agent)).Append('\n');
+            }
+        }
+
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Documents: ").Append(model.Current("document-revision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture))
@@ -380,9 +396,10 @@ public static class EstateStatus
     /// Codes that mean two clones diverged and a person or an authorized agent must settle it, never merged silently; and, from 0.6.0,
     /// batch.incomplete, a batch of records this machine stopped storing part-way, which the runtime reports from its journal;
     /// and batch.unreadable, a local recovery journal the runtime cannot safely judge; and, from 0.9.2, operation.duplicate-identity, which
-    /// a reconciliation now settles.
+    /// a reconciliation now settles; and, from 0.9.4, standing.duplicate, one occurrence of a standing agent held by two assignments, as
+    /// two clones' merge leaves it, which a reconciliation keeping one of them settles.
     /// </summary>
-    public static readonly ImmutableArray<string> ReconcileCodes = ["reconcile.successors", "work.duplicate-key", "result.duplicate", "estate.multiple", "record.duplicate-id", "batch.incomplete", "batch.unreadable", "communication.conflict", "operation.duplicate-identity"];
+    public static readonly ImmutableArray<string> ReconcileCodes = ["reconcile.successors", "work.duplicate-key", "result.duplicate", "estate.multiple", "record.duplicate-id", "batch.incomplete", "batch.unreadable", "communication.conflict", "operation.duplicate-identity", "standing.duplicate"];
 
     /// <summary>The findings that are reconcile tasks, sorted.</summary>
     public static IReadOnlyList<Finding> ReconcileTasks(FindingList findings)
@@ -401,6 +418,22 @@ public static class EstateStatus
                 model.CurrentPrincipal(r.By) is { } person && EstateModel.BodyString(person, "kind") == "human" &&
                 !model.Findings.Any(f => f.Severity == Severity.Error && f.Location.StartsWith(r.ExpectedPath, StringComparison.Ordinal)))
             .OrderBy(r => EstateModel.BodyString(r, "asOf"), StringComparer.Ordinal).ThenBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+    }
+
+    /// <summary>Every current standing agent as of a time, by goal id.</summary>
+    internal static IReadOnlyList<StandingAgents.Agent> Standing(EstateModel model, DateTimeOffset at) => Standing(model, () => at);
+
+    /// <summary>Every current standing agent as of a time read only when there is one, by goal id.</summary>
+    internal static IReadOnlyList<StandingAgents.Agent> Standing(EstateModel model, Func<DateTimeOffset> at)
+    {
+        List<RecordEnvelope> goals = [.. model.Current("goal").Where(StandingAgents.IsStanding).OrderBy(g => g.Id, StringComparer.Ordinal)];
+        if (goals.Count == 0)
+        {
+            return [];
+        }
+
+        DateTimeOffset time = at();
+        return [.. goals.Select(g => StandingAgents.Derive(model, g, time))];
     }
 
     /// <summary>
@@ -468,6 +501,21 @@ public static class EstateStatus
         if (runs.Count > 0)
         {
             status["runs"] = FlowStops.RunsJson(model, runs);
+        }
+
+        // From 0.9.4 (GOAL-07): each standing agent as of the estate's newest record, so canonical status never depends on when it is read;
+        // absent when there is none. A duty trigger's occurrences are the runtime's to evaluate, in goal due.
+        IReadOnlyList<StandingAgents.Agent> standing = Standing(model, recorded);
+        if (standing.Count > 0)
+        {
+            status["standingAgents"] = new JsonArray([.. standing.Select(a => (JsonNode)StandingView.Summary(model, a))]);
+        }
+
+        // From 0.9.4 (CODE-73), the open overlaps of active assignments, from the records alone; absent when there is none.
+        IReadOnlyList<AssignmentOverlaps.Overlap> overlaps = AssignmentOverlaps.Overlaps(model);
+        if (overlaps.Any(o => o.Open))
+        {
+            status["overlaps"] = AssignmentOverlaps.StatusJson(model, overlaps);
         }
 
         // Work proposed for goals whose plan says sponsor-approves, waiting for the sponsor's approval (FIX-117); absent when there is none.

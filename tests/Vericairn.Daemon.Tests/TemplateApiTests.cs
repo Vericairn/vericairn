@@ -86,9 +86,10 @@ public sealed class TemplateApiTests
         using var handler = new RouteHandler(service);
         using var sdk = new VericairnClient(new HttpClient(handler) { BaseAddress = new Uri("http://fixture.invalid") });
         var catalogue = (await sdk.TemplatesAsync(TestContext.Current.CancellationToken)).Templates;
-        Assert.Equal(13, catalogue.Count);
+        Assert.Equal(17, catalogue.Count);
         Assert.Equal(Vericairn.Records.Templates.PresentationTemplates.Definitions.Concat(Vericairn.Records.Templates.FirstPartyTemplates.Definitions)
-                .Concat(Vericairn.Records.Templates.SoftwareFlows.Definitions).Select(d => d.Hash).Order(StringComparer.Ordinal),
+                .Concat(Vericairn.Records.Templates.SoftwareFlows.Definitions).Concat(Vericairn.Records.Templates.StandingRoleFlows.Definitions)
+                .Concat(Vericairn.Records.Templates.StarterFlows.Definitions).Select(d => d.Hash).Order(StringComparer.Ordinal),
             catalogue.Where(t => t.Pin.Id != definition.Id).Select(t => t.Pin.Hash).Order(StringComparer.Ordinal));
         var template = Assert.Single(catalogue, t => t.Pin.Id == definition.Id);
         Assert.Equal(definition.Hash, template.Pin.Hash);

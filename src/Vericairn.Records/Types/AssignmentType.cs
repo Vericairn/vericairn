@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
+using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -28,14 +29,101 @@ public sealed class AssignmentType : IRecordType
         SavedPrompts.UseField,
         new("execution", "object", false, "Explicit execution choices and cumulative restrictions; launcher, roster, goal, assignment, then run precedence. Role restrictions remain binding.", 2),
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
-        new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests."),
+        new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests; from 0.9.4, optional repository (the identity of the estate or of a repository resource the work changes), excludedChanges (patterns in permittedChanges' grammar the work leaves out) and after (at most 20 assignment ids whose work it waits for, each followed to its current revision, never itself and never a cycle); from 0.9.4 (RUN-04), optional retrieval: public, which permits the work's runs to retrieve public sources with their harness's web tools, never with credentials, each source retained as an untrusted original; no other field or text permits it. A reader lacking these refuses the brief, which admits no unknown field.") { Members = [.. AssignmentBrief.Members.Select(m => m.Describe())] },
         new("note", "string", false, "Free text."),
         new("step", "object", false, "For an assignment of a run's work order, the flow step it carries: key, instance for a step that runs over a list under each, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do. A review before hand-off adds review: the items it reviews (none for a step that declares no items) and the exact subject {type, id, hash} that carries them; its contributor is never an author of the step's work unless every item takes a self review.", 3),
-        new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
+        new("occurrence", "object", false, "From 0.9.4, for an assignment of a standing agent's work order, the occurrence it carries: key (the goal's identity, trigger, revision and item, or for a duty trigger duty/ and the duty occurrence's identity), trigger, revision (the goal revision the trigger's declaration originates from) and item (schedule {interval, dueAt}, event {record {type, id, hash}}, condition {failing, records}, request {at, by} or duty {occurrence, policy, rule, dueAt, deadline, schedule}). Every assignment of a standing agent's work order names one and only those do; a key holds one assignment, whoever records it, unless a person takes its step over. A reader lacking it refuses the assignment, which admits no unknown field.", 3),
+        new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step. From 0.9.4, additive in format 3: session, an assignment routing gave an agent's live session, stored alone and holding its step at once; a reader before 0.9.4 refuses it.", 2),
+        new("basis", "ulid", false, "From 0.9.4, additive in format 3: for a hand-over, the lapse ask it answers, an ask about the assignment it takes the step over from. Recorded by a person, never an agent; a reader before 0.9.4 refuses it as an unknown field.", 3),
     ];
 
-    /// <summary>The records routing stores an assignment together with.</summary>
-    public static readonly ImmutableArray<string> RoutedWith = ["run", "ask"];
+    /// <summary>The most assignments a brief's after names.</summary>
+    public const int MaxAfter = 20;
+
+    /// <summary>
+    /// From 0.9.4 (CODE-73; the estate's design/measured-work.md § 5), the brief fields the overlap check reads, additive in format 3:
+    /// repository, the identity of the estate or of a repository resource; excludedChanges, interpretable patterns of the worker's
+    /// grammar, since prose excludes nothing; and after, at most 20 assignments, never this one and never a cycle when each is followed
+    /// to its current revision.
+    /// </summary>
+    private static void Overlaps(ValidationContext context, BodyReader brief)
+    {
+        if (brief.Since(3, AssignmentBrief.Repository.Name) && brief.Has(AssignmentBrief.Repository.Name))
+        {
+            string? repository = AssignmentBrief.Repository.Id(brief);
+            if (repository is not null && !AssignmentOverlaps.IsRepository(context.Model, repository))
+            {
+                brief.Error("assignment.repository", "repository", "The repository is the identity of the estate or of a repository resource: the first record of its lineage.");
+            }
+        }
+
+        IReadOnlyList<string>? excluded = brief.Since(3, AssignmentBrief.ExcludedChanges.Name) ? AssignmentBrief.ExcludedChanges.Strings(brief) : null;
+        foreach (string entry in excluded ?? [])
+        {
+            if (PathPatterns.Pattern(entry) is null)
+            {
+                brief.Error("assignment.excluded", "excludedChanges", $"'{entry}' is not a repository-relative pattern; an exclusion is a pattern, such as path:docs/operator-guide.md, since prose excludes nothing.");
+            }
+        }
+
+        IReadOnlyList<string>? after = brief.Since(3, AssignmentBrief.After.Name) ? AssignmentBrief.After.Strings(brief) : null;
+        if (after is null)
+        {
+            return;
+        }
+
+        if (after.Count > MaxAfter)
+        {
+            brief.Error("assignment.after", "after", $"A brief waits for at most {MaxAfter} assignments; it names {after.Count}.");
+        }
+
+        if (after.Distinct(StringComparer.Ordinal).Count() != after.Count)
+        {
+            brief.Error("assignment.after", "after", "Each assignment is named once.");
+        }
+
+        HashSet<string> own = [.. context.Model.ById.ContainsKey(context.Record.Id) ? context.Model.Chain(context.Model.Latest(context.Record)) : [context.Record.Id]];
+        if (context.Record.Supersedes is string previous && context.Model.ById.ContainsKey(previous))
+        {
+            own.UnionWith(context.Model.Chain(context.Model.Latest(context.Model.ById[previous])));
+        }
+
+        foreach (string id in after)
+        {
+            if (!Records.Identity.Ulid.IsValid(id))
+            {
+                brief.Error("assignment.after", "after", $"'{id}' is not an assignment id.");
+                continue;
+            }
+
+            if (own.Contains(id))
+            {
+                brief.Error("assignment.after", "after", "An assignment never waits for itself.");
+                continue;
+            }
+
+            context.RequireReference("brief.after", id, "assignment");
+        }
+
+        if (AssignmentOverlaps.Cycle(context.Model, own, after) is string through)
+        {
+            brief.Error("assignment.after", "after", $"Waiting for these assignments makes a cycle through assignment {through}: each would wait for the other.");
+        }
+    }
+
+    /// <summary>The one retrieval a brief may permit (RUN-04): public sources, with the harness's web tools and no credential.</summary>
+    internal const string PublicRetrieval = "public";
+
+    /// <summary>Whether an assignment's brief permits its runs to retrieve public sources (RUN-04); nothing else permits it.</summary>
+    internal static bool PermitsRetrieval(RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(assignment);
+        return assignment.Format >= 3 && assignment.Body.TryGetProperty("brief", out JsonElement brief) && brief.ValueKind == JsonValueKind.Object
+            && brief.TryGetProperty("retrieval", out JsonElement retrieval) && retrieval.ValueKind == JsonValueKind.String && retrieval.GetString() == PublicRetrieval;
+    }
+
+    /// <summary>The records routing stores an assignment together with; from 0.9.4 (format 3) also session, which it stores alone.</summary>
+    public static readonly ImmutableArray<string> RoutedWith = ["run", "ask", "session"];
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
@@ -46,8 +134,9 @@ public sealed class AssignmentType : IRecordType
         BodyReader? brief = body.Nested("brief", true);
         if (brief is not null)
         {
-            brief.Text("outcome", true, 4000);
-            foreach (BodyReader source in brief.NestedArray("sources", true, allowEmpty: true) ?? [])
+            // From 0.9.4 (DOCS-46) each member is read by the rule the record reference describes it from (AssignmentBrief).
+            AssignmentBrief.Outcome.Text(brief);
+            foreach (BodyReader source in AssignmentBrief.Sources.Objects(brief) ?? [])
             {
                 RecordReference? reference = RecordParser.ParseReference(source.Element, source.Location, context.Findings);
                 if (reference is null)
@@ -62,15 +151,18 @@ public sealed class AssignmentType : IRecordType
                 }
             }
 
-            brief.StringArray("permittedChanges", true, allowEmpty: false, maxItemLength: 2000);
-            brief.StringArray("prohibitedEffects", true, allowEmpty: true, maxItemLength: 2000);
-            brief.StringArray("workspace", true, allowEmpty: false, maxItemLength: 500);
-            brief.StringArray("limits", true, allowEmpty: true, maxItemLength: 2000);
-            brief.StringArray("expectedOutputs", true, allowEmpty: false, maxItemLength: 2000);
-            brief.StringArray("reviewCriteria", true, allowEmpty: false, maxItemLength: 2000);
-            brief.Text("recovery", true, 4000);
-            if (context.Format >= 3)
-                brief.Text("reviewBrief", false, 1_000_000);
+            AssignmentBrief.PermittedChanges.Strings(brief);
+            AssignmentBrief.ProhibitedEffects.Strings(brief);
+            AssignmentBrief.Workspace.Strings(brief);
+            AssignmentBrief.Limits.Strings(brief);
+            AssignmentBrief.ExpectedOutputs.Strings(brief);
+            AssignmentBrief.ReviewCriteria.Strings(brief);
+            AssignmentBrief.Recovery.Text(brief);
+            if (context.Format >= AssignmentBrief.ReviewBrief.SinceFormat)
+                AssignmentBrief.ReviewBrief.Text(brief);
+            Overlaps(context, brief);
+            if (brief.Since(3, AssignmentBrief.Retrieval.Name)) AssignmentBrief.Retrieval.OneOf(brief);
+
             ProgressReporting.Request(brief);
             brief.NoOtherKeys();
         }
@@ -129,10 +221,14 @@ public sealed class AssignmentType : IRecordType
             step.NoOtherKeys();
         }
 
-        if (body.Since(2, "routedWith"))
+        BodyReader? occurrence = body.Since(3, "occurrence") ? body.Nested("occurrence", false) : null;
+        if (body.Since(2, "routedWith") && body.Enum("routedWith", false, RoutedWith) == "session" && context.Format < 3)
         {
-            body.Enum("routedWith", false, RoutedWith);
+            body.Error("body.format", "routedWith", "routedWith session belongs to record format 3, and this record states an earlier format; an estate writes it once it is upgraded to a release that writes format 3.");
         }
+
+        // From 0.9.4 (GOAL-11): a hand-over's basis, the lapse ask it answers.
+        string? basis = body.Since(3, "basis") ? body.Ulid("basis", false) : null;
 
         SavedPrompts.ValidateUse(context);
         ExecutionPolicy.Read(body);
@@ -168,11 +264,37 @@ public sealed class AssignmentType : IRecordType
         if (context.Format >= 3 && order is not null)
         {
             FlowRuns.ValidateStep(context, order, step);
+            StandingAgents.ValidateOccurrence(context, order, occurrence);
         }
 
         if (contributor is not null && context.Principal(contributor) is null)
         {
             context.Error("assignment.contributor", $"Contributor {contributor} has no principal record; contributors are admitted before work is assigned to them.");
+        }
+
+        // From 0.9.4 (GOAL-11): a hand-over citing a lapse ask is a person's act, never an agent's, and its basis is the standing lapse ask
+        // the presence sweep recorded about the very assignment it takes the step over from: open or notified when it is recorded, neither
+        // withdrawn nor answered, and signed by that assignment's author, as the sweep signs it. An ask any other principal wrote is none.
+        if (basis is not null && context.RequireReference("basis", basis, "ask") is RecordEnvelope ask)
+        {
+            if (!GoalRules.IsPerson(context.Model, by))
+            {
+                context.Error("assignment.basis", "A hand-over citing a lapse ask is recorded by a person, the one taking the step over, who decides for its goal or an operator, and never by an agent.");
+            }
+            else if (order is not null && !Routing.MayHandOver(context.Model, by, contributor, order, context.Record))
+            {
+                context.Error("assignment.basis", "A hand-over citing a lapse ask is recorded by the person taking the step over, who decides for its goal or an operator.");
+            }
+
+            // The lapsed assignment is the one the ask is about, found by its id whoever recorded it and whatever it holds now; it carries
+            // the same step of the same work order.
+            RecordEnvelope? lapsed = ask.Subject is { Type: "assignment" } about && context.Find(about.Id) is { Type: "assignment" } cited ? context.Model.Latest(cited) : null;
+            bool sameStep = lapsed?.Subject is not null && order is not null && context.Model.Chain(context.Model.Latest(order)).Contains(lapsed.Subject.Id)
+                && Routing.HoldingKey(lapsed.Body) == Routing.HoldingKey(context.Record.Body);
+            if (lapsed is null || !sameStep || !Routing.LapseAsk(context.Model, ask, lapsed, context.Record))
+            {
+                context.Error("assignment.basis", $"Ask {basis} is no standing lapse ask about an assignment of this step{(lapsed is null ? string.Empty : $" ({lapsed.Id})")}: a hand-over's basis is the ask the presence sweep recorded when the session holding that assignment lapsed, open when the hand-over is recorded, neither withdrawn nor answered.");
+            }
         }
     }
 }

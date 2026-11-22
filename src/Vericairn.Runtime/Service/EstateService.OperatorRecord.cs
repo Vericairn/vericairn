@@ -242,7 +242,10 @@ public sealed partial class EstateService
             cancellationToken.ThrowIfCancellationRequested();
             adapter.Branch(Root, checkpoint.Basis, checkpoint.Branch, files, Receipts());
             stage = "commit";
-            string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, files, Receipts(), checkpoint.CarriedFiles);
+            // The commit carries the trailer lines the estate requires on every pushed commit, so its checked push finds them (CODE-81).
+            IReadOnlyList<string> trailers;
+            lock (gate) trailers = [.. CommitMessages.In(session.Load(), DateTimeOffset.UtcNow).Trailers.Select(t => t.Line)];
+            string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, files, Receipts(), checkpoint.CarriedFiles, trailers);
             if (checkpoint.Head is not null && checkpoint.Head != head) throw new ProviderRefusedException("The recorded commit changed; reconcile it before continuing.");
             checkpoint = checkpoint with { Head = head };
             lock (gate) SaveOperatorCheckpoint(identity, checkpoint);
@@ -354,9 +357,10 @@ public sealed partial class EstateService
                 }
             }
 
+            // From 0.9.4 (FIX-154): the identity a change is reconciled under, a re-push of an incomplete earlier push under one of its own.
             RecordEnvelope? Prior(string action, string name)
             {
-                lock (gate) return CurrentOperation($"{configuration.Provider.Provider}:{configuration.Repository.Id}:{action}:{name}:{head}:{checkpoint.ProductHash[7..]}");
+                lock (gate) return CurrentOperation(ChangeIdentity(session.Load(), configuration, action, name, head));
             }
 
             ChangeResponse Step(string action, string name, Func<string?, ChangeResponse> execute)
@@ -466,7 +470,7 @@ public sealed partial class EstateService
         PresenceSignature[]? Step(string action)
         {
             if (checkpoint?.Head is not string head) return null;
-            RecordEnvelope? prior = CurrentOperation($"{configuration.Provider.Provider}:{configuration.Repository.Id}:{action}:{checkpoint.Branch}:{head}:{checkpoint.ProductHash[7..]}");
+            RecordEnvelope? prior = CurrentOperation(ChangeIdentity(session.Load(), configuration, action, checkpoint.Branch, head));
             if (prior is null) return null;
             return EstateModel.BodyString(prior, "status") switch
             {
@@ -749,6 +753,8 @@ public sealed partial class EstateService
         EstateModel model = session.Load();
         if (session.Profile != "repository-synced" || session.Manifest.RecordFormat < 3)
             throw new ProviderRefusedException("An operator record command requires a repository-synced estate at record format 3.");
+        // From 0.9.4 (FIX-159): the shared acting refusal names the estate's error before anything is signed, committed or pushed.
+        if (ActingRefusal.BeforeActing(model, "recording and merging the operator's record") is Problem invalid) throw new ProviderRefusedException(invalid.Message);
         RequireChangeAuthority(by);
         if (!model.HasRole(by, Roles.Operator)) throw new ProviderRefusedException("Only an operator can record an operator action.");
         if (RequestDeviceRefusal(model) is Problem denied) throw new ProviderRefusedException(denied.Message);

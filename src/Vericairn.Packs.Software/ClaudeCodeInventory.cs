@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -15,8 +16,22 @@ internal static class ClaudeCodeInventory
     // /goal is a built-in evaluator hook: disableAllHooks would also disable the requested run.
     internal const string Settings = "{\"hooks\":{},\"enabledPlugins\":{}}";
 
-    internal static string SettingsFor(LaunchContext context) => context.AdapterAddress is null ? Settings
-        : JsonSerializer.Serialize(new { hooks = new { }, enabledPlugins = new { }, env = new { ANTHROPIC_BASE_URL = context.AdapterAddress.AbsoluteUri.TrimEnd('/'), CLAUDE_CODE_MAX_RETRIES = "0" } });
+    // From 0.9.4 (RUN-04): the built-in web tools a retrieval run adds, and only such a run.
+    internal const string RetrievalToolList = "WebFetch,WebSearch";
+
+    internal static string ToolsFor(LaunchContext context) => HarnessInventory.Retrieval(context) ? ToolList + "," + RetrievalToolList : ToolList;
+
+    internal static string SettingsFor(LaunchContext context)
+    {
+        bool retrieval = HarnessInventory.Retrieval(context);
+        if (context.AdapterAddress is null && !retrieval) return Settings;
+        var settings = new JsonObject { ["hooks"] = new JsonObject(), ["enabledPlugins"] = new JsonObject() };
+        // A retrieval run's web tools are allowed explicitly, so a print-mode run neither prompts nor silently loses them.
+        if (retrieval) settings["permissions"] = new JsonObject { ["allow"] = new JsonArray([.. RetrievalToolList.Split(',').Select(t => (JsonNode)t)]) };
+        if (context.AdapterAddress is not null)
+            settings["env"] = new JsonObject { ["ANTHROPIC_BASE_URL"] = context.AdapterAddress.AbsoluteUri.TrimEnd('/'), ["CLAUDE_CODE_MAX_RETRIES"] = "0" };
+        return settings.ToJsonString();
+    }
 
     internal static RunPreflight Establish(LaunchContext context, bool qualifying = false)
     {
@@ -41,9 +56,14 @@ internal static class ClaudeCodeInventory
             arguments = HarnessInventory.Arguments(context, "claude"),
             loginPresent = File.Exists(Path.Combine(context.Environment["CLAUDE_CONFIG_DIR"], ".credentials.json")),
         });
-        List<RunComponent> components = HarnessInventory.Components(context, "claude", "claude-code", version, configuration, ToolList.Split(','), "CLAUDE_CONFIG_DIR", "anthropic-inference");
-        components.Add(new("claude-code-setting-sources-none", "configuration", "none", HarnessInventory.Digest("none"), configuration, [], ["local"], ["claude-code-configuration"]));
-        components.Add(new("claude-code-goal-evaluator", "hook", version, HarnessInventory.Digest(new { version, command = "goal", settings = Settings }), configuration,
+        // Qualification is of the harness, not the run: the probes keep the base configuration, and a retrieval run's components carry
+        // a configuration that names its web tools and their explicit permission.
+        bool retrieval = HarnessInventory.Retrieval(context);
+        string runConfiguration = retrieval ? HarnessInventory.Digest(new { configuration, retrieval = RetrievalAdmission.Destination, tools = ToolsFor(context), settings = SettingsFor(context) }) : configuration;
+        List<RunComponent> components = HarnessInventory.Components(context, "claude", "claude-code", version, runConfiguration, ToolList.Split(','), "CLAUDE_CONFIG_DIR", "anthropic-inference",
+            retrieval ? RetrievalToolList.Split(',') : null);
+        components.Add(new("claude-code-setting-sources-none", "configuration", "none", HarnessInventory.Digest("none"), runConfiguration, [], ["local"], ["claude-code-configuration"]));
+        components.Add(new("claude-code-goal-evaluator", "hook", version, HarnessInventory.Digest(new { version, command = "goal", settings = Settings }), runConfiguration,
             [], ["anthropic-inference"], ["claude-code"]));
         HarnessInventory.Recheck(context, command, binding, instructions, codex: false);
         var probes = new Dictionary<string, string>(StringComparer.Ordinal)

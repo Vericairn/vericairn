@@ -61,6 +61,56 @@ length is considered, and a missing required timestamp is refused with
 `body.missing` and the same form. Nothing is written, and no value is converted
 to the required form on the caller's behalf.
 
+## Writing an assignment brief (0.9.4)
+
+From 0.9.4 (DOCS-46), `records describe assignment` and the generated `record-reference.md` list every member of an
+assignment's `brief` with its kind, whether it is required, whether an array may be empty, its limits and the record format
+that introduced it, from the same rules the validator reads the brief by: the reference's `assignment.brief` table, then a
+table for each member of fixed members of its own, such as `assignment.brief.sources` and
+`assignment.brief.progressRequest`. Every required member is present, a required array that may be empty is written `[]`,
+an item of an array is never an empty string, and the brief admits no member the table does not list. A path pattern in
+`permittedChanges`, such as `path:NOTES.md`, also needs `repository` on a new format-3 assignment, which `work assign` fills
+in ([record format 3](record-format-v3.md)).
+
+A minimal complete brief, assigned with `work assign`:
+
+```sh
+vericairn work assign W-1 --contributor <contributor-id> --by <operator-id> --brief brief.json
+```
+
+with `brief.json`:
+
+```json
+{"outcome": "NOTES.md holds a one-line greeting.", "sources": [], "permittedChanges": ["NOTES.md, one line"],
+ "prohibitedEffects": [], "workspace": ["the estate's repository, main branch"], "limits": [],
+ "expectedOutputs": ["NOTES.md"], "reviewCriteria": ["Does NOTES.md hold a greeting?"],
+ "recovery": "Read this brief and NOTES.md."}
+```
+
+`work assign` takes the brief alone and builds the record: its subject, the work order pinned to its current revision, and
+its body, the contributor and the brief. `records new assignment` takes the whole body and the subject as you write them,
+with the work order's id and its current hash, which `vericairn work brief W-1` shows as `work order <id> at <hash>`:
+
+```sh
+vericairn records new assignment --by <operator-id> --subject work-order:<work-order-id>:<work-order-hash> --body assignment.json
+```
+
+with `assignment.json`:
+
+```json
+{"contributor": "<contributor-id>",
+ "brief": {"outcome": "NOTES.md holds a one-line greeting.", "sources": [], "permittedChanges": ["NOTES.md, one line"],
+  "prohibitedEffects": [], "workspace": ["the estate's repository, main branch"], "limits": [],
+  "expectedOutputs": ["NOTES.md"], "reviewCriteria": ["Does NOTES.md hold a greeting?"],
+  "recovery": "Read this brief and NOTES.md."}}
+```
+
+There is no dry-run command. `records new` and `work assign` validate the estate together with the proposed record and write
+nothing when the estate would be invalid with it: they refuse with `Not written: the estate would be invalid with this record`,
+the number of errors and every finding at once, such as `body.missing` for a required member left out, and exit with code 1.
+A proposed record that is valid is written at once. `records validate` checks the estate as it stands, not a
+proposed body.
+
 ## Release lines and channels (0.9.0)
 
 These optional fields extend record format 3. Existing release bodies, hashes and
@@ -203,6 +253,19 @@ account-holder package actions their whole target (`operation.package-target`), 
 this rule. The retry path is unchanged: a retry after a known failure or a cancellation that names its `reconciliation` pins
 the settings it runs with, as a release retry that repairs its workflow or ref does, while a retry after an uncertain
 outcome names its reconciliation and keeps the intent and target.
+
+## A checked push records its basis (0.9.4)
+
+From 0.9.4 (FIX-154) a `change-push` operation records, from its dispatch on, the target fact `basis`: where its scan began,
+`merge-base` or the id of the observed `change-push` of the same repository, destination, branch and target that it continued,
+whose head is its `base`. The runtime derives from these facts, and from the `remoteHead` and `base` of pushes recorded before
+them, which pushes are complete, and a checked merge takes only a complete push of its exact head
+([coverage](changes.md#coverage-094)). Validation refuses a `basis` on another action, any other value, and a continued push
+of another repository, destination, branch or target, or whose head is not the revision's `base` where it records one, with
+`operation.change-basis` at severity `error`. Like every target fact of a repository change but a retry's `base`,
+`remoteHead` and `targetHead` (`operation.change-target`), a recorded `basis` is kept by every later revision, a retry's
+included, so a reader before 0.9.4 keeps it as one more target fact and ignores it. The field adds no record type and no
+format number; the estate stays at format 3.
 
 ## History checkpoints (0.9.2)
 

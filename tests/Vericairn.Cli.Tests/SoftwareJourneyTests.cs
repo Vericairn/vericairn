@@ -200,7 +200,7 @@ public class SoftwareJourneyTests
             foreach (string key in new[] { "W-8", "W-9" })
             {
                 CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", builder, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Work {{key}}","intent":"Exercise the notes.","scope":["notes"],"exitQuestion":"Done?","inputs":[],"deliverables":["notes"]}"""));
-                string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", key, "--contributor", builder, "--by", builder, "--brief", brief).Id;
+                string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", key, "--contributor", builder, "--by", builder, "--repository", "estate", "--brief", brief).Id;
                 for (int i = 0; i < (key == "W-8" ? 3 : 1); i++)
                 {
                     CliHarness.Outcome attempt = CliHarness.Ok("--estate", root, "--json", "work", "attempt", assignment, "--by", builder, "--workspace", "here", "--note", "Do it.", "--at", RecordParser.FormatTimestamp(notesTime));

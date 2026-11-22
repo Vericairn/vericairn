@@ -309,7 +309,9 @@ Top-level `checks` apply to the whole document; `quality.checks` applies to the
 section payload. Built-in check objects use `name`: `length` with `min` and/or
 `max` bounds, `required-terms` with `terms`, `references-exist`, `links-resolve`,
 `names-version`, or `matches-generator`. Length measures text characters;
-required terms compare case-sensitive text. Version checks use selected release
+required terms compare case-sensitive text. From 0.9.4, `links-resolve` passes over
+a link inside a fenced or indented code block or an inline code span, as the
+[living documents guide](living-documents.md#when-a-declared-check-fails) describes. Version checks use selected release
 records. Other installed namespaced checks receive the payload and resolved
 sources. Unavailable checks cannot pass.
 
@@ -884,6 +886,85 @@ observation after `observe`, a reserved `publish` step after `publish` whose
 or a document review after `docs-after`. Such an extension names its estate's
 own destinations, so it stays that estate's content and pins the base it
 extends by hash.
+
+
+### The first standing roles (0.9.4)
+
+From 0.9.4 (PROC-08) the software pack also ships three standing roles as
+built-in flows with triggers: `vericairn.estate/duty-carrier` 1.0.0 (trigger
+kinds `duty` and `request`), `vericairn.software/researcher` 1.0.0 and
+`vericairn.software/bug-hunter` 1.0.0 (both `schedule`, `event` and
+`request`). Each has one role, one work step and never lines; its role brief
+states the outputs it records, its fingerprint rule and the authority each
+effect needs, and what no grant covers becomes an operator request. A standing
+agent pins one with `goal propose --standing`; the roles, their triggers and
+outputs are in [software.md](software.md#the-first-standing-roles-094).
+
+### The starter flow (0.9.4)
+
+From 0.9.4 (TPL-13) every installation also lists a starter flow that belongs
+to no domain, `vericairn.starter/service-appointment` 1.0.0, in which a service
+request becomes an approved appointment. Its subject is `request`, the request
+as received, as text. Its `draft` step is a work step of the `scheduler` role,
+which an agent holds: the agent drafts a proposed appointment and records a
+result naming it as the output `appointment`, a JSON file by its hash. Its
+`approve` step is a review step of the `approver` role, which a person holds:
+that person's review passing the exact result is the approval. Nothing in it is
+reserved and nothing leaves the estate, so approving books, confirms or charges
+nothing. In this build only an operator records a review of another's work as a
+person, so the approver is a person with the operator role.
+
+The flow ships with Vericairn: install it, and `templates list` shows the flow
+without a file copied into the estate. Name the agent that drafts and the person
+who approves in the roster, then propose and activate a run for one request:
+
+```sh
+vericairn templates show vericairn.starter/service-appointment --version 1.0.0
+vericairn records new roster --by <you> --body roster.json
+vericairn goal propose --by <you> --title "Appointment for SR-0001" \
+  --objective "Turn the service request into an approved appointment." \
+  --done '{"type":"work-order","fields":{"key":"SR-0001"}}' --work-order <work order id> \
+  --budget wallMinutes=30 --budget attemptsPerStep=2 \
+  --flow vericairn.starter/service-appointment@1.0.0 \
+  --subject request="SR-0001: a pool cleaning visit at 1 Sample Lane, any weekday morning."
+vericairn goal activate <goal> --by <you>
+vericairn goal step <goal> --by <you> --repository <resource>
+```
+
+Here `roster.json` is
+`{"roles":[{"role":"scheduler","principals":["<agent>"]},{"role":"approver","principals":["<you>"]}]}`.
+`goal step` takes one step per command. The draft goes to the agent through the
+worker, as any agent's step does ([runs of a flow](operator-guide.md#runs-of-a-flow-092)):
+the agent runs in your own coding-agent harness, under your own account, in a
+workspace made from a repository clone registered on your machine (`sources adopt`
+and `sources clone`), and signs its attempt and result with its own device
+admitted there. No hosted service takes part. The next `goal step` assigns the
+approval to you and asks you. Read the proposed appointment, which
+`vericairn work observe SR-0001` names by hash, and approve that exact result:
+
+```sh
+vericairn records new review --by <you> --subject result:<result id>:<result hash> --body approval.json
+```
+
+Here `approval.json` is
+`{"independence":"operator","outcome":"pass","summary":"The visit matches the request.","findings":[]}`.
+`goal show` then reads `2 of 2 steps done; the run is complete`, and the goal's
+evaluation and acceptance remain, as for any goal. A review with outcome
+`findings` sends the draft back to the agent for another attempt instead.
+
+The approval names the result by its hash. When the draft changes, by another
+attempt or a revision of the result, the earlier approval covers nothing:
+`approve` reads `stale`, naming the result its brief pinned and the one there is
+now, and after a revision `estate check` reports the earlier review as
+`record.subject-stale`. The flow asks again only through `goal step`, never
+unattended: the next `goal step` assigns the approval afresh and asks you. `goal show` names the exact flow that
+ran, `Flow: vericairn.starter/service-appointment 1.0.0 (sha256:...)`, with each
+step's result and the review that passed it, and `records show <review>` gives
+who approved which result revision. `estate export` and `estate restore` carry the
+run to another machine as they carry any records
+([export and restore](operator-guide.md#10-export-restore-recovery-and-divergence)):
+there `recover inspect` lists the devices whose keys stayed behind, and
+`goal show` gives the same position.
 
 ## Client and extension contract
 

@@ -59,6 +59,8 @@ public static class EstateExport
             throw new IOException($"{zipPath} already exists; exports are never overwritten.");
         }
 
+        // Before anything is created, so that a refused export leaves no file behind.
+        IReadOnlyList<string> instructions = OwnerInstructionFiles(session.Root);
         IReadOnlyList<RecordFile> records = session.Files();
         var inventory = new JsonArray();
         string createdAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
@@ -99,6 +101,13 @@ public static class EstateExport
                         documents++;
                     }
                 }
+            }
+
+            foreach (string name in instructions)
+            {
+                string full = Path.Combine(session.Root, name);
+                Add(zip, inventory, name, File.ReadAllBytes(full), Executable(full, name));
+                documents++;
             }
 
             byte[] inventoryBytes = Canonical(inventory);
@@ -349,6 +358,45 @@ public static class EstateExport
         }
 
         return manifestBytes;
+    }
+
+    // From 0.9.4 (FIX-135), the owner's agent instruction files at the root travel with the export, each named exactly as
+    // EstateLayout.OwnerInstructionFiles names it: the root is listed rather than probed by name, so a differently cased file on a
+    // case-insensitive volume is never exported under the owner's name. An entry of that name that is a directory is no instruction
+    // file, and estate check reports it. Anything else that is not a regular file is refused, judged from its status without opening
+    // it: following a link would export bytes from outside the estate under the owner's name, a restore never makes a link, and opening
+    // a FIFO, a device or a socket would wait or read without end.
+    private static IReadOnlyList<string> OwnerInstructionFiles(string root)
+    {
+        var files = new List<string>();
+        foreach (string entry in Directory.EnumerateFileSystemEntries(root))
+        {
+            string name = Path.GetFileName(entry);
+            if (!EstateLayout.OwnerInstructionFiles.Contains(name))
+            {
+                continue;
+            }
+
+            var info = new FileInfo(entry);
+            if (info.LinkTarget is not null)
+            {
+                throw new InvalidOperationException($"{name} at the estate root is a link, not a file. The owner's agent instruction files travel in an export only as files, and a restore never makes a link; replace the link with the file's own content and export again. Nothing was written.");
+            }
+
+            if (Directory.Exists(entry))
+            {
+                continue;
+            }
+
+            if (Records.Signing.OwnerOnlyState.IsRegularFile(entry) == false || (info.Attributes & FileAttributes.Device) != 0)
+            {
+                throw new InvalidOperationException($"{name} at the estate root is not a regular file. The owner's agent instruction files travel in an export only as regular files; replace it with a file holding its content and export again. Nothing was written.");
+            }
+
+            files.Add(name);
+        }
+
+        return [.. files.Order(StringComparer.Ordinal)];
     }
 
     // Windows keeps no execute permission, so there the first-party POSIX bootstrap script, which estate init and estate

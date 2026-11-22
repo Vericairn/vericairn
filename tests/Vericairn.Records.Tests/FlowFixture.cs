@@ -104,6 +104,79 @@ public sealed class FlowFixture : IDisposable
         RunClosings.Plan closing = RunClosings.Prepare(run.Estate.Load(), run.Goal, run.Estate.OperatorId, "The song is shelved.", [("shorts[intro]", "The intro has no clip.")], run.Estate.Clock);
         Assert.Empty(closing.Refusals);
         run.Add("goal-status", closing.Body(), subject: run.Goal.Reference);
+
+        // From 0.9.4 (GOAL-07) a standing agent's plan carries standing, and the assignment of its occurrence names the occurrence.
+        TemplateDefinition researcher = Install(run.Estate, StandingFlows.Researcher());
+        RecordEnvelope research = run.Add("work-order", new JsonObject
+        {
+            ["key"] = "RES-1", ["kind"] = "ordinary", ["title"] = "Research the song", ["intent"] = "Keep researching.", ["scope"] = new JsonArray("path:research/"),
+            ["exitQuestion"] = "Is each occurrence researched?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("findings"),
+        });
+        RecordEnvelope standing = run.Add("goal", new JsonObject
+        {
+            ["title"] = "Research the song", ["objective"] = "Keep researching the song.", ["completion"] = new JsonArray(new JsonObject { ["record"] = Marker("RESEARCHED") }),
+            ["constraints"] = new JsonArray(), ["kind"] = "stewardship", ["sponsor"] = run.Estate.OperatorId, ["budget"] = new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 2 },
+            ["roles"] = new JsonArray(Role("researcher", run.Estate.BuilderId)),
+            ["plan"] = new JsonObject
+            {
+                ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(research.Id),
+                ["standing"] = new JsonObject
+                {
+                    ["pin"] = Pin(researcher), ["subject"] = new JsonObject { ["topic"] = "the song" }, ["triggers"] = new JsonArray(StandingFlows.Monthly()),
+                    ["period"] = new JsonObject { ["unit"] = "months", ["runs"] = 4, ["wallMinutes"] = 120 }, ["until"] = "2027-06-01T00:00:00Z",
+                },
+            },
+            ["inputs"] = new JsonArray(),
+        });
+        run.Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, subject: standing.Reference);
+        StandingAgents.Occurrence occurrence = StandingAgents.Derive(run.Estate.Load(), standing, run.Estate.Clock).Occurrences[0].Occurrence;
+        JsonObject carried = AssignmentBody("research", run.Estate.BuilderId);
+        carried.Remove("step");
+        carried["occurrence"] = new JsonObject { ["key"] = occurrence.Key, ["trigger"] = occurrence.Trigger, ["revision"] = occurrence.Revision, ["item"] = JsonNode.Parse(occurrence.Item.GetRawText()) };
+        RecordEnvelope held = run.Add("assignment", carried, subject: research.Reference);
+
+        // From 0.9.4 (GOAL-08) the builder, in its run of the occurrence, records a possibility, an ask and a publication request, each
+        // naming what raised it.
+        RecordEnvelope intent = run.Add("operation", new JsonObject
+        {
+            ["provider"] = "stand-in", ["action"] = "agent-run", ["identity"] = "research-run", ["intent"] = "Carry the occurrence.",
+            ["target"] = new JsonObject { ["assignment"] = held.Id, ["principal"] = run.Estate.BuilderId, ["workspace"] = "research, branch work/res-1", ["goal"] = standing.Id },
+            ["status"] = "not-started", ["evidence"] = new JsonArray(), ["cap"] = new JsonObject { ["wallMinutes"] = 10, ["attemptsPerStep"] = 2 },
+        });
+        JsonObject Raised() => new() { ["goal"] = standing.Id, ["occurrence"] = occurrence.Key, ["assignment"] = held.Id, ["run"] = intent.Id };
+        RecordEnvelope declined = run.Add("possibility", new JsonObject
+        {
+            ["title"] = "Shorten the chorus", ["idea"] = "The chorus runs long.", ["origin"] = "The researcher's occurrence.", ["disposition"] = "open", ["raisedBy"] = Raised(),
+            ["fingerprint"] = "chorus/length", ["sources"] = new JsonArray(new JsonObject { ["address"] = "https://example.org/chorus" }),
+        }, builder: true);
+        JsonObject decline = JsonNode.Parse(declined.Body.GetRawText())!.AsObject();
+        decline["disposition"] = "declined";
+        decline["reason"] = "The length is intended.";
+        RecordEnvelope declinedNow = run.Add("possibility", decline, supersedes: declined.Id);
+        run.Add("possibility", new JsonObject
+        {
+            ["title"] = "Shorten the chorus again", ["idea"] = "Listeners skip the chorus.", ["origin"] = "The researcher's occurrence.", ["disposition"] = "open", ["raisedBy"] = Raised(),
+            ["fingerprint"] = "chorus/length", ["raisesAgain"] = declined.Id, ["disclosure"] = "held",
+            ["sources"] = new JsonArray(new JsonObject { ["address"] = "https://example.org/skips", ["retrievedAt"] = "2026-10-01T00:00:00Z", ["hash"] = Hash('e'), ["extents"] = "the skip chart" }),
+            ["evidence"] = new JsonArray(new JsonObject { ["stance"] = "for", ["statement"] = "Skips rise at the chorus.", ["sources"] = new JsonArray(0) }, new JsonObject { ["stance"] = "against", ["statement"] = "The length is intended." }),
+            ["reviewTriggers"] = new JsonArray(new JsonObject { ["at"] = "2027-01-01T00:00:00Z" }, new JsonObject { ["condition"] = "when the next mix is ready" }),
+            ["links"] = new JsonArray(new JsonObject { ["relation"] = "supersedes", ["possibility"] = declinedNow.Id, ["hash"] = declinedNow.ComputedHash }),
+            ["draft"] = new JsonObject { ["key"] = "MIX-2", ["title"] = "Shorten the chorus", ["intent"] = "Fewer skips.", ["scope"] = new JsonArray("path:mix/"), ["deliverables"] = new JsonArray("a shorter chorus"), ["exitQuestion"] = "Is the chorus shorter?" },
+            ["extras"] = new JsonArray("Try a shorter intro too."),
+        }, builder: true);
+        run.Add("ask", new JsonObject
+        {
+            ["to"] = run.Estate.OperatorId, ["question"] = "Is the chorus length intended?", ["recommendation"] = "Say whether it is.", ["consequence"] = "The research goes on.",
+            ["goal"] = standing.Id, ["state"] = "open", ["raisedBy"] = Raised(),
+        }, builder: true);
+        const string text = "The chorus is being reviewed.";
+        run.Add("operator-request", new JsonObject
+        {
+            ["to"] = run.Estate.OperatorId, ["askedBy"] = run.Estate.BuilderId, ["action"] = "Publish an agent's draft", ["why"] = "Listeners asked.", ["recommendation"] = "Post it.",
+            ["consequence"] = "Nothing is posted.", ["kind"] = "publication", ["destination"] = "the song's page",
+            ["content"] = new JsonArray(new JsonObject { ["kind"] = "text", ["hash"] = Vericairn.Records.Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(text)), ["text"] = text }),
+            ["raisedBy"] = Raised(),
+        }, builder: true, subject: research.Reference);
         return run;
     }
 
@@ -290,12 +363,12 @@ public sealed class FlowFixture : IDisposable
         Add("assignment", AssignmentBody(step, contributor, instance, inputs), subject: Work.Reference);
 
     /// <summary>The body of an assignment of a step to a contributor, pinning the inputs given.</summary>
-    public static JsonObject AssignmentBody(string step, string contributor, string? instance = null, JsonArray? inputs = null)
+    public static JsonObject AssignmentBody(string step, string contributor, string? instance = null, JsonArray? inputs = null, string? repository = null)
     {
         var named = new JsonObject { ["key"] = step };
         if (instance is not null) named["instance"] = instance;
         if (inputs is not null) named["inputs"] = inputs;
-        return new JsonObject
+        var body = new JsonObject
         {
             ["contributor"] = contributor, ["step"] = named,
             ["brief"] = new JsonObject
@@ -305,6 +378,8 @@ public sealed class FlowFixture : IDisposable
                 ["reviewCriteria"] = new JsonArray("the outputs exist"), ["recovery"] = "Carry it again.",
             },
         };
+        if (repository is not null) body["brief"]!["repository"] = repository;
+        return body;
     }
 
     /// <summary>The contributor's attempt and completed result on an assignment, naming outputs by name and hash.</summary>
@@ -374,4 +449,27 @@ public sealed class FlowFixture : IDisposable
     public static JsonElement Element(JsonNode node) => JsonSerializer.SerializeToElement(node);
 
     public void Dispose() => Policies.Dispose();
+}
+
+/// <summary>The flows and triggers of standing agents' tests, shared with the runtime's tests.</summary>
+public static class StandingFlows
+{
+    /// <summary>The researcher flow: every trigger kind, the researcher role, one work step and a never line.</summary>
+    public static JsonObject Researcher() => new()
+    {
+        ["format"] = "vericairn.template/1", ["kind"] = "flow", ["id"] = "example/researcher", ["version"] = "1.0.0", ["purpose"] = "Research a subject between releases.",
+        ["subject"] = new JsonObject { ["summary"] = "what is researched", ["fields"] = new JsonArray(new JsonObject { ["name"] = "topic", ["type"] = "text" }) },
+        ["roles"] = new JsonArray(new JsonObject { ["id"] = "researcher", ["holder"] = "either", ["brief"] = "Research the subject and record what you find, citing each source." }),
+        ["triggers"] = new JsonArray(
+            new JsonObject { ["kind"] = "schedule", ["summary"] = "On a calendar." },
+            new JsonObject { ["kind"] = "event", ["summary"] = "When a record of a kind is made." },
+            new JsonObject { ["kind"] = "condition", ["summary"] = "When a condition fails." },
+            new JsonObject { ["kind"] = "duty", ["summary"] = "When a duty falls due." },
+            new JsonObject { ["kind"] = "request", ["summary"] = "On request." }),
+        ["never"] = new JsonArray("never publish anything outside the estate"),
+        ["steps"] = new JsonArray(FlowFixture.Step("research", "work", "researcher", outputs: new JsonArray(FlowFixture.FileItem("findings", "text/markdown")))),
+    };
+
+    /// <summary>A monthly schedule from the first day of October 2026.</summary>
+    public static JsonObject Monthly(string key = "monthly", string firstAt = "2026-10-01T00:00:00Z") => new() { ["key"] = key, ["kind"] = "schedule", ["unit"] = "months", ["every"] = 1, ["firstAt"] = firstAt };
 }
