@@ -24,6 +24,22 @@
   `record.reference` (as a referenced operation a retry or revision supersedes). A runtime and helper of the same release agree;
   terms written by a runtime from before the follow-up are refused by the follow-up's helper.
 
+## Presence sessions in the enclave helper (ID-15)
+
+No public API change: no route, interface member, protocol type, record type or field, or member of a Community package is added or
+changed. The macOS enclave helper, which the runtime drives and no client calls, adds `vericairn-enclave session <blob>`: one JSON
+object per line on standard input and output in `vericairn.presence-session/1` (`open`, `prompting`, `opened`, `sign`, `signed`,
+`status`, `close`, `refused` and `ended`, each naming itself in `type`), with the terms compared with the blob's key before anything
+is shown and every record checked by the helper itself before it signs. It also adds `vericairn-enclave sign-record`, whose dialog
+opens with "sign Vericairn record <type> <short hash>:", and the digest-only `sign` now opens with "sign an unread Vericairn
+digest:". A helper whose own code does not meet the release requirement refuses `open` with `helper.unsigned`, so a development
+build opens no session. From the follow-up, a session refuses a record that takes any id the session holds (`record.author`) or
+supersedes its own id (`record.reference`), holds an observation to the operation it observes, and makes its context non-interactive
+once its check has passed, so a signature the check does not cover is refused with `check.unavailable`. The vectors in
+`tests/fixtures/presence-sessions/vectors.json` hold the helper and the runtime's canonical serializer to the same bytes, and
+[presence-session qualification](presence-session-qualification.md) gives the procedure for a candidate's signed helper. ID-16's
+entry above gives the runtime's side.
+
 ## Presence session notices, the owner's setting and the session ledger (CODE-80)
 
 - `Vericairn.Protocol.PresenceNotice` gains two init-only properties outside its positional parameters, so its constructor and
@@ -117,11 +133,91 @@ All additive; every Community package keeps 0.9.3's API.
   the three built-in flows `vericairn.estate/duty-carrier`, `vericairn.software/researcher` and `vericairn.software/bug-hunter` at
   1.0.0 in every template listing.
 
+## Step timing (PROC-18)
+
+All additive; every Community package keeps 0.9.3's API.
+
+- `Vericairn.Records.Templates.FlowTiming` (new record): the timing contract a step's `when` states, read with
+  `FlowTiming.Read(JsonElement)`: `Start`, one of `Starts` (`instant`, `delay`, `at`, `schedule`, `event`, `watch` and `due`),
+  `After`, `From`, `Time`, `Output`, `Field`, `ScheduleDays`, `Times`, `EventKind`, `Predicate`, `Every`, `Limit`, the window's
+  `Open` and `Quiet` spans (`FlowTiming.Span`), `Zone`, `Deadline`, `Missed`, one of `MissedRules`, `Fixed`, `Element`, `Windowed`,
+  `Untimed`, `Waited`, `NextScheduled`, `InWindow`, `NextOpen` and `Describe`; and static `Instant`, `EventKinds`, `Days`, `Utc`,
+  `ZoneOption` (`zone`), `WhenOption` (`when.`), `Close`, `Activation`, `WaitedOf`, `ZoneOf`, `TryZoneOf`, `KnownZone`,
+  `LocalToInstant`, `ParseInstant` and `LocalTime`. `FlowStep.When` keeps its type and is read as this contract.
+- `Vericairn.Records.Estate`: `FlowRuns.Configuration.Zone` and `FlowRuns.Configuration.Timing(FlowStep)`, the run's time zone and a
+  step's effective timing; `FlowPosition.StepDue(At, Reason)` (new record) with init-only `Timing`, `Zone`, `Deadline` and `Missed`;
+  `FlowPosition.StepInstance.Due`, init-only, so the positional constructor and deconstruction are unchanged; `FlowPosition.DueText`
+  and `DueJson`; and `FlowPosition.AttentionKinds` gains `missed`.
+- `Vericairn.Presentation` (not a package): `DueRow`, `FlowRunRow.Due`, `EstateView.Due` and `GoalPresentation.Due`.
+- JSON, with no route, request or response type changed: the goal read and `goal show --json` give each timed step's `due` (`at`,
+  `reason`, `timing`, `zone`, `deadline` and `missed`), and canonical status's `runs` (`GET /v1/status`) gain `due`, as of the
+  newest record.
+- Refusals: the flow contract checks each timing (`flow.when`); a configuration's `zone` must name a zone every machine reads alike
+  (`flow.zone`), and its `when.<step>` is refused for a step whose timing the flow fixes (`flow.timing-fixed`).
+- Records: no record type or field is added. Flows that use `due` or `watch` keep their content and hashes. A 0.9.3 runtime refuses
+  a flow whose step uses any other timing (`flow.when`) and refuses `zone` and `when.<step>` as options the flow does not declare
+  (`flow.option`).
+
 ## Decision transitions (PROC-19)
 
 `IEstateApi.GoalDecide` and `GoalDecideAsync`, with default implementations that refuse as unsupported; `GoalDecideRequest`;
 `GoalStepResponse.Decision`; `VericairnClient.GoalDecide` and `GoalDecideAsync`; `CancellationBoundApi.GoalDecide` and
 `GoalDecideAsync`.
+
+## The release flow reads complete when the release is (FIX-142)
+
+`Vericairn.Records.Estate.FlowStops.Dismissal(model, goal, step, command, since, until)` (new): the operator's dismissal that
+settles an optional reserved step, or null. No route, protocol type, record type or field changes, and nothing else in a Community
+package's API. Behaviors of the flow engine, for runs on any revision: once the addressed operator dismisses the request of an
+optional reserved step, a request carrying the command the records give now, after the step was asked, the step reads `off`, skipped
+with the dismissal as its reason and with no revision of the goal, while a required or policy-required step stays asked; a goal
+revision whose options only turn optional steps or optional items off keeps the asks of every step it leaves in the run; and a step
+done by its done predicates alone, each a count of at most none, such as the documentation pass after publication, counts only once
+every step it waits on is done. The state language's label for a step that is `off` adds "or skipped". The base flow
+`vericairn.software/release` 1.0.0 keeps its content and hash.
+
+## Closing a run with a reason for each unsettled step (FIX-143)
+
+All additive; every Community package keeps 0.9.3's API.
+
+- `Vericairn.Protocol`: `IEstateApi.GoalClose(goal, GoalCloseRequest)` and `GoalCloseAsync`, default members that refuse as
+  unsupported; `GoalCloseRequest(By, Reason = null, StepReasons = null)` and `GoalStepReason(Step, Reason)` (new records);
+  `GoalAcceptRequest` gains init-only `Reason` and `StepReasons` outside its positional parameters, so its constructor and
+  deconstruction are unchanged; `CancellationBoundApi.GoalClose` and `GoalCloseAsync`; and the OpenAPI document's
+  `POST /v1/goals/{id}/close`, the schemas `GoalCloseRequest` and `GoalStepReason`, and `reason` and `stepReasons` in
+  `GoalAcceptRequest`.
+- `Vericairn.Sdk`: `VericairnClient.GoalClose` and `GoalCloseAsync`. `Vericairn.Runtime`: `EstateService.GoalClose`.
+- `Vericairn.Records.Estate`: `RunClosings` (new: `MaximumReason`, `Unsettled`, `Plan`, `Of` and `Prepare`); `GoalRules.MayClose`,
+  `CloseRefusals` and `Closing`; `FlowPosition.Position.Closing` and `Unsettled`; `FlowPosition.ClosingJson` and `UnsettledText`;
+  and `FlowPosition.States` gains `unsettled`. `Vericairn.Records.Types.GoalStatusType.Statuses` gains `closed`.
+- Records (format 3, additive): `goal-status` gains the status `closed` and the field `unsettled`, each entry
+  `{key, instance?, reason}`, required with `closed` and refused with any other status; an earlier format refuses `closed`
+  (`goal-status.closed`), and a reader before 0.9.4 refuses a closing as a status it does not know with an unknown key. A goal
+  without a closing reads as before.
+- Command line: `goal close <goal> --by <principal> [--reason <text>] [--step-reason <step>=<reason>]`, and `goal accept` takes
+  `--reason` and `--step-reason`, writing the closing and the acceptance as one judged batch on the runtime's machine, so a
+  device-signed network request is refused for an acceptance with reasons. Status's canonical `runs` list a closed run, with its
+  `closed`, until its goal is accepted or ended. The state language adds the goal status `closed` and the flow-step state
+  `unsettled`. MCP adds no tool; `goal_get` and `goal_progress` read the closing.
+
+## A close counts only when made after its step was asked (FIX-144)
+
+No public API change: no route, protocol type, record type or field, or public member changes. Behavior of the flow engine: an
+optional step skipped in the run's current shape carries when it was skipped (the dismissal's time, the time of the revision since
+which every revision turns it off, or the time the step it takes its input from was skipped), and a reserved step's asked-since time
+is no earlier than the skip time of any step it waits on, directly or through steps that are off. A close of its exact command made
+while it waited counts for nothing, and one made after counts. A step that a revision turns off after it was done, or after its
+request was dismissed, keeps the closes recorded since for the steps after it.
+
+## A running run keeps its configuration (FIX-146)
+
+No public API change: `FlowRuns.Product` keeps its signature, and no route, protocol type, record type or field changes. Behaviors
+of the flow engine: a run reads the `template-defaults` records, and the product its work order names, as they stood when its
+current goal revision was first activated, so defaults recorded later apply to new runs and to the run's next revision, which its
+sponsor signs and activates; a revision compares the configurations each revision was resolved with, so the defaults it takes in
+count as a change of its configuration even when the goal's own options are unchanged; a revision that changes `until` asks every
+step again; an optional item a revision turns off settles its step as done from that revision, unless the item was satisfied before
+it; and a step's done time counts the reviews and verifications that satisfy its items.
 
 ## Concurrent assignments compared by their permitted paths (CODE-73)
 
@@ -418,6 +514,23 @@ adds `members` to a field that has them, each member with `emptyAllowed` and `li
 input (`inputs/record-types.json`) adds the same `members`; the record-reference companion renders an input without them as
 before.
 
+## Tool annotations and the published tool definitions (MCP-07)
+
+All additive; every Community package keeps 0.9.3's API. No tool's behavior changes.
+
+- `Vericairn.Mcp`: `ToolDefinition.Destructive` and `Idempotent`, init-only, so its constructor and deconstruction are unchanged;
+  `ToolDefinition.Describe()` adds `annotations`; `ToolRegistry.Definitions()`, every tool the build defines, ordered by name, as
+  `tools/list` describes it over standard input and output; `ToolRegistry.DefinitionsHash`, the SHA-256 of that array in RFC 8785
+  canonical JSON, and `ToolRegistry.DefinitionHash(definition)`; and `McpServer.ToolDefinitionsMeta` (`vericairn/toolDefinitions`).
+- MCP: each tool `tools/list` gives carries `annotations` with `readOnlyHint` (true for a read), `destructiveHint` and
+  `idempotentHint`. Every read is read-only and idempotent; the destructive writes are `policy_revise`, `policy_retire`,
+  `policy_revoke_exception`, `writing_exception_remove`, `prompt_save` and `prompt_preference`, and the idempotent writes
+  `policy_declare`, `policy_revise`, `policy_retire`, `policy_revoke_exception` and `writing_exception_remove`. Every definition's
+  bytes therefore differ from 0.9.3's. `initialize`'s result carries `vericairn/toolDefinitions` in `_meta`, `{count, hash}`,
+  computed once per process, and the server answers `initialize` before it reads the requests sent with it.
+- Build tooling (not shipped): `vericairn-docs mcp-tools` prints every tool's hints and definition SHA-256 with the set's SHA-256,
+  and the package workflow appends it to the draft release's notes.
+
 ## A checked push refuses the estate's blocked terms in the pushed commits' messages (CODE-81)
 
 - **Vericairn.Runtime**: a new public record `PushedCommit(string Commit, string Message)`; `IPushAdapter.CommitMessages(string
@@ -446,6 +559,24 @@ before.
   without renames, external diffs or text conversion, a merge commit naming only paths that differ from every parent.
 - **Vericairn.Records**: no public member is added or changed; `DisclosureHolds.Active` and `Disclosed` read as before.
 - **Record format 3**: unchanged. The approval is read from existing asks and decisions; no field or type is added.
+
+## Every file a release's SHA256SUMS names is attached (FIX-140)
+
+All additive; every Community package keeps 0.9.3's API. No route, protocol type, record type or field changes.
+
+- `Vericairn.Runtime.Providers.ReleaseObservation.ChecksumNames`, an init-only property outside its positional parameters, so its
+  constructor and deconstruction are unchanged: every name the release's checksum file lists, in order, or null when the provider
+  did not read the checksum file, as a provider written before 0.9.4 does not. `IReleaseProvider.ObserveRelease` keeps its signature
+  and from 0.9.4 reports them.
+- `Vericairn.Runtime.Release.ReleaseProfile.Unattached(release, checksums)`: the listed files a draft does not attach, in ordinal
+  order; empty when the provider reported no names.
+- Behaviors: `ReleaseFlow.AfterObservation` counts a draft complete only when it attaches every file its checksum file names. Once
+  the run has succeeded, a draft that does not is a known failure whose summary names each missing file, and no candidate is
+  recorded; while the run is in progress, or none is identified, the observation waits and its pending message names them. The
+  observe response for a known failure carries the observation's summary, `release submit --check`'s `release.identity` objection
+  quotes it until a retry gives a reconciliation, and a candidate's evidence says every listed file is attached. The release
+  workflow attaches `vericairn-<version>-companions.zip` and fails a draft that lacks a listed file; releases up to 0.9.3 keep that
+  archive only in the retained CI artifact.
 
 ## A checked push covers every commit its target does not hold (FIX-154)
 
@@ -479,6 +610,14 @@ unchanged in signature. `Vericairn.Adapters.Git`'s `GitPushAdapter` implements b
 now scan from the merge base with the target whatever the remote branch holds, and every form refuses a branch that is its target.
 `PushPlan` and `SecretScan` are unchanged.
 
+## A document.drift finding names both digests (FIX-157)
+
+No public API change: no route, protocol type, record type or field, or public member changes. `estate check`'s `document.drift`
+error keeps its code, location, severity and guidance; its message now labels both values, "The revision pinned <digest>; the file
+now has <digest>.", where it showed only the file's current digest after "pinned it", and for an authored-content pin (`hashMode`
+`authored-revisions-v1`) it adds "Both digests cover the authored content, not the generated revision history." A script that
+matched the old message must match the new one; the code is the stable thing to match ([living documents](living-documents.md)).
+
 ## No record counts because its refuser is unread (FIX-159)
 
 No route, request, response shape, protocol type, record field, record type or public member changes. Behaviors: the estate check
@@ -487,6 +626,40 @@ reports two new findings, `record.duplicate-refused` (warning) and `record.dupli
 `StandingAgents.RunRefusals` adds an `operation.standing` refusal for the hold while records are unread; release submission, run start
 and preparation, a standing goal step, record writes, checkpoint writes, record preparation for a device and pairing-code issuance
 return a `refused` problem naming the errors as described above. `EstateStatus.ReconcileCodes` is unchanged.
+
+## Operations, the OpenAPI document, MCP and the record reader
+
+`IEstateApi` now has 170 synchronous operations, each with a cancellable counterpart, where 0.9.3 had 151. Nineteen are added, each
+with a default implementation: `Presence`, `PresenceRegister`, `PresenceHeartbeat` and `PresenceRelease` (ID-11), `GoalDue`
+(GOAL-07), `StandingOutput` (GOAL-08), `GoalDecide` (PROC-19), `GoalClose` (FIX-143), `WorkOverlap` and `WorkOverlapPreview`
+(CODE-73), `OperatorAnswer` and `OperatorAnswerCandidates` (OPS-16), `OperatorAct` and `OperatorActItems` (OPS-24), `Observers`,
+`ObserverDeclare`, `ObserverReport` and `ObserverWithdraw` (OPS-20), and `StopDrill` (OPS-21). None is removed or changes its
+signature.
+
+The OpenAPI document has 175 operations where 0.9.3's had 156, adding those operations' routes: `GET` and `POST /v1/presence`,
+`POST /v1/presence/{lease}/heartbeat`, `DELETE /v1/presence/{lease}`, `GET /v1/goals/{id}/due`, `POST /v1/standing/outputs`,
+`POST /v1/goals/{id}/decide`, `POST /v1/goals/{id}/close`, `GET /v1/overlaps`, `POST /v1/overlaps/preview`, `GET` and
+`POST /v1/operator/answers`, `GET` and `POST /v1/operator/act`, `GET /v1/observers`, `POST /v1/observers/declare`,
+`POST /v1/observers/report`, `POST /v1/observers/withdraw` and `POST /v1/runs/drill`. Its schemas go from 178 to 210: the requests
+and responses of those operations, and CODE-80's `PresenceSessionNotice` and `PresenceEntryDescription`. Twelve schemas gain
+optional properties: `AssignRequest.repository`, and `notices` in `WriteOutcome`, `RunResponse` and `GoalStepResponse` (CODE-73);
+`CommunicationProfile.availability`, `quietHours` and `availabilityNow`, and `TakeoverRequest.basis` (GOAL-11);
+`GoalStepRequest.occurrence` and `now`, and `GoalActionRequest.stopRuns` (GOAL-07); `GoalStepResponse.decision` (PROC-19);
+`WorkNewRequest.fromPossibility` (GOAL-08); `GoalAcceptRequest.reason` and `stepReasons` (FIX-143);
+`HistoryCheckpointResponse.byRemovedRoles` (ID-14); and `PresenceNotice.session` and `shortHash`, with `session`, `signed`,
+`renewed` and `ended` added to its `kind` (CODE-80). No operation or schema is removed, and no existing operation changes but in its
+summary (`POST /v1/presence/prompts`, `POST /v1/operator/close` and `POST /v1/goals/{id}/accept`).
+
+The MCP server defines 63 tools where 0.9.3's defined 57, adding the read tools `goal_due` (GOAL-07) and `work_overlap` (CODE-73)
+and the write tools `standing_possibility`, `standing_question` and `standing_publication` (GOAL-08) and `goal_decide` (PROC-19);
+none is removed. Every definition gains its annotations (MCP-07), and `initialize` carries the definitions' count and hash.
+`resources/list` adds the release's documentation index, `vericairn://docs/llms.txt` (DOCS-38). The server's instructions are
+unchanged.
+
+The generic record reader moves from `vericairn.records/readers/8` to `vericairn.records/readers/12`, with new golden fixtures at
+each step: a result's `decision` (PROC-19), an assignment's overlap fields (CODE-73), its `occurrence` (GOAL-07) and its routing by
+session (GOAL-11). Its explanations carry the record fields and statuses 0.9.4 adds, as the entries above give them, among them
+goal-status's `closed` and `unsettled` (FIX-143). The generator id, `vericairn.records/items`, and contract version 1 are unchanged.
 
 ## The embedded runtime
 
