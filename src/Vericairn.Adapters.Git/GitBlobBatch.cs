@@ -9,7 +9,7 @@ namespace Vericairn.Adapters.Git;
 
 /// <summary>
 /// One isolated <c>git cat-file --batch</c> over a registered clone, so the blobs of an exact commit are read through one
-/// process instead of one process each. It starts with the adapter's exact arguments and environment. Each request is one
+/// process instead of one process each. It starts with the adapter's exact hardened arguments and environment. Each request is one
 /// exact object id, answered in full before the next is sent, so a response always belongs to the object that was asked
 /// for. An absent, mistyped, oversized, late or malformed response ends the reader; the caller then treats its whole read
 /// as unavailable, as a failed single read was.
@@ -22,15 +22,17 @@ internal sealed class GitBlobBatch : IDisposable
     // A single read was stopped after this long; each object now has the same allowance.
     private static readonly TimeSpan Allowance = TimeSpan.FromSeconds(30);
     private readonly Process process;
+    private readonly GitHardening hardening;
     private readonly StreamWriter input;
     private readonly Stream requests;
     private readonly BufferedStream responses;
     private readonly Task errors;
     private bool ended;
 
-    private GitBlobBatch(Process process)
+    private GitBlobBatch(Process process, GitHardening hardening)
     {
         this.process = process;
+        this.hardening = hardening;
         input = process.StandardInput;
         requests = input.BaseStream;
         responses = new BufferedStream(process.StandardOutput.BaseStream, 1 << 16);
@@ -41,14 +43,18 @@ internal sealed class GitBlobBatch : IDisposable
     /// <summary>Starts the reader in the clone, or returns null when git cannot start there.</summary>
     internal static GitBlobBatch? Start(string clone)
     {
-        ProcessStartInfo info = GitFileSource.StartInfo(clone, isolated: true, ["cat-file", "--batch"]);
+        GitHardening hardening;
+        try { hardening = GitHardening.Create(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
+        ProcessStartInfo info = GitFileSource.StartInfo(clone, hardening, ["cat-file", "--batch"]);
         info.RedirectStandardInput = true;
         try
         {
-            return new(GitFileSource.Start(info));
+            return new(GitFileSource.Start(info), hardening);
         }
         catch (System.ComponentModel.Win32Exception)
         {
+            hardening.Dispose();
             return null;
         }
     }
@@ -94,6 +100,7 @@ internal sealed class GitBlobBatch : IDisposable
         {
             responses.Dispose();
             process.Dispose();
+            hardening.Dispose();
         }
     }
 

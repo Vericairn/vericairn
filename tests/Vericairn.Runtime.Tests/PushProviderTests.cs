@@ -32,7 +32,7 @@ public sealed class PushProviderTests
             if (info.ArgumentList[0] == "version") return Success("8.30.1");
             Assert.Contains("--redact=100", info.ArgumentList);
             Assert.Contains("--ignore-gitleaks-allow", info.ArgumentList);
-            Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text", info.ArgumentList);
+            Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text --submodule=short", info.ArgumentList);
             Assert.Contains("--report-format=template", info.ArgumentList);
             string template = info.ArgumentList.Single(a => a.StartsWith("--report-template=", StringComparison.Ordinal)).Split('=', 2)[1];
             Assert.Equal("{{ len . }}", File.ReadAllText(template));
@@ -82,9 +82,13 @@ public sealed class PushProviderTests
             Assert.True(Path.IsPathFullyQualified(grafts) && !File.Exists(grafts) && !Directory.Exists(Path.GetDirectoryName(grafts)));
             Assert.False(info.Environment.ContainsKey("GIT_CONFIG_PARAMETERS"));
             Assert.False(info.Environment.ContainsKey(Trace));
-            Assert.Equal("8", info.Environment["GIT_CONFIG_COUNT"]);
+            // The hardening of every git process on a repository Vericairn did not create comes first (FIX-147), then the read settings.
+            int hardened = GitHardening.Settings.Length + 1;
+            Assert.Equal((hardened + 8).ToString(CultureInfo.InvariantCulture), info.Environment["GIT_CONFIG_COUNT"]);
+            Assert.Equal("core.hooksPath", info.Environment["GIT_CONFIG_KEY_0"]);
+            Assert.Equal(GitHardening.Settings, Enumerable.Range(1, hardened - 1).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
             Assert.Equal(["core.commitGraph=false", "pack.useBitmaps=false", "core.multiPackIndex=false", "color.ui=false", "color.diff=false", "log.showRoot=true",
-                "log.showSignature=false", "log.diffMerges=first-parent"], Enumerable.Range(0, 8).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
+                "log.showSignature=false", "log.diffMerges=first-parent"], Enumerable.Range(hardened, 8).Select(n => info.Environment["GIT_CONFIG_KEY_" + n] + "=" + info.Environment["GIT_CONFIG_VALUE_" + n]));
         });
     }
 
@@ -111,11 +115,10 @@ public sealed class PushProviderTests
         GitPushAdapter.Isolate(push, []);
         Assert.All(routing.Concat(indexed), name => Assert.NotEqual("inherited", push.Environment.TryGetValue(name, out string? value) ? value : null));
         ProcessStartInfo scan = Inherited();
-        GitleaksScanner.Isolate(scan);
+        using (GitHardening hardening = GitHardening.Create()) GitleaksScanner.Isolate(scan, hardening);
         Assert.DoesNotContain(scan.Environment, variable => variable.Value == "inherited");
         Assert.Equal("1", scan.Environment["GIT_NO_REPLACE_OBJECTS"]);
-        Assert.Equal("8", scan.Environment["GIT_CONFIG_COUNT"]);
-        Assert.False(scan.Environment.ContainsKey("GIT_CONFIG_KEY_12"));
+        Assert.Equal((GitHardening.Settings.Length + 1 + 8).ToString(CultureInfo.InvariantCulture), scan.Environment["GIT_CONFIG_COUNT"]);
     }
 
     // FIX-150, after the Reviewer's review: before gitleaks runs, the scanner reads every commit, tree and blob the push carries, checked
@@ -139,7 +142,7 @@ public sealed class PushProviderTests
             if (info.FileName == "git" && info.ArgumentList.Contains("--verify-objects"))
             {
                 reads.Add("objects");
-                Assert.Equal(["--no-replace-objects", "rev-list", "--objects", "--verify-objects", "--quiet", Plan.Range], info.ArgumentList);
+                Assert.Equal(["--no-replace-objects", "rev-list", "--objects", "--verify-objects", "--quiet", Plan.Range], Requested(info));
                 return read switch
                 {
                     "objects fail" => new(ProcessOutcome.Exited, true, 128, string.Empty, "untrusted: object is corrupt"),
@@ -152,7 +155,7 @@ public sealed class PushProviderTests
             {
                 reads.Add("patches");
                 Assert.Equal(["--no-replace-objects", "log", "-p", "-U0", Plan.Range, "--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text",
-                    "--output=" + nothing], info.ArgumentList);
+                    "--submodule=short", "--output=" + nothing], Requested(info));
                 return read switch
                 {
                     "patches fail" => new(ProcessOutcome.Exited, true, 128, string.Empty, "untrusted: unable to read"),
@@ -167,7 +170,7 @@ public sealed class PushProviderTests
             if (info.ArgumentList[0] == "version") return Success("8.30.1");
             scans++;
             // gitleaks' git read takes exactly the options the scanner's own patch read repeats.
-            Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text", info.ArgumentList);
+            Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text --submodule=short", info.ArgumentList);
             string report = info.ArgumentList.Single(a => a.StartsWith("--report-path=", StringComparison.Ordinal)).Split('=', 2)[1];
             File.WriteAllText(report, "0");
             return read == "gitleaks stops early"
@@ -206,7 +209,7 @@ public sealed class PushProviderTests
             {
                 Assert.Equal("C", info.Environment["LC_ALL"]);
                 Assert.Equal(["--no-replace-objects", "log", "--no-show-signature", "--format=commit %H", "--name-only", "--root", "--no-renames", "--full-history", "-m",
-                    "--diff-filter=d", "--no-relative", "--no-ext-diff", "--no-textconv", Plan.Range, "--", ":(top)objects"], info.ArgumentList);
+                    "--diff-filter=d", "--no-relative", "--no-ext-diff", "--no-textconv", Plan.Range, "--", ":(top)objects"], Requested(info));
                 return range switch
                 {
                     "log fails" => new(ProcessOutcome.Exited, true, 128, string.Empty, string.Empty),
@@ -429,6 +432,17 @@ public sealed class PushProviderTests
     }
 
     private static ProcessResult Success(string output = "") => new(ProcessOutcome.Exited, true, 0, output, string.Empty);
+
+    // A git process of the scan starts with the hardened options of every git process on a repository Vericairn did not create (FIX-147):
+    // no pager, the empty hooks directory, then the shared settings. What follows them is the scan's own request.
+    private static string[] Requested(ProcessStartInfo info)
+    {
+        Assert.Equal("--no-pager", info.ArgumentList[0]);
+        Assert.Equal("-c", info.ArgumentList[1]);
+        Assert.StartsWith("core.hooksPath=", info.ArgumentList[2], StringComparison.Ordinal);
+        Assert.Equal(GitHardening.Settings.SelectMany(setting => new[] { "-c", setting }), info.ArgumentList.Skip(3).Take(2 * GitHardening.Settings.Length));
+        return [.. info.ArgumentList.Skip(3 + 2 * GitHardening.Settings.Length)];
+    }
 
     private sealed class RecordedGit
     {

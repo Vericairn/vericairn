@@ -10,10 +10,11 @@ namespace Vericairn.Adapters.Git;
 
 /// <summary>
 /// From 0.9.4 (CODE-73): what a registered clone shows the overlap check, read without checkout, fetch or change. Each read starts as
-/// the adapter's isolated reads do (no system or global configuration, no transport, no replacement objects, no lazy fetch) and, as
-/// the workspace commands do, without a pager, a file-system monitor or hooks, and with the clone's grafts ignored, so that the
-/// clone's own configuration and info files cannot run a program or steer which commits are ancestors; a diff compares submodules too
-/// and names every path from the repository's root, whatever subdirectory the clone's configured working tree puts it in.
+/// the adapter's hardened reads do (<see cref="GitHardening"/>: no system or global configuration, no transport, no replacement objects,
+/// no lazy fetch, no pager, file-system monitor or hooks, and the repository's own program settings overridden), with the clone's grafts
+/// ignored too, so that the clone's own configuration and info files cannot run a program or steer which commits are ancestors; a diff
+/// compares submodules too and names every path from the repository's root, whatever subdirectory the clone's configured working tree
+/// puts it in.
 /// </summary>
 public sealed partial class GitCommandAdapter
 {
@@ -99,18 +100,29 @@ public sealed partial class GitCommandAdapter
     }
 
     /// <summary>
-    /// The arguments and environment every read of the overlap check starts git with, beyond the adapter's isolated start: no pager, no
-    /// file-system monitor, hooks from a directory that does not exist, and a graft file that does not exist, so that the clone's
-    /// <c>info/grafts</c> cannot rewrite which commits are ancestors. An empty hooks path would name the filesystem's root instead.
+    /// The arguments and environment every read of the overlap check starts git with: the adapter's hardened start
+    /// (<see cref="GitFileSource.StartInfo"/>), whose hooks path names a directory that does not exist, and a graft file that does not
+    /// exist, so that the clone's <c>info/grafts</c> cannot rewrite which commits are ancestors. <paramref name="hardening"/> must outlive
+    /// the process.
     /// </summary>
-    internal static ProcessStartInfo OverlapRead(string root, IEnumerable<string> arguments)
+    internal static ProcessStartInfo OverlapRead(string root, GitHardening hardening, IEnumerable<string> arguments)
     {
-        string absent = Path.Combine(Path.GetTempPath(), "vericairn-absent-" + Guid.NewGuid().ToString("N"));
-        ProcessStartInfo info = GitFileSource.StartInfo(root, true,
-            ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + Path.Combine(absent, "hooks"), "-c", "core.pager=", .. arguments]);
-        info.Environment["GIT_GRAFT_FILE"] = Path.Combine(absent, "grafts");
+        ArgumentNullException.ThrowIfNull(hardening);
+        ProcessStartInfo info = GitFileSource.StartInfo(root, hardening, arguments);
+        info.Environment["GIT_GRAFT_FILE"] = Path.Combine(hardening.Control, "absent", "grafts");
         return info;
     }
 
-    private static int Read(string root, out byte[] output, params string[] arguments) => GitFileSource.Run(OverlapRead(root, arguments), out output);
+    private static int Read(string root, out byte[] output, params string[] arguments)
+    {
+        GitHardening hardening;
+        try { hardening = GitHardening.Create(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            output = [];
+            return -1;
+        }
+
+        using (hardening) return GitFileSource.Run(OverlapRead(root, hardening, arguments), out output);
+    }
 }

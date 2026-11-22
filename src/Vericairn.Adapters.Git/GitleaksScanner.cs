@@ -52,8 +52,10 @@ public sealed partial class GitleaksScanner : ISecretScanner
     internal const string InventoryLine = "(" + InventoryTypes + @")/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}";
 
     // The options of gitleaks' history read, git log -p -U0 over the range, which the scanner's own patch read repeats exactly; -m reads
-    // each merge as its patch against its first parent, whatever the clone's log.diffMerges says (ReadSettings).
-    private static readonly string[] LogOptions = ["--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text"];
+    // each merge as its patch against its first parent, whatever the clone's log.diffMerges says (ReadSettings). --submodule=short shows a
+    // submodule's change as its two commit ids, whatever the clone's diff.submodule says, so neither read starts a git process of its own
+    // in the submodule, which would read the submodule's configuration and attributes without these options.
+    private static readonly string[] LogOptions = ["--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text", "--submodule=short"];
 
     // The patch read's output goes nowhere: it is read to establish that git can read every patch, never retained.
     private static readonly string NullDevice = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
@@ -138,7 +140,9 @@ public sealed partial class GitleaksScanner : ISecretScanner
     {
         var info = new ProcessStartInfo("gitleaks") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        Isolate(info);
+        // The scanner starts git in the clone itself; git's configuration environment carries the same hardening to it (Isolate).
+        using GitHardening hardening = Harden();
+        Isolate(info, hardening);
         return run(info);
     }
 
@@ -161,21 +165,20 @@ public sealed partial class GitleaksScanner : ISecretScanner
     // The scan reads the history the push carries: its processes drop every routing variable the push adapter's drop, from the same list,
     // since a shallow file, another repository or another object store named in the environment would show git a shorter or another
     // history than the push sends; then every other configuration variable, keeping only the settings forced here, and git's trace
-    // variables (FIX-150).
-    internal static void Isolate(ProcessStartInfo info)
+    // variables (FIX-150). The settings forced here are the hardening of every git process on a repository Vericairn did not create
+    // (GitHardening: no system or global configuration, an empty hooks directory, and the clone's own program settings overridden),
+    // followed by the read settings above, all carried through git's configuration environment, which every git process the scan starts
+    // reads, gitleaks' own included. The hardening's directory must outlive the process.
+    internal static void Isolate(ProcessStartInfo info, GitHardening hardening)
     {
+        ArgumentNullException.ThrowIfNull(hardening);
         GitRouting.Remove(info);
         foreach (string name in info.Environment.Keys.Where(n => n.StartsWith("GIT_CONFIG", StringComparison.OrdinalIgnoreCase)
             || n.StartsWith("GIT_TRACE", StringComparison.OrdinalIgnoreCase)).ToArray())
             info.Environment.Remove(name);
+        hardening.ApplyEnvironment(info, ReadSettings.Select(s => s.Key + "=" + s.Value));
         info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
         info.Environment["GIT_GRAFT_FILE"] = NoGrafts;
-        info.Environment["GIT_CONFIG_COUNT"] = ReadSettings.Length.ToString(CultureInfo.InvariantCulture);
-        for (int i = 0; i < ReadSettings.Length; i++)
-        {
-            info.Environment["GIT_CONFIG_KEY_" + i.ToString(CultureInfo.InvariantCulture)] = ReadSettings[i].Key;
-            info.Environment["GIT_CONFIG_VALUE_" + i.ToString(CultureInfo.InvariantCulture)] = ReadSettings[i].Value;
-        }
     }
 
     /// <summary>
@@ -246,9 +249,9 @@ public sealed partial class GitleaksScanner : ISecretScanner
     private ProcessResult InventoryGit(string directory, params string[] arguments)
     {
         var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        info.ArgumentList.Add("--no-replace-objects");
-        foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        Isolate(info);
+        using GitHardening hardening = Harden();
+        hardening.Apply(info, ["--no-replace-objects", .. arguments]);
+        Isolate(info, hardening);
         // Character ranges in the line's shape read as bytes, and pathspecs keep their magic whatever the environment asks.
         info.Environment["LC_ALL"] = "C";
         foreach (string name in new[] { "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS" }) info.Environment.Remove(name);
@@ -268,9 +271,9 @@ public sealed partial class GitleaksScanner : ISecretScanner
     private bool Reads(string directory, params string[] arguments)
     {
         var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        info.ArgumentList.Add("--no-replace-objects");
-        foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        Isolate(info);
+        using GitHardening hardening = Harden();
+        hardening.Apply(info, ["--no-replace-objects", .. arguments]);
+        Isolate(info, hardening);
         ProcessResult result = run(info);
         return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0;
     }
@@ -280,11 +283,24 @@ public sealed partial class GitleaksScanner : ISecretScanner
         // Gitleaks can report zero findings when git cannot read a range. Establish readability independently,
         // before and after scanning, without asking git for patches or retaining any source text.
         var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (string argument in new[] { "--no-replace-objects", "rev-list", "--count", range }) info.ArgumentList.Add(argument);
-        Isolate(info);
+        using GitHardening hardening = Harden();
+        hardening.Apply(info, ["--no-replace-objects", "rev-list", "--count", range]);
+        Isolate(info, hardening);
         ProcessResult result = run(info);
         return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0
             && int.TryParse(result.StandardOutput.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int count) && count >= 0 ? count : null;
+    }
+
+    private static GitHardening Harden()
+    {
+        try
+        {
+            return GitHardening.Create();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new ProviderRefusedException("git cannot run isolated: a temporary directory could not be created; nothing was scanned.", error);
+        }
     }
 
     private static byte[] ReadConfiguration()
