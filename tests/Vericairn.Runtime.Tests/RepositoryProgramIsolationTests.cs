@@ -274,6 +274,49 @@ public sealed class RepositoryProgramIsolationTests
         });
     }
 
+    // A scan over a range that moves a submodule reads the submodule's change as its two commit ids, whatever form the clone's
+    // diff.submodule asks for: neither of the scan's patch reads starts git in the submodule, whose own configuration and attributes
+    // name a diff driver here, and the scan gives the verdict it gives without that setting.
+    [Fact]
+    public void AScanOverASubmoduleMoveRunsNoProgramTheSubmoduleNames()
+    {
+        using var scans = new SecretScanConfigurationTests();
+        _ = scans.Start();
+        string root = Path.GetDirectoryName(scans.Repository)!;
+        string origin = Path.Combine(root, "origin");
+        string marker = Path.Combine(root, "marker");
+        Directory.CreateDirectory(origin);
+        scans.Git("-C", origin, "init", "--quiet", "--initial-branch=main");
+        scans.Git("-C", origin, "commit", "--quiet", "--allow-empty", "-m", "First submodule commit");
+        scans.Git("-c", "protocol.file.allow=always", "submodule", "add", "--quiet", origin, "sub");
+        scans.Git("commit", "--quiet", "-m", "Add the submodule");
+        string basis = scans.Git("rev-parse", "HEAD");
+        string submodule = Path.Combine(scans.Repository, "sub");
+        File.WriteAllText(Path.Combine(submodule, "widget.txt"), "widget\n");
+        scans.Git("-C", submodule, "add", "widget.txt");
+        scans.Git("-C", submodule, "commit", "--quiet", "-m", "Second submodule commit");
+        scans.Git("add", "sub");
+        // The range moves the submodule and adds a credential beside it.
+        string head = scans.Commit([("settings.txt", "credential = " + SecretScanConfigurationTests.Token() + "\n")]);
+        SecretScan plain = scans.Scan(basis, head);
+        Assert.Equal("findings", plain.Verdict);
+
+        // The clone asks for a submodule's change as a diff of the submodule's files, and the submodule's own configuration and
+        // attributes send every file through a diff driver's command.
+        scans.Git("config", "diff.submodule", "diff");
+        string modules = Path.Combine(scans.Repository, ".git", "modules", "sub");
+        scans.Git("--git-dir=" + modules, "config", "diff.probe.command", "printf ran > '" + marker.Replace('\\', '/').Replace("'", "'\\''", StringComparison.Ordinal) + "'");
+        Directory.CreateDirectory(Path.Combine(modules, "info"));
+        File.WriteAllText(Path.Combine(modules, "info", "attributes"), "* diff=probe\n");
+        SecretScan armed = scans.Scan(basis, head);
+
+        Assert.False(File.Exists(marker), "The scan ran the diff driver the submodule's configuration names.");
+        Assert.Equal((plain.Verdict, plain.FindingCount), (armed.Verdict, armed.FindingCount));
+        // Plain git's patch read of the range, without the scan's submodule form, does run it, so the probe was armed.
+        scans.Git("log", "-p", "--no-ext-diff", "--no-textconv", basis + ".." + head);
+        Assert.True(File.Exists(marker), "Plain git did not run the submodule's diff driver; the probe proves nothing.");
+    }
+
     // A committed repository with an inside/ and an outside/ directory and a file at its root, for the layout tests.
     private sealed class ScratchRepository : IDisposable
     {
