@@ -50,6 +50,9 @@ public sealed partial class EstateService
             if (session.IsReadOnly) return Refused("denied", "This session is read-only; the drill records its measurement, so nothing was started.");
             EstateModel model = session.Load();
             if (RequestDeviceRefusal(model) is { } denied) return Refused(denied.Code, denied.Message);
+            // From 0.9.4 (FIX-159): no scratch run starts while the estate reports an error, as no run is admitted then.
+            if (ActingRefusal.BeforeActing(model, "starting the stop drill's scratch run") is { } invalid)
+                return new(false, invalid.Message, false, null, null, null, null, null, grace, limit, null, invalid);
             if (request.By is null || !Ulid.IsValid(request.By) || model.CurrentPrincipal(request.By) is null)
                 return Refused("refused", "Name the principal running the drill by its ULID, a principal of this estate.");
             if (model.CurrentEstate is not { } current) return Refused("refused", "The estate has no charter for the drill's verification to name.");

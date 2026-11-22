@@ -86,6 +86,31 @@ public sealed class StopDrillTests
         Assert.Empty(f.Api.Records("verification"));
     }
 
+    [Fact]
+    public void NoScratchRunStartsWhileTheEstateReportsAnError()
+    {
+        using var f = new DrillFixture();
+        // A second record carrying a record's identifier, written by hand in an earlier month: the estate leaves one of them unread.
+        string decision = $$"""{"title":"A decision","statement":"Nothing.","summary":"Nothing.","synthesis":"Nothing.","effects":["nothing"],"affects":[],"decidedBy":"{{f.Operator}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":["spending"]}""";
+        RecordEnvelope original = f.Estate.Add("decision", f.Operator, decision);
+        DateTimeOffset now = f.Estate.Clock;
+        f.Estate.SetClock(new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero));
+        f.Estate.Add("decision", f.Builder, decision, id: original.Id);
+        f.Estate.SetClock(now);
+        int verifications = f.Api.Records("verification").Count;
+
+        StopDrillResponse refused = f.Api.StopDrill(new(f.Operator, GraceSeconds: 0));
+        Assert.False(refused.Ok);
+        Assert.Equal("refused", refused.Problem!.Code);
+        Assert.Contains("Refused before starting the stop drill's scratch run", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("record.duplicate-id", refused.Message, StringComparison.Ordinal);
+        Assert.Contains(refused.Problem.Findings, x => x.Code == "record.duplicate-id" && x.Severity == "error");
+        Assert.Null(refused.RequestedAt);
+        Assert.Null(refused.Verification);
+        Assert.False(Directory.Exists(f.RunsRoot) && Directory.EnumerateDirectories(f.RunsRoot).Any());
+        Assert.Equal(verifications, f.Api.Records("verification").Count);
+    }
+
     private static string? Body(RecordEnvelope record, string name) => record.Body.TryGetProperty(name, out JsonElement value) ? value.GetString() : null;
 
     private sealed class DrillFixture : IDisposable

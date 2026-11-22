@@ -1406,8 +1406,8 @@ The command prints the verification's path, id and hash, the stop's time, grace 
 passed; with `--json`, the runtime's `StopDrillResponse` (`ok`, `message`, `passed`, `requestedAt`, `containedAt`,
 `stopToContainedMilliseconds`, `lastWriteAt`, `stopToLastWriteMilliseconds`, `graceSeconds`, `limitSeconds`, `verification` and
 `problem`). Exit 0 means a drill that passed and was recorded, 1 a failed drill or a refusal, and 2 an invalid argument. It is
-refused, before anything starts, without an admitted device of the principal held on the runtime's machine, and over the local
-network: run it on the runtime's machine. A recurring duty whose discharge names a `stop-drill` verification runs it monthly; see
+refused, before anything starts, without an admitted device of the principal held on the runtime's machine, while the estate
+reports an error (naming the finding, as a run's admission does), and over the local network: run it on the runtime's machine. A recurring duty whose discharge names a `stop-drill` verification runs it monthly; see
 [who can stop a run](software.md#who-can-stop-a-run-and-the-timed-stop-drill-094).
 
 ```sh
