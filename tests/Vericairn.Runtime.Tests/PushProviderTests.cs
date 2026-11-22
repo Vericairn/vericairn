@@ -33,7 +33,7 @@ public sealed class PushProviderTests
             if (info.ArgumentList[0] == "version") return Success("8.30.1");
             Assert.Contains("--redact=100", info.ArgumentList);
             Assert.Contains("--ignore-gitleaks-allow", info.ArgumentList);
-            Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text", info.ArgumentList);
+            Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text --submodule=short", info.ArgumentList);
             Assert.Contains("--report-format=template", info.ArgumentList);
             string template = info.ArgumentList.Single(a => a.StartsWith("--report-template=", StringComparison.Ordinal)).Split('=', 2)[1];
             Assert.Equal("{{ len . }}", File.ReadAllText(template));
@@ -244,7 +244,7 @@ public sealed class PushProviderTests
             {
                 reads.Add("patches");
                 Assert.Equal(["--no-replace-objects", "log", "-p", "-U0", Plan.Range, "--full-history", "--no-renames", "-m", "--no-ext-diff", "--no-textconv", "--text",
-                    "--output=" + nothing], Requested(info));
+                    "--submodule=short", "--output=" + nothing], Requested(info));
                 return read switch
                 {
                     "patches fail" => new(ProcessOutcome.Exited, true, 128, string.Empty, "untrusted: unable to read"),
@@ -259,7 +259,7 @@ public sealed class PushProviderTests
             if (info.ArgumentList[0] == "version") return Success("8.30.1");
             scans++;
             // gitleaks' git read takes exactly the options the scanner's own patch read repeats.
-            Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text", info.ArgumentList);
+            Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text --submodule=short", info.ArgumentList);
             string report = info.ArgumentList.Single(a => a.StartsWith("--report-path=", StringComparison.Ordinal)).Split('=', 2)[1];
             File.WriteAllText(report, "0");
             return read == "gitleaks stops early"
