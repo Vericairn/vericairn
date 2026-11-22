@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using Vericairn.Records.Processes;
 
 namespace Vericairn.Records.Signing;
 
@@ -159,9 +160,8 @@ public sealed class SecretServiceKeyStore : IDeviceKeyStore
     private string Marker(string deviceId) =>
         Identity.Ulid.IsValid(deviceId) ? Path.Combine(directory, deviceId + ".secret") : throw new ArgumentException("A device id is a ULID.", nameof(deviceId));
 
-    private static string? ToolPath() =>
-        (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(d => Path.Combine(d, SecretServiceCustody.Tool)).FirstOrDefault(File.Exists);
+    // From 0.9.4 (FIX-161) the tool is found as every program is: in an absolute directory of PATH, by its absolute path.
+    private static string? ToolPath() => ProgramPath.TryResolve(SecretServiceCustody.Tool);
 
     private static string RequiredTool() => ToolPath() ?? throw new PlatformNotSupportedException($"Secret-service custody needs {SecretServiceCustody.Tool} (libsecret) and a running secret service.");
 
@@ -173,7 +173,7 @@ public sealed class SecretServiceKeyStore : IDeviceKeyStore
             start.ArgumentList.Add(argument);
         }
 
-        using Process process = Process.Start(start) ?? throw new InvalidOperationException($"{SecretServiceCustody.Tool} did not start.");
+        using Process process = ProgramPath.Start(start) ?? throw new InvalidOperationException($"{SecretServiceCustody.Tool} did not start.");
         Task<string> output = process.StandardOutput.ReadToEndAsync();
         Task<string> error = process.StandardError.ReadToEndAsync();
         if (input is not null)

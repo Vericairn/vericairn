@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+using Vericairn.Records.Processes;
 
 namespace Vericairn.Runtime.Workers;
 
@@ -46,7 +47,19 @@ internal sealed class ContainedProcess
 
     public int ExitCode => exited ? exitCode : throw new InvalidOperationException("Exit has not been observed.");
 
-    public static ContainedProcess Start(ProcessStartInfo info) => OperatingSystem.IsWindows() ? StartWindows(info) : StartUnix(info);
+    /// <summary>
+    /// Starts <paramref name="info"/> inside its boundary. From 0.9.4 (FIX-161) the program is started by the absolute path
+    /// <see cref="ProgramPath"/> resolves for its <see cref="ProcessStartInfo.FileName"/>; one that cannot be resolved throws
+    /// <see cref="ProgramNotFoundException"/>, a <see cref="Win32Exception"/>, before anything is created. Its environment's PATH, when
+    /// it is this process's own, loses its empty and relative entries (<see cref="ProgramPath.NarrowSearchPath(ProcessStartInfo)"/>).
+    /// </summary>
+    public static ContainedProcess Start(ProcessStartInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        string program = ProgramPath.Resolve(info.FileName);
+        ProgramPath.NarrowSearchPath(info);
+        return OperatingSystem.IsWindows() ? StartWindows(info, program) : StartUnix(info, program);
+    }
 
     public bool WaitForExit(TimeSpan timeout)
     {
@@ -401,8 +414,9 @@ internal sealed class ContainedProcess
     }
 
     // posix_spawn installs the group and redirections atomically, before the executable runs. addchdir_np is supplied by both
-    // macOS and Linux's libc; there is no shell, fork of the managed runtime, or dependency on a setsid utility.
-    private static ContainedProcess StartUnix(ProcessStartInfo info)
+    // macOS and Linux's libc; there is no shell, fork of the managed runtime, or dependency on a setsid utility. The program is an
+    // absolute path, so posix_spawnp searches no directory; it stays posix_spawnp so nothing else about the start changes.
+    private static ContainedProcess StartUnix(ProcessStartInfo info, string program)
     {
         VerifyUnixHost(Environment.ProcessId);
         byte[] signalAction = new byte[256];
@@ -437,9 +451,9 @@ internal sealed class ContainedProcess
             Check(posix_spawn_file_actions_addopen(actions, 0, "/dev/null", 0, 0));
             Redirect(output, 1);
             Redirect(error, 2);
-            nint argv = Vector(new[] { info.FileName }.Concat(info.ArgumentList));
+            nint argv = Vector(new[] { program }.Concat(info.ArgumentList));
             nint env = Vector(info.Environment.Select(e => e.Key + "=" + e.Value));
-            Check(posix_spawnp(out pid, info.FileName, actions, attributes, argv, env));
+            Check(posix_spawnp(out pid, program, actions, attributes, argv, env));
             created = true;
             _ = close(output[1]);
             descriptors.Remove(output[1]);
@@ -559,7 +573,7 @@ internal sealed class ContainedProcess
         }
     }
 
-    private static ContainedProcess StartWindows(ProcessStartInfo info)
+    private static ContainedProcess StartWindows(ProcessStartInfo info, string program)
     {
         SafeFileHandle job = CreateJobObjectW(0, null);
         if (job.IsInvalid)
@@ -611,9 +625,11 @@ internal sealed class ContainedProcess
 
             input.Dispose();
             var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>(), Flags = 0x100, Input = stdin.DangerousGetHandle(), Output = output.DangerousGetHandle(), Error = error.DangerousGetHandle() };
-            string command = string.Join(' ', new[] { info.FileName }.Concat(info.ArgumentList).Select(Quote));
+            // The application name is the resolved absolute path, so CreateProcess searches no directory; the command line starts
+            // with the same path, quoted, as the program's own first argument.
+            string command = string.Join(' ', new[] { program }.Concat(info.ArgumentList).Select(Quote));
             string environment = string.Join('\0', info.Environment.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase).Select(e => e.Key + "=" + e.Value)) + "\0\0";
-            if (!CreateProcessW(null, (command + "\0").ToCharArray(), 0, 0, true, 0x4 | 0x400 | 0x08000000, environment, info.WorkingDirectory, ref startup, out ProcessInformation process))
+            if (!CreateProcessW(program, (command + "\0").ToCharArray(), 0, 0, true, 0x4 | 0x400 | 0x08000000, environment, info.WorkingDirectory, ref startup, out ProcessInformation process))
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }

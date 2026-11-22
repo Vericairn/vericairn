@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Vericairn.Records.Processes;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Packs.Software;
@@ -91,7 +92,7 @@ internal static class HarnessProcess
 
         try
         {
-            using Process process = Process.Start(info) ?? throw new ProviderRefusedException($"{command[0]} did not start.");
+            using Process process = ProgramPath.Start(info) ?? throw new ProviderRefusedException($"{command[0]} did not start.");
             process.StandardInput.Close();
             Task<string> output = process.StandardOutput.ReadToEndAsync();
             Task<string> error = process.StandardError.ReadToEndAsync();

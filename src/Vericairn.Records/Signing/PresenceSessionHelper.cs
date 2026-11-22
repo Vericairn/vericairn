@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
+using Vericairn.Records.Processes;
 
 namespace Vericairn.Records.Signing;
 
@@ -306,6 +307,17 @@ internal sealed class PresenceHelperProcess : IPresenceHelperChannel
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(helper);
         ArgumentNullException.ThrowIfNull(arguments);
+        // From 0.9.4 (FIX-161) the helper is started by the absolute path the program resolver gives, before any pipe exists.
+        string program;
+        try
+        {
+            program = ProgramPath.Resolve(helper);
+        }
+        catch (ProgramNotFoundException exception)
+        {
+            throw new IOException($"The helper could not be started: {exception.Message}", exception);
+        }
+
         // Each pipe is made close-on-exec at both ends, so no other child of this process inherits either end; the helper gets its
         // ends as descriptors 0, 1 and 2 by duplication, and posix_spawn closes every other descriptor in it.
         var input = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.None);
@@ -327,12 +339,12 @@ internal sealed class PresenceHelperProcess : IPresenceHelperChannel
             Check(posix_spawnattr_setsigmask(ref attributes, ref none), "posix_spawnattr_setsigmask");
             Check(posix_spawnattr_setsigdefault(ref attributes, ref defaults), "posix_spawnattr_setsigdefault");
             Check(posix_spawnattr_setflags(ref attributes, CloseOnExecDefault | SetSignalMask | SetSignalDefault), "posix_spawnattr_setflags");
-            IntPtr[] argv = Strings([helper, .. arguments]);
+            IntPtr[] argv = Strings([program, .. arguments]);
             IntPtr[] envp = Strings([.. (environment ?? new Dictionary<string, string>()).Select(p => p.Key + "=" + p.Value)]);
             int pid;
             try
             {
-                Check(posix_spawn(out pid, helper, ref actions, ref attributes, argv, envp), "posix_spawn");
+                Check(posix_spawn(out pid, program, ref actions, ref attributes, argv, envp), "posix_spawn");
             }
             finally
             {

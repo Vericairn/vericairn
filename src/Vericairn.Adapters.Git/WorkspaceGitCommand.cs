@@ -4,6 +4,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
+using Vericairn.Records.Processes;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -36,7 +37,7 @@ internal static class WorkspaceGitCommand
                 info.Environment[name] = value;
             // Worker transfers are local: only the file protocol is allowed back after the shared hardening refuses every transport.
             hardening.Apply(info, ["-c", "protocol.file.allow=always", .. arguments]);
-            using Process process = Process.Start(info) ?? throw new ProviderRefusedException("Git did not start.");
+            using Process process = ProgramPath.Start(info) ?? throw new ProviderRefusedException("Git did not start.");
             Task<string> standardOutput = WorkspaceGitScope.ReadAsync(process.StandardOutput);
             Task<string> standardError = WorkspaceGitScope.ReadAsync(process.StandardError);
             if (input is not null)

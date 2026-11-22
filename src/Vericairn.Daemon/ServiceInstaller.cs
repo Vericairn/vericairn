@@ -7,6 +7,7 @@ using System.Security;
 using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Processes;
 using Vericairn.Records.Signing;
 
 namespace Vericairn.Daemon;
@@ -237,7 +238,7 @@ public static class ServiceInstaller
             info.ArgumentList.Add(argument);
         }
 
-        using Process process = Process.Start(info) ?? throw new InvalidOperationException($"{command[0]} did not start.");
+        using Process process = ProgramPath.Start(info) ?? throw new InvalidOperationException($"{command[0]} did not start.");
         string output = process.StandardOutput.ReadToEnd();
         string error = process.StandardError.ReadToEnd();
         process.WaitForExit();
@@ -259,7 +260,7 @@ public static class ServiceInstaller
     {
         try
         {
-            using Process? process = Process.Start(new ProcessStartInfo("id") { ArgumentList = { "-u" }, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true });
+            using Process? process = ProgramPath.Start(new ProcessStartInfo("id") { ArgumentList = { "-u" }, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true });
             if (process is null)
             {
                 return null;
