@@ -271,8 +271,8 @@ jobs:
       - name: Measure status at 10,000 records
         if: matrix.share == 1
         # FIX-136's cost test, on each platform beside the suites: opening the runtime and reading status on a generated estate of
-        # 10,000 records judges it twice and repeats no removed pass, counted; each phase's time is written to this step's log and
-        # bounds nothing.
+        # 10,000 records judges it once, the opening's judgment kept for status (FIX-148), and repeats no removed pass, counted; each
+        # phase's time is written to this step's log and bounds nothing.
         env:
           VERICAIRN_COST_TESTS: "1"
         run: dotnet artifacts/bin/Vericairn.Runtime.Tests/release/Vericairn.Runtime.Tests.dll --filter-class Vericairn.Runtime.Tests.StatusCostTests --show-live-output on

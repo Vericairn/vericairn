@@ -170,7 +170,8 @@ public sealed class AvailabilityRoutingTests
         GoalStepResponse refused = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource));
         Assert.False(refused.Ok);
         Assert.Equal(("none", "refused"), (refused.Outcome, refused.Problem!.Code));
-        Assert.StartsWith("Refused before giving W-1 to ", refused.Message, StringComparison.Ordinal);
+        // From FIX-159's last commit every goal's step is refused right after the estate is loaded, before a route is chosen.
+        Assert.StartsWith($"Refused before taking a step of goal {run.Goal}: ", refused.Message, StringComparison.Ordinal);
         Assert.Contains(refused.Problem.Findings, f => f.Code == "record.subject");
         Assert.Empty(Assert.Single(run.Service.Presence().Sessions).Holds);
         Assert.Equal(before, run.Estate.Load().Current("assignment").Count());

@@ -118,6 +118,14 @@ public sealed partial class EstateService
         lock (gate)
         {
             EstateModel model = session.Load();
+            // From 0.9.4 (FIX-159): while the estate reports an error a goal's step records, asks, assigns and dispatches nothing, by
+            // any route, and the refusal names the finding. It comes before the step's first signature, so its presence session, which
+            // opens at that signature, never opens: the action's tally above only counts and announces nothing until then.
+            if (ActingRefusal.BeforeActing(model, "taking a step of goal " + goal) is Problem erroneous)
+            {
+                return new GoalStepResponse(goal, "none", erroneous.Message, false, Problem: erroneous);
+            }
+
             RecordEnvelope? current = GoalView.Find(model, goal);
             if (current is null)
             {
