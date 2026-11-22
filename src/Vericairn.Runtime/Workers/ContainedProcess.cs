@@ -50,12 +50,14 @@ internal sealed class ContainedProcess
     /// <summary>
     /// Starts <paramref name="info"/> inside its boundary. From 0.9.4 (FIX-161) the program is started by the absolute path
     /// <see cref="ProgramPath"/> resolves for its <see cref="ProcessStartInfo.FileName"/>; one that cannot be resolved throws
-    /// <see cref="ProgramNotFoundException"/>, a <see cref="Win32Exception"/>, before anything is created.
+    /// <see cref="ProgramNotFoundException"/>, a <see cref="Win32Exception"/>, before anything is created. Its environment's PATH, when
+    /// it is this process's own, loses its empty and relative entries (<see cref="ProgramPath.NarrowSearchPath(ProcessStartInfo)"/>).
     /// </summary>
     public static ContainedProcess Start(ProcessStartInfo info)
     {
         ArgumentNullException.ThrowIfNull(info);
         string program = ProgramPath.Resolve(info.FileName);
+        ProgramPath.NarrowSearchPath(info);
         return OperatingSystem.IsWindows() ? StartWindows(info, program) : StartUnix(info, program);
     }
 

@@ -12,6 +12,7 @@ namespace Vericairn.Records.Processes;
 /// part, and on Windows the name gains the program extensions PATHEXT lists. An absolute path, such as a configured harness path, is
 /// used as given. A relative path, or a name no absolute directory of PATH holds, is refused before anything starts. The start then
 /// names that absolute path, so neither the platform's own search nor the directory the process happens to run in chooses what runs.
+/// The program receives PATH with its empty and relative entries removed, so what it starts by name in turn is found the same way.
 /// </summary>
 internal static class ProgramPath
 {
@@ -56,7 +57,41 @@ internal static class ProgramPath
     {
         ArgumentNullException.ThrowIfNull(info);
         info.FileName = Resolve(info.FileName);
+        NarrowSearchPath(info);
         return Process.Start(info);
+    }
+
+    /// <summary>
+    /// The search path a started program receives. When <paramref name="info"/>'s environment holds this process's own PATH, as it does
+    /// unless its caller set another, that PATH loses its empty and relative entries, its absolute entries kept in their order, so a
+    /// program that starts another by name finds it only in an absolute directory too. A PATH the caller set is kept as given. With no
+    /// absolute entry left PATH is removed, since an empty PATH also names the current directory to a POSIX search.
+    /// </summary>
+    internal static void NarrowSearchPath(ProcessStartInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        NarrowSearchPath(info.Environment, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows());
+    }
+
+    /// <summary><see cref="NarrowSearchPath(ProcessStartInfo)"/> for an environment, this process's own PATH and a platform.</summary>
+    internal static void NarrowSearchPath(IDictionary<string, string?> environment, string? own, bool windows)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        string? key = environment.Keys.FirstOrDefault(name => string.Equals(name, "PATH", windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+        if (key is null || environment[key] is not string value || !string.Equals(value, own, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string narrowed = string.Join(windows ? ';' : ':', Entries(value, windows).Where(entry => entry.Directory is not null).Select(entry => entry.Text));
+        if (narrowed.Length == 0)
+        {
+            environment.Remove(key);
+        }
+        else
+        {
+            environment[key] = narrowed;
+        }
     }
 
     /// <summary>
@@ -102,15 +137,16 @@ internal static class ProgramPath
 
     // The absolute entries of PATH, in order. An empty entry means the current directory to a shell, and a relative entry is read
     // against it, so both are skipped, as is anything else that does not name one directory from a root.
-    private static IEnumerable<string> Directories(string? path, bool windows)
+    private static IEnumerable<string> Directories(string? path, bool windows) =>
+        Entries(path, windows).Select(entry => entry.Directory).OfType<string>();
+
+    // Each entry of PATH as written, with the directory it names when that is absolute, else null.
+    private static IEnumerable<(string Text, string? Directory)> Entries(string? path, bool windows)
     {
         foreach (string entry in (path ?? string.Empty).Split(windows ? ';' : ':'))
         {
             string directory = windows ? Unquote(entry) : entry;
-            if (directory.Length > 0 && FullyQualified(directory, windows))
-            {
-                yield return directory;
-            }
+            yield return (entry, directory.Length > 0 && FullyQualified(directory, windows) ? directory : null);
         }
     }
 

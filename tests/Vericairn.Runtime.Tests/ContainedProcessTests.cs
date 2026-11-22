@@ -259,6 +259,55 @@ public class ContainedProcessTests
         }
     }
 
+    [Fact]
+    public async Task AStartedGitFindsNoProgramThroughAnEmptyOrRelativeEntryOfItsStartersSearchPath()
+    {
+        // From 0.9.4 (FIX-161): a started program receives its starter's PATH without empty and relative entries, so git, which
+        // reads an empty entry as its working directory, cannot start a program from there by name, whichever way it was started.
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The stand-in program is a POSIX shell script; Windows is verified on a Windows machine.");
+        if (OperatingSystem.IsWindows()) return;
+        TestPrerequisites.RequireGit();
+        string root = Directory.CreateTempSubdirectory("vericairn-search-path-").FullName;
+        try
+        {
+            string directory = Directory.CreateDirectory(Path.Combine(root, "work")).FullName;
+            string markers = Directory.CreateDirectory(Path.Combine(root, "markers")).FullName;
+            string program = Path.Combine(directory, "git-" + ProcessHarness.OnwardCommand);
+            File.WriteAllText(program, $"#!/bin/sh\necho ran > '{markers}/'\"$1\"\n");
+            File.SetUnixFileMode(program, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            string path = ":.:" + Environment.GetEnvironmentVariable("PATH");
+
+            // Git given that search path itself runs the program from its working directory, and leaves the marker.
+            var direct = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, ArgumentList = { ProcessHarness.OnwardCommand, "direct" } };
+            direct.Environment["PATH"] = path;
+            using (Process git = Process.Start(direct)!)
+            {
+                git.StandardOutput.ReadToEnd();
+                git.StandardError.ReadToEnd();
+                Assert.True(git.WaitForExit(TestTiming.HangTimeout));
+            }
+
+            Assert.True(File.Exists(Path.Combine(markers, "direct")));
+
+            ProcessStartInfo child = ProcessHarness.Command("onward-git");
+            child.Environment["PATH"] = path;
+            child.Environment[ProcessHarness.DirectoryVariable] = directory;
+            using Process starter = Process.Start(child)!;
+            Task<string> output = starter.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+            Task<string> error = starter.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+            await starter.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            Assert.True(starter.ExitCode == 0, await error);
+            // Git ran both times and found no such command.
+            Assert.Equal("Exited 1 1", await output);
+            Assert.False(File.Exists(Path.Combine(markers, "contained")), "Git started through the containment primitive ran the program.");
+            Assert.False(File.Exists(Path.Combine(markers, "started")), "Git started through the program resolver ran the program.");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static ContainedProcess Start(RunEstate run, string scenario, string? stop = null)
     {
         List<string> command = FakeHarness.Command(scenario, run.Report(scenario));

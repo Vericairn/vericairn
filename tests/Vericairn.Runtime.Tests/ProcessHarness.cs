@@ -9,6 +9,12 @@ internal static class ProcessHarness
 {
     private const string Marker = "--vericairn-process-test";
 
+    /// <summary>The variable naming the working directory of the onward-git scenario.</summary>
+    internal const string DirectoryVariable = "VERICAIRN_PROCESS_TEST_DIRECTORY";
+
+    /// <summary>The external git command the onward-git scenario asks for: git-vericairn-standin, which git looks up by its search path.</summary>
+    internal const string OnwardCommand = "vericairn-standin";
+
     internal static ProcessStartInfo Command(string scenario, string? ready = null)
     {
         var info = new ProcessStartInfo(Environment.ProcessPath!)
@@ -100,6 +106,27 @@ internal static class ProcessHarness
                 }
 
                 // The root exits; its descendant retains both inherited pipe handles.
+                return 0;
+            case "onward-git":
+                // Started with empty and relative entries in its own PATH, this process starts git through the containment primitive
+                // and through the program resolver's start, each asking git for an external command it would find only through them.
+                string directory = Environment.GetEnvironmentVariable(DirectoryVariable)!;
+                var contained = new ProcessStartInfo("git") { WorkingDirectory = directory, ArgumentList = { OnwardCommand, "contained" } };
+                Vericairn.Runtime.Providers.ProcessResult result = Vericairn.Runtime.Providers.BoundedProcess.Run(contained, TestTiming.HangTimeout);
+                var started = new ProcessStartInfo("git")
+                {
+                    WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+                    ArgumentList = { OnwardCommand, "started" },
+                };
+                using (Process process = Vericairn.Records.Processes.ProgramPath.Start(started)!)
+                {
+                    Task<string> output = process.StandardOutput.ReadToEndAsync();
+                    Task<string> error = process.StandardError.ReadToEndAsync();
+                    process.WaitForExit();
+                    _ = output.GetAwaiter().GetResult() + error.GetAwaiter().GetResult();
+                    Console.Out.Write($"{result.Outcome} {result.ExitCode} {process.ExitCode}");
+                }
+
                 return 0;
             default:
                 return 99;

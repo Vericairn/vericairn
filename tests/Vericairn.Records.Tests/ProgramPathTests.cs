@@ -217,6 +217,47 @@ public sealed class ProgramPathTests
         Assert.True(Path.IsPathFullyQualified(shell.FileName), shell.FileName);
     }
 
+    [Fact]
+    public void AStartedProgramReceivesThisProcesssSearchPathWithOnlyItsAbsoluteEntriesInOrder()
+    {
+        const string Own = ":/usr/local/bin:.:bin::./tools:/usr/bin:~/bin";
+        var environment = new Dictionary<string, string?>(StringComparer.Ordinal) { ["PATH"] = Own, ["HOME"] = "/home/person" };
+        ProgramPath.NarrowSearchPath(environment, Own, windows: false);
+        Assert.Equal("/usr/local/bin:/usr/bin", environment["PATH"]);
+        Assert.Equal("/home/person", environment["HOME"]);
+
+        // No absolute entry left: PATH is removed, since an empty one also names the current directory.
+        environment = new Dictionary<string, string?>(StringComparer.Ordinal) { ["PATH"] = ":.:bin" };
+        ProgramPath.NarrowSearchPath(environment, ":.:bin", windows: false);
+        Assert.False(environment.ContainsKey("PATH"));
+
+        // On Windows the name is matched without case and an absolute entry keeps its own spelling.
+        const string Windows = @" ;C:\Git\cmd;.;bin;\tools;C:tools; ""C:\Program Files\Tools"" ;\\server\share";
+        environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { ["Path"] = Windows };
+        ProgramPath.NarrowSearchPath(environment, Windows, windows: true);
+        Assert.Equal(@"C:\Git\cmd; ""C:\Program Files\Tools"" ;\\server\share", environment["PATH"]);
+        Assert.Equal(["Path"], environment.Keys);
+    }
+
+    [Fact]
+    public void ASearchPathTheCallerSetIsKeptAsGivenAndNoneIsAdded()
+    {
+        var explicitly = new Dictionary<string, string?>(StringComparer.Ordinal) { ["PATH"] = "bin:/opt/tools" };
+        ProgramPath.NarrowSearchPath(explicitly, ":/usr/bin", windows: false);
+        Assert.Equal("bin:/opt/tools", explicitly["PATH"]);
+
+        var without = new Dictionary<string, string?>(StringComparer.Ordinal) { ["HOME"] = "/home/person" };
+        ProgramPath.NarrowSearchPath(without, ":/usr/bin", windows: false);
+        Assert.False(without.ContainsKey("PATH"));
+
+        var info = new ProcessStartInfo("git");
+        info.Environment.Remove("PATH");
+        info.Environment["PATH"] = "bin" + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH") + "-explicit";
+        string given = info.Environment["PATH"]!;
+        ProgramPath.NarrowSearchPath(info);
+        Assert.Equal(given, info.Environment["PATH"]);
+    }
+
     // A program file of this platform: an executable script on Linux and macOS, a file with the .exe extension on Windows.
     private static string Program(string directory, string name)
     {
