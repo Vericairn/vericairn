@@ -58,5 +58,9 @@
   "enrollment-troubleshooting.md",
   "llms.txt",
   "llms-full.txt",
-  "presence-session-qualification.md"
+  "presence-session-qualification.md",
+  "api-compatibility-0.9.4.md",
+  "events-and-presence.md",
+  "observers.md",
+  "progress-targets.md"
 ]

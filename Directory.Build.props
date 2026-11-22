@@ -39,7 +39,7 @@
     <DebugType>portable</DebugType>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <VersionPrefix>0.9.3</VersionPrefix>
+    <VersionPrefix>0.9.4</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
     <!-- From 0.9.4 (ID-16, design/presence-sessions.md § 11): the release build (DIST-21) passes Vericairn's Developer ID team
          identifier, the release helper's code-signing identifier and the macOS major versions its candidate's signed helper was
