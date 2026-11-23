@@ -167,11 +167,12 @@ public sealed class WorkspaceSetupProgramTests : IDisposable
         string workspace = Directory.CreateDirectory(Path.Combine(root, "workspace")).FullName;
         string report = Path.Combine(root, "setup.jsonl");
         // The test host's own name holds dots (Vericairn.Runtime.Tests.exe), so without ".exe" it still has an extension, as Windows
-        // reads it, and names a file that does not exist; cmd in the system directory has none and is cmd.exe.
-        string cmd = Path.Combine(Environment.SystemDirectory, "cmd");
-        Assert.True(File.Exists(cmd + ".exe") && !File.Exists(cmd), "The system directory holds cmd.exe and no file named cmd.");
-        WorkspaceSetupResult bare = WorkspaceSetup.Run(new() { Command = [cmd, "/d", "/c", "exit 3"] }, workspace, WorkerEnvironment.Current());
-        Assert.True(bare.Status == "exited" && bare.ExitCode == 3, bare.Facts);
+        // reads it, and names a file that does not exist; hostname in the system directory has none and is hostname.exe, a program
+        // that reads its command line the C runtime's way (cmd.exe does not, so it is no probe for an ordinary start's arguments).
+        string hostname = Path.Combine(Environment.SystemDirectory, "hostname");
+        Assert.True(File.Exists(hostname + ".exe") && !File.Exists(hostname), "The system directory holds hostname.exe and no file named hostname.");
+        WorkspaceSetupResult bare = WorkspaceSetup.Run(new() { Command = [hostname] }, workspace, WorkerEnvironment.Current());
+        Assert.True(bare.Succeeded, bare.Facts);
 
         // A name whose file name holds a dot has an extension and is used as given: without its ".exe", the test host is not started.
         List<string> command = FakeHarness.Command("generic", report);
