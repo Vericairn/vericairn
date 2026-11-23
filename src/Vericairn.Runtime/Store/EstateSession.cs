@@ -537,7 +537,7 @@ public sealed class EstateSession : IDisposable
     }
 
     /// <summary>The object store as the session hands it out: storing or removing an object drops the kept model (FIX-148).</summary>
-    private sealed class NotingObjectStore(IObjectStore inner, Action wrote) : IObjectStore
+    private sealed class NotingObjectStore(IObjectStore inner, Action wrote) : IObjectStore, IBoundedObjectReads
     {
         internal IObjectStore Inner => inner;
 
@@ -564,5 +564,17 @@ public sealed class EstateSession : IDisposable
         }
 
         public void Dispose() => inner.Dispose();
+
+        // The stores this session opens read bounded; another store is read whole, once, as it always was.
+        public long? Length(string hash) => inner is IBoundedObjectReads bounded ? bounded.Length(hash) : inner.Read(hash)?.LongLength;
+
+        public bool ReadExactly(string hash, Span<byte> destination)
+        {
+            if (inner is IBoundedObjectReads bounded) return bounded.ReadExactly(hash, destination);
+            byte[]? bytes = inner.Read(hash);
+            if (bytes is null || bytes.Length != destination.Length) return false;
+            bytes.CopyTo(destination);
+            return true;
+        }
     }
 }

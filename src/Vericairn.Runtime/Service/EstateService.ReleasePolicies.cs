@@ -64,21 +64,19 @@ public sealed partial class EstateService
     public ReleaseBasisResponse? ReleaseBasis(string hash)
     {
         if (!ContentHash.IsValid(hash)) return null;
-        byte[]? bytes;
-        try { bytes = ObjectGet(hash); }
-        catch (ObjectCorruptedException)
-        {
-            return UnresolvedBasis(hash, [new("error", "release-basis.hash-mismatch", "basis:" + hash,
-                "The retained basis object's bytes do not match its hash.")]);
-        }
-        if (bytes is null) return null;
-        return ReadReleaseBasis(hash, bytes, parts: true);
+        // The object is measured before it is read, and a split basis's root is bounded and checked, and its parts measured, before
+        // any part is read; nothing past the basis bound is read at all (FIX-163).
+        SplitObjectContent read = SplitObject.Read(hash, new BasisObjects(this), ReleaseBasisRetention.MaximumBasisBytes);
+        if (read.Problems is [{ Part: 0, Fault: SplitObjectFault.Missing }]) return null;
+        if (read.Problems is [{ Part: 0, Fault: SplitObjectFault.Altered }])
+            return UnresolvedBasis(hash, [new("error", "release-basis.hash-mismatch", "basis:" + hash, "The retained basis object's bytes do not match its hash.")]);
+        if (read.Content is not { } bytes) return UnresolvedBasis(hash, [.. read.Problems.Select(problem => PartFailure(hash, problem))]);
+        return ReadReleaseBasis(hash, bytes, read.Split);
     }
 
-    // From 0.9.4 (FIX-163) a basis past the object limit is retained as a split object (SplitObject), its parts named by a root. The
-    // root reads under its own hash as the one basis its parts join to, each part and the whole checked against their hashes; a part
-    // missing, changed or out of the layout makes the basis unavailable, and joined bytes that are no single-object basis make it invalid.
-    private ReleaseBasisResponse? ReadReleaseBasis(string hash, byte[] bytes, bool parts)
+    // From 0.9.4 (FIX-163) a basis past the object limit is retained as a split object (SplitObject), whose root reads under its own
+    // hash as the one basis its parts join to; joined bytes that are no single-object basis make it invalid rather than absent.
+    private ReleaseBasisResponse? ReadReleaseBasis(string hash, byte[] bytes, bool joined)
     {
         string? format = null;
         try
@@ -86,43 +84,46 @@ public sealed partial class EstateService
             using JsonDocument document = JsonDocument.Parse(bytes);
             format = document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("format", out JsonElement value) &&
                 value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-            if (parts && format == SplitObject.Format)
-            {
-                SplitObjectContent joined = SplitObject.Join(bytes, BasisPart);
-                if (joined.Content is { } whole) return ReadReleaseBasis(hash, whole, parts: false) ?? InvalidBasis(hash);
-                return joined.Problems is [{ Fault: SplitObjectFault.Invalid, Part: 0 }] ? InvalidBasis(hash) : UnresolvedBasis(hash, [.. joined.Problems.Select(PartFailure)]);
-            }
             if (format is ReferencedBasisFormat or CommittedBasisFormat) return ResolveReleaseBasis(hash, bytes);
-            if (format != CopiedBasisFormat) return null;
+            if (format != CopiedBasisFormat) return joined ? InvalidBasis(hash) : null;
             ReleaseBasisEvidence? evidence = JsonSerializer.Deserialize<ReleaseBasisEvidence>(bytes, ProtocolJson.Options);
             return evidence is { Format: CopiedBasisFormat, Basis: not null, Policies: not null,
                 Records: not null, Repositories: not null, Objects: not null, Documents: not null, ExcludedOperationRevisions: not null }
                 ? new(hash, evidence) : InvalidBasis(hash);
         }
-        catch (JsonException) { return format is CommittedBasisFormat or ReferencedBasisFormat or CopiedBasisFormat || !parts ? InvalidBasis(hash) : null; }
+        catch (JsonException) { return format is CommittedBasisFormat or ReferencedBasisFormat or CopiedBasisFormat || joined ? InvalidBasis(hash) : null; }
     }
 
-    // A part of a split basis as the store holds it; bytes that no longer match the part's hash are reported as altered.
-    private byte[]? BasisPart(string hash)
-    {
-        try { return ObjectGet(hash); }
-        catch (ObjectCorruptedException exception) { throw new InvalidDataException(exception.Message, exception); }
-    }
-
-    // A split basis's problem in the basis reader's terms: a part is named by its place and hash, the joined whole by its digest.
-    private static FindingDto PartFailure(SplitObjectProblem problem) => new("error", problem.Fault switch
+    // A split basis's problem in the basis reader's terms: a part is named by its place and hash, the joined whole by its digest, and
+    // anything about the object or root itself by the basis's hash.
+    private static FindingDto PartFailure(string hash, SplitObjectProblem problem) => new("error", problem.Fault switch
     {
         SplitObjectFault.Missing => "release-basis.missing",
         SplitObjectFault.Altered or SplitObjectFault.Mismatch => "release-basis.hash-mismatch",
         SplitObjectFault.InvalidReference => "release-basis.invalid-reference",
         _ => "release-basis.invalid",
-    }, problem.Part > 0 ? $"basis-part:{problem.Part}@{problem.Reference}" : "basis:" + problem.Reference, problem.Fault switch
+    }, problem.Part > 0 ? $"basis-part:{problem.Part}@{problem.Reference}" : problem.Fault == SplitObjectFault.Mismatch ? "basis:" + problem.Reference : "basis:" + hash,
+        problem.Fault switch
+        {
+            SplitObjectFault.Missing => "The basis part is missing.",
+            SplitObjectFault.Altered => "The basis part's bytes do not match its hash.",
+            SplitObjectFault.Mismatch => "The basis parts, joined in order, do not match the retained basis's digest.",
+            _ => problem.Message,
+        });
+
+    // The estate's objects as a split object's reader reads them: measured, then read into a destination of exactly that length.
+    private sealed class BasisObjects(EstateService service) : ISplitObjectSource
     {
-        SplitObjectFault.Missing => "The basis part is missing.",
-        SplitObjectFault.Altered => "The basis part's bytes do not match its hash.",
-        SplitObjectFault.Mismatch => "The basis parts, joined in order, do not match the retained basis's length and digest.",
-        _ => problem.Message,
-    });
+        public long? Length(string hash)
+        {
+            lock (service.gate) return service.session.Objects is IBoundedObjectReads bounded ? bounded.Length(hash) : null;
+        }
+
+        public bool Read(string hash, Span<byte> destination)
+        {
+            lock (service.gate) return service.session.Objects is IBoundedObjectReads bounded && bounded.ReadExactly(hash, destination);
+        }
+    }
 
     // A referenced basis resolves to the same evidence a copied one carries: every record from the estate's own records, every
     // file of a repository read at an exact commit from that repository's git objects at the commit, through its registered clone
@@ -333,9 +334,10 @@ public sealed partial class EstateService
     // names (FIX-163): a root is written only once every part it names is held.
     private string RetainReleaseBasis(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, IReadOnlyList<RecordReference> excluded)
     {
-        SplitObjectPlan basis = SplitObject.Plan(SerializeReleaseBasis(assessment, documents, excluded));
+        byte[] serialized = SerializeReleaseBasis(assessment, documents, excluded);
+        SplitObjectPlan basis = SplitObject.Plan(serialized);
         (PolicyRepository Repository, PolicyFile File)[] retained = [.. ReleaseBasisRetention.Retained(assessment.Basis)];
-        if (basis.Refusal is not null || retained.Any(r => r.File.Bytes.Length > EstateLayout.MaxObjectBytes))
+        if (serialized.LongLength > ReleaseBasisRetention.MaximumBasisBytes || basis.Refusal is not null || retained.Any(r => r.File.Bytes.Length > EstateLayout.MaxObjectBytes))
             throw new InvalidOperationException("The release basis exceeds the estate's object limit; reduce the source selection and check again.");
         long retainedBytes = retained.Sum(r => (long)r.File.Bytes.Length);
         if (retained.Length > ReleaseBasisRetention.MaximumFiles || retainedBytes > ReleaseBasisRetention.MaximumBytes)

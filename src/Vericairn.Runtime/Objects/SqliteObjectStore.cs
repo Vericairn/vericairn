@@ -9,7 +9,7 @@ using Vericairn.Runtime.Store;
 namespace Vericairn.Runtime.Objects;
 
 /// <summary>Objects as rows of a SQLite database: a single file holding many small objects, verified on read.</summary>
-public sealed class SqliteObjectStore : IObjectStore
+public sealed class SqliteObjectStore : IObjectStore, IBoundedObjectReads
 {
     private readonly SqliteConnection connection;
     private readonly SqliteReadSnapshot? readSnapshot;
@@ -105,6 +105,26 @@ public sealed class SqliteObjectStore : IObjectStore
     {
         connection.Dispose();
         readSnapshot?.Dispose();
+    }
+
+    long? IBoundedObjectReads.Length(string hash)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT length(bytes) FROM objects WHERE hash = $hash;";
+        command.Parameters.AddWithValue("$hash", Check(hash));
+        return command.ExecuteScalar() is long length ? length : null;
+    }
+
+    // The length is measured first, so the blob read here is no longer than the destination the reader checked.
+    bool IBoundedObjectReads.ReadExactly(string hash, Span<byte> destination)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT bytes FROM objects WHERE hash = $hash AND length(bytes) = $length;";
+        command.Parameters.AddWithValue("$hash", Check(hash));
+        command.Parameters.AddWithValue("$length", destination.Length);
+        if (command.ExecuteScalar() is not byte[] bytes || bytes.Length != destination.Length) return false;
+        bytes.CopyTo(destination);
+        return true;
     }
 
     private static string Check(string hash) => ContentHash.IsValid(hash) ? hash : throw new ArgumentException("Not a content hash.", nameof(hash));

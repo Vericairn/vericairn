@@ -61,15 +61,18 @@ public sealed partial class ReleasePolicyGateTests
             Assert.Equal(0, f.Api.Validate().Errors);
             Assert.DoesNotContain(f.Api.Check().Findings, finding => finding.Severity == "error");
 
-            // The root reads as the basis its parts join to, exactly as those bytes read held in one object.
+            // The root reads as the basis its parts join to: its records, repositories, files and documents are the joined bytes'. (The
+            // reader tests show it reads exactly as the same basis held in one object; an object past the limit is not read at all.)
             ReleaseBasisResponse read = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(root));
             Assert.Null(read.Problem);
             Assert.Equal(root, read.Hash);
             Assert.Equal("vericairn.release-basis/3", read.Evidence!.Format);
+            Assert.Equal(whole.RootElement.GetProperty("records").GetArrayLength(), read.Evidence.Records.Count);
+            Assert.Equal(whole.RootElement.GetProperty("repositories").EnumerateArray().Select(r => (r.GetProperty("identity").GetString(), r.GetProperty("files").GetArrayLength())),
+                read.Evidence.Repositories.Select(r => ((string?)r.Identity, r.Files.Count)));
             Assert.Contains(read.Evidence.Repositories, r => r.Files.Count == PastTheLimit);
-            string single = f.Api.Session.Objects.Put(joined);
-            ReleaseBasisResponse direct = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(single));
-            Assert.Equal(JsonSerializer.Serialize(direct with { Hash = root }, ProtocolJson.Options), JsonSerializer.Serialize(read, ProtocolJson.Options));
+            Assert.Equal(whole.RootElement.GetProperty("documents").EnumerateArray().Select(d => d.GetString()!), read.Evidence.Documents);
+            Assert.Equal(whole.RootElement.GetProperty("basis").GetProperty("recordDigest").GetString(), read.Evidence.Basis.RecordDigest);
         }
         finally { PolicySources.RepositorySource = previous; }
     }
@@ -91,23 +94,41 @@ public sealed partial class ReleasePolicyGateTests
             string digest = named["digest"]!.GetValue<string>();
             Assert.Equal(2, parts.Length);
 
-            // A root naming a part twice joins to other bytes than the basis its digest records.
+            // A root naming the full part twice puts a part of the wrong length in the last place, refused before either is read.
             named["parts"] = new JsonArray(parts[0], parts[0]);
             string repeated = f.Api.Session.Objects.Put(System.Text.Encoding.UTF8.GetBytes(named.ToJsonString()));
-            Assert.Equal(("release-basis.hash-mismatch", "basis:" + digest), Failure(f, repeated));
+            Assert.Equal(("release-basis.invalid", $"basis-part:2@{parts[0]}"), Failure(f, repeated));
+            Assert.Contains(f.Api.Check().Findings, finding => finding.Code == "objects.split" && finding.Location.EndsWith(repeated[ContentHash.Prefix.Length..], StringComparison.Ordinal));
+            Assert.True(f.Api.Session.Objects.Remove(repeated));
 
+            // A root committed without a part is named by the reader and by the estate check.
+            string objects = Path.Combine(f.Records.Estate.Root, EstateLayout.ObjectsDirectory);
+            string rootPath = EstateLayout.ObjectsDirectory + "/" + root[ContentHash.Prefix.Length..];
             byte[] last = f.Api.Session.Objects.Read(parts[1])!;
             Assert.True(f.Api.Session.Objects.Remove(parts[1]));
             Assert.Equal(("release-basis.missing", $"basis-part:2@{parts[1]}"), Failure(f, root));
+            FindingDto incomplete = Assert.Single(f.Api.Check().Findings, finding => finding.Code == "objects.split");
+            Assert.Equal(("error", rootPath), (incomplete.Severity, incomplete.Location));
+            Assert.StartsWith($"Part 2 of this split object, {parts[1]}: No object is held under the hash.", incomplete.Message, StringComparison.Ordinal);
             f.Api.Session.Objects.Put(last);
             Assert.Null(f.Api.ReleaseBasis(root)!.Problem);
+            Assert.DoesNotContain(f.Api.Check().Findings, finding => finding.Severity == "error");
 
-            File.WriteAllText(Path.Combine(f.Records.Estate.Root, EstateLayout.ObjectsDirectory, parts[0][ContentHash.Prefix.Length..]), "Changed bytes.\n");
+            // A part of another length is refused before it is read; one of its own length but other bytes, once read.
+            string first = Path.Combine(objects, parts[0][ContentHash.Prefix.Length..]);
+            byte[] held = File.ReadAllBytes(first);
+            File.WriteAllText(first, "Changed bytes.\n");
+            Assert.Equal(("release-basis.invalid", $"basis-part:1@{parts[0]}"), Failure(f, root));
+            Assert.Equal($"The part holds 15 bytes; part 1 of this content holds {EstateLayout.MaxObjectBytes}.", Assert.Single(f.Api.ReleaseBasis(root)!.Problem!.Findings).Message);
+            held[0] ^= 1;
+            File.WriteAllBytes(first, held);
             Assert.Equal(("release-basis.hash-mismatch", $"basis-part:1@{parts[0]}"), Failure(f, root));
             Assert.Equal("The basis part's bytes do not match its hash.", Assert.Single(f.Api.ReleaseBasis(root)!.Problem!.Findings).Message);
-            // The estate check refuses the altered part as it refuses any object whose bytes no longer match its name.
-            Assert.Contains(f.Api.Check().Findings, finding => finding.Severity == "error" && finding.Code == "objects.hash" &&
+            // The estate check refuses the altered part as it refuses any object whose bytes no longer match its name, and its root.
+            IReadOnlyList<FindingDto> findings = f.Api.Check().Findings;
+            Assert.Contains(findings, finding => finding.Severity == "error" && finding.Code == "objects.hash" &&
                 finding.Location == EstateLayout.ObjectsDirectory + "/" + parts[0][ContentHash.Prefix.Length..]);
+            Assert.Contains(findings, finding => finding.Severity == "error" && finding.Code == "objects.split" && finding.Location == rootPath);
         }
         finally { PolicySources.RepositorySource = previous; }
     }

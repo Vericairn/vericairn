@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Vericairn.Protocol;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Runtime.Tests;
 
@@ -77,11 +78,12 @@ public sealed class ReleaseBasisCommandsTests
 
     // FIX-163: a basis retained as a split object reads under its root's hash exactly as its one object does.
     [Fact]
-    public void ABasisRetainedInPartsReadsAsBeforeAndALostPartIsNamed()
+    public void ABasisRetainedInPartsReadsAsBeforeAndALostOrChangedPartIsNamed()
     {
         using var f = new ReleaseBasisFixture();
-        (string root, IReadOnlyList<string> parts) = f.StoreInParts(1_000);
+        (string root, IReadOnlyList<string> parts, _) = f.StoreInParts();
         ReleaseBasisResponse response = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(root));
+        Assert.NotNull(response.Evidence);
 
         CliHarness.Outcome json = Read(f, root, json: true);
         CliHarness.Outcome human = Read(f, root, json: false);
@@ -91,13 +93,15 @@ public sealed class ReleaseBasisCommandsTests
         Assert.Equal(JsonSerializer.Serialize(response, ProtocolJson.Options) + "\n", json.Out);
         Assert.Equal("vericairn.release-basis/2", json.Json.GetProperty("evidence").GetProperty("format").GetString());
         Assert.Equal(0, human.Code);
-        Assert.Equal(Read(f, f.Hash, json: false).Out.Replace(f.Hash, root, StringComparison.Ordinal), human.Out);
+        Assert.StartsWith("Retained release evidence " + root + "\n", human.Out, StringComparison.Ordinal);
 
-        f.LoseObject(parts[0], corrupted: true);
+        f.LoseObject(parts[1], corrupted: false);
         CliHarness.Outcome lost = Read(f, root, json: false);
         Assert.Equal(2, lost.Code);
-        Assert.Contains($"release-basis.hash-mismatch basis-part:1@{parts[0]}: The basis part's bytes do not match its hash.", lost.Err, StringComparison.Ordinal);
+        Assert.Contains($"release-basis.missing basis-part:2@{parts[1]}: The basis part is missing.", lost.Err, StringComparison.Ordinal);
         Assert.Contains($"Retained release basis {root} cannot resolve.", lost.Err, StringComparison.Ordinal);
+        f.LoseObject(parts[0], corrupted: true);
+        Assert.Contains($"release-basis.invalid basis-part:1@{parts[0]}: The part holds 15 bytes; part 1 of this content holds {EstateLayout.MaxObjectBytes}.", Read(f, root, json: false).Err, StringComparison.Ordinal);
     }
 
     private static CliHarness.Outcome Read(ReleaseBasisFixture fixture, string hash, bool json)

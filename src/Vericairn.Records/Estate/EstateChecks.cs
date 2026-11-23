@@ -157,6 +157,25 @@ public static partial class EstateChecks
         if (actual != "sha256:" + name)
         {
             findings.Error("objects.hash", relative, "The object's content does not match its name.");
+            return;
+        }
+
+        CheckSplitObject(file, relative, findings);
+    }
+
+    // From 0.9.4 (FIX-163): a split object's canonical root is committed with every part it names, each of the length its place holds
+    // and the bytes its hash names, and the parts join to the root's digest. Only an object small enough to be a root is read for it; a
+    // root-shaped object that is no canonical root is plain content, as a reader takes it.
+    private static void CheckSplitObject(string file, string relative, FindingList findings)
+    {
+        if (new FileInfo(file).Length > SplitObject.MaxRootBytes()) return;
+        byte[] bytes = File.ReadAllBytes(file);
+        if (!SplitObject.IsRoot(bytes) || SplitObject.Verify(bytes, new ObjectFiles(Path.GetDirectoryName(file)!)) is not { Count: > 0 } problems) return;
+        foreach (SplitObjectProblem problem in problems)
+        {
+            findings.Error("objects.split", relative, problem.Part > 0
+                ? $"Part {problem.Part} of this split object, {problem.Reference}: {problem.Message} Commit every part beside its root."
+                : $"This split object's parts do not join to its content: {problem.Message}");
         }
     }
 

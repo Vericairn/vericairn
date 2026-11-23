@@ -32,11 +32,12 @@ public sealed class ReleaseBasisApiTests
     public async Task ABasisRetainedInPartsReadsThroughTheDaemonAsItsOneObject()
     {
         using var f = new ReleaseBasisFixture();
-        (string root, _) = f.StoreInParts(1_000);
         ReleaseBasisResponse single = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(f.Hash));
+        (string root, _, IReadOnlyList<string> documents) = f.StoreInParts();
         ReleaseBasisResponse expected = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(root));
         Assert.NotNull(expected.Evidence);
-        Assert.Equal(JsonSerializer.Serialize(single with { Hash = root }, ProtocolJson.Options), JsonSerializer.Serialize(expected, ProtocolJson.Options));
+        Assert.Equal(JsonSerializer.Serialize(single with { Hash = root, Evidence = single.Evidence! with { Documents = documents } }, ProtocolJson.Options),
+            JsonSerializer.Serialize(expected, ProtocolJson.Options));
         await using DaemonHost host = await DaemonTestHome.StartAsync(f.Records.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(DaemonHost.Discover(f.Records.Estate.Root)!);
         string json = JsonSerializer.Serialize(expected, ProtocolJson.Options);

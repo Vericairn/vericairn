@@ -982,20 +982,32 @@ product's `securityReports` in an earlier format is refused as a later format's 
 ## Split objects (0.9.4)
 
 From 0.9.4 (FIX-163), content larger than the 8 MiB object limit can be kept under `objects/` as a split object, and a
-release basis past the limit is its first user. The content's bytes, in order, are stored as parts, each an object of at
-most 8 MiB, every part but the last of one length and the last at least one byte and no longer. A root object, the
-canonical JSON `{"bytes": <length>, "digest": "sha256:<hex>", "format": "vericairn.split-object/1", "parts": [<part hash>, ...]}`
-with at least two parts and no other member, names them, and the root's hash names the content wherever a record would name
-an object, such as an evidence `hash`. Content that fits one object is stored as that one object, as before, and its own
-hash names it. A reader reads every part, checks each against its hash and the parts' lengths against the layout, and checks
-the joined bytes against the root's length and digest; a missing, extra, reordered or altered part fails, and the content is
-then unreadable rather than partly read. The parts are stored before the root, so a root is only stored once every part it
-names is.
+release basis past the limit is its first user. The content's bytes, in order, are stored as parts, each an object: every
+part but the last exactly 8 MiB, and the last at least one byte and no longer. A root object, the canonical JSON
+`{"bytes":<length>,"digest":"sha256:<hex>","format":"vericairn.split-object/1","parts":[<part hash>,...]}` (members in
+this order, no whitespace, no other member), names them, and the root's hash names the content wherever a record would
+name an object, such as an evidence `hash`. The count of parts is the length divided by 8 MiB, rounded up, so the length
+fixes the count, every part's length and the root's bytes: one content has one reference. Content within the limit is
+stored as that one object, as before, and its own hash names it, unless it would itself read as a root (one JSON object
+whose top-level `format` is `vericairn.split-object/1`); such content is wrapped in a root of one part, the only root of
+one part a reader accepts, so that reading what was written always returns it. The parts are stored before the root, so a
+root is only stored once every part it names is.
+
+A reader treats a root as untrusted and reads no more than it has checked. It measures an object before it reads it and
+does not read one past the object limit. Before it reads any part it refuses a root larger than the root of the longest
+content it accepts (19,093 bytes for the longest array, 2,516 for a release basis's 256 MiB), a length past its caller's
+maximum, a count that does not follow from the length, and a root that is not canonical; then it measures every part and
+refuses one missing or of another length than its place holds. Only then does it allocate the stated length once, read
+each part into it, check each part against its hash and the whole against the root's digest. A missing, extra, reordered
+or altered part fails, and the content is then unreadable rather than partly read. A part may repeat, as identical
+stretches of content give identical parts; the work stays bounded by the stated length.
 
 No record field, record type or format number changes: a record names a root as it names any object, by hash. The estate
 check sees ordinary objects, each within the limit, so an estate holding split objects passes an earlier release's check; an
-earlier reader that expects the content takes the root for an object it does not support. `SplitObject` in
-`Vericairn.Records.Estate` writes and reads them.
+earlier reader that expects the content takes the root for an object it does not support. From 0.9.4 the estate check also
+reads each object small enough to be a canonical root and reports `objects.split` when a part it names is missing, is of
+the wrong length or bytes, or the parts do not join to its digest; an object of a root's shape that is not a canonical root
+is plain content and is not judged. `SplitObject` in `Vericairn.Records.Estate` writes and reads them.
 
 ## History checkpoints (0.9.2)
 
