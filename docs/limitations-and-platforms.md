@@ -328,7 +328,8 @@ holding a doubled quote. Every program Vericairn starts on Windows receives `NoD
 and the system's own search find a program named bare in `PATH` only; a program that searches in its own way, without reading
 that variable, can still look in its working directory. The launch binding hashes the script, not `cmd.exe` and, for an npm
 shim, not the runtime and script the shim starts. An absolute path whose file name ends with a dot or a space, or that names a
-stream of a file, is refused.
+stream of a file, is refused. A file name holding a dot, such as `harness.v2`, has an extension as Windows reads it, so it is
+started as named and gains no `.exe`.
 
 Codex receives a fresh `CODEX_HOME` with only the approved harness login imported; effective MCP configuration is probed and extra servers or incompatible managed policy refuse launch. Claude Code receives a fresh `CLAUDE_CONFIG_DIR`, restricted settings, hooks/plugins disabled and strict MCP configuration; detected managed policy refuses launch. Remote or undetected managed policy and managed Claude accounts are unsupported. These controls do not stop deliberate same-user file or keychain access.
 

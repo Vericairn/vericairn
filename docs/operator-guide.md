@@ -920,7 +920,7 @@ command longer than 8191 characters; `worker configure --setup-command` refuses 
 the repository: every program Vericairn starts on Windows receives `NoDefaultCurrentDirectoryInExePath=1`, which keeps the
 working directory out of that search. A script names a file of its working directory as `.\file`. An absolute path without an
 extension, such as one ending in `\tools\harness`, starts that folder's `harness.exe`, else its `harness.com`, and nothing from
-another folder. The [software guide](software.md#coding-agents-the-worker-and-its-launchers) gives the exact command `cmd.exe`
+another folder; a file name holding a dot, such as `harness.v2`, has an extension and is started as named. The [software guide](software.md#coding-agents-the-worker-and-its-launchers) gives the exact command `cmd.exe`
 is given.
 
 ## 8. Releases

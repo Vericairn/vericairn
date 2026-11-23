@@ -166,11 +166,22 @@ public sealed class WorkspaceSetupProgramTests : IDisposable
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows reads a program's extension; the rule is checked on every platform.");
         string workspace = Directory.CreateDirectory(Path.Combine(root, "workspace")).FullName;
         string report = Path.Combine(root, "setup.jsonl");
+        // The test host's own name holds dots (Vericairn.Runtime.Tests.exe), so without ".exe" it still has an extension, as Windows
+        // reads it, and names a file that does not exist; cmd in the system directory has none and is cmd.exe.
+        string cmd = Path.Combine(Environment.SystemDirectory, "cmd");
+        Assert.True(File.Exists(cmd + ".exe") && !File.Exists(cmd), "The system directory holds cmd.exe and no file named cmd.");
+        WorkspaceSetupResult bare = WorkspaceSetup.Run(new() { Command = [cmd, "/d", "/c", "exit 3"] }, workspace, WorkerEnvironment.Current());
+        Assert.True(bare.Status == "exited" && bare.ExitCode == 3, bare.Facts);
+
+        // A name whose file name holds a dot has an extension and is used as given: without its ".exe", the test host is not started.
         List<string> command = FakeHarness.Command("generic", report);
         Assert.EndsWith(".exe", command[0], StringComparison.OrdinalIgnoreCase);
+        if (Path.GetFileNameWithoutExtension(command[0]).Contains('.', StringComparison.Ordinal))
+        {
+            Assert.Equal("not-started", WorkspaceSetup.Run(new() { Command = [Path.ChangeExtension(command[0], null), .. command.Skip(1)] }, workspace, WorkerEnvironment.Current()).Status);
+        }
 
-        WorkspaceSetupResult result = WorkspaceSetup.Run(new() { Command = [Path.ChangeExtension(command[0], null), .. command.Skip(1)] }, workspace, WorkerEnvironment.Current());
-
+        WorkspaceSetupResult result = WorkspaceSetup.Run(new() { Command = command }, workspace, WorkerEnvironment.Current());
         Assert.True(result.Succeeded, result.Facts);
         JsonObject given = Assert.Single(FakeHarness.Reports(report));
         Assert.Equal("generic", given["scenario"]!.GetValue<string>());
