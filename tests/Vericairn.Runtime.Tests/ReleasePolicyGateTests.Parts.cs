@@ -124,11 +124,12 @@ public sealed partial class ReleasePolicyGateTests
             File.WriteAllBytes(first, held);
             Assert.Equal(("release-basis.hash-mismatch", $"basis-part:1@{parts[0]}"), Failure(f, root));
             Assert.Equal("The basis part's bytes do not match its hash.", Assert.Single(f.Api.ReleaseBasis(root)!.Problem!.Findings).Message);
-            // The estate check refuses the altered part as it refuses any object whose bytes no longer match its name, and its root.
+            // The estate check refuses the altered part as it refuses any object whose bytes no longer match its name, once; its root,
+            // whose parts are all there at their lengths, draws nothing more, since the check reads no part.
             IReadOnlyList<FindingDto> findings = f.Api.Check().Findings;
-            Assert.Contains(findings, finding => finding.Severity == "error" && finding.Code == "objects.hash" &&
+            Assert.Single(findings, finding => finding.Severity == "error" && finding.Code == "objects.hash" &&
                 finding.Location == EstateLayout.ObjectsDirectory + "/" + parts[0][ContentHash.Prefix.Length..]);
-            Assert.Contains(findings, finding => finding.Severity == "error" && finding.Code == "objects.split" && finding.Location == rootPath);
+            Assert.DoesNotContain(findings, finding => finding.Code == "objects.split");
         }
         finally { PolicySources.RepositorySource = previous; }
     }
@@ -149,6 +150,29 @@ public sealed partial class ReleasePolicyGateTests
         Assert.DoesNotContain(f.Api.Session.Objects.List(), o => System.Text.Encoding.UTF8.GetString(f.Api.Session.Objects.Read(o)!).Contains(SplitFormat, StringComparison.Ordinal));
         Assert.Equal(hash, f.Api.ReleaseBasis(hash)!.Hash);
         Assert.Null(f.Api.ReleaseBasis(hash)!.Problem);
+    }
+
+    // Admission holds a basis to the bound its reader reads, 256 MiB, before anything is written: narrowed below this basis's size, the
+    // check and the submission refuse it.
+    [Fact]
+    public void ABasisPastItsBoundIsRefusedBeforeAnythingIsWritten()
+    {
+        using var f = new Fixture();
+        Assert.Equal(256L * 1024 * 1024, f.Api.ReleaseBasisBound);
+        f.Api.ReleaseBasisBound = 1_000;
+        var before = BytesOf(f.Records.Estate.Root);
+
+        ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
+        ReleaseResponse submit = f.Api.ReleaseSubmit(f.Request);
+
+        Assert.False(check.Ok);
+        Assert.False(submit.Ok);
+        ReleaseObjection objection = Assert.Single(check.Check!.Objections, o => o.Code == "release.basis-size");
+        Assert.Equal($"The retained basis would be {check.Check.BasisBytes} bytes; a release basis is at most 1000 bytes, the most its reader reads.", objection.Message);
+        Assert.Contains(submit.Problem!.Findings, o => o.Code == "release.basis-size");
+        Assert.Empty(f.Api.Session.Objects.List());
+        Assert.Equal(before, BytesOf(f.Records.Estate.Root));
+        Assert.Equal(0, f.Provider.Calls);
     }
 
     // A source policy over the fixture repository, so that the inventory's files at the commit enter the basis.

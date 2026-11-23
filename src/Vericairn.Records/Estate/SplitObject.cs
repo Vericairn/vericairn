@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Vericairn.Records.Hashing;
@@ -66,7 +65,8 @@ public interface ISplitObjectSource
 {
     /// <summary>The number of bytes held under a hash, found without reading them; null when no object is held there.</summary>
     /// <param name="hash">The object's content hash.</param>
-    long? Length(string hash);
+    /// <param name="cancellationToken">Stops the measurement.</param>
+    long? Length(string hash, CancellationToken cancellationToken);
 
     /// <summary>
     /// Reads the bytes held under a hash into <paramref name="destination"/>, which is exactly as long as <see cref="Length"/> said;
@@ -75,7 +75,8 @@ public interface ISplitObjectSource
     /// </summary>
     /// <param name="hash">The object's content hash.</param>
     /// <param name="destination">Where the bytes go, exactly as long as the object.</param>
-    bool Read(string hash, Span<byte> destination);
+    /// <param name="cancellationToken">Stops the read.</param>
+    bool Read(string hash, Span<byte> destination, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -91,7 +92,8 @@ public interface ISplitObjectSource
 /// length past the caller's maximum, requires the count to follow from the length and the root to be canonical, and measures every part
 /// against the length its place holds. It then allocates the whole once, at the checked length, reads each part straight into it,
 /// checks each part's hash, and checks the whole digest. A part may repeat, as identical stretches of content give identical parts; the
-/// work is bounded by the checked length either way.
+/// work is bounded by the checked length either way, and each distinct part is measured once. Every reader states the longest content it
+/// accepts: there is no default.
 /// </remarks>
 public static class SplitObject
 {
@@ -106,7 +108,7 @@ public static class SplitObject
     /// </summary>
     /// <param name="maxBytes">The longest content, at most the longest array.</param>
     /// <param name="maxObjectBytes">The part length, the estate's object limit unless a caller narrows it.</param>
-    public static long MaxRootBytes(long maxBytes = int.MaxValue, long maxObjectBytes = EstateLayout.MaxObjectBytes)
+    public static long MaxRootBytes(long maxBytes, long maxObjectBytes = EstateLayout.MaxObjectBytes)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxObjectBytes);
         long length = Math.Clamp(maxBytes, 1, Array.MaxLength);
@@ -191,19 +193,21 @@ public static class SplitObject
     /// <param name="source">Where the objects are read from.</param>
     /// <param name="maxBytes">The longest content the caller accepts.</param>
     /// <param name="maxObjectBytes">The object limit and part length, the estate's unless a caller narrows it.</param>
-    public static SplitObjectContent Read(string reference, ISplitObjectSource source, long maxBytes = int.MaxValue, long maxObjectBytes = EstateLayout.MaxObjectBytes)
+    /// <param name="cancellationToken">Stops the read between objects.</param>
+    public static SplitObjectContent Read(string reference, ISplitObjectSource source, long maxBytes, long maxObjectBytes = EstateLayout.MaxObjectBytes,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxObjectBytes);
         if (!ContentHash.IsValid(reference)) return Refused(new(SplitObjectFault.InvalidReference, 0, reference ?? string.Empty, "The reference is not a supported content hash."));
-        long? length = source.Length(reference);
+        long? length = source.Length(reference, cancellationToken);
         if (length is null) return Refused(new(SplitObjectFault.Missing, 0, reference, "No object is held under the hash."));
         if (length > maxObjectBytes)
             return Refused(new(SplitObjectFault.Invalid, 0, reference, $"The object is {length} bytes, past the {maxObjectBytes}-byte object limit, and is not read."));
         byte[] bytes = new byte[length.Value];
-        if (!source.Read(reference, bytes)) return Refused(new(SplitObjectFault.Missing, 0, reference, "No object of the measured length is held under the hash."));
+        if (!source.Read(reference, bytes, cancellationToken)) return Refused(new(SplitObjectFault.Missing, 0, reference, "No object of the measured length is held under the hash."));
         if (ContentHash.Sha256(bytes) != reference) return Refused(new(SplitObjectFault.Altered, 0, reference, "The bytes held do not match the hash."));
-        if (IsRoot(bytes)) return Join(bytes, source, maxBytes, maxObjectBytes) with { Split = true };
+        if (IsRoot(bytes)) return Join(bytes, source, maxBytes, maxObjectBytes, cancellationToken) with { Split = true };
         return bytes.LongLength > maxBytes
             ? Refused(new(SplitObjectFault.TooLarge, 0, reference, $"The object is {bytes.LongLength} bytes, more than the {maxBytes} the reader accepts."))
             : new(bytes, []);
@@ -218,18 +222,21 @@ public static class SplitObject
     /// <param name="source">Where the parts are read from.</param>
     /// <param name="maxBytes">The longest content the caller accepts.</param>
     /// <param name="maxObjectBytes">The part length, the estate's object limit unless a caller narrows it.</param>
-    public static SplitObjectContent Join(ReadOnlySpan<byte> root, ISplitObjectSource source, long maxBytes = int.MaxValue, long maxObjectBytes = EstateLayout.MaxObjectBytes)
+    /// <param name="cancellationToken">Stops the read between parts.</param>
+    public static SplitObjectContent Join(ReadOnlySpan<byte> root, ISplitObjectSource source, long maxBytes, long maxObjectBytes = EstateLayout.MaxObjectBytes,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxObjectBytes);
         long cap = Math.Clamp(maxBytes, 1, Array.MaxLength);
-        if (Shape(root, cap, maxObjectBytes, source, out Layout? layout) is { } refused) return new(null, refused) { Split = true };
+        if (Shape(root, cap, maxObjectBytes, source, cancellationToken, out Layout? layout) is { } refused) return new(null, refused) { Split = true };
         byte[] whole = new byte[layout!.Bytes];
         var problems = new List<SplitObjectProblem>();
         for (int i = 0; i < layout.Parts.Length; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Span<byte> part = whole.AsSpan((int)(i * maxObjectBytes), (int)layout.PartLength(i));
-            if (Held(layout.Parts[i], i + 1, part, source) is { } problem) problems.Add(problem);
+            if (Held(layout.Parts[i], i + 1, part, source, cancellationToken) is { } problem) problems.Add(problem);
         }
 
         if (problems.Count > 0) return new(null, problems) { Split = true };
@@ -239,30 +246,21 @@ public static class SplitObject
     }
 
     /// <summary>
-    /// The problems of a canonical root found in an estate's objects, its parts read one at a time into one buffer of the part length
-    /// and hashed as they go; null when the bytes are no canonical root, so that they are plain content and not judged as one.
+    /// What an estate's check judges of a canonical root found in its objects, with work bounded by the root's own bytes: every distinct part
+    /// it names is measured once, and none is read. A part missing or of another length than its place holds, or a part reference that is
+    /// no content hash, is a problem; each part's bytes are the store's own hash check's to judge, and the whole digest a reader's. Null
+    /// when the bytes are no canonical root, which a reader refuses as one and this check does not judge.
     /// </summary>
     internal static IReadOnlyList<SplitObjectProblem>? Verify(ReadOnlySpan<byte> root, ISplitObjectSource source, long maxObjectBytes = EstateLayout.MaxObjectBytes)
     {
-        if (Shape(root, Array.MaxLength, maxObjectBytes, source, out Layout? layout) is { } refused)
+        if (Shape(root, Array.MaxLength, maxObjectBytes, source, CancellationToken.None, out _) is { } refused)
             return refused.Any(p => p.Part > 0) ? refused : null;
-        byte[] buffer = new byte[layout!.PartLength(0)];
-        var problems = new List<SplitObjectProblem>();
-        using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        for (int i = 0; i < layout.Parts.Length; i++)
-        {
-            Span<byte> part = buffer.AsSpan(0, (int)layout.PartLength(i));
-            if (Held(layout.Parts[i], i + 1, part, source) is { } problem) problems.Add(problem);
-            else digest.AppendData(part);
-        }
-
-        if (problems.Count > 0) return problems;
-        if (ContentHash.Prefix + Convert.ToHexStringLower(digest.GetHashAndReset()) != layout.Digest) return [layout.Mismatch];
-        return layout.Parts.Length == 1 && !IsRoot(buffer) ? [Layout.Unwrapped] : [];
+        return [];
     }
 
     // The root's layout once every check that reads no part has passed, or every problem found before any part would be read.
-    private static IReadOnlyList<SplitObjectProblem>? Shape(ReadOnlySpan<byte> root, long cap, long maxObjectBytes, ISplitObjectSource source, out Layout? layout)
+    private static IReadOnlyList<SplitObjectProblem>? Shape(ReadOnlySpan<byte> root, long cap, long maxObjectBytes, ISplitObjectSource source,
+        CancellationToken cancellationToken, out Layout? layout)
     {
         layout = null;
         long largest = MaxRootBytes(cap, maxObjectBytes);
@@ -281,13 +279,21 @@ public static class SplitObject
             .Select(p => new SplitObjectProblem(SplitObjectFault.InvalidReference, p.i + 1, p.part, "The part's reference is not a supported content hash."))];
         if (references.Length > 0) return references;
         var shape = new Layout(length, digest, parts, maxObjectBytes);
-        // Every part is measured before any is read or the whole allocated: one missing, or of another length than its place holds,
-        // stops the read here.
+        // Every part is measured before any is read or the whole allocated, each distinct part once: one missing, or of another length
+        // than its place holds, stops the read here.
         var measured = new List<SplitObjectProblem>();
+        var lengths = new Dictionary<string, long?>(StringComparer.Ordinal);
         for (int i = 0; i < parts.Length; i++)
         {
-            long? held = source.Length(parts[i]);
-            if (held is null) measured.Add(new(SplitObjectFault.Missing, i + 1, parts[i], "No object is held under the hash."));
+            bool first = !lengths.TryGetValue(parts[i], out long? held);
+            if (first)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                lengths[parts[i]] = held = source.Length(parts[i], cancellationToken);
+            }
+
+            // A missing part is named once, at its first place.
+            if (held is null) { if (first) measured.Add(new(SplitObjectFault.Missing, i + 1, parts[i], "No object is held under the hash.")); }
             else if (held != shape.PartLength(i))
                 measured.Add(new(SplitObjectFault.Invalid, i + 1, parts[i], $"The part holds {held} bytes; part {i + 1} of this content holds {shape.PartLength(i)}."));
         }
@@ -298,9 +304,9 @@ public static class SplitObject
     }
 
     // Reads one measured part into its place and checks it against its hash.
-    private static SplitObjectProblem? Held(string hash, int part, Span<byte> destination, ISplitObjectSource source)
+    private static SplitObjectProblem? Held(string hash, int part, Span<byte> destination, ISplitObjectSource source, CancellationToken cancellationToken)
     {
-        if (!source.Read(hash, destination)) return new(SplitObjectFault.Missing, part, hash, "No object of the measured length is held under the hash.");
+        if (!source.Read(hash, destination, cancellationToken)) return new(SplitObjectFault.Missing, part, hash, "No object of the measured length is held under the hash.");
         return ContentHash.Sha256(destination) == hash ? null : new(SplitObjectFault.Altered, part, hash, "The bytes held do not match the hash.");
     }
 

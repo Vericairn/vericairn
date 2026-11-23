@@ -1005,9 +1005,14 @@ stretches of content give identical parts; the work stays bounded by the stated 
 No record field, record type or format number changes: a record names a root as it names any object, by hash. The estate
 check sees ordinary objects, each within the limit, so an estate holding split objects passes an earlier release's check; an
 earlier reader that expects the content takes the root for an object it does not support. From 0.9.4 the estate check also
-reads each object small enough to be a canonical root and reports `objects.split` when a part it names is missing, is of
-the wrong length or bytes, or the parts do not join to its digest; an object of a root's shape that is not a canonical root
-is plain content and is not judged. `SplitObject` in `Vericairn.Records.Estate` writes and reads them.
+reads each object small enough to be a canonical root and reports `objects.split` when a part it names is missing or of the
+wrong length. Its work is bounded by the bytes stored, not the length a root states: it measures each distinct part once and
+reads none. Each part's bytes are judged by `objects.hash`, once per object, as every object's are, and the whole digest is a
+reader's to check. An object of a root's shape that is not a canonical root is not judged by the check, and a reader refuses
+it as an invalid root. Wrapped content that is itself a canonical root is stored under its own hash and judged like any root,
+since a reader that reads it by that hash takes it for one; it arises only when the content written is another root whose
+parts the estate does not hold. `SplitObject` in `Vericairn.Records.Estate` writes and reads them; every reader states the
+longest content it accepts.
 
 ## History checkpoints (0.9.2)
 

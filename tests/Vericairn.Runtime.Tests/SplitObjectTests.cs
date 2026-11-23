@@ -20,6 +20,11 @@ public sealed class SplitObjectTests
     private const long Limit = EstateLayout.MaxObjectBytes;
     private const long Narrow = 1_000;
 
+    // The longest content these tests accept where the maximum is not what they test: a reader always states one.
+    private const long Any = int.MaxValue;
+
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
     [Theory]
     [InlineData(1)]
     [InlineData(Limit - 1)]
@@ -37,7 +42,7 @@ public sealed class SplitObjectTests
         Assert.Same(content, Assert.Single(plan.Objects));
         Assert.Equal(ContentHash.Sha256(content), reference);
         Assert.Equal([reference], store.Objects.Keys);
-        SplitObjectContent read = SplitObject.Read(reference, store);
+        SplitObjectContent read = SplitObject.Read(reference, store, Any, cancellationToken: Token);
         Assert.Empty(read.Problems);
         Assert.False(read.Split);
         Assert.Equal(content, read.Content);
@@ -66,7 +71,7 @@ public sealed class SplitObjectTests
         Assert.True(SplitObject.IsRoot(store.Objects[reference]));
 
         store.Reset();
-        SplitObjectContent read = SplitObject.Read(reference, store);
+        SplitObjectContent read = SplitObject.Read(reference, store, Any, cancellationToken: Token);
         Assert.Empty(read.Problems);
         Assert.True(read.Split);
         Assert.Equal(content, read.Content);
@@ -81,11 +86,11 @@ public sealed class SplitObjectTests
         var store = new Store();
         string reference = SplitObject.Write(content, store.Put, Narrow);
         Assert.Equal(11, store.Objects.Count);
-        Assert.Equal(content, SplitObject.Read(reference, store, maxObjectBytes: Narrow).Content);
+        Assert.Equal(content, SplitObject.Read(reference, store, Any, Narrow, cancellationToken: Token).Content);
         // MaxRootBytes is the size of the root of the longest content allowed, and no root of shorter content is larger.
         Assert.Equal(store.Objects[reference].LongLength, SplitObject.MaxRootBytes(9_500, Narrow));
         Assert.True(SplitObject.MaxRootBytes(9_001, Narrow) == SplitObject.MaxRootBytes(9_500, Narrow) && SplitObject.MaxRootBytes(9_000, Narrow) < SplitObject.MaxRootBytes(9_001, Narrow));
-        Assert.Equal(Canonical(Array.MaxLength, ContentHash.Sha256([]), [.. Enumerable.Repeat(ContentHash.Sha256([]), 256)]).Length, SplitObject.MaxRootBytes());
+        Assert.Equal(Canonical(Array.MaxLength, ContentHash.Sha256([]), [.. Enumerable.Repeat(ContentHash.Sha256([]), 256)]).Length, SplitObject.MaxRootBytes(Array.MaxLength));
     }
 
     [Fact]
@@ -117,14 +122,14 @@ public sealed class SplitObjectTests
             Assert.Equal(2, plan.Objects.Count);
             string reference = SplitObject.Write(content, store.Put, Narrow);
             Assert.NotEqual(ContentHash.Sha256(content), reference);
-            Assert.Equal(content, SplitObject.Read(reference, store, maxObjectBytes: Narrow).Content);
+            Assert.Equal(content, SplitObject.Read(reference, store, Any, Narrow, cancellationToken: Token).Content);
         }
         // Content that does not read as a root is stored as itself.
         foreach (byte[] content in new[] { """{"format":"vericairn.split-object/2"}"""u8.ToArray(), """[{"format":"vericairn.split-object/1"}]"""u8.ToArray(), """{"format":"vericairn.split-object/1"} x"""u8.ToArray() })
         {
             Assert.False(SplitObject.IsRoot(content));
             Assert.Equal(ContentHash.Sha256(content), SplitObject.Write(content, store.Put, Narrow));
-            Assert.Equal(content, SplitObject.Read(ContentHash.Sha256(content), store, maxObjectBytes: Narrow).Content);
+            Assert.Equal(content, SplitObject.Read(ContentHash.Sha256(content), store, Any, Narrow, cancellationToken: Token).Content);
         }
         // A root of one part over content that is no root is not what any writer produces.
         byte[] plain = Content(500);
@@ -156,7 +161,7 @@ public sealed class SplitObjectTests
         string twice = SplitObject.Write(repetitive, store.Put);
         Assert.Equal(2, Parts(store, twice).Distinct().Count());
         store.Reset();
-        Assert.Equal(repetitive, SplitObject.Read(twice, store).Content);
+        Assert.Equal(repetitive, SplitObject.Read(twice, store, Any, cancellationToken: Token).Content);
         Assert.Equal(repetitive.LongLength + store.Objects[twice].LongLength, store.BytesRead);
     }
 
@@ -171,7 +176,7 @@ public sealed class SplitObjectTests
         string part = store.Put(Content(Narrow));
         byte[] root = Encoding.UTF8.GetBytes(Canonical(length, ContentHash.Sha256([0]), [.. Enumerable.Repeat(part, count)]));
         store.Reset();
-        SplitObjectContent read = SplitObject.Join(root, store, maxObjectBytes: Narrow);
+        SplitObjectContent read = SplitObject.Join(root, store, Any, Narrow, cancellationToken: Token);
         Assert.Null(read.Content);
         Assert.Equal((SplitObjectFault.Invalid, 0), Problem(read.Problems));
         Assert.Contains($"names {count} parts", read.Problems[0].Message, StringComparison.Ordinal);
@@ -185,7 +190,7 @@ public sealed class SplitObjectTests
         var store = new Store();
         long largest = SplitObject.MaxRootBytes(3_500, Narrow);
         byte[] padded = Encoding.UTF8.GetBytes(new string(' ', (int)largest + 1));
-        SplitObjectProblem problem = Assert.Single(SplitObject.Join(padded, store, 3_500, Narrow).Problems);
+        SplitObjectProblem problem = Assert.Single(SplitObject.Join(padded, store, 3_500, Narrow, cancellationToken: Token).Problems);
         Assert.Equal((SplitObjectFault.Invalid, 0), (problem.Fault, problem.Part));
         Assert.Equal($"The root is {largest + 1} bytes; the root of content up to 3500 bytes is at most {largest}.", problem.Message);
         Assert.Empty(store.Measured);
@@ -198,7 +203,7 @@ public sealed class SplitObjectTests
         string shorter = store.Put(Content(999, seed: 3));
         byte[] root = Encoding.UTF8.GetBytes(Canonical(3_500, ContentHash.Sha256(Content(3_500)), [parts[0], shorter, parts[2], parts[3]]));
         store.Reset();
-        SplitObjectContent read = SplitObject.Join(root, store, maxObjectBytes: Narrow);
+        SplitObjectContent read = SplitObject.Join(root, store, Any, Narrow, cancellationToken: Token);
         Assert.Equal([new SplitObjectProblem(SplitObjectFault.Invalid, 2, shorter, "The part holds 999 bytes; part 2 of this content holds 1000.")], read.Problems);
         Assert.Equal(0, store.BytesRead);
         Assert.Equal(parts.Length, store.Measured.Count);
@@ -207,7 +212,7 @@ public sealed class SplitObjectTests
         store.Reset();
         Assert.Equal([1, 4], Refused(store, moved).Select(p => p.Part));
         Assert.Equal(store.Objects[moved].LongLength, store.BytesRead);
-        Assert.Equal(Content(3_500), SplitObject.Read(reference, store, maxObjectBytes: Narrow).Content);
+        Assert.Equal(Content(3_500), SplitObject.Read(reference, store, Any, Narrow, cancellationToken: Token).Content);
     }
 
     [Fact]
@@ -220,13 +225,13 @@ public sealed class SplitObjectTests
         Assert.Equal("The root names 3500 bytes, more than the 3499 the reader accepts.", problem.Message);
         Assert.Equal([reference], store.Measured);
         Assert.Equal(store.Objects[reference].LongLength, store.BytesRead);
-        Assert.Equal(Content(3_500), SplitObject.Read(reference, store, 3_500, Narrow).Content);
+        Assert.Equal(Content(3_500), SplitObject.Read(reference, store, 3_500, Narrow, cancellationToken: Token).Content);
         // An object of its own past the caller's maximum is refused too, and one past the object limit is not read at all.
         string plain = store.Put(Content(800));
-        Assert.Equal(SplitObjectFault.TooLarge, Assert.Single(SplitObject.Read(plain, store, 799, Narrow).Problems).Fault);
+        Assert.Equal(SplitObjectFault.TooLarge, Assert.Single(SplitObject.Read(plain, store, 799, Narrow, cancellationToken: Token).Problems).Fault);
         string large = store.Put(Content(Narrow + 1));
         store.Reset();
-        Assert.Equal((SplitObjectFault.Invalid, 0), Problem(SplitObject.Read(large, store, maxObjectBytes: Narrow).Problems));
+        Assert.Equal((SplitObjectFault.Invalid, 0), Problem(SplitObject.Read(large, store, Any, Narrow, cancellationToken: Token).Problems));
         Assert.Equal(0, store.BytesRead);
     }
 
@@ -245,7 +250,7 @@ public sealed class SplitObjectTests
         })
         {
             store.Reset();
-            SplitObjectContent read = SplitObject.Join(Encoding.UTF8.GetBytes(text), store, maxObjectBytes: Narrow);
+            SplitObjectContent read = SplitObject.Join(Encoding.UTF8.GetBytes(text), store, Any, Narrow, cancellationToken: Token);
             Assert.Null(read.Content);
             Assert.Equal((SplitObjectFault.Invalid, 0), Problem(read.Problems));
             Assert.Equal(0, store.BytesRead);
@@ -297,20 +302,55 @@ public sealed class SplitObjectTests
             Canonical(3_500, "not-a-hash", parts), Canonical(0, digest, parts), "{\"format\":\"vericairn.split-object/1\",\"parts\":[]}", "not json",
         })
         {
-            Assert.Equal((SplitObjectFault.Invalid, 0), Problem(SplitObject.Join(Encoding.UTF8.GetBytes(text), store, maxObjectBytes: Narrow).Problems));
+            Assert.Equal((SplitObjectFault.Invalid, 0), Problem(SplitObject.Join(Encoding.UTF8.GetBytes(text), store, Any, Narrow, cancellationToken: Token).Problems));
         }
-        Assert.Equal(SplitObjectFault.InvalidReference, Assert.Single(SplitObject.Read("not-a-hash", store).Problems).Fault);
-        Assert.Equal(SplitObjectFault.Missing, Assert.Single(SplitObject.Read(ContentHash.Sha256("absent"u8), store).Problems).Fault);
+        Assert.Equal(SplitObjectFault.InvalidReference, Assert.Single(SplitObject.Read("not-a-hash", store, Any, cancellationToken: Token).Problems).Fault);
+        Assert.Equal(SplitObjectFault.Missing, Assert.Single(SplitObject.Read(ContentHash.Sha256("absent"u8), store, Any, cancellationToken: Token).Problems).Fault);
+    }
+
+    // The estate check's work is bounded by the bytes stored, not by the length a root states: it measures each distinct part once and
+    // reads none. The reviewer's root names one part of the limit 255 times and a 4-byte part, stating about 2 GiB.
+    [Fact]
+    public void AnEstatesCheckMeasuresEachDistinctPartOnceAndReadsNone()
+    {
+        var store = new Store();
+        string full = store.Put(Content(Limit)), last = store.Put(Content(4));
+        string[] parts = [.. Enumerable.Repeat(full, 255), last];
+        byte[] crafted = Encoding.UTF8.GetBytes(Canonical(255 * Limit + 4, ContentHash.Sha256("not the content"u8), parts));
+        Assert.True(crafted.LongLength <= SplitObject.MaxRootBytes(Array.MaxLength));
+        store.Reset();
+        Assert.Empty(SplitObject.Verify(crafted, store)!);
+        Assert.Equal(0, store.BytesRead);
+        Assert.Equal([full, last], store.Measured);
+
+        // A missing part is named once, at its first place, however often the root repeats it.
+        store.Objects.Remove(full);
+        store.Reset();
+        Assert.Equal([new SplitObjectProblem(SplitObjectFault.Missing, 1, full, "No object is held under the hash.")], SplitObject.Verify(crafted, store));
+        Assert.Equal([full, last], store.Measured);
+        Assert.Equal(0, store.BytesRead);
+
+        // A repeated part of the wrong length for a place is named at that place; it is still measured once.
+        (Store split, string reference, string[] named) = Split();
+        byte[] repeated = Encoding.UTF8.GetBytes(Canonical(3_500, ContentHash.Sha256(Content(3_500)), Enumerable.Repeat(named[0], 4)));
+        split.Reset();
+        Assert.Equal([(SplitObjectFault.Invalid, 4)], SplitObject.Verify(repeated, split, Narrow)!.Select(p => (p.Fault, p.Part)));
+        Assert.Equal([named[0]], split.Measured);
+        Assert.Equal(0, split.BytesRead);
+
+        // A complete root draws nothing; bytes that are no canonical root are not judged by the check.
+        Assert.Empty(SplitObject.Verify(split.Objects[reference], split, Narrow)!);
+        Assert.Null(SplitObject.Verify("""{"format":"vericairn.split-object/1","note":"an ordinary document"}"""u8, split, Narrow));
+        Assert.Null(SplitObject.Verify(Encoding.UTF8.GetBytes(Canonical(3_500, ContentHash.Sha256(Content(3_500)), named) + "\n"), split, Narrow));
     }
 
     [Fact]
-    public void AnEstatesCheckJudgesOnlyCanonicalRootsAndReadsEveryPartOnce()
+    public void AReadCanBeStoppedBetweenParts()
     {
-        (Store store, string reference, string[] parts) = Split();
-        Assert.Empty(SplitObject.Verify(store.Objects[reference], store, Narrow)!);
-        Assert.Null(SplitObject.Verify("""{"format":"vericairn.split-object/1","note":"an ordinary document"}"""u8, store, Narrow));
-        store.Objects.Remove(parts[3]);
-        Assert.Equal((SplitObjectFault.Missing, 4), Problem(SplitObject.Verify(store.Objects[reference], store, Narrow)!));
+        (Store store, string reference, _) = Split();
+        using var stopped = new CancellationTokenSource();
+        stopped.Cancel();
+        Assert.Throws<OperationCanceledException>(() => SplitObject.Read(reference, store, Any, Narrow, stopped.Token));
     }
 
     // The estate's own stores measure an object without reading it and read one only into a destination of exactly its length.
@@ -358,9 +398,9 @@ public sealed class SplitObjectTests
 
     private static string Root(Store store, long bytes, string digest, IEnumerable<string> parts) => store.Put(Encoding.UTF8.GetBytes(Canonical(bytes, digest, parts)));
 
-    private static IReadOnlyList<SplitObjectProblem> Refused(Store store, string reference, long maxBytes = int.MaxValue, long maxObjectBytes = Narrow)
+    private static IReadOnlyList<SplitObjectProblem> Refused(Store store, string reference, long maxBytes = Any, long maxObjectBytes = Narrow)
     {
-        SplitObjectContent read = SplitObject.Read(reference, store, maxBytes, maxObjectBytes);
+        SplitObjectContent read = SplitObject.Read(reference, store, maxBytes, maxObjectBytes, cancellationToken: Token);
         Assert.Null(read.Content);
         Assert.NotEmpty(read.Problems);
         return read.Problems;
@@ -401,13 +441,13 @@ public sealed class SplitObjectTests
             return hash;
         }
 
-        public long? Length(string hash)
+        public long? Length(string hash, CancellationToken cancellationToken)
         {
             Measured.Add(hash);
             return Objects.TryGetValue(hash, out byte[]? bytes) ? bytes.LongLength : null;
         }
 
-        public bool Read(string hash, Span<byte> destination)
+        public bool Read(string hash, Span<byte> destination, CancellationToken cancellationToken)
         {
             if (!Objects.TryGetValue(hash, out byte[]? bytes) || bytes.Length != destination.Length) return false;
             bytes.CopyTo(destination);

@@ -11,7 +11,7 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 internal sealed class ObjectFiles(string directory) : ISplitObjectSource
 {
-    public long? Length(string hash)
+    public long? Length(string hash, CancellationToken cancellationToken)
     {
         if (!ContentHash.IsValid(hash)) return null;
         try
@@ -25,7 +25,7 @@ internal sealed class ObjectFiles(string directory) : ISplitObjectSource
         }
     }
 
-    public bool Read(string hash, Span<byte> destination)
+    public bool Read(string hash, Span<byte> destination, CancellationToken cancellationToken)
     {
         if (!ContentHash.IsValid(hash)) return false;
         try

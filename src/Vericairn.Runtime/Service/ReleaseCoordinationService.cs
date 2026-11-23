@@ -28,7 +28,8 @@ internal sealed partial class ReleaseCoordinationService(
     Func<ReleasePolicyAssessment, IReadOnlyList<string>, IReadOnlyList<RecordReference>, string> retainBasis,
     Func<DateTimeOffset> now,
     Action<string> boundary,
-    Func<string?, bool, bool, IReadOnlyList<FindingDto>> securityReports)
+    Func<string?, bool, bool, IReadOnlyList<FindingDto>> securityReports,
+    Func<long> basisBound)
 {
     private readonly object gate = recordAccess.Gate;
     private readonly EstateSession session = recordAccess.Session;
@@ -151,9 +152,9 @@ internal sealed partial class ReleaseCoordinationService(
         // is each object retention would write and the basis's bound, which its reader holds it to, and the evidence names the object
         // retention would name.
         SplitObjectPlan retention = SplitObject.Plan(basis);
-        if (basis.LongLength > ReleaseBasisRetention.MaximumBasisBytes)
-            objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes; a release basis is at most " +
-                $"{ReleaseBasisRetention.MaximumBasisBytes} bytes, {ReleaseBasisRetention.MaximumBasisBytes / EstateLayout.MaxObjectBytes} objects of the estate's {EstateLayout.MaxObjectBytes}-byte object limit."));
+        long bound = basisBound();
+        if (basis.LongLength > bound)
+            objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes; a release basis is at most {bound} bytes, the most its reader reads."));
         else if (retention.Refusal is not null)
             objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes. {retention.Refusal}"));
         objections.AddRange(ReleaseBasisRetention.Objections(assessment.Basis));

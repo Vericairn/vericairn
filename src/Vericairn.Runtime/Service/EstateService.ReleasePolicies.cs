@@ -66,7 +66,7 @@ public sealed partial class EstateService
         if (!ContentHash.IsValid(hash)) return null;
         // The object is measured before it is read, and a split basis's root is bounded and checked, and its parts measured, before
         // any part is read; nothing past the basis bound is read at all (FIX-163).
-        SplitObjectContent read = SplitObject.Read(hash, new BasisObjects(this), ReleaseBasisRetention.MaximumBasisBytes);
+        SplitObjectContent read = SplitObject.Read(hash, new BasisObjects(this), ReleaseBasisBound);
         if (read.Problems is [{ Part: 0, Fault: SplitObjectFault.Missing }]) return null;
         if (read.Problems is [{ Part: 0, Fault: SplitObjectFault.Altered }])
             return UnresolvedBasis(hash, [new("error", "release-basis.hash-mismatch", "basis:" + hash, "The retained basis object's bytes do not match its hash.")]);
@@ -114,12 +114,12 @@ public sealed partial class EstateService
     // The estate's objects as a split object's reader reads them: measured, then read into a destination of exactly that length.
     private sealed class BasisObjects(EstateService service) : ISplitObjectSource
     {
-        public long? Length(string hash)
+        public long? Length(string hash, CancellationToken cancellationToken)
         {
             lock (service.gate) return service.session.Objects is IBoundedObjectReads bounded ? bounded.Length(hash) : null;
         }
 
-        public bool Read(string hash, Span<byte> destination)
+        public bool Read(string hash, Span<byte> destination, CancellationToken cancellationToken)
         {
             lock (service.gate) return service.session.Objects is IBoundedObjectReads bounded && bounded.ReadExactly(hash, destination);
         }
@@ -278,6 +278,9 @@ public sealed partial class EstateService
     // Tests can change the clock or sources at an actual boundary; no production caller supplies an evaluation verdict.
     internal Action<string>? ReleaseBoundary { get; set; }
 
+    // The longest basis admission accepts, retention writes and the reader reads (FIX-163). Tests narrow it to show each holds it.
+    internal long ReleaseBasisBound { get; set; } = ReleaseBasisRetention.MaximumBasisBytes;
+
     private static PolicySubmission SelectRelease(EstateModel model, string product, string version, string? commit, IReadOnlySet<string> repositories, RecordReference? release = null)
     {
         string Identity(string id) => model.ById.TryGetValue(id, out RecordEnvelope? record) ? PolicyWork.Identity(model, record) : id;
@@ -337,7 +340,7 @@ public sealed partial class EstateService
         byte[] serialized = SerializeReleaseBasis(assessment, documents, excluded);
         SplitObjectPlan basis = SplitObject.Plan(serialized);
         (PolicyRepository Repository, PolicyFile File)[] retained = [.. ReleaseBasisRetention.Retained(assessment.Basis)];
-        if (serialized.LongLength > ReleaseBasisRetention.MaximumBasisBytes || basis.Refusal is not null || retained.Any(r => r.File.Bytes.Length > EstateLayout.MaxObjectBytes))
+        if (serialized.LongLength > ReleaseBasisBound || basis.Refusal is not null || retained.Any(r => r.File.Bytes.Length > EstateLayout.MaxObjectBytes))
             throw new InvalidOperationException("The release basis exceeds the estate's object limit; reduce the source selection and check again.");
         long retainedBytes = retained.Sum(r => (long)r.File.Bytes.Length);
         if (retained.Length > ReleaseBasisRetention.MaximumFiles || retainedBytes > ReleaseBasisRetention.MaximumBytes)
