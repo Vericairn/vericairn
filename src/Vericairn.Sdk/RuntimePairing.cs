@@ -181,7 +181,7 @@ public static class RuntimePairing
         using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         byte[]? presented = null;
         TlsScreenStream? screen = null;
-        SslStream tls;
+        SslStream? tls = null;
         try
         {
             await socket.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
@@ -196,8 +196,14 @@ public static class RuntimePairing
             });
             await LocalNetworkTls.AuthenticateAsync(tls, tlsOptions, options.Tls, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is SocketException or IOException or System.Security.Authentication.AuthenticationException || (legacy && exception is OperationCanceledException))
+        catch (Exception exception)
         {
+            // From 0.9.5 (FIX-164) a handshake that failed or was refused closes its TLS stream at once. That is safe on Android too:
+            // the options its TLS refuses between making and initializing its native stream are refused before the handshake starts,
+            // and a stream it initialized releases cleanly.
+            if (tls is not null) await tls.DisposeAsync().ConfigureAwait(false);
+            if (!(exception is SocketException or IOException or System.Security.Authentication.AuthenticationException || (legacy && exception is OperationCanceledException)))
+                throw;
             if (!legacy)
             {
                 if (screen?.RefusedPeer == true || exception is System.Security.Authentication.AuthenticationException)

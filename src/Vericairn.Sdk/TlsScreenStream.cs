@@ -58,8 +58,8 @@ public sealed class TlsScreenStream : Stream
     /// <summary>
     /// The suites the local network allows: ECDHE with ECDSA and AES-GCM, 256 bits first. Null on Windows, whose TLS takes no list
     /// from an application and puts these first in its own order, and from 0.9.5 (FIX-164) on Android, whose .NET TLS takes no list
-    /// either and ends the process when given one; there the runtime chooses from its own list, and an Android client refuses a
-    /// handshake that ended on any other suite before it sends anything.
+    /// either and ends the process when given one; there the runtime chooses from its own list, and a client on either refuses a
+    /// handshake that ended on any other suite before it sends any request.
     /// </summary>
     public static CipherSuitesPolicy? CipherSuites { get; } = Suites();
     private byte[] buffer = new byte[16 * 1024];

@@ -7,6 +7,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
+using Vericairn.Protocol;
 using Vericairn.Sdk;
 
 namespace Vericairn.Daemon.Tests;
@@ -14,9 +15,10 @@ namespace Vericairn.Daemon.Tests;
 /// <summary>
 /// From 0.9.5 (FIX-164): an Android client of the local network. .NET 10's Android TLS takes no cipher-suite list, and when given one
 /// it refuses it only after making its native stream, whose release then ends the process; so an Android client offers none, keeps
-/// every other option, refuses before the handshake an option that would end the process, reports a TLS setup failure as a refused
-/// handshake, and refuses a handshake that ended on a suite outside the local network's list before it sends anything. The runtime
-/// chooses from its own list. The Android option set is made here by naming the platform, so it runs on every test machine.
+/// every other option, refuses before the handshake an option that would end the process, and reports a TLS setup failure as a refused
+/// handshake. The runtime chooses from its own list, and a client that offered no list, on Android or Windows, refuses a handshake that
+/// ended on a suite outside the local network's list before it sends any request. Each platform's option set is made here by naming
+/// the platform, so it runs on every test machine.
 /// </summary>
 [Collection("daemon")]
 public sealed class LocalNetworkAndroidTlsTests : IDisposable
@@ -37,7 +39,7 @@ public sealed class LocalNetworkAndroidTlsTests : IDisposable
         Assert.False(LocalNetworkTls.OffersCipherSuites(LocalNetworkTls.Platform.Windows));
         Assert.True(LocalNetworkTls.OffersCipherSuites(LocalNetworkTls.Platform.Listed));
         Assert.True(LocalNetworkTls.ChecksNegotiatedSuite(LocalNetworkTls.Platform.Android));
-        Assert.False(LocalNetworkTls.ChecksNegotiatedSuite(LocalNetworkTls.Platform.Windows));
+        Assert.True(LocalNetworkTls.ChecksNegotiatedSuite(LocalNetworkTls.Platform.Windows));
         Assert.False(LocalNetworkTls.ChecksNegotiatedSuite(LocalNetworkTls.Platform.Listed));
         Assert.Equal([TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256], TlsScreenStream.AllowedSuites);
 
@@ -120,19 +122,23 @@ public sealed class LocalNetworkAndroidTlsTests : IDisposable
         Assert.Equal("refused", Vericairn.Protocol.ClientFailure.FromException(refused)!.Code);
     }
 
-    [Fact]
-    public async Task AnAndroidClientPairsAndConnectsAndTheRuntimeChoosesFromItsOwnList()
+    [Theory]
+    [InlineData("Android")]
+    [InlineData("Windows")]
+    public async Task AClientThatOffersNoListPairsAndConnectsAndTheRuntimeChoosesFromItsOwnList(string platformName)
     {
+        LocalNetworkTls.Platform platform = Enum.Parse<LocalNetworkTls.Platform>(platformName);
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         string code = harness.Issue(harness.Estate.BuilderId).Code;
         RuntimeConnection connection = await harness.Connections.AddAsync(harness.Address, code,
-            new PairingOptions("Android phone") { Tls = LocalNetworkTls.Platform.Android }, TestContext.Current.CancellationToken);
+            new PairingOptions("Phone") { Tls = platform }, TestContext.Current.CancellationToken);
         Assert.Equal(harness.Estate.Estate.Id, connection.Estate);
 
-        // Mutual TLS with the device's credential, then the runtime identity's proof, with the Android option set.
+        // Mutual TLS with the device's credential, then the runtime identity's proof, with the platform's option set; the suite check
+        // passes because the runtime chose from its own list.
         DeviceRequestSigner signer = harness.Signer(connection);
         using var credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey));
-        await using Stream stream = await LocalNetworkTransport.ConnectAsync(connection, signer, credential, TestContext.Current.CancellationToken, platform: LocalNetworkTls.Platform.Android);
+        await using Stream stream = await LocalNetworkTransport.ConnectAsync(connection, signer, credential, TestContext.Current.CancellationToken, platform: platform);
         var tls = Assert.IsType<SslStream>(stream);
         Assert.Equal(SslProtocols.Tls12, tls.SslProtocol);
         Assert.Contains(tls.NegotiatedCipherSuite, TlsScreenStream.AllowedSuites);
@@ -140,53 +146,40 @@ public sealed class LocalNetworkAndroidTlsTests : IDisposable
         Assert.True(tls.IsMutuallyAuthenticated);
     }
 
-    [Fact]
-    public async Task AnAndroidClientRefusesASuiteOutsideTheLocalNetworksListBeforeSendingAnything()
+    [Theory]
+    [InlineData("Android", false)]
+    [InlineData("Windows", false)]
+    [InlineData("Android", true)]
+    [InlineData("Windows", true)]
+    public async Task AClientThatOffersNoListRefusesASuiteOutsideTheLocalNetworksListBeforeAnyRequest(string platformName, bool pairing)
     {
-        // Windows' TLS takes no list from an application, so no server here can be made to choose another suite.
+        LocalNetworkTls.Platform platform = Enum.Parse<LocalNetworkTls.Platform>(platformName);
+        // Windows' TLS takes no list from an application, so no server on a Windows test machine can be made to choose another suite.
         if (OperatingSystem.IsWindows()) return;
 
         using X509Certificate2 certificate = RuntimeCertificate.Load(Path.Combine(scratch, "stranger"));
         // Suites outside the local network's list, each with ECDSA, as a stranger posing as the runtime could choose.
-        var outside = new CipherSuitesPolicy([TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256]);
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var received = new MemoryStream();
-        Task server = Task.Run(async () =>
-        {
-            using Socket accepted = await listener.AcceptSocketAsync(TestContext.Current.CancellationToken);
-            await using var tls = new SslStream(new NetworkStream(accepted, ownsSocket: false));
-            await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
-            {
-                ServerCertificate = certificate,
-                EnabledSslProtocols = SslProtocols.Tls12,
-                CipherSuitesPolicy = outside,
-            }, TestContext.Current.CancellationToken);
-            try
-            {
-                await tls.CopyToAsync(received, TestContext.Current.CancellationToken);
-            }
-            catch (IOException)
-            {
-                // The client closes without a TLS close notification.
-            }
-        }, TestContext.Current.CancellationToken);
-
-        using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
-        await socket.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        await using var stranger = new Stranger(certificate, new CipherSuitesPolicy([TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256]));
         AuthenticationException refused;
-        await using (var client = new SslStream(new TlsScreenStream(new NetworkStream(socket, ownsSocket: false)), leaveInnerStreamOpen: false))
+        if (pairing)
         {
+            // Pairing reports it as a refusal, sends no hello and closes its TLS stream.
+            ClientRefusedException failure = await Assert.ThrowsAsync<ClientRefusedException>(() => RuntimePairing.PairAsync(stranger.Address, PairingProtocol.NewCode(),
+                new PairingOptions("Phone") { Tls = platform, Timeout = TestTiming.HangTimeout }, TestContext.Current.CancellationToken));
+            refused = Assert.IsType<AuthenticationException>(failure.InnerException);
+        }
+        else
+        {
+            using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+            await socket.ConnectAsync(IPAddress.Loopback, stranger.Port, TestContext.Current.CancellationToken);
+            await using var client = new SslStream(new TlsScreenStream(new NetworkStream(socket, ownsSocket: true)), leaveInnerStreamOpen: false);
             refused = await Assert.ThrowsAsync<AuthenticationException>(() => LocalNetworkTls.AuthenticateAsync(
-                client, LocalNetworkTls.ClientOptions(LocalNetworkTls.Platform.Android, Accept), LocalNetworkTls.Platform.Android, TestContext.Current.CancellationToken));
+                client, LocalNetworkTls.ClientOptions(platform, Accept), platform, TestContext.Current.CancellationToken));
         }
 
-        socket.Dispose();
-        await server.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
-        Assert.Contains("which the local network does not allow", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(0, await stranger.ReceivedAsync());
+        Assert.Contains("which the local network does not allow, so this device sent it no request", refused.Message, StringComparison.Ordinal);
         Assert.True(refused.Message.Contains("CHACHA20", StringComparison.Ordinal) || refused.Message.Contains("AES_128_CBC", StringComparison.Ordinal), refused.Message);
-        Assert.Equal(0, received.Length);
     }
 
     public void Dispose()
@@ -201,6 +194,68 @@ public sealed class LocalNetworkAndroidTlsTests : IDisposable
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// A TLS 1.2 server on loopback for one connection, choosing from the suites it is given, that keeps every byte of application
+    /// data it receives until the client closes.
+    /// </summary>
+    private sealed class Stranger : IAsyncDisposable
+    {
+        private readonly TcpListener listener = new(IPAddress.Loopback, 0);
+        private readonly MemoryStream received = new();
+        private readonly Task served;
+
+        public Stranger(X509Certificate2 certificate, CipherSuitesPolicy suites)
+        {
+            listener.Start();
+            served = Task.Run(async () =>
+            {
+                using Socket accepted = await listener.AcceptSocketAsync(TestContext.Current.CancellationToken);
+                await using var tls = new SslStream(new NetworkStream(accepted, ownsSocket: false));
+                await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+                {
+                    ServerCertificate = certificate,
+                    EnabledSslProtocols = SslProtocols.Tls12,
+                    CipherSuitesPolicy = suites,
+                }, TestContext.Current.CancellationToken);
+                try
+                {
+                    await tls.CopyToAsync(received, TestContext.Current.CancellationToken);
+                }
+                catch (IOException)
+                {
+                    // The client closes without a TLS close notification.
+                }
+            }, TestContext.Current.CancellationToken);
+        }
+
+        public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        public string Address => $"127.0.0.1:{Port}";
+
+        /// <summary>The application data received, once the client has closed the connection.</summary>
+        public async Task<long> ReceivedAsync()
+        {
+            await served.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            return received.Length;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            listener.Stop();
+            listener.Dispose();
+            try
+            {
+                await served.WaitAsync(TestTiming.HangTimeout);
+            }
+            catch (Exception exception) when (exception is SocketException or IOException or AuthenticationException or OperationCanceledException)
+            {
+                // Already observed by the test, or the listener stopped before a client came.
+            }
+
+            await received.DisposeAsync();
+        }
     }
 
     /// <summary>A stream that counts every read and write, has nothing to read, and refuses writes when told to.</summary>

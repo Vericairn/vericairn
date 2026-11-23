@@ -15,8 +15,9 @@ namespace Vericairn.Sdk;
 /// network's cipher suites are offered as a list only where .NET's TLS takes one from an application. Windows' does not, and puts them
 /// first in its own order. Android's refuses one, and in .NET 10 it refuses it only after making its native TLS stream, whose release
 /// then calls a null function pointer and ends the process; the same follows any option it refuses at that point. There the runtime
-/// chooses from its own list, which it always applies where .NET lets it, and an Android client refuses, before it sends anything, a
-/// handshake that ended on any other suite.
+/// chooses from its own list, which it always applies where .NET lets it, and a client that offered no list, on Windows or Android,
+/// refuses a handshake that ended on any other suite before it sends any request: the TLS 1.2 handshake itself, the client
+/// certificate included, has completed by then.
 /// </summary>
 internal static class LocalNetworkTls
 {
@@ -42,8 +43,8 @@ internal static class LocalNetworkTls
     /// <summary>Whether a client on <paramref name="platform"/> offers the local network's cipher suites as a list.</summary>
     public static bool OffersCipherSuites(Platform platform) => platform == Platform.Listed;
 
-    /// <summary>Whether a client on <paramref name="platform"/> checks the suite its handshake ended on before it sends anything.</summary>
-    public static bool ChecksNegotiatedSuite(Platform platform) => platform == Platform.Android;
+    /// <summary>Whether a client on <paramref name="platform"/> checks the suite its handshake ended on before it sends any request: wherever it offered no list.</summary>
+    public static bool ChecksNegotiatedSuite(Platform platform) => !OffersCipherSuites(platform);
 
     /// <summary>
     /// The options of a local-network client on <paramref name="platform"/>: <paramref name="validate"/> sees the runtime's certificate,
@@ -80,7 +81,7 @@ internal static class LocalNetworkTls
     /// Authenticates as a local-network client. An option the platform's TLS refuses after making its native stream is refused here
     /// first; whatever else keeps the platform's TLS from setting up the connection is an <see cref="AuthenticationException"/>, as a
     /// refused handshake is; and on a platform that offered no list, a handshake that ended on a suite outside the local network's is
-    /// refused before anything is sent.
+    /// refused before any request is sent.
     /// </summary>
     public static async Task AuthenticateAsync(SslStream tls, SslClientAuthenticationOptions options, Platform platform, CancellationToken cancellationToken)
     {
@@ -98,7 +99,7 @@ internal static class LocalNetworkTls
 
         if (ChecksNegotiatedSuite(platform) && !TlsScreenStream.AllowedSuites.Contains(tls.NegotiatedCipherSuite))
         {
-            throw new AuthenticationException($"The other end chose the cipher suite {tls.NegotiatedCipherSuite}, which the local network does not allow, so this device sent it nothing.");
+            throw new AuthenticationException($"The other end chose the cipher suite {tls.NegotiatedCipherSuite}, which the local network does not allow, so this device sent it no request.");
         }
     }
 
