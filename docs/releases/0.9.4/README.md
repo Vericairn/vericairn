@@ -72,20 +72,24 @@ Workbench nor the macOS Secure Enclave helper.
   brief judge the estate once per command or request, with each signature verified once
   per process.
 - **Checked changes and releases (CODE-81, FIX-137, FIX-140, FIX-150, FIX-154, FIX-156,
-  FIX-159, CI-08, CI-09):** a checked push refuses the estate's blocked terms in its
-  commits' messages and covers every commit its target does not hold, and its secret scan
-  reads a history checkpoint's inventory as public data; a disclosure hold ends where the
-  release procedure says it does; every file a release's SHA256SUMS names is attached to
-  the release; a record whose identifier another already carries is never read in its
+  FIX-159, FIX-163, CI-08, CI-09):** a checked push refuses the estate's blocked terms in
+  its commits' messages and covers every commit its target does not hold, and its secret
+  scan reads a history checkpoint's inventory as public data; a disclosure hold ends where
+  the release procedure says it does; every file a release's SHA256SUMS names is attached
+  to the release; a release basis past the 8 MiB object limit is retained as a split
+  object of at most 256 MiB and reads as before, where a release before 0.9.4 reports it
+  as unsupported; a record whose identifier another already carries is never read in its
   place, and no record counts because the record that refused it is unread; publishing
   waits for the operator's approval, workflow actions are pinned by repository identity,
   and dependency updates wait a cooldown.
-- **Fixes (FIX-134, FIX-135, FIX-138, FIX-139, FIX-141, FIX-157):** the first authority
-  counts only when its self-admission's signature verifies; export and restore carry the
-  owner's agent instruction files, which the estate check reads for hooks, automatic
-  approvals and secret-like values; the links-resolve check skips code blocks; an
-  acceptance of a work order's current revision accepts its current result; and a
-  `document.drift` finding names the digest pinned and the current one.
+- **Fixes (FIX-134, FIX-135, FIX-138, FIX-139, FIX-141, FIX-157, FIX-165):** the first
+  authority counts only when its self-admission's signature verifies; export and restore
+  carry the owner's agent instruction files, which the estate check reads for hooks,
+  automatic approvals and secret-like values; the links-resolve check skips code blocks;
+  an acceptance of a work order's current revision accepts its current result; a
+  `document.drift` finding names the digest pinned and the current one; and on Windows a
+  batch program (`.cmd`, `.bat`) starts through the system directory's `cmd.exe`, and an
+  absolute path without an extension starts that folder's `.exe`, else its `.com`.
 - **Documentation and MCP (OPS-17, DOCS-38, MCP-07, DOCS-45, DOCS-46, with DOCS-35,
   DOCS-41 and DOCS-48):** the held guides take their changes as fragments; every set
   carries `llms.txt` and `llms-full.txt`; MCP tools carry behavior annotations, and
@@ -124,8 +128,8 @@ installation guide retains.
 
 ## This documentation set
 
-The references and manifest were generated on November 22, 2026 UTC from the Release build
-of `3c7c31c8547e52173e388fc583e24cfd62689ac9`, whose implementation includes the product
+The references and manifest were generated on November 23, 2026 UTC from the Release build
+of `a7a7e5de6863997cf44394c6336ba41216e537b4`, whose implementation includes the product
 changes listed above. They contain 227 commands, 175 API operations and 48 record types,
 with 64 required documents. That commit is reference generation provenance, not the later
 documentation or final release commit. The generated files retain the tool's bytes,
