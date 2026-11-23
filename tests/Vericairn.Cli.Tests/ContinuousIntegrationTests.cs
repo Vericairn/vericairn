@@ -814,16 +814,24 @@ public class ContinuousIntegrationTests
         Assert.DoesNotContain("uses:", gate, StringComparison.Ordinal);
         string step = Block(gate, "- name: Require every job this event runs", 6);
         Assert.Contains("NEEDS: ${{ toJSON(needs) }}\n", step, StringComparison.Ordinal);
+        Assert.Contains("EVENT: ${{ github.event_name }}\n", step, StringComparison.Ordinal);
         Assert.Contains("set -eu\n", step, StringComparison.Ordinal);
-        // The lookup and the plan must pass; a push the queue tested passes with everything else skipped; otherwise every job
-        // the plan runs must pass and every other must be skipped, so a failed, cancelled or unexpected job fails the gate.
+        // The lookup must pass, and a push the queue tested passes with everything else skipped.
         Assert.Contains("          expect queue-tested success\n", step, StringComparison.Ordinal);
         Assert.Contains("          if [ \"$(output queue-tested skip)\" = true ]; then\n", step, StringComparison.Ordinal);
         Assert.Contains("for job in plan workflow-policy build-test remote-ios remote-android package docs-check; do expect \"$job\" skipped; done\n", step, StringComparison.Ordinal);
+        // Every other event but a pull request: the full gate whatever the plan says, every platform's shares numbered from 1.
+        Assert.Contains("          elif [ \"$EVENT\" != pull_request ]; then\n", step, StringComparison.Ordinal);
+        Assert.Contains("for job in plan workflow-policy build-test remote-ios remote-android package; do expect \"$job\" success; done\n            expect docs-check skipped\n", step, StringComparison.Ordinal);
+        Assert.Contains("            if [ \"$planned\" != \"true true false\" ]; then failed=1; fi\n", step, StringComparison.Ordinal);
+        Assert.Contains("            for os in ubuntu-latest macos-latest windows-latest; do\n", step, StringComparison.Ordinal);
+        Assert.Contains("'length > 0 and . == [range(1; length + 1)]'", step, StringComparison.Ordinal);
+        // A pull request: the plan, the workflow policy and whichever of build-test and the documentation check it runs.
         Assert.Contains("            expect plan success\n            expect workflow-policy success\n", step, StringComparison.Ordinal);
         Assert.Contains("on() { if [ \"$(output plan \"$1\")\" = true ]; then echo success; else echo skipped; fi; }\n", step, StringComparison.Ordinal);
         Assert.Contains("            expect build-test \"$(on build)\"\n            expect docs-check \"$(on docs)\"\n", step, StringComparison.Ordinal);
-        Assert.Contains("for job in remote-ios remote-android package; do expect \"$job\" \"$(on full)\"; done\n", step, StringComparison.Ordinal);
+        Assert.Contains("for job in remote-ios remote-android package; do expect \"$job\" skipped; done\n", step, StringComparison.Ordinal);
+        Assert.Contains("            if [ \"$(output plan build)\" = \"$(output plan docs)\" ]; then failed=1; fi\n", step, StringComparison.Ordinal);
         Assert.Contains("            if [ \"$actual\" != \"$2\" ]; then failed=1; fi\n", step, StringComparison.Ordinal);
         Assert.EndsWith("\n          exit \"$failed\"", step.TrimEnd('\n'), StringComparison.Ordinal);
     }
@@ -860,6 +868,9 @@ public class ContinuousIntegrationTests
         using var release = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(github, "rulesets", "release-branches.json")));
         Assert.Equal("~DEFAULT_BRANCH", main.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("include")[0].GetString());
         Assert.Equal("refs/heads/release/*", release.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("include")[0].GetString());
+        // release/0.3 predates ci-gate and the secret scan, so the rules would leave it unmergeable; it stays outside them.
+        Assert.Equal(["refs/heads/release/0.3"], release.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("exclude").EnumerateArray().Select(item => item.GetString()));
+        Assert.Empty(main.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("exclude").EnumerateArray());
         Assert.Equal(Rules(main), Rules(release));
         string checks = Rules(main).Single(rule => rule.StartsWith("{\"type\":\"required_status_checks\"", StringComparison.Ordinal));
         Assert.Contains("\"required_status_checks\":[{\"context\":\"ci-gate\",\"integration_id\":15368},{\"context\":\"secret-scan\",\"integration_id\":15368}]", checks, StringComparison.Ordinal);
@@ -883,7 +894,7 @@ public class ContinuousIntegrationTests
         Assert.Contains("\npermissions:\n  contents: read\n", workflow, StringComparison.Ordinal);
         string job = Block(workflow, "runner-failures:", 2);
         Assert.Contains("\n    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 && github.event.workflow_run.event != 'merge_group'\n", job, StringComparison.Ordinal);
-        Assert.Contains("\n    permissions:\n      actions: write\n      checks: read\n    steps:\n", job, StringComparison.Ordinal);
+        Assert.Contains("\n    permissions:\n      actions: write\n      checks: read\n      contents: read\n    steps:\n", job, StringComparison.Ordinal);
         // Only the default branch's own scripts run: the checkout names no other ref or repository.
         string checkout = Assert.Single(Steps(job), step => step.Contains("uses: actions/checkout@", StringComparison.Ordinal));
         Assert.DoesNotContain("ref:", checkout, StringComparison.Ordinal);
@@ -893,6 +904,11 @@ public class ContinuousIntegrationTests
         string script = Read(Path.Combine(RepositoryRoot(), ".github", "scripts", "runner-failures.py"));
         Assert.Contains("rerun-failed-jobs", script, StringComparison.Ordinal);
         Assert.Contains("if args.attempt != 1:", script, StringComparison.Ordinal);
+        // A cancelled or timed-out job, which GitHub's re-run of failed jobs also takes, refuses the re-run; so does a newer
+        // attempt or, for a pull request, a newer run of its branch.
+        Assert.Contains("SETTLED = (\"success\", \"skipped\")", script, StringComparison.Ordinal);
+        Assert.Contains("unsettled = [job for job in jobs if job.get(\"name\") != GATE and job.get(\"conclusion\") not in SETTLED]", script, StringComparison.Ordinal);
+        Assert.Contains("refused = still_current(args.repository, args.run, args.attempt)", script, StringComparison.Ordinal);
         Assert.Contains("    if not all(is_setup(step) for step in reached):\n        return None\n", script, StringComparison.Ordinal);
     }
 

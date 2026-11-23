@@ -7,7 +7,9 @@
       "include": [
         "refs/heads/release/*"
       ],
-      "exclude": []
+      "exclude": [
+        "refs/heads/release/0.3"
+      ]
     }
   },
   "rules": [

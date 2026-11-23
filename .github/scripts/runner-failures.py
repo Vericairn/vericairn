@@ -7,8 +7,11 @@ A job is a runner failure when the runner ended it while it was still setting up
 the change: every step up to the one that ended it is a setup step (the job's own set-up, the checkout, the .NET SDK, a
 locked restore, a pinned tool or workload install), and GitHub's annotations say the process was killed (exit code 137) or
 the runner was lost. A test failure, a build failure, a timeout or a cancellation is never one, and neither is a runner
-lost once a job had begun to build or test. A run is re-run only when every failed job is a runner failure, only its first
-attempt, and only its failed jobs and the jobs that need them (ci-gate among them), so nothing a test decided is retried.
+lost once a job had begun to build or test. A run is re-run only when every job that neither passed nor was skipped, ci-gate
+apart, is a runner failure: GitHub's re-run of failed jobs also re-runs cancelled and timed-out ones, so a run holding one is
+never re-run. Only a first attempt is re-run, only if it is still the run's latest attempt, and a pull request's run only if no
+newer run of its branch exists, since a re-run joins the pull request's concurrency group and would cancel the newer head's run.
+It re-runs the failed jobs and the jobs that need them (ci-gate among them), so nothing a test decided is retried.
 
 Exit status: 0 when every failed job of the attempt is a runner failure (re-run with --rerun), 3 when not, 1 when GitHub
 could not be read.
@@ -19,6 +22,7 @@ import json
 import re
 import subprocess
 import sys
+from urllib.parse import quote
 
 # Steps that run before anything of the change is built or tested, by the name GitHub's jobs API gives them.
 SETUP_STEPS = frozenset({
@@ -37,6 +41,7 @@ RUNNER_ENDED = re.compile(r"exit code 137\b|lost communication with the server|r
                           r"|was not acquired by Runner|encountered an error while running your job", re.IGNORECASE)
 # The aggregate check fails because the jobs it needs failed; it is re-run with them, never judged on its own.
 GATE = "ci-gate"
+SETTLED = ("success", "skipped")
 NOT_RETRYABLE = 3
 
 
@@ -70,16 +75,36 @@ def runner_failure(job, annotations):
 
 
 def verdict(jobs, annotations):
-    """(retry, lines): retry only when there is a failed job and every one but the gate is a runner failure."""
-    failed = [job for job in jobs if job.get("conclusion") == "failure" and job.get("name") != GATE]
-    lines, retry = [], bool(failed)
-    for job in failed:
-        reason = runner_failure(job, annotations.get(job["id"], []))
+    """(retry, lines): retry only when some job, the gate apart, neither passed nor was skipped, and every such job failed
+    and is a runner failure. A cancelled or timed-out job, which a re-run of failed jobs would also take, refuses it."""
+    unsettled = [job for job in jobs if job.get("name") != GATE and job.get("conclusion") not in SETTLED]
+    lines, retry = [], bool(unsettled)
+    for job in unsettled:
+        if job.get("conclusion") == "failure":
+            reason = runner_failure(job, annotations.get(job["id"], []))
+            lines.append(f"{job.get('name')}: {reason}" if reason else f"{job.get('name')}: not a runner failure")
+        else:
+            reason = None
+            lines.append(f"{job.get('name')}: ended {job.get('conclusion')}, which is never re-run")
         retry = retry and reason is not None
-        lines.append(f"{job.get('name')}: {reason}" if reason else f"{job.get('name')}: not a runner failure")
-    if not failed:
+    if not unsettled:
         lines.append("No job failed apart from the gate.")
     return retry, lines
+
+
+def still_current(repository, run, attempt):
+    """None when the run may be re-run now, else why not: it must be complete, still at the judged attempt, and for a pull
+    request the newest run of its branch."""
+    body = gh(f"repos/{repository}/actions/runs/{run}")
+    if body.get("status") != "completed" or body.get("run_attempt") != attempt:
+        return f"run {run} is at attempt {body.get('run_attempt')} ({body.get('status')}), not the judged attempt {attempt}"
+    if body.get("event") == "pull_request":
+        branch = quote(str(body.get("head_branch") or ""), safe="")
+        newest = gh(f"repos/{repository}/actions/workflows/{body['workflow_id']}/runs?event=pull_request&branch={branch}&per_page=1")
+        latest = (newest.get("workflow_runs") or [{}])[0].get("id")
+        if latest != run:
+            return f"run {latest} is newer for branch {body.get('head_branch')}; re-running {run} would cancel it"
+    return None
 
 
 def gh(*args):
@@ -118,12 +143,20 @@ def main():
     for line in lines:
         print(line)
     if not retry:
-        print("Not re-run: a failed job is not a runner failure.")
+        print("Not re-run: a job that did not pass is not a runner failure.")
         return NOT_RETRYABLE
     if args.attempt != 1:
         print(f"Not re-run: attempt {args.attempt} is already the re-run.")
         return NOT_RETRYABLE
     if args.rerun:
+        try:
+            refused = still_current(args.repository, args.run, args.attempt)
+        except (RuntimeError, KeyError, TypeError, ValueError, IndexError) as error:
+            print(f"Not re-run: {error}")
+            return 1
+        if refused:
+            print(f"Not re-run: {refused}.")
+            return NOT_RETRYABLE
         try:
             subprocess.run(["gh", "api", "--method", "POST", f"repos/{args.repository}/actions/runs/{args.run}/rerun-failed-jobs"],
                            check=True, capture_output=True, text=True)

@@ -204,15 +204,31 @@ and `release-branches.json` gives `refs/heads/release/*` the same rules: no dele
 or force push, pull requests merged by merge commit, the same required checks and
 merge queue.
 
+A release branch these rules cover must carry this `ci.yml` and `secret-scan.yml`:
+without them its pull requests never report `ci-gate` or `secret-scan` and its queue
+groups never start, so it could not be merged into, nor deleted. The only existing
+release branch, `release/0.3`, predates both and is excluded; it keeps no rules, as
+today. A release branch cut before this change merges needs the two workflows first,
+or an exclusion of its own.
+
+To apply, with the queue empty and the change that adds `ci-gate` having passed its
+pull request run:
+
 ```sh
+gh api repos/Vericairn/vericairn/rulesets/27077099 > <scratch>/default-branch-merge-queue.live.json
 gh api --method PUT repos/Vericairn/vericairn/rulesets/27077099 --input .github/rulesets/default-branch-merge-queue.json
 gh api --method POST repos/Vericairn/vericairn/rulesets --input .github/rulesets/release-branches.json
 ```
 
-Apply the first once the change that adds `ci-gate` has passed its pull request run
-and before it is queued; a pull request opened earlier reports `ci-gate` once it is
-updated with the branch. The queue builds up to two groups at once; each full gate
-wants five macOS runners, so two groups share them and take longer, and building one
+Then queue that change; if its group fails, restore the saved ruleset with the same
+PUT. Before the PUT its own pull request cannot be queued, since its run has no
+macOS legs, which the live ruleset requires. A pull request whose last run used the
+older `ci.yml` reports no `ci-gate` and can be queued only after a new push, or a
+close and reopen, builds a fresh merge commit: re-running its old run reuses the old
+merge commit. An entry already queued at the PUT was built with the older `ci.yml`
+and holds the queue until the 90-minute check timeout, hence the empty queue. Every
+misstep fails closed. The queue builds up to two groups at once; each full gate wants
+the five macOS runners, so two groups share them and take longer, and building one
 group at a time (`max_entries_to_build: 1`) keeps a group's run at its own length.
 
 ## Shards
@@ -229,8 +245,11 @@ per platform from the same seconds, without a reserve. Every share is checked ag
 test discovery before it runs, so every class runs exactly once per platform.
 
 Each leg uploads its xUnit XML reports as `test-reports-<platform>-<share>` for 14
-days. To rebalance, download a full gate's reports and write their times into the
-plan; review the change like any other:
+days. To rebalance, download the reports of a full gate, a `merge_group` or push run
+of `ci.yml` and never a pull request's, which holds Linux's only and ran that pull
+request's code, and write their times into the plan; review the change like any
+other. Nothing reads the reports otherwise, and the plan only weighs the classes
+discovery lists, so a bad time can unbalance the shares but never drop a class:
 
 ```sh
 gh run download <run> --pattern 'test-reports-*' --dir <reports>
@@ -254,21 +273,37 @@ change. The queue still runs the full gate.
 
 GitHub has no job-level retry. `retry.yml` runs when a `ci.yml` run completes and
 fails, from the default branch's own files, and re-runs that run's failed jobs once
-(with the jobs that need them, `ci-gate` among them) when every failed job is a
-runner failure: GitHub's annotations say the process was killed (exit code 137) or
-the runner was lost, shut down or never acquired, and every step up to the one that
-ended the job is a setup step (its set-up, the checkout, the .NET SDK, a locked
-restore, a pinned tool or workload install). A test or build failure, a timeout or a
-cancellation is never re-run, nor is a second attempt. `runner-failures.py` decides;
-its exit status is 0 for a run only runners failed, 3 otherwise.
+(with the jobs that need them, `ci-gate` among them) when every job that neither
+passed nor was skipped, `ci-gate` apart, is a runner failure: GitHub's annotations
+say the process was killed (exit code 137) or the runner was lost, shut down or never
+acquired, and every step up to the one that ended the job is a setup step (its
+set-up, the checkout, the .NET SDK, a locked restore, a pinned tool or workload
+install). A test or build failure, a timeout or a cancellation is never re-run, and
+since GitHub's re-run of failed jobs also takes timed-out and cancelled jobs, a run
+holding one is not re-run at all. Only a first attempt is re-run, and only while it
+is still the run's latest; a pull request's run only while no newer run of its branch
+exists, since the re-run joins the pull request's concurrency group and would cancel
+the newer head's run. `runner-failures.py` decides; its exit status is 0 for a run
+only runners failed, 3 otherwise. A pull request can earn its own run one re-run by
+naming a step like a setup step or making a setup step report exit code 137 (a restore
+target can): one more attempt of its own code with its own token, which the queue's
+full gate still follows.
 
 A queue group's run is not re-run: when its `ci-gate` fails, the queue has already
-removed the pull request. The builder's queue script handles that case: when a pull
-request leaves the queue without merging, it runs `runner-failures.py` on the group's
-`ci.yml` run and, if it exits 0 and the pull request has not been queued again for
-this reason, queues it once more. It waits on the `ci-gate` check, not on
-`build-test`, since a pull request runs Linux shares only, and on a pull request run
-that failed it waits for `retry.yml`'s second attempt when the script exits 0.
+removed the pull request. The builder's queue script (`merge_queue.zsh`) handles it:
+
+- It waits on the pull request's `ci-gate` and `secret-scan` checks, not on
+  `build-test`, since a pull request runs Linux shares only and a docs-only one none.
+  When `ci-gate` fails, it runs `runner-failures.py` on that `ci.yml` run without
+  `--rerun`; on exit 0 it waits for `retry.yml`'s second attempt, otherwise it stops.
+- When the pull request leaves the queue without merging, it finds the group's run:
+  the latest `merge_group` run of `ci.yml` whose `head_branch` starts
+  `gh-readonly-queue/<branch>/pr-<number>-`. It queues the pull request once more only
+  if that run concluded `failure`, the group's `secret-scan` run passed, the pull
+  request is still open and mergeable, it has not been queued again for this reason,
+  and `runner-failures.py` exits 0 on the run. A removal for any other reason, a
+  failed secret scan, a conflict or a cancelled group, is never re-queued, even when a
+  `ci.yml` job also had a runner failure.
 
 ## Superseded runs
 

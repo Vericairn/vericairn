@@ -81,15 +81,24 @@ class VerdictTests(unittest.TestCase):
                 job(2, "build-test (windows-latest, 2)", build_test("Test, with a secret service"))]
         self.assertFalse(rf["verdict"](jobs, {1: [KILLED], 2: [TESTS_FAILED]})[0])
 
-    def test_the_gate_and_jobs_that_did_not_fail_are_not_judged(self):
+    def test_the_gate_and_jobs_that_passed_or_were_skipped_are_not_judged(self):
         jobs = [job(1, "build-test (windows-latest, 1)", build_test("Restore (locked)")),
                 job(2, "ci-gate", [step(1, "Set up job"), step(2, "Require every job this event runs", "failure")]),
                 job(3, "build-test (windows-latest, 2)", build_test("Complete job"), conclusion="success"),
-                job(4, "package / package", [], conclusion="skipped"),
-                job(5, "remote-ios", build_test("Build", conclusion="cancelled"), conclusion="cancelled")]
+                job(4, "package / package", [], conclusion="skipped")]
         retry, lines = rf["verdict"](jobs, {1: [KILLED]})
         self.assertTrue(retry)
         self.assertEqual(1, len(lines))
+
+    def test_a_cancelled_or_timed_out_job_beside_a_runner_failure_refuses_the_retry(self):
+        # A re-run of failed jobs would re-run it too, and a timeout or cancellation is never re-run.
+        for conclusion in ("cancelled", "timed_out", "action_required", None):
+            with self.subTest(conclusion=conclusion):
+                jobs = [job(1, "build-test (macos-latest, 1)", build_test("Restore (locked)")),
+                        job(5, "build-test (windows-latest, 3)", build_test("Test, with a secret service", conclusion="cancelled"), conclusion=conclusion)]
+                retry, lines = rf["verdict"](jobs, {1: [KILLED], 5: [LOST]})
+                self.assertFalse(retry)
+                self.assertIn(f"build-test (windows-latest, 3): ended {conclusion}, which is never re-run", lines)
 
     def test_a_run_whose_only_failure_is_the_gate_is_not_retried(self):
         self.assertFalse(rf["verdict"]([job(2, "ci-gate", [])], {})[0])
@@ -119,8 +128,15 @@ FAKE = textwrap.dedent('''\
         sys.stderr.write("HTTP 502"); sys.exit(1)
     if "/jobs?" in route:
         print(json.dumps({"total_count": len(scenario["jobs"]), "jobs": scenario["jobs"]})); sys.exit(0)
-    identifier = route.split("/check-runs/")[1].split("/")[0]
-    print(json.dumps([{"message": message} for message in scenario["annotations"].get(identifier, [])]))
+    if "/check-runs/" in route:
+        identifier = route.split("/check-runs/")[1].split("/")[0]
+        print(json.dumps([{"message": message} for message in scenario["annotations"].get(identifier, [])])); sys.exit(0)
+    if "/actions/workflows/" in route:
+        open(os.path.join(state, "listed"), "a").write(route + "\\n")
+        print(json.dumps({"workflow_runs": [{"id": scenario.get("newest", 42)}]})); sys.exit(0)
+    run = {"id": 42, "status": "completed", "run_attempt": 1, "event": "push", "head_branch": "main", "workflow_id": 7}
+    run.update(scenario.get("run", {}))
+    print(json.dumps(run))
     ''')
 
 
@@ -165,6 +181,25 @@ class ScriptTests(unittest.TestCase):
     def test_without_rerun_it_only_judges(self):
         scenario = {"jobs": [job(7, "remote-ios", build_test("Restore (locked)"))], "annotations": {"7": [LOST]}}
         self.assertEqual((0, []), (lambda c, _, r: (c, r))(*self.run_script(scenario)))
+
+    def test_a_run_rerun_meanwhile_or_still_running_is_not_rerun_again(self):
+        scenario = {"jobs": [job(7, "remote-ios", build_test("Restore (locked)"))], "annotations": {"7": [LOST]}}
+        for run in ({"run_attempt": 2}, {"status": "in_progress"}):
+            with self.subTest(run=run):
+                code, out, reruns = self.run_script(dict(scenario, run=run), "--rerun")
+                self.assertEqual((3, []), (code, reruns))
+                self.assertIn("not the judged attempt 1", out)
+
+    def test_an_older_pull_request_run_is_not_rerun_over_its_newer_head(self):
+        scenario = {"jobs": [job(7, "build-test (ubuntu-latest, 2)", build_test("Restore (locked)"))], "annotations": {"7": [KILLED]},
+                    "run": {"event": "pull_request", "head_branch": "work/fix 1"}}
+        code, out, reruns = self.run_script(dict(scenario, newest=43), "--rerun")
+        self.assertEqual((3, []), (code, reruns))
+        self.assertIn("run 43 is newer for branch work/fix 1", out)
+        self.assertEqual(["repos/example/repo/actions/workflows/7/runs?event=pull_request&branch=work%2Ffix%201&per_page=1"],
+                         (self.root / "listed").read_text().splitlines())
+        code, _, reruns = self.run_script(scenario, "--rerun")
+        self.assertEqual((0, ["repos/example/repo/actions/runs/42/rerun-failed-jobs"]), (code, reruns))
 
     def test_an_unreadable_run_reruns_nothing(self):
         code, out, reruns = self.run_script({"broken": True}, "--rerun")
