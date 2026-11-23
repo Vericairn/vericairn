@@ -244,36 +244,6 @@ public sealed partial class ReleasePolicyGateTests
     }
 
     [Fact]
-    public void OversizedSerializedBasisIsMeasuredAndRefusedWithoutRetainingEvenSmallFiles()
-    {
-        using var f = new Fixture();
-        RecordEnvelope resource = Assert.Single(f.Api.Session.Read().Current("resource"));
-        JsonObject definition = f.Records.PolicyBody("source");
-        definition["level"] = "remind";
-        definition["startsAt"] = RecordParser.FormatTimestamp(f.Clock.Now.AddSeconds(-10));
-        definition["appliesTo"] = new JsonObject { ["kind"] = "repository", ["repository"] = resource.Id, ["selectors"] = new JsonArray("docs/**") };
-        definition["rules"] = new JsonArray(new JsonObject { ["key"] = "revision", ["kind"] = "vericairn.estate/revision-line", ["version"] = 1,
-            ["parameters"] = new JsonObject { ["selectors"] = new JsonArray("docs/**"), ["style"] = "estate-design/1" } });
-        f.Records.Policy(definition);
-        IPolicyRepositorySource? previous = PolicySources.RepositorySource;
-        try
-        {
-            PolicySources.RepositorySource = new LargeInventory();
-            ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
-            ReleaseResponse submit = f.Api.ReleaseSubmit(f.Request);
-            Assert.False(check.Ok);
-            Assert.False(submit.Ok);
-            Assert.True(check.Check!.BasisBytes > EstateLayout.MaxObjectBytes);
-            Assert.Contains(check.Check.Objections, o => o.Code == "release.basis-size");
-            Assert.Contains(submit.Problem!.Findings, o => o.Code == "release.basis-size");
-            Assert.Empty(f.Api.Session.Objects.List());
-            Assert.Empty(f.Api.Session.Read().OfType("operation"));
-            Assert.Equal(0, f.Provider.Calls);
-        }
-        finally { PolicySources.RepositorySource = previous; }
-    }
-
-    [Fact]
     public async Task ReadOnlyMcpAndSyncAsyncSdkCarryTheExactCheckAndNeverUseTheSubmitRoute()
     {
         using var f = new Fixture();

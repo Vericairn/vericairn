@@ -35,7 +35,8 @@ internal static class WorkspaceSetup
     {
         ArgumentNullException.ThrowIfNull(configuration);
         // From 0.9.4 (FIX-161) a relative executable with a directory part (./scripts/setup.sh) is the workspace's file, by its absolute
-        // path; a bare name is found in an absolute directory of PATH, as every program is.
+        // path; a bare name is found in an absolute directory of PATH, as every program is. From 0.9.4 (FIX-165) a batch program runs
+        // through cmd.exe inside the same job, and its exit code is the script's.
         var info = new ProcessStartInfo(ProgramPath.InDirectory(configuration.Command[0], workspace))
         {
             WorkingDirectory = workspace, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
