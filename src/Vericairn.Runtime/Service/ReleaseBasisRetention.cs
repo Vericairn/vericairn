@@ -20,6 +20,12 @@ internal static class ReleaseBasisRetention
     /// <summary>The most source bytes one basis retains as objects, 64 MiB.</summary>
     internal const long MaximumBytes = 64L * 1024 * 1024;
 
+    /// <summary>
+    /// The longest basis serialization retained and read, 256 MiB (FIX-163): 32 objects of the estate's object limit. Admission refuses a
+    /// longer basis before anything is written, and the basis reader refuses a split basis claiming more before it reads any part.
+    /// </summary>
+    internal const long MaximumBasisBytes = 256L * 1024 * 1024;
+
     /// <summary>Codes of the objections that measure what a basis would write; a basis that draws one is never retained.</summary>
     internal static readonly IReadOnlySet<string> SizeCodes = new HashSet<string>(StringComparer.Ordinal)
     {

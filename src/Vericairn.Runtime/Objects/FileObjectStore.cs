@@ -6,7 +6,7 @@ using Vericairn.Records.Hashing;
 namespace Vericairn.Runtime.Objects;
 
 /// <summary>Objects as files named by their hash in one directory, written atomically; the repository's objects/ directory uses this layout.</summary>
-public sealed class FileObjectStore : IObjectStore
+public sealed class FileObjectStore : IObjectStore, IBoundedObjectReads
 {
     private readonly string directory;
 
@@ -99,6 +99,29 @@ public sealed class FileObjectStore : IObjectStore
     /// <inheritdoc />
     public void Dispose()
     {
+    }
+
+    long? IBoundedObjectReads.Length(string hash)
+    {
+        var info = new FileInfo(PathOf(hash));
+        return info.Exists && info.LinkTarget is null ? info.Length : null;
+    }
+
+    bool IBoundedObjectReads.ReadExactly(string hash, Span<byte> destination)
+    {
+        string path = PathOf(hash);
+        try
+        {
+            if (new FileInfo(path).LinkTarget is not null) return false;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan);
+            if (stream.Length != destination.Length) return false;
+            stream.ReadExactly(destination);
+            return true;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or EndOfStreamException)
+        {
+            return false;
+        }
     }
 
     private static string Hex(string hash) => hash[ContentHash.Prefix.Length..];

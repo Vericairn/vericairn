@@ -51,6 +51,26 @@ public sealed class ReleaseBasisFixture : IDisposable
 
     public string Store() => Api.Session.Objects.Put(JsonSerializer.SerializeToUtf8Bytes(Stored, ProtocolJson.Options));
 
+    /// <summary>
+    /// Stores the basis as one past the object limit is retained (FIX-163): its documents padded so that it passes the limit, its bytes
+    /// cut into parts of exactly the limit, each an object, and a canonical root naming them in order with the whole basis's length and
+    /// digest, written here independently of the writer. Returns the root's hash, the parts' hashes and the padded documents.
+    /// </summary>
+    public (string Root, IReadOnlyList<string> Parts, IReadOnlyList<string> Documents) StoreInParts()
+    {
+        string[] documents = ["Padding that takes the retained basis past the object limit: " + new string('x', (int)EstateLayout.MaxObjectBytes)];
+        Stored["documents"] = new JsonArray([.. documents.Select(d => (JsonNode)d)]);
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(Stored, ProtocolJson.Options);
+        List<string> parts = [];
+        for (long offset = 0; offset < bytes.LongLength; offset += EstateLayout.MaxObjectBytes)
+            parts.Add(Api.Session.Objects.Put(bytes.AsSpan((int)offset, (int)Math.Min(EstateLayout.MaxObjectBytes, bytes.LongLength - offset))));
+        return (StoreRoot(bytes.LongLength, ContentHash.Sha256(bytes), parts), parts, documents);
+    }
+
+    /// <summary>Stores the canonical root naming the given parts in order, with the given length and digest of their joined bytes.</summary>
+    public string StoreRoot(long bytes, string digest, IEnumerable<string> parts) => Api.Session.Objects.Put(System.Text.Encoding.UTF8.GetBytes(
+        $"{{\"bytes\":{bytes},\"digest\":\"{digest}\",\"format\":\"vericairn.split-object/1\",\"parts\":[{string.Join(",", parts.Select(p => "\"" + p + "\""))}]}}"));
+
     public void LoseObject(string hash, bool corrupted)
     {
         if (corrupted)
