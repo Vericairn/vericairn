@@ -308,6 +308,125 @@ public class ContainedProcessTests
         }
     }
 
+    [Fact]
+    public void AWindowsStartNamesTheProgramOrForABatchProgramTheSystemsCmdAndARefusedOneLooksForNothing()
+    {
+        // From 0.9.4 (FIX-165), on every platform: what a Windows start passes to CreateProcessW.
+        (string application, string command) = ContainedProcess.WindowsCommandLine(@"C:\Program Files\Tool\tool.exe", ["a b", "x\"y", @"C:\dir\"],
+            () => throw new InvalidOperationException("A program needs no interpreter."));
+        Assert.Equal(@"C:\Program Files\Tool\tool.exe", application);
+        Assert.Equal("\"C:\\Program Files\\Tool\\tool.exe\" \"a b\" \"x\\\"y\" \"C:\\dir\\\\\"", command);
+
+        (application, command) = ContainedProcess.WindowsCommandLine(@"C:\script dir\probe.CMD", ["a b", "x\"y"], () => @"C:\Windows\System32\cmd.exe");
+        Assert.Equal(@"C:\Windows\System32\cmd.exe", application);
+        Assert.Equal("\"C:\\Windows\\System32\\cmd.exe\" /d /e:on /v:off /s /c \"\"C:\\script dir\\probe.CMD\" \"a b\" \"x\"\"y\"\"", command);
+
+        Assert.Throws<Vericairn.Records.Processes.BatchArgumentRefusedException>(() => ContainedProcess.WindowsCommandLine(@"C:\tools\probe.bat", ["a b", "100%"],
+            () => throw new InvalidOperationException("No interpreter is looked for.")));
+    }
+
+    // From 0.9.4 (FIX-165): a batch program in a folder whose name has a space runs through cmd.exe inside the job, receives its
+    // arguments, gives its exit code, and leaves a descendant the job still holds and ends.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task OnWindowsABatchProgramRunsInsideTheJobWithItsArgumentsAndItsExitCode(int code)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "A batch program runs on Windows only; the command it is given is checked on every platform.");
+        string root = Directory.CreateTempSubdirectory("vericairn-batch-").FullName;
+        try
+        {
+            string folder = Directory.CreateDirectory(Path.Combine(root, "script dir")).FullName;
+            string report = Path.Combine(root, "given.jsonl");
+            string child = Path.Combine(root, "descendant.jsonl");
+            // It records %~1 and %2 itself, hands %* to the stand-in harness, which records what it reads the C runtime's way, starts
+            // a descendant and waits until it runs, and exits with the code.
+            string script = BatchScript.Write(folder, "probe.cmd",
+            [
+                "@echo off",
+                ">\"%~dp0one.txt\" echo(%~1",
+                ">\"%~dp0two.txt\" echo(%2",
+                BatchScript.Line(FakeHarness.Command("generic", report)) + " %*",
+                .. BatchScript.Descendant(child),
+                $"exit /b {code}",
+            ]);
+            var info = new ProcessStartInfo(script) { WorkingDirectory = root, ArgumentList = { "a b", "x\"y" } };
+
+            ContainedProcess process = ContainedProcess.Start(info);
+            Task drained = Task.WhenAll(process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken), process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken));
+            try
+            {
+                Assert.True(process.WaitForExit(TestTiming.HangTimeout));
+                Assert.Equal(code, process.ExitCode);
+                Assert.Equal(["a b", "x\"y"], Assert.Single(FakeHarness.Reports(report))["arguments"]!.AsArray().Select(a => a!.GetValue<string>()));
+                Assert.Equal("a b", File.ReadAllText(Path.Combine(folder, "one.txt")).TrimEnd('\r', '\n'));
+                Assert.Equal("\"x\"\"y\"", File.ReadAllText(Path.Combine(folder, "two.txt")).TrimEnd('\r', '\n'));
+
+                // cmd.exe has exited; the job still holds the script's descendant, and ends it.
+                using Process descendant = BatchScript.DescendantProcess(child);
+                Assert.False(process.BoundaryExited());
+                process.Signal(force: true);
+                Assert.True(descendant.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds), "The job did not end the script's descendant.");
+                await drained.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            }
+            finally
+            {
+                if (!process.WaitForExit(TimeSpan.Zero) || !process.BoundaryExited()) process.Signal(force: true);
+                process.Close();
+            }
+        }
+        finally
+        {
+            WorkspaceCleanup.Delete(root);
+        }
+    }
+
+    [Fact]
+    public async Task OnWindowsABatchProgramCmdCannotBeGivenAsDataCreatesNothing()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "A batch program runs on Windows only; the refusals are checked on every platform.");
+        string root = Directory.CreateTempSubdirectory("vericairn-batch-").FullName;
+        try
+        {
+            string marker = Path.Combine(root, "ran.txt");
+            string script = BatchScript.Write(root, "probe.cmd", $">\"{marker}\" echo ran", "exit /b 0");
+            string percent = BatchScript.Write(Directory.CreateDirectory(Path.Combine(root, "100%")).FullName, "probe.cmd", $">\"{marker}\" echo ran", "exit /b 0");
+            var refused = new List<(string Script, string[] Arguments)>
+            {
+                (script, ["100%"]), (script, ["a b", "%PATH%"]), (script, ["a\nb"]), (script, ["a\rb"]), (script, ["a\u001Ab"]),
+                (script, [new string('a', Vericairn.Records.Processes.ProgramPath.CommandLineLimit)]), (percent, ["a b"]),
+            };
+            foreach ((string program, string[] arguments) in refused)
+            {
+                var info = new ProcessStartInfo(program) { WorkingDirectory = root };
+                foreach (string argument in arguments) info.ArgumentList.Add(argument);
+                System.ComponentModel.Win32Exception failure = Assert.Throws<Vericairn.Records.Processes.BatchArgumentRefusedException>(() => ContainedProcess.Start(info));
+                Assert.Equal(160, failure.NativeErrorCode);
+                Assert.False(File.Exists(marker), "The batch program ran.");
+            }
+
+            // The same program with arguments cmd.exe reads as data runs, and leaves the marker.
+            var accepted = new ProcessStartInfo(script) { WorkingDirectory = root, ArgumentList = { "a b", "&|<>^()!", "x\"y" } };
+            ContainedProcess process = ContainedProcess.Start(accepted);
+            try
+            {
+                Task drained = Task.WhenAll(process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken), process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken));
+                Assert.True(process.WaitForExit(TestTiming.HangTimeout));
+                Assert.Equal(0, process.ExitCode);
+                await drained.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+                Assert.True(File.Exists(marker));
+            }
+            finally
+            {
+                process.Close();
+            }
+        }
+        finally
+        {
+            WorkspaceCleanup.Delete(root);
+        }
+    }
+
     private static ContainedProcess Start(RunEstate run, string scenario, string? stop = null)
     {
         List<string> command = FakeHarness.Command(scenario, run.Report(scenario));

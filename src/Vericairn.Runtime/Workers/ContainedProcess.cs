@@ -52,13 +52,46 @@ internal sealed class ContainedProcess
     /// <see cref="ProgramPath"/> resolves for its <see cref="ProcessStartInfo.FileName"/>; one that cannot be resolved throws
     /// <see cref="ProgramNotFoundException"/>, a <see cref="Win32Exception"/>, before anything is created. Its environment's PATH, when
     /// it is this process's own, loses its empty and relative entries (<see cref="ProgramPath.NarrowSearchPath(ProcessStartInfo)"/>).
+    /// From 0.9.4 (FIX-165), on Windows a batch program starts through the system directory's cmd.exe (<see cref="WindowsCommandLine"/>),
+    /// which the job contains with everything the script starts; one whose path or arguments cmd.exe cannot be given as data throws
+    /// <see cref="BatchArgumentRefusedException"/>, a <see cref="Win32Exception"/>, before anything is created.
     /// </summary>
     public static ContainedProcess Start(ProcessStartInfo info)
     {
         ArgumentNullException.ThrowIfNull(info);
         string program = ProgramPath.Resolve(info.FileName);
+        if (OperatingSystem.IsWindows())
+        {
+            (string application, string command) = WindowsCommandLine(program, info.ArgumentList, ProgramPath.CommandInterpreter);
+            ProgramPath.NarrowSearchPath(info);
+            return StartWindows(info, application, command);
+        }
+
         ProgramPath.NarrowSearchPath(info);
-        return OperatingSystem.IsWindows() ? StartWindows(info, program) : StartUnix(info, program);
+        return StartUnix(info, program);
+    }
+
+    /// <summary>
+    /// The application name and command line a Windows start of <paramref name="program"/>, a resolved absolute path, passes to
+    /// CreateProcessW. A program is its own application name, so nothing is searched for, and the command line is its path and its
+    /// arguments, each quoted the C runtime's way. From 0.9.4 (FIX-165) a batch program, which Windows runs only through cmd.exe, has
+    /// the interpreter <paramref name="interpreter"/> gives as its application name, and the command line names that interpreter,
+    /// quoted, before the command <see cref="ProgramPath.BatchArguments"/> writes; that command is written, or refused, before the
+    /// interpreter is looked for.
+    /// </summary>
+    internal static (string Application, string CommandLine) WindowsCommandLine(string program, IReadOnlyList<string> arguments, Func<string> interpreter)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentNullException.ThrowIfNull(interpreter);
+        if (!ProgramPath.IsBatch(program, windows: true))
+        {
+            return (program, string.Join(' ', new[] { program }.Concat(arguments).Select(Quote)));
+        }
+
+        string batch = ProgramPath.BatchArguments(program, arguments);
+        string cmd = interpreter();
+        return (cmd, Quote(cmd) + " " + batch);
     }
 
     public bool WaitForExit(TimeSpan timeout)
@@ -573,7 +606,7 @@ internal sealed class ContainedProcess
         }
     }
 
-    private static ContainedProcess StartWindows(ProcessStartInfo info, string program)
+    private static ContainedProcess StartWindows(ProcessStartInfo info, string application, string command)
     {
         SafeFileHandle job = CreateJobObjectW(0, null);
         if (job.IsInvalid)
@@ -625,11 +658,10 @@ internal sealed class ContainedProcess
 
             input.Dispose();
             var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>(), Flags = 0x100, Input = stdin.DangerousGetHandle(), Output = output.DangerousGetHandle(), Error = error.DangerousGetHandle() };
-            // The application name is the resolved absolute path, so CreateProcess searches no directory; the command line starts
-            // with the same path, quoted, as the program's own first argument.
-            string command = string.Join(' ', new[] { program }.Concat(info.ArgumentList).Select(Quote));
+            // The application name is an absolute path, the program's or for a batch program cmd.exe's, so CreateProcess searches no
+            // directory; the command line starts with the same path, quoted, as the program's own first argument (WindowsCommandLine).
             string environment = string.Join('\0', info.Environment.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase).Select(e => e.Key + "=" + e.Value)) + "\0\0";
-            if (!CreateProcessW(program, (command + "\0").ToCharArray(), 0, 0, true, 0x4 | 0x400 | 0x08000000, environment, info.WorkingDirectory, ref startup, out ProcessInformation process))
+            if (!CreateProcessW(application, (command + "\0").ToCharArray(), 0, 0, true, 0x4 | 0x400 | 0x08000000, environment, info.WorkingDirectory, ref startup, out ProcessInformation process))
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }

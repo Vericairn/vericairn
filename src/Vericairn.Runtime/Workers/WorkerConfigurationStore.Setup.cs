@@ -163,6 +163,9 @@ public sealed partial class WorkerConfigurationStore
         // From 0.9.4 (FIX-161) an executable no reading can start is refused here, not at every run.
         if (ProgramPath.NeverStarts(configuration.Command[0]) is string never)
             throw new ProviderRefusedException($"The setup command's executable {configuration.Command[0]} can never be started: {never} A relative path with a directory part is read against the workspace, and a bare name is found in an absolute directory of PATH.");
+        // From 0.9.4 (FIX-165) a batch program's path and arguments that cmd.exe cannot be given as data are refused here, not at every run.
+        if (ProgramPath.BatchRefusal(configuration.Command[0], configuration.Command.Skip(1).ToArray(), OperatingSystem.IsWindows()) is string batch)
+            throw new ProviderRefusedException($"The setup command's batch program can never be started: {batch} A batch program (.cmd, .bat) runs through cmd.exe, which reads no percent sign or control character as data.");
         if (configuration.Variables is { } variables && (variables.Count > WorkspaceSetupConfiguration.MaximumVariables
             || variables.Any(v => v is null || !WorkerEnvironment.IsVariableName(v) || v.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase))
             || variables.Distinct(WorkerEnvironment.Names).Count() != variables.Count))
