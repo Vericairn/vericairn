@@ -27,7 +27,7 @@ from source. Its [release notes](docs/releases/0.9.3/release-notes.md) and
 
 ## 0.9.4 — planned
 
-0.9.4 is the first release Vericairn's own estate runs on the software pack's release flow. A flow's steps run
+0.9.4 readies an estate for work that goes on between the commands a person runs. A flow's steps run
 on their timing, at once, after a delay, at a time, on a schedule, in a window or on an event, and a step may end
 in a decision among named paths, made by a rule, an agent in a role or a person in a role. Standard and Pro carry
 a run from step to step by themselves, stopping only where a person holds the role, while Community keeps one
@@ -35,9 +35,7 @@ step per command. Agents keep working on a product between releases as standing 
 caps, and every output is a possibility a person adopts. When an agent holding work goes quiet, its sponsor is
 asked and the step moves to another holder. People say when they are away and set quiet hours that hold notices,
 letting incidents through by default. Removing a person's role closes what they may still write, and an estate
-shows its progress through a target its configuration chooses, GitHub Discussions first. Installers open
-without warnings on macOS and Windows, and Vericairn installs and upgrades with one command through Homebrew,
-winget or an install script that verifies the signed release manifest before installing.
+shows its progress through a target its configuration chooses, GitHub Discussions first.
 
 ## 0.9.5 — planned
 
