@@ -101,8 +101,8 @@ public sealed partial class RemoteViewModel
 
     private void InitializeActCommands()
     {
-        ReadActCommand = new(ReadActAsync, () => !Busy && Selected?.Current == true);
-        SignActCommand = new(SignActAsync, CanSignAct);
+        ReadActCommand = Command(ReadActAsync, () => !Busy && Selected?.Current == true);
+        SignActCommand = Command(SignActAsync, CanSignAct);
     }
 
     private bool CanSignAct() => !Busy && Selected?.Current == true && actCurrent && ActReviewed && HasPresenceKey && ActChoices.Any(c => c.Choice != "wait") &&

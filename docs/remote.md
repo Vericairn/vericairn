@@ -258,6 +258,13 @@ names the request device it pairs with. If the runtime refuses either device, it
 presence key (an iPhone without a passcode, an Android phone without a secure lock screen) or you decline the prompt, the phone
 pairs with its request key alone and can add the presence key later. The connection pins the runtime's identity.
 
+From 0.9.5 (FIX-164), Remote pairs on Android. Before, it closed when **Pair** was tapped: .NET's TLS on Android ends the
+process when it is given the local network's list of cipher suites, so an Android phone now offers none, the runtime chooses
+from its own list, and the phone refuses any other suite before it sends anything. The phone's request key also could not sign
+on Android, which would have ended every pairing that got further. A pairing that fails says why on the form, as does a code
+that is not one; an error Remote does not expect is shown on the form, or under the connection line on the home, and Remote
+stays open.
+
 A phone paired before it had a presence key, or one whose runtime did not offer one, adds it later: open a decision, and under
 **Add presence key** enter a new code the administrator issued for the same person with the same command. The runtime must
 prove the same identity and name the same estate and person before the phone makes the key; it then records and admits the

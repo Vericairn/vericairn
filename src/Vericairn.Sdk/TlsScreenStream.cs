@@ -52,9 +52,14 @@ public sealed class TlsScreenStream : Stream
     private readonly Stream output;
     private readonly bool leaveOpen;
 
+    /// <summary>The suites the local network allows, in order, whether or not this platform's TLS takes them as a list; declared before <see cref="CipherSuites"/>, which is made from it.</summary>
+    internal static IReadOnlyList<TlsCipherSuite> AllowedSuites { get; } = [TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256];
+
     /// <summary>
     /// The suites the local network allows: ECDHE with ECDSA and AES-GCM, 256 bits first. Null on Windows, whose TLS takes no list
-    /// from an application and puts these first in its own order.
+    /// from an application and puts these first in its own order, and from 0.9.5 (FIX-164) on Android, whose .NET TLS takes no list
+    /// either and ends the process when given one; there the runtime chooses from its own list, and an Android client refuses a
+    /// handshake that ended on any other suite before it sends anything.
     /// </summary>
     public static CipherSuitesPolicy? CipherSuites { get; } = Suites();
     private byte[] buffer = new byte[16 * 1024];
@@ -203,12 +208,12 @@ public sealed class TlsScreenStream : Stream
 
     private static CipherSuitesPolicy? Suites()
     {
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsAndroid())
         {
             return null;
         }
 
-        return new CipherSuitesPolicy([TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
+        return new CipherSuitesPolicy(AllowedSuites);
     }
 
     private static int Length24(ReadOnlySpan<byte> bytes) => (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];

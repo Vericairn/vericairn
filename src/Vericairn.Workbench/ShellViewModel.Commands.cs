@@ -44,6 +44,13 @@ public sealed partial class ShellViewModel
     /// <summary>Requests cancellation of the active application command.</summary>
     public void CancelCurrentRequest() => currentRequest?.Cancel();
 
+    /// <summary>From 0.9.5 (FIX-164): an exception a command did not expect is shown in the status line and logged; Workbench stays open.</summary>
+    private void Unexpected(Exception exception)
+    {
+        Status = $"The last command stopped on an unexpected error ({exception.GetType().Name}): {exception.Message}";
+        Log($"unexpected {exception.GetType().Name}: {exception.Message}");
+    }
+
     private Task<bool> RunCommandAsync(string label, Func<CancellationToken, Task> action, CancellationToken cancellationToken = default) =>
         RunCommandAsync<bool>(label, async token => { await action(token).ConfigureAwait(true); return true; }, cancellationToken);
 
