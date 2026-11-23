@@ -154,6 +154,75 @@ class RetryRunnerTests(unittest.TestCase):
         self.assertEqual(([], ""), (retries, summary))
         self.assertFalse((self.root / "commands").exists())
 
+    def write_plan(self, count=6, reserve=0.1):
+        measured = {f"Vericairn.Cli.Tests.Class{index}": float(index + 1) for index in range(30)}
+        plan = {"platforms": {"windows-latest": {"shares": count, "reserve": reserve}}, "classes": {"Vericairn.Cli.Tests": measured}}
+        (self.root / ".github").mkdir(exist_ok=True)
+        (self.root / ".github" / "test-shards.json").write_text(json.dumps(plan))
+
+    def test_a_platforms_shares_come_from_the_plan_and_together_run_every_class_once(self):
+        self.prepare_share_project()
+        self.write_plan()
+        selected = []
+        for share in range(1, 7):
+            with self.subTest(share=share):
+                code, out, _, _ = self.run_scenario("pass", "--share", str(share), "--platform", "windows-latest")
+                self.assertEqual(0, code, out)
+                self.assertIn(f"Running share {share} of 6.", out)
+                [command] = [json.loads(line) for line in (self.root / "commands").read_text().splitlines()]
+                (self.root / "commands").unlink()
+                selected.extend(command[6:])
+        self.assertCountEqual(["Vericairn.Cli.Tests.Class" + str(i) for i in range(30)], selected)
+
+    def test_a_share_beyond_the_platforms_count_or_an_unknown_platform_runs_nothing(self):
+        self.prepare_share_project()
+        self.write_plan()
+        code, _, _, _ = self.run_scenario("pass", "--share", "7", "--platform", "windows-latest")
+        self.assertEqual(2, code)
+        code, out, _, _ = self.run_scenario("pass", "--share", "1", "--platform", "macos-latest")
+        self.assertEqual(1, code)
+        self.assertIn("Test share guard failed: The shard plan names no platform 'macos-latest'.", out)
+        self.assertFalse((self.root / "commands").exists())
+
+    def test_reports_are_written_where_asked(self):
+        self.prepare_share_project()
+        code, out, _, _ = self.run_scenario("pass", "--share", "2", "--reports", "artifacts/test-reports")
+        self.assertEqual(0, code, out)
+        [command] = [json.loads(line) for line in (self.root / "commands").read_text().splitlines()]
+        reports = str((self.root / "artifacts" / "test-reports").resolve())
+        self.assertEqual(["--report-xunit-xml", "--results-directory", reports], command[-3:])
+
+    def test_the_documentation_check_runs_only_the_classes_that_read_the_documentation(self):
+        self.prepare_share_project()
+        sources = self.root / "tests" / "Vericairn.Cli.Tests"
+        (sources / "GuideTests.cs").write_text(textwrap.dedent('''\
+            namespace Vericairn.Cli.Tests;
+
+            public class Class3
+            {
+                private static string Guide(string root) => File.ReadAllText(Path.Combine(root, "docs", "cli.md"));
+                private static bool IsRoot(string root) => File.Exists(Path.Combine(root, "Vericairn.slnx"));
+            }
+
+            internal sealed class Class7 { private const string Readme = "README.md"; }
+            '''))
+        (sources / "EstateTests.cs").write_text('namespace Vericairn.Cli.Tests;\npublic class Class5 { string p = "docs"; }\n')
+        code, out, retries, _ = self.run_scenario("pass", "--docs")
+        self.assertEqual(0, code, out)
+        self.assertIn("Vericairn.Cli.Tests: 2 classes read the documentation", out)
+        [command] = [json.loads(line) for line in (self.root / "commands").read_text().splitlines()]
+        self.assertEqual(["test", "--no-build", "--configuration", "Release", "--project", os.path.join("tests", "Vericairn.Cli.Tests"),
+                          "--", "--filter-class", "Vericairn.Cli.Tests.Class3", "Vericairn.Cli.Tests.Class7"], command)
+        self.assertEqual([], retries)
+
+    def test_a_documentation_check_that_would_select_nothing_runs_nothing(self):
+        self.prepare_share_project()
+        code, out, _, _ = self.run_scenario("pass", "--docs")
+        self.assertEqual(1, code)
+        self.assertIn("Documentation check guard failed: No test class reads the repository's documentation", out)
+        self.assertFalse((self.root / "commands").exists())
+        self.assertEqual(2, self.run_scenario("pass", "--docs", "--share", "1")[0])
+
     def test_an_invalid_share_cannot_run_unfiltered_tests(self):
         for share in ("0", "4"):
             with self.subTest(share=share):

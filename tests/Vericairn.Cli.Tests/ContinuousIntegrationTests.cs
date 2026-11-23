@@ -44,10 +44,14 @@ public class ContinuousIntegrationTests
 
     [Theory]
     [InlineData("ci.yml", "queue-tested:", 10)]
+    [InlineData("ci.yml", "plan:", 10)]
     [InlineData("ci.yml", "workflow-policy:", 15)]
     [InlineData("ci.yml", "build-test:", 60)]
     [InlineData("ci.yml", "remote-ios:", 45)]
     [InlineData("ci.yml", "remote-android:", 45)]
+    [InlineData("ci.yml", "docs-check:", 30)]
+    [InlineData("ci.yml", "ci-gate:", 10)]
+    [InlineData("retry.yml", "runner-failures:", 10)]
     [InlineData("release.yml", "verify:", 60)]
     [InlineData("package.yml", "enclave-helper:", 20)]
     [InlineData("package.yml", "package:", 45)]
@@ -388,7 +392,8 @@ public class ContinuousIntegrationTests
         string ci = Block(Read(Path.Combine(workflows, "ci.yml")), "package:", 2);
         Assert.Contains("    uses: ./.github/workflows/package.yml\n", ci, StringComparison.Ordinal);
         Assert.Contains("      release: false\n", ci, StringComparison.Ordinal);
-        Assert.Contains(QueueGate, ci, StringComparison.Ordinal);
+        // CI-12: in the full gate, which every merge queue group runs before main moves.
+        Assert.Contains(FullGate, ci, StringComparison.Ordinal);
         string release = Block(Read(Path.Combine(workflows, "release.yml")), "package:", 2);
         Assert.Contains("    uses: ./.github/workflows/package.yml\n", release, StringComparison.Ordinal);
         Assert.Contains("      release: true\n", release, StringComparison.Ordinal);
@@ -610,8 +615,9 @@ public class ContinuousIntegrationTests
         Assert.Contains($"run: dotnet workload install {workload} --version ", steps, StringComparison.Ordinal);
         Assert.Contains($"dotnet restore {project} --locked-mode", steps, StringComparison.Ordinal);
         Assert.Contains($"dotnet build {project} --no-restore --configuration Release", steps, StringComparison.Ordinal);
-        Assert.Contains(QueueGate, steps, StringComparison.Ordinal);
-        Assert.DoesNotContain("if:", steps.Replace(QueueGate, "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+        // CI-12: the phone heads build in the full gate (a merge queue group, a push, a manual run), not for a pull request.
+        Assert.Contains(FullGate, steps, StringComparison.Ordinal);
+        Assert.DoesNotContain("if:", steps.Replace(FullGate, "\n", StringComparison.Ordinal), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -619,29 +625,42 @@ public class ContinuousIntegrationTests
     {
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
         Assert.True(File.Exists(Path.Combine(RepositoryRoot(), ".github", "scripts", "run-tests.py")));
-        foreach ((string file, string job) in new[] { ("ci.yml", "build-test:"), ("release.yml", "verify:") })
+        // CI-12: ci.yml's shares come from the shard plan for the leg's platform, and each leg keeps its test reports.
+        const string plan = " --platform ${{ matrix.os }} --reports artifacts/test-reports";
+        foreach ((string file, string job, string options) in new[] { ("ci.yml", "build-test:", plan), ("release.yml", "verify:", "") })
         {
             string steps = Block(Read(Path.Combine(workflows, file)), job, 2);
-            Assert.Contains("        run: python .github/scripts/run-tests.py --share ${{ matrix.share }}\n", steps, StringComparison.Ordinal);
-            Assert.Contains("            python3 .github/scripts/run-tests.py --share ${{ matrix.share }}'\n", steps, StringComparison.Ordinal);
+            Assert.Contains("        run: python .github/scripts/run-tests.py --share ${{ matrix.share }}" + options + "\n", steps, StringComparison.Ordinal);
+            Assert.Contains("            python3 .github/scripts/run-tests.py --share ${{ matrix.share }}" + options + "'\n", steps, StringComparison.Ordinal);
             Assert.DoesNotContain("dotnet test --no-build", steps, StringComparison.Ordinal);
         }
+        string docs = Block(Read(Path.Combine(workflows, "ci.yml")), "docs-check:", 2);
+        Assert.Contains("        run: python3 .github/scripts/run-tests.py --docs\n", docs, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet test --no-build", docs, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("ci.yml", "build-test:")]
     [InlineData("release.yml", "verify:")]
-    public void EveryPlatformBuildsOnceInEachOfThreeIndependentTestShares(string file, string job)
+    public void EveryPlatformBuildsOnceInEachOfItsIndependentTestShares(string file, string job)
     {
         string steps = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", file)), job, 2);
-        Assert.Equal("      matrix:\n        os: [ubuntu-latest, macos-latest, windows-latest]\n        share: [1, 2, 3]\n", Block(steps, "matrix:", 6));
+        if (file == "ci.yml")
+        {
+            // CI-12: the plan job's matrix, every share of every platform the shard plan names for the full gate (ci-plan.py),
+            // Linux's for a pull request. The build waits only on the lookup and the plan, which take seconds.
+            Assert.Equal("      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}\n", Block(steps, "matrix:", 6));
+            Assert.Contains(BuildGate, steps, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Equal("      matrix:\n        os: [ubuntu-latest, macos-latest, windows-latest]\n        share: [1, 2, 3]\n", Block(steps, "matrix:", 6));
+        }
+
         Assert.Contains("\n      fail-fast: false\n", steps, StringComparison.Ordinal);
         Assert.Contains("\n    runs-on: ${{ matrix.os }}\n", steps, StringComparison.Ordinal);
         Assert.DoesNotContain("max-parallel:", steps, StringComparison.Ordinal);
-        // ci.yml's build waits only on the merge queue lookup, which takes seconds; the release's verification on nothing.
-        if (file == "ci.yml")
-            Assert.Contains(QueueGate, steps, StringComparison.Ordinal);
-        Assert.DoesNotContain("needs:", steps.Replace(QueueGate, "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.DoesNotContain("needs:", steps.Replace(BuildGate, "\n", StringComparison.Ordinal), StringComparison.Ordinal);
         Assert.DoesNotContain("continue-on-error", steps, StringComparison.Ordinal);
         foreach (string step in new[] { "Restore (locked)", "Build" })
         {
@@ -716,11 +735,11 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
-    public void EveryRequiredWorkflowRunsTheSameJobsForAMergeQueueGroup()
+    public void ThePullRequestRunsTheLightPlanAndTheMergeQueueTheFullGateUnderOneRequiredCheck()
     {
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
-        // A required check that a queued group never reports would hold the queue for good, so both workflows whose jobs the
-        // default branch requires run on merge_group as on a pull request.
+        // A required check that a pull request or a queued group never reports would hold it for good, so both workflows whose
+        // checks the branches require run on merge_group as on a pull request.
         foreach (string file in new[] { "ci.yml", "secret-scan.yml" })
         {
             string triggers = Block(Read(Path.Combine(workflows, file)), "on:", 0);
@@ -728,39 +747,176 @@ public class ContinuousIntegrationTests
             Assert.Contains("\n  merge_group:\n", triggers, StringComparison.Ordinal);
         }
 
-        // The same jobs run for a pull request, a queued group and a manual run: ci.yml's jobs are skipped only by the merge
-        // queue lookup, which skips nothing but on a push (see MainsPushRunIsSkippedOnlyForACommitTheMergeQueuePassed), no job
-        // of the packaging path it calls depends on the event, and secret-scan's one job skips only a push that deletes a branch.
-        foreach (string job in Jobs(Read(Path.Combine(workflows, "ci.yml"))))
+        // CI-12: the plan decides what each event runs, and every job's condition is one of the plan's: the full gate (both
+        // Remote builds and the packaging path), build-test (Linux for a pull request, every platform in the full gate) or the
+        // documentation check. The plan and the workflow policy run whenever the lookup does not skip the commit.
+        string ci = Read(Path.Combine(workflows, "ci.yml"));
+        var conditions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            string[] conditions = job.Split('\n').Where(line => line.StartsWith("    if:", StringComparison.Ordinal)).ToArray();
-            if (job.StartsWith("  queue-tested:\n", StringComparison.Ordinal))
-                Assert.Empty(conditions);
+            ["queue-tested"] = "",
+            ["plan"] = QueueGate,
+            ["workflow-policy"] = QueueGate,
+            ["remote-ios"] = FullGate,
+            ["remote-android"] = FullGate,
+            ["build-test"] = BuildGate,
+            ["package"] = FullGate,
+            ["docs-check"] = "\n    needs: [plan]\n    if: needs.plan.outputs.docs == 'true'\n",
+            ["ci-gate"] = "\n    if: always()\n",
+        };
+        string[] jobs = Jobs(ci).ToArray();
+        Assert.Equal(conditions.Keys.Order(StringComparer.Ordinal), jobs.Select(JobName).Order(StringComparer.Ordinal));
+        foreach (string job in jobs)
+        {
+            string name = JobName(job);
+            string[] ifs = job.Split('\n').Where(line => line.StartsWith("    if:", StringComparison.Ordinal)).ToArray();
+            if (conditions[name].Length == 0)
+                Assert.Empty(ifs);
             else
-                Assert.Equal(["    if: needs.queue-tested.outputs.skip != 'true'"], conditions);
+                Assert.Contains(conditions[name], job, StringComparison.Ordinal);
+            Assert.True(ifs.Length <= 1, name);
         }
 
+        // The plan: the full gate for every event but a pull request, whatever it changes.
+        string plan = Read(Path.Combine(RepositoryRoot(), ".github", "scripts", "ci-plan.py"));
+        Assert.Contains("    full = event != \"pull_request\"\n", plan, StringComparison.Ordinal);
+        Assert.Contains("    platforms = PLATFORMS if full else LIGHT\n", plan, StringComparison.Ordinal);
+        Assert.Contains("PLATFORMS = (\"ubuntu-latest\", \"macos-latest\", \"windows-latest\")", plan, StringComparison.Ordinal);
+        Assert.Contains("LIGHT = (\"ubuntu-latest\",)", plan, StringComparison.Ordinal);
+        Assert.Contains("\"git\", \"diff\", \"--name-only\", \"--no-renames\", \"-z\", \"HEAD^1\", \"HEAD\"", plan, StringComparison.Ordinal);
+        string planJob = Block(ci, "plan:", 2);
+        Assert.Contains("\n          fetch-depth: 2\n", planJob, StringComparison.Ordinal);
+        Assert.Contains("run: python3 .github/scripts/ci-plan.py --event \"$EVENT\" >> \"$GITHUB_OUTPUT\"\n", planJob, StringComparison.Ordinal);
+        foreach (string output in new[] { "full", "build", "docs", "matrix" })
+            Assert.Contains($"      {output}: ${{{{ steps.plan.outputs.{output} }}}}\n", planJob, StringComparison.Ordinal);
+
+        // The packaging path's own jobs depend on no event, and secret-scan's one job skips only a push that deletes a branch.
         foreach (string job in Jobs(Read(Path.Combine(workflows, "package.yml"))))
             Assert.DoesNotContain(job.Split('\n'), line => line.StartsWith("    if:", StringComparison.Ordinal));
         Assert.Single(Read(Path.Combine(workflows, "secret-scan.yml")).Split('\n'), line => line.StartsWith("    if:", StringComparison.Ordinal));
 
         // Releases and publications run only when a person starts them or publishes a release, never for the queue.
-        foreach (string file in new[] { "release.yml", "nuget.yml", "mcp-registry.yml" })
+        foreach (string file in new[] { "release.yml", "nuget.yml", "mcp-registry.yml", "retry.yml" })
             Assert.DoesNotContain("merge_group", Block(Read(Path.Combine(workflows, file)), "on:", 0), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void TheRequiredCheckPassesOnlyWhenEveryJobTheEventRunsPassed()
+    {
+        // CI-12: ci-gate is the one ci.yml check the branches require. It needs every other job and runs whatever they did:
+        // without always(), a gate skipped because a job it needs failed would report as passing.
+        string ci = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml"));
+        string gate = Block(ci, "ci-gate:", 2);
+        string[] others = Jobs(ci).Select(JobName).Where(name => name != "ci-gate").ToArray();
+        string needs = Assert.Single(gate.Split('\n'), line => line.StartsWith("    needs: [", StringComparison.Ordinal));
+        Assert.Equal(others.Order(StringComparer.Ordinal), needs["    needs: [".Length..^1].Split(", ").Order(StringComparer.Ordinal));
+        Assert.Contains("\n    if: always()\n", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("uses:", gate, StringComparison.Ordinal);
+        string step = Block(gate, "- name: Require every job this event runs", 6);
+        Assert.Contains("NEEDS: ${{ toJSON(needs) }}\n", step, StringComparison.Ordinal);
+        Assert.Contains("set -eu\n", step, StringComparison.Ordinal);
+        // The lookup and the plan must pass; a push the queue tested passes with everything else skipped; otherwise every job
+        // the plan runs must pass and every other must be skipped, so a failed, cancelled or unexpected job fails the gate.
+        Assert.Contains("          expect queue-tested success\n", step, StringComparison.Ordinal);
+        Assert.Contains("          if [ \"$(output queue-tested skip)\" = true ]; then\n", step, StringComparison.Ordinal);
+        Assert.Contains("for job in plan workflow-policy build-test remote-ios remote-android package docs-check; do expect \"$job\" skipped; done\n", step, StringComparison.Ordinal);
+        Assert.Contains("            expect plan success\n            expect workflow-policy success\n", step, StringComparison.Ordinal);
+        Assert.Contains("on() { if [ \"$(output plan \"$1\")\" = true ]; then echo success; else echo skipped; fi; }\n", step, StringComparison.Ordinal);
+        Assert.Contains("            expect build-test \"$(on build)\"\n            expect docs-check \"$(on docs)\"\n", step, StringComparison.Ordinal);
+        Assert.Contains("for job in remote-ios remote-android package; do expect \"$job\" \"$(on full)\"; done\n", step, StringComparison.Ordinal);
+        Assert.Contains("            if [ \"$actual\" != \"$2\" ]; then failed=1; fi\n", step, StringComparison.Ordinal);
+        Assert.EndsWith("\n          exit \"$failed\"", step.TrimEnd('\n'), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADocumentationOnlyPullRequestRunsTheDocumentationCheckOnTheSameBuild()
+    {
+        string ci = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml"));
+        string docs = Block(ci, "docs-check:", 2);
+        Assert.Contains("\n    runs-on: ubuntu-latest\n", docs, StringComparison.Ordinal);
+        Assert.Contains("run: dotnet restore --locked-mode", Block(docs, "- name: Restore (locked)", 6), StringComparison.Ordinal);
+        Assert.Contains("run: dotnet build --no-restore --configuration Release", Block(docs, "- name: Build", 6), StringComparison.Ordinal);
+        Assert.Contains("run: python3 .github/scripts/run-tests.py --docs\n", Block(docs, "- name: Test the classes that read the documentation", 6), StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", docs, StringComparison.Ordinal);
+        // The selection reads the sources that find the repository root and name docs/, README.md or ROADMAP.md.
+        string selection = Read(Path.Combine(RepositoryRoot(), ".github", "scripts", "docs_classes.py"));
+        Assert.Contains("ROOT_MARKER = '\"Vericairn.slnx\"'", selection, StringComparison.Ordinal);
+        Assert.Contains("READS = re.compile(r'\"(?:docs|README\\.md|ROADMAP\\.md)\"|\"docs/')", selection, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReleaseBranchesAreTreatedAsMainAndTheirRulesRequireTheSameChecksAndQueue()
+    {
+        // CI-12: a push to a release branch is looked up and built as a push to main is; merge_group and pull_request have no
+        // branch filter, so a release branch's queue groups and pull requests run as main's do.
+        string github = Path.Combine(RepositoryRoot(), ".github");
+        string ci = Read(Path.Combine(github, "workflows", "ci.yml"));
+        Assert.Contains("\n  push:\n    branches: [main, 'release/*']\n  pull_request:\n", Block(ci, "on:", 0), StringComparison.Ordinal);
+        Assert.DoesNotContain("branches", Block(ci, "on:", 0).Split("  pull_request:")[1], StringComparison.Ordinal);
+
+        // The rulesets the builder applies (README.md beside the workflows): the default branch's and release/*'s require the
+        // gate and the secret scan from GitHub Actions and the same merge queue.
+        using var main = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(github, "rulesets", "default-branch-merge-queue.json")));
+        using var release = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(github, "rulesets", "release-branches.json")));
+        Assert.Equal("~DEFAULT_BRANCH", main.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("include")[0].GetString());
+        Assert.Equal("refs/heads/release/*", release.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("include")[0].GetString());
+        Assert.Equal(Rules(main), Rules(release));
+        string checks = Rules(main).Single(rule => rule.StartsWith("{\"type\":\"required_status_checks\"", StringComparison.Ordinal));
+        Assert.Contains("\"required_status_checks\":[{\"context\":\"ci-gate\",\"integration_id\":15368},{\"context\":\"secret-scan\",\"integration_id\":15368}]", checks, StringComparison.Ordinal);
+        Assert.Contains("\n  ci-gate:\n", ci, StringComparison.Ordinal);
+        Assert.Contains("\n  secret-scan:\n", Read(Path.Combine(github, "workflows", "secret-scan.yml")), StringComparison.Ordinal);
+        foreach (string type in new[] { "deletion", "non_fast_forward", "pull_request", "merge_queue" })
+            Assert.Contains(Rules(main), rule => rule.StartsWith("{\"type\":\"" + type + "\"", StringComparison.Ordinal));
+
+        static string[] Rules(System.Text.Json.JsonDocument ruleset) => ruleset.RootElement.GetProperty("rules").EnumerateArray().Select(rule => rule.GetRawText()
+            .Replace(" ", "", StringComparison.Ordinal).Replace("\n", "", StringComparison.Ordinal).Replace("\r", "", StringComparison.Ordinal)).ToArray();
+    }
+
+    [Fact]
+    public void ARunThatOnlyItsRunnersFailedIsRerunOnceAndNeverATestFailure()
+    {
+        // CI-12: GitHub has no job-level retry. retry.yml runs from the default branch when a ci.yml run fails, and re-runs a
+        // first attempt's failed jobs once when every one is a runner failure in setup (runner-failures.py). A queue group's
+        // run is not re-run: its pull request has already left the queue, and the builder's queue script queues it again.
+        string workflow = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "retry.yml"));
+        Assert.Equal("on:\n  workflow_run:\n    workflows: [ci]\n    types: [completed]\n\n", Block(workflow, "on:", 0));
+        Assert.Contains("\npermissions:\n  contents: read\n", workflow, StringComparison.Ordinal);
+        string job = Block(workflow, "runner-failures:", 2);
+        Assert.Contains("\n    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 && github.event.workflow_run.event != 'merge_group'\n", job, StringComparison.Ordinal);
+        Assert.Contains("\n    permissions:\n      actions: write\n      checks: read\n    steps:\n", job, StringComparison.Ordinal);
+        // Only the default branch's own scripts run: the checkout names no other ref or repository.
+        string checkout = Assert.Single(Steps(job), step => step.Contains("uses: actions/checkout@", StringComparison.Ordinal));
+        Assert.DoesNotContain("ref:", checkout, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository:", checkout, StringComparison.Ordinal);
+        Assert.Contains("RUN: ${{ github.event.workflow_run.id }}\n", job, StringComparison.Ordinal);
+        Assert.Contains("run: python3 .github/scripts/runner-failures.py --repository \"$REPOSITORY\" --run \"$RUN\" --attempt 1 --rerun || test $? -eq 3\n", job, StringComparison.Ordinal);
+        string script = Read(Path.Combine(RepositoryRoot(), ".github", "scripts", "runner-failures.py"));
+        Assert.Contains("rerun-failed-jobs", script, StringComparison.Ordinal);
+        Assert.Contains("if args.attempt != 1:", script, StringComparison.Ordinal);
+        Assert.Contains("    if not all(is_setup(step) for step in reached):\n        return None\n", script, StringComparison.Ordinal);
+    }
+
     private const string QueueGate = "\n    needs: [queue-tested]\n    if: needs.queue-tested.outputs.skip != 'true'\n";
+    // The full gate's jobs outside build-test decide on the event, as the plan does, and wait only on the lookup.
+    private const string FullGate = "\n    needs: [queue-tested]\n    if: needs.queue-tested.outputs.skip != 'true' && github.event_name != 'pull_request'\n";
+    private const string BuildGate = "\n    needs: [plan]\n    if: needs.plan.outputs.build == 'true'\n";
+
+    private static string JobName(string job) => job[2..job.IndexOf(':', StringComparison.Ordinal)];
 
     [Fact]
     public void MainsPushRunIsSkippedOnlyForACommitTheMergeQueuePassed()
     {
         // CI-07: a merge queue moves main to the exact commit its group's run tested, so main's push run would repeat a passed
         // run. Each commit on main keeps exactly one passing three-platform run: the queue's, or else its own push run.
+        // From CI-12 the plan, the workflow policy and the full gate's jobs outside build-test wait on the lookup and every other
+        // job on the plan, so a push the queue tested skips them all; ci-gate then passes with them skipped.
         string ci = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml"));
         string[] jobs = Jobs(ci).ToArray();
         Assert.StartsWith("  queue-tested:\n", jobs[0], StringComparison.Ordinal);
-        foreach (string job in jobs.Skip(1))
-            Assert.Contains(QueueGate, job, StringComparison.Ordinal);
+        foreach (string job in jobs.Skip(1).Where(job => JobName(job) != "ci-gate"))
+            Assert.True(job.Contains(QueueGate, StringComparison.Ordinal) || job.Contains(FullGate, StringComparison.Ordinal)
+                || job.Contains("\n    needs: [plan]\n", StringComparison.Ordinal), JobName(job));
+        Assert.Contains(QueueGate, Block(ci, "plan:", 2), StringComparison.Ordinal);
 
         string lookup = jobs[0];
         Assert.DoesNotContain("needs:", lookup, StringComparison.Ordinal);
@@ -798,8 +954,9 @@ public class ContinuousIntegrationTests
             Assert.Single(workflow.Split('\n'), line => line.Contains("cancel-in-progress", StringComparison.Ordinal));
         }
 
-        // A release run, a publication and the packaging path a release shares hold no concurrency group, so none is ever cancelled.
-        foreach (string file in new[] { "release.yml", "package.yml", "nuget.yml", "mcp-registry.yml" })
+        // A release run, a publication, the packaging path a release shares and a runner-failure re-run hold no concurrency group,
+        // so none is ever cancelled.
+        foreach (string file in new[] { "release.yml", "package.yml", "nuget.yml", "mcp-registry.yml", "retry.yml" })
         {
             string workflow = Read(Path.Combine(workflows, file));
             Assert.DoesNotContain(workflow.Split('\n'), line => line.TrimStart().StartsWith("concurrency:", StringComparison.Ordinal));
@@ -824,6 +981,8 @@ public class ContinuousIntegrationTests
         string ci = Read(Path.Combine(workflows, "ci.yml"));
         string build = Block(ci, "build-test:", 2);
         Assert.EndsWith("\n          cache: true" + portable, Assert.Single(Steps(build), IsSetupDotnet), StringComparison.Ordinal);
+        // CI-12: the documentation check restores the same portable graph and shares build-test's cache.
+        Assert.EndsWith("\n          cache: true" + portable, Assert.Single(Steps(Block(ci, "docs-check:", 2)), IsSetupDotnet), StringComparison.Ordinal);
         // The phone heads' restores also download the runtime packs of the workload set this workflow pins.
         foreach (string job in new[] { "remote-ios:", "remote-android:" })
             Assert.EndsWith("\n          cache: true" + portable + "\n            .github/workflows/ci.yml",
@@ -832,7 +991,7 @@ public class ContinuousIntegrationTests
         string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
         Assert.EndsWith("\n          cache: ${{ !inputs.release }}" + portable + "\n            **/packages.distributable.lock.json",
             Assert.Single(Steps(package), IsSetupDotnet), StringComparison.Ordinal);
-        Assert.Equal(4, WorkflowFiles().Sum(file => Read(file).Split('\n').Count(line => line.TrimStart().StartsWith("cache:", StringComparison.Ordinal))));
+        Assert.Equal(5, WorkflowFiles().Sum(file => Read(file).Split('\n').Count(line => line.TrimStart().StartsWith("cache:", StringComparison.Ordinal))));
         Assert.DoesNotContain("cache", Read(Path.Combine(workflows, "release.yml")), StringComparison.Ordinal);
 
         // Every restore stays locked, so NuGet compares each package's SHA-512 with its lock file, cached or downloaded.

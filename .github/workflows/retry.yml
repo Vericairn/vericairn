@@ -1,0 +1,41 @@
+name: retry
+
+# CI-12: one automatic re-run of a ci.yml run that only its runners failed. GitHub has no job-level retry, so this workflow
+# runs when a ci.yml run completes and fails, reads that run's jobs and their annotations, and re-runs its failed jobs once
+# when every one of them is a runner failure: the runner ended it while it was still setting up (exit code 137 or a lost
+# runner, in its own set-up, the checkout, the .NET SDK, a locked restore or a pinned install), before anything of the change
+# was built or tested (runner-failures.py). A test failure, a build failure, a timeout or a cancellation is never re-run, and
+# only a run's first attempt is. A merge queue group's run is not re-run here: the queue has removed its pull request when the
+# run's ci-gate failed, so the builder's queue script queues that pull request again once instead (README.md beside this file).
+#
+# A workflow_run workflow runs this file and the scripts from the default branch, never from the run it judges, and checks out
+# nothing else; the run's identity reaches the script through the environment.
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  runner-failures:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 && github.event.workflow_run.event != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Re-run a first attempt that only runner failures ended
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN: ${{ github.event.workflow_run.id }}
+        # Exit status 3 means a failed job is not a runner failure: the run stays failed and nothing is re-run.
+        run: python3 .github/scripts/runner-failures.py --repository "$REPOSITORY" --run "$RUN" --attempt 1 --rerun || test $? -eq 3
