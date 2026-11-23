@@ -102,7 +102,9 @@ internal static class ProgramPath
     /// From 0.9.4 (FIX-165): makes <paramref name="info"/> start the batch program <paramref name="script"/> through the command
     /// interpreter <paramref name="interpreter"/> gives: its file name becomes the interpreter's absolute path and its arguments the
     /// command <see cref="BatchArguments"/> writes from the script and the argument list. Arguments given as one string cannot be
-    /// checked one by one, so they are refused. Nothing about <paramref name="info"/> changes when it is refused.
+    /// checked one by one, so they are refused. Nothing about <paramref name="info"/> changes when it is refused. Its environment
+    /// receives <see cref="NoCurrentDirectorySearch"/>, so cmd.exe looks for what the script names bare in PATH only, never in the
+    /// working directory the start gives it.
     /// </summary>
     internal static void ThroughCommandInterpreter(ProcessStartInfo info, string script, Func<string> interpreter)
     {
@@ -118,6 +120,7 @@ internal static class ProgramPath
         info.FileName = program;
         info.ArgumentList.Clear();
         info.Arguments = arguments;
+        WithoutCurrentDirectorySearch(info.Environment);
     }
 
     /// <summary>
@@ -273,12 +276,42 @@ internal static class ProgramPath
     /// The search path a started program receives. When <paramref name="info"/>'s environment holds this process's own PATH, as it does
     /// unless its caller set another, that PATH loses its empty and relative entries, its absolute entries kept in their order, so a
     /// program that starts another by name finds it only in an absolute directory too. A PATH the caller set is kept as given. With no
-    /// absolute entry left PATH is removed, since an empty PATH also names the current directory to a POSIX search.
+    /// absolute entry left PATH is removed, since an empty PATH also names the current directory to a POSIX search. From 0.9.4
+    /// (FIX-165), on Windows the program also receives <see cref="NoCurrentDirectorySearch"/> (<see cref="WithoutCurrentDirectorySearch"/>),
+    /// so that cmd.exe, and every program that searches as CreateProcess does, looks for a bare name in PATH only.
     /// </summary>
     internal static void NarrowSearchPath(ProcessStartInfo info)
     {
         ArgumentNullException.ThrowIfNull(info);
-        NarrowSearchPath(info.Environment, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows());
+        bool windows = OperatingSystem.IsWindows();
+        NarrowSearchPath(info.Environment, Environment.GetEnvironmentVariable("PATH"), windows);
+        if (windows)
+        {
+            WithoutCurrentDirectorySearch(info.Environment);
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (FIX-165): the Windows environment variable whose existence, whatever its value, keeps the working directory out of the
+    /// search for a program named without a backslash (NeedCurrentDirectoryForExePathW). cmd.exe searches ".;%PATH%" for every command a
+    /// batch program names bare without it, and "%PATH%" with it; CreateProcess's own search for a bare name consults it too.
+    /// </summary>
+    internal const string NoCurrentDirectorySearch = "NoDefaultCurrentDirectoryInExePath";
+
+    /// <summary>
+    /// From 0.9.4 (FIX-165): sets <see cref="NoCurrentDirectorySearch"/> to 1 in <paramref name="environment"/>, a Windows environment,
+    /// replacing any spelling or value it had. Windows checks only that the variable exists; the value is 1, not empty, so that no
+    /// reader that treats an empty value as unset (cmd.exe's own <c>set NAME=</c> removes it) reads it as absent.
+    /// </summary>
+    internal static void WithoutCurrentDirectorySearch(IDictionary<string, string?> environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        foreach (string key in environment.Keys.Where(name => string.Equals(name, NoCurrentDirectorySearch, StringComparison.OrdinalIgnoreCase)).ToArray())
+        {
+            environment.Remove(key);
+        }
+
+        environment[NoCurrentDirectorySearch] = "1";
     }
 
     /// <summary><see cref="NarrowSearchPath(ProcessStartInfo)"/> for an environment, this process's own PATH and a platform.</summary>

@@ -957,14 +957,22 @@ quote inside an argument as two (`x"y` as `x""y`), since `cmd.exe` has no other 
 with the reason and the argument's position but never its value: a percent sign in the script's path or an argument, which
 `cmd.exe` expands as a variable before it reads any quoting and which nothing escapes on its command line; a line break or another
 control character (a tab in an argument aside), since a line feed ends the command `cmd.exe` reads and a carriage return is
-dropped from it; a double quote in the script's path; and a command longer than the 8191 characters `cmd.exe` reads. The process's
-job contains `cmd.exe` and everything the script starts, and the exit code is the script's. A launch binding hashes the script;
-`cmd.exe`, the operating system's own, is not hashed.
+dropped from it; a double quote in the script's path; and a command longer than the 8191 characters `cmd.exe` reads. `cmd.exe`
+looks for each program the script names bare in `PATH` only, never in its working directory (the workspace, for a launcher's
+command and a setup command; below). The process's job contains `cmd.exe` and everything the script starts, and the exit code is
+the script's. A launch binding hashes the script; `cmd.exe`, the operating system's own, is not hashed. What reaches the script is
+data; a script that expands an argument unquoted (`%~1`), passes it to `call` or turns delayed expansion on reads it again as a
+command line, and a program that reads its command line by rules older than the C runtime's current ones may split an argument
+that holds a doubled quote.
 
 The program then receives `PATH` without its empty and relative entries, its absolute entries kept as written and in order, so a
-program that starts another by name, as git, a harness or a setup script does, finds it in an absolute directory as well. With no
-absolute entry left, `PATH` is removed. This is the `PATH` Vericairn hands over; a program that sets its own search path, or reads
-another, decides for itself what it then starts.
+program that starts another by name, as git, a harness or a setup script does, finds it in an absolute directory as well, as far
+as its search reads only `PATH`. With no absolute entry left, `PATH` is removed. On Windows, `cmd.exe`, which runs every batch
+program, and the system's own search for a program named without a path also look in the working directory before `PATH`, unless
+the variable `NoDefaultCurrentDirectoryInExePath` exists; from 0.9.4 (FIX-165) every program Vericairn starts on Windows receives
+it, set to `1` whatever the environment held, so those searches read `PATH` only, and a batch program names a file of its working
+directory as `.\file`. This is the `PATH` Vericairn hands over; a program that sets its own search path, reads another, or
+searches in its own way decides for itself what it then starts.
 
 The launch binding records the hash of the file the start runs, found by the same lookup.
 

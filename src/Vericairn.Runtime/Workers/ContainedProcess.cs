@@ -54,7 +54,9 @@ internal sealed class ContainedProcess
     /// it is this process's own, loses its empty and relative entries (<see cref="ProgramPath.NarrowSearchPath(ProcessStartInfo)"/>).
     /// From 0.9.4 (FIX-165), on Windows a batch program starts through the system directory's cmd.exe (<see cref="WindowsCommandLine"/>),
     /// which the job contains with everything the script starts; one whose path or arguments cmd.exe cannot be given as data throws
-    /// <see cref="BatchArgumentRefusedException"/>, a <see cref="Win32Exception"/>, before anything is created.
+    /// <see cref="BatchArgumentRefusedException"/>, a <see cref="Win32Exception"/>, before anything is created. On Windows every start's
+    /// environment also holds <see cref="ProgramPath.NoCurrentDirectorySearch"/>, so cmd.exe finds what a script names bare in PATH
+    /// only, not in the working directory (the workspace, for runs and setup commands).
     /// </summary>
     public static ContainedProcess Start(ProcessStartInfo info)
     {

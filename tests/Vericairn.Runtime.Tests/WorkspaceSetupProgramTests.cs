@@ -172,7 +172,10 @@ public sealed class WorkspaceSetupProgramTests : IDisposable
         WorkspaceSetupResult result = WorkspaceSetup.Run(new() { Command = [Path.ChangeExtension(command[0], null), .. command.Skip(1)] }, workspace, WorkerEnvironment.Current());
 
         Assert.True(result.Succeeded, result.Facts);
-        Assert.Equal("generic", Assert.Single(FakeHarness.Reports(report))["scenario"]!.GetValue<string>());
+        JsonObject given = Assert.Single(FakeHarness.Reports(report));
+        Assert.Equal("generic", given["scenario"]!.GetValue<string>());
+        // Every program started on Windows looks for what it names bare in PATH only (FIX-165).
+        Assert.Equal("1", given["environment"]![Vericairn.Records.Processes.ProgramPath.NoCurrentDirectorySearch]!.GetValue<string>());
 
         string chcp = Path.Combine(Environment.SystemDirectory, "chcp");
         Assert.SkipUnless(File.Exists(chcp + ".com") && !File.Exists(chcp + ".exe"), "This Windows has no chcp.com alone in its system directory.");

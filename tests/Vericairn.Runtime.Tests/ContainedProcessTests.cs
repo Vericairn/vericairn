@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using Microsoft.Win32.SafeHandles;
 using Vericairn.Runtime.Workers;
 
@@ -425,6 +426,90 @@ public class ContainedProcessTests
         {
             WorkspaceCleanup.Delete(root);
         }
+    }
+
+    // From 0.9.4 (FIX-165): cmd.exe looks for what a batch program names bare in PATH only, never in the working directory it starts
+    // in (the workspace, for runs, setup commands and harness probes), whichever way the batch program is started.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OnWindowsABatchProgramFindsWhatItNamesBareInPathAndNeverInItsWorkingDirectory(bool contained)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "cmd.exe's search is Windows'; the variable that narrows it is checked on every platform.");
+        string host = Environment.ProcessPath!;
+        Assert.SkipWhen(Path.GetFileNameWithoutExtension(host).Equals("dotnet", StringComparison.OrdinalIgnoreCase), "The program on PATH is a copy of the test executable's own host.");
+        string root = Directory.CreateTempSubdirectory("vericairn-batch-").FullName;
+        string name = "vericairn-probe-" + Guid.NewGuid().ToString("N");
+        string onPath = Path.Combine(Path.GetDirectoryName(host)!, name + ".exe");
+        try
+        {
+            string work = Directory.CreateDirectory(Path.Combine(root, "work")).FullName;
+            string scripts = Directory.CreateDirectory(Path.Combine(root, "script dir")).FullName;
+            string marker = Path.Combine(root, "working-directory-ran.txt");
+            string report = Path.Combine(root, "path-ran.jsonl");
+            string result = Path.Combine(root, "result.txt");
+            // The working directory's program of that name: a copy of cmd.exe, which writes the marker its command line names.
+            File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), Path.Combine(work, name + ".exe"));
+            // The script names it bare; a copy of the test executable reads the same command line as the stand-in harness.
+            string script = BatchScript.Write(scripts, "probe.cmd",
+                "@echo off",
+                $"{name} /d /c echo ran^>\"{marker}\" " + BatchScript.Line([FakeHarness.Marker, "generic", report]),
+                $">\"{result}\" echo %errorlevel%",
+                "exit /b 0");
+
+            // Not on PATH: the working directory's program does not run, and cmd.exe finds no such command (error level 9009).
+            Assert.Equal(0, await RunBatch(script, work, Environment.SystemDirectory, contained));
+            Assert.False(File.Exists(marker), "cmd.exe ran the program in its working directory.");
+            Assert.Equal("9009", File.ReadAllText(result).Trim());
+
+            // In an absolute directory of PATH: that program runs, and still not the working directory's.
+            File.Copy(host, onPath);
+            Assert.Equal(0, await RunBatch(script, work, Path.GetDirectoryName(host) + ";" + Environment.SystemDirectory, contained));
+            Assert.False(File.Exists(marker), "cmd.exe ran the program in its working directory.");
+            Assert.Equal("0", File.ReadAllText(result).Trim());
+            JsonObject given = Assert.Single(FakeHarness.Reports(report));
+            Assert.Equal("generic", given["scenario"]!.GetValue<string>());
+            Assert.Equal("1", given["environment"]![Vericairn.Records.Processes.ProgramPath.NoCurrentDirectorySearch]!.GetValue<string>());
+
+            // Named from the working directory (.\name), its program runs: the marker's absence above was the search's doing.
+            string named = BatchScript.Write(scripts, "named.cmd", "@echo off", $".\\{name} /d /c echo ran^>\"{marker}\"", "exit /b 0");
+            Assert.Equal(0, await RunBatch(named, work, Environment.SystemDirectory, contained));
+            Assert.True(File.Exists(marker));
+        }
+        finally
+        {
+            if (File.Exists(onPath)) File.Delete(onPath);
+            WorkspaceCleanup.Delete(root);
+        }
+    }
+
+    // Starts a batch program in a working directory with the PATH given, through the containment primitive or the resolver's start,
+    // and waits for it; its exit code.
+    private static async Task<int> RunBatch(string script, string directory, string path, bool contained)
+    {
+        var info = new ProcessStartInfo(script) { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        info.Environment["PATH"] = path;
+        if (contained)
+        {
+            ContainedProcess process = ContainedProcess.Start(info);
+            try
+            {
+                Task drained = Task.WhenAll(process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken), process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken));
+                Assert.True(process.WaitForExit(TestTiming.HangTimeout));
+                await drained.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+                return process.ExitCode;
+            }
+            finally
+            {
+                process.Close();
+            }
+        }
+
+        using Process started = Vericairn.Records.Processes.ProgramPath.Start(info)!;
+        Task drainedOutput = Task.WhenAll(started.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken), started.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken));
+        await started.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        await drainedOutput.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        return started.ExitCode;
     }
 
     private static ContainedProcess Start(RunEstate run, string scenario, string? stop = null)

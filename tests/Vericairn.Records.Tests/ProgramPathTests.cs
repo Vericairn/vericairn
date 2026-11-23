@@ -522,6 +522,7 @@ public sealed class ProgramPathTests
         Assert.Equal(@"C:\Windows\System32\cmd.exe", info.FileName);
         Assert.Empty(info.ArgumentList);
         Assert.Equal("/d /e:on /v:off /s /c \"\"C:\\script dir\\probe.cmd\" \"a b\" \"x\"\"y\"\"", info.Arguments);
+        Assert.Equal("1", info.Environment[ProgramPath.NoCurrentDirectorySearch]);
 
         var refused = new ProcessStartInfo("probe.cmd") { ArgumentList = { "a b", "100%" } };
         Assert.Throws<BatchArgumentRefusedException>(() => ProgramPath.ThroughCommandInterpreter(refused, Script, () => throw new InvalidOperationException("No interpreter is looked for.")));
@@ -531,6 +532,83 @@ public sealed class ProgramPathTests
         var single = new ProcessStartInfo("probe.cmd", "a b");
         Assert.Contains("given as one string", Assert.Throws<BatchArgumentRefusedException>(() => ProgramPath.ThroughCommandInterpreter(single, Script, () => @"C:\Windows\System32\cmd.exe")).Message, StringComparison.Ordinal);
         Assert.Equal("probe.cmd", single.FileName);
+    }
+
+    // From 0.9.4 (FIX-165): each character cmd.exe reads as more than data, alone and inside an argument, is quoted, a double quote
+    // doubled, and a percent sign refused; each character of the bare set stays bare. Any change to the bare set fails one of these.
+    private const string Probe = @"C:\tools\probe.cmd";
+
+    private static string Written(params string[] arguments) => "/d /e:on /v:off /s /c \"\"" + Probe + "\"" + string.Concat(arguments.Select(a => " " + a)) + "\"";
+
+    [Theory]
+    [InlineData('&')]
+    [InlineData('|')]
+    [InlineData('<')]
+    [InlineData('>')]
+    [InlineData('^')]
+    [InlineData('(')]
+    [InlineData(')')]
+    [InlineData(',')]
+    [InlineData(';')]
+    [InlineData('=')]
+    [InlineData('!')]
+    [InlineData(' ')]
+    [InlineData('\t')]
+    [InlineData('\'')]
+    [InlineData('`')]
+    [InlineData('~')]
+    [InlineData('[')]
+    [InlineData(']')]
+    [InlineData('{')]
+    [InlineData('}')]
+    [InlineData('\u00a0')]
+    public void EachCharacterCmdReadsAsMoreThanDataIsQuoted(char special)
+    {
+        Assert.Equal(Written($"\"{special}\""), ProgramPath.BatchArguments(Probe, [special.ToString()]));
+        Assert.Equal(Written($"\"a{special}b\""), ProgramPath.BatchArguments(Probe, [$"a{special}b"]));
+    }
+
+    [Fact]
+    public void ADoubleQuoteIsDoubledInsideQuotesAndAPercentSignIsRefused()
+    {
+        Assert.Equal(Written("\"\"\"\""), ProgramPath.BatchArguments(Probe, ["\""]));
+        Assert.Equal(Written("\"a\"\"b\""), ProgramPath.BatchArguments(Probe, ["a\"b"]));
+        Assert.Throws<BatchArgumentRefusedException>(() => ProgramPath.BatchArguments(Probe, ["%"]));
+        Assert.Throws<BatchArgumentRefusedException>(() => ProgramPath.BatchArguments(Probe, ["a%b"]));
+    }
+
+    [Theory]
+    [InlineData('#')]
+    [InlineData('$')]
+    [InlineData('*')]
+    [InlineData('+')]
+    [InlineData('-')]
+    [InlineData('.')]
+    [InlineData('/')]
+    [InlineData(':')]
+    [InlineData('?')]
+    [InlineData('@')]
+    [InlineData('_')]
+    [InlineData('\\')]
+    [InlineData('a')]
+    [InlineData('Z')]
+    [InlineData('0')]
+    public void EachCharacterOfTheBareSetStaysBareInsideAnArgument(char plain) =>
+        Assert.Equal(Written($"a{plain}b"), ProgramPath.BatchArguments(Probe, [$"a{plain}b"]));
+
+    // From 0.9.4 (FIX-165): every program started on Windows looks for what it names bare in PATH only.
+    [Fact]
+    public void TheVariableThatKeepsTheWorkingDirectoryOutOfTheSearchIsSetWhateverTheEnvironmentHeld()
+    {
+        Assert.Equal("NoDefaultCurrentDirectoryInExePath", ProgramPath.NoCurrentDirectorySearch);
+        var windows = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { ["Path"] = @"C:\Windows", ["nodefaultcurrentdirectoryinexepath"] = "0" };
+        ProgramPath.WithoutCurrentDirectorySearch(windows);
+        Assert.Equal(["Path", "NoDefaultCurrentDirectoryInExePath"], windows.Keys);
+        Assert.Equal("1", windows["NoDefaultCurrentDirectoryInExePath"]);
+
+        var spelled = new Dictionary<string, string?>(StringComparer.Ordinal) { ["NODEFAULTCURRENTDIRECTORYINEXEPATH"] = null, ["NoDefaultCurrentDirectoryInExePath"] = "" };
+        ProgramPath.WithoutCurrentDirectorySearch(spelled);
+        Assert.Equal(new KeyValuePair<string, string?>("NoDefaultCurrentDirectoryInExePath", "1"), Assert.Single(spelled));
     }
 
     // On a Windows machine: the batch program starts through the system's cmd.exe, gets its arguments and gives its exit code.
@@ -713,5 +791,43 @@ public sealed class ProgramPathTests
         File.WriteAllText(path, "#!/bin/sh\nexit 0\n");
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         return path;
+    }
+}
+
+/// <summary>
+/// From 0.9.4 (FIX-165): cmd.exe is the system directory's, never the one ComSpec names. The test changes this process's ComSpec, so
+/// nothing runs beside it.
+/// </summary>
+[CollectionDefinition("command interpreter", DisableParallelization = true)]
+public sealed class CommandInterpreterScope;
+
+[Collection("command interpreter")]
+public sealed class CommandInterpreterTests
+{
+    [Fact]
+    public void TheCommandInterpreterIsNeverTheOneComSpecNames()
+    {
+        string? comSpec = Environment.GetEnvironmentVariable("ComSpec");
+        string root = Directory.CreateTempSubdirectory("vericairn-comspec-").FullName;
+        string standIn = Path.Combine(root, "cmd.exe");
+        File.WriteAllText(standIn, "not the system's command interpreter");
+        try
+        {
+            Environment.SetEnvironmentVariable("ComSpec", standIn);
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Equal(Path.Combine(Environment.SystemDirectory, "cmd.exe"), ProgramPath.CommandInterpreter(), StringComparer.OrdinalIgnoreCase);
+            }
+            else
+            {
+                // No system directory: refused, whatever ComSpec names.
+                Assert.Throws<ProgramNotFoundException>(() => ProgramPath.CommandInterpreter());
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ComSpec", comSpec);
+            Directory.Delete(root, recursive: true);
+        }
     }
 }
