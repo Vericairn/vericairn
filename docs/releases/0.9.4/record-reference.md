@@ -877,16 +877,16 @@ Subject type: null; subject hash required: false; introduced in record format: 3
 
 Reserved for later releases: &#91;&#34;object&#34;&#93;.
 
-Build version: 0&#46;9&#46;4; provenance instant: 2026&#45;11&#45;22T21&#58;27&#58;33Z.
+Build version: 0&#46;9&#46;4; provenance instant: 2026&#45;11&#45;23T14&#58;15&#58;23Z.
 
 ## Generation basis
 
-Build commit: `3c7c31c8547e52173e388fc583e24cfd62689ac9`.
+Build commit: `a7a7e5de6863997cf44394c6336ba41216e537b4`.
 
 Generator: `vericairn.software/record-reference/1`; implementation: `vericairn.software.companions/1`; source digest: `sha256:da60e7f17012bdfc621f3d22a3180cf8345a1efe066dbb23f4192ff28ac910c6`.
 
-Input digest: `sha256:6961027380c9f8d5ae43a4ec907500374e3e412dc2344556bd659b1da2d99e13`.
+Input digest: `sha256:c5a6c571b7a96ca8bc0f5d2cd1d28fe60a185161acc1e6d99631fdcb0a0aca07`.
 
 | Input | SHA-256 | Bytes |
 |---|---|---|
-| inputs&#47;record&#45;types&#46;json | `sha256:3b849729f565eb45363cb4219234ab2fe61918dc4c556ad64fb7540bd7f4e915` | 108173 |
+| inputs&#47;record&#45;types&#46;json | `sha256:f65b1167a7c667356740b437062e661015c8ade69f955b677f3e799c32dac566` | 108173 |

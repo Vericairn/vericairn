@@ -355,6 +355,17 @@ read at an exact commit resolves from that repository's Git objects at the commi
 registered on the serving machine. When none can supply it and no earlier copy is retained, its
 `release-basis.missing` finding says so. See [API compatibility for 0.9.2](api-compatibility-0.9.2.md#a-release-basis-keeps-evidence-files-by-hash-fix-95).
 
+From 0.9.4 (FIX-163), a basis whose serialization passes the 8 MiB object limit is retained as a split object: parts of
+exactly 8 MiB, the last no longer, and a canonical root of format `vericairn.split-object/1` naming them in order with the
+basis's length and SHA-256. `GET /v1/release-bases/{hash}` with the root's hash returns the same `ReleaseBasisResponse` as
+for the basis held in one object, its `hash` the root's and its evidence of format `vericairn.release-basis/3`. Before it
+reads any part, the reader refuses an object past the object limit, a root larger than any root of a basis within 256 MiB,
+stating more than 256 MiB, naming a count of parts that does not follow from its length, or not canonical, each as
+`release-basis.invalid` at `basis:<hash>`, and it measures every part: one missing is `release-basis.missing` and one of
+another length than its place holds is `release-basis.invalid`, at `basis-part:<n>@<hash>`. Read parts whose bytes do not
+match their hash are `release-basis.hash-mismatch` at their place, and parts that join to other bytes than the root's
+digest are `release-basis.hash-mismatch` at `basis:<digest>`. A runtime before 0.9.4 answers HTTP 404 for a root.
+
 ## Work-order creation (0.8.3)
 
 `POST /v1/work/new` takes `WorkNewRequest`, the API counterpart of `vericairn work new`:
