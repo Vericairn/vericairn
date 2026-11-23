@@ -87,4 +87,98 @@ public sealed class WorkspaceSetupProgramTests : IDisposable
         Assert.Contains($"'setup-repository-{repository}.json' could not be read", unreadable.Message, StringComparison.Ordinal);
         Assert.Contains("can never be started", unreadable.InnerException!.Message, StringComparison.Ordinal);
     }
+
+    // From 0.9.4 (FIX-165): a setup command that is a batch program the workspace holds, named relative to it, runs through cmd.exe
+    // from the workspace, receives its arguments, gives its exit code, and what it leaves running is ended with the job.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void OnWindowsARelativeBatchProgramRunsFromTheWorkspaceWithItsArgumentsAndItsExitCode(int code)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "A batch program runs on Windows only; a POSIX script of the workspace is checked above.");
+        string workspace = Directory.CreateDirectory(Path.Combine(root, "workspace")).FullName;
+        string scripts = Directory.CreateDirectory(Path.Combine(workspace, "scripts")).FullName;
+        string report = Path.Combine(root, "setup.jsonl");
+        string child = Path.Combine(root, "descendant.jsonl");
+        BatchScript.Write(scripts, "probe.cmd",
+        [
+            "@echo off",
+            ">given.txt echo(%~1",
+            BatchScript.Line(FakeHarness.Command("generic", report)) + " %*",
+            .. BatchScript.Descendant(child),
+            $"exit /b {code}",
+        ]);
+
+        WorkspaceSetupResult result = WorkspaceSetup.Run(new() { Command = [@"scripts\probe.cmd", "a b"] }, workspace, WorkerEnvironment.Current());
+
+        Assert.Equal("exited", result.Status);
+        Assert.Equal(code, result.ExitCode);
+        Assert.Equal(code == 0, result.Succeeded);
+        Assert.Equal("a b", File.ReadAllText(Path.Combine(workspace, "given.txt")).TrimEnd('\r', '\n'));
+        Assert.Equal(["a b"], Assert.Single(FakeHarness.Reports(report))["arguments"]!.AsArray().Select(a => a!.GetValue<string>()));
+        Assert.True(BatchScript.DescendantEnded(child), "The setup command's descendant outlived it.");
+    }
+
+    [Fact]
+    public void OnWindowsABatchSetupArgumentCmdCannotBeGivenAsDataRunsNothing()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "A batch program runs on Windows only; the refusals are checked on every platform.");
+        string workspace = Directory.CreateDirectory(Path.Combine(root, "workspace")).FullName;
+        string marker = Path.Combine(root, "ran.txt");
+        BatchScript.Write(workspace, "probe.cmd", $">\"{marker}\" echo ran", "exit /b 0");
+        foreach (string argument in new[] { "100%", "a\nb" })
+        {
+            Assert.Equal("not-started", WorkspaceSetup.Run(new() { Command = [@".\probe.cmd", argument] }, workspace, WorkerEnvironment.Current()).Status);
+            Assert.False(File.Exists(marker), "The batch program ran.");
+        }
+
+        Assert.True(WorkspaceSetup.Run(new() { Command = [@".\probe.cmd", "a b"] }, workspace, WorkerEnvironment.Current()).Succeeded);
+        Assert.True(File.Exists(marker));
+    }
+
+    [Fact]
+    public void ABatchSetupCommandsArgumentsCmdCannotBeGivenAsDataAreRefusedWhenConfiguredOnWindows()
+    {
+        var store = new WorkerConfigurationStore(Directory.CreateDirectory(Path.Combine(root, "home")).FullName);
+        string repository = Ulid.NewUlid().Value;
+        foreach (string[] command in new string[][] { [@"scripts\setup.cmd", "100%"], ["setup.bat", "a", "line\nbreak"] })
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => store.WriteSetup(null, repository, new() { Command = command }));
+                Assert.Contains("batch program can never be started", refused.Message, StringComparison.Ordinal);
+            }
+            else
+            {
+                // Linux and macOS run no batch program: the name is an ordinary executable's.
+                store.WriteSetup(null, repository, new() { Command = command });
+            }
+        }
+
+        store.WriteSetup(null, repository, new() { Command = [@"scripts\setup.cmd", "a b", "x\"y", "&|<>^!"] });
+        Assert.Equal([@"scripts\setup.cmd", "a b", "x\"y", "&|<>^!"], Assert.Single(store.ListSetup()).Setup!.Command);
+    }
+
+    // From 0.9.4 (FIX-165): an absolute path without an extension starts the .exe, else the .com, of that name in that folder.
+    [Fact]
+    public void OnWindowsAnAbsoluteSetupExecutableWithoutAnExtensionStartsItsExeOrItsCom()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows reads a program's extension; the rule is checked on every platform.");
+        string workspace = Directory.CreateDirectory(Path.Combine(root, "workspace")).FullName;
+        string report = Path.Combine(root, "setup.jsonl");
+        List<string> command = FakeHarness.Command("generic", report);
+        Assert.EndsWith(".exe", command[0], StringComparison.OrdinalIgnoreCase);
+
+        WorkspaceSetupResult result = WorkspaceSetup.Run(new() { Command = [Path.ChangeExtension(command[0], null), .. command.Skip(1)] }, workspace, WorkerEnvironment.Current());
+
+        Assert.True(result.Succeeded, result.Facts);
+        JsonObject given = Assert.Single(FakeHarness.Reports(report));
+        Assert.Equal("generic", given["scenario"]!.GetValue<string>());
+        // Every program started on Windows looks for what it names bare in PATH only (FIX-165).
+        Assert.Equal("1", given["environment"]![Vericairn.Records.Processes.ProgramPath.NoCurrentDirectorySearch]!.GetValue<string>());
+
+        string chcp = Path.Combine(Environment.SystemDirectory, "chcp");
+        Assert.SkipUnless(File.Exists(chcp + ".com") && !File.Exists(chcp + ".exe"), "This Windows has no chcp.com alone in its system directory.");
+        Assert.Equal("exited", WorkspaceSetup.Run(new() { Command = [chcp] }, workspace, WorkerEnvironment.Current()).Status);
+    }
 }
