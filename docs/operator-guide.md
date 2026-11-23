@@ -907,6 +907,22 @@ From 0.9.4 (FIX-161), git, gitleaks and gh must be in an absolute directory of `
 current directory, an estate root or a clone is not used, and `vericairn doctor` reports git as missing when only such a copy
 exists.
 
+From 0.9.4 (FIX-165), on Windows a `check run` command, a launcher's `command` or a workspace setup command that is a batch
+program (`.cmd` or `.bat`, such as the shim npm installs for a harness) runs through `cmd.exe` in the system directory
+(`%SystemRoot%\System32`), never one that `ComSpec` or `PATH` names, inside the same job, and its exit code is the script's.
+Each argument reaches the script as data: one holding any character but a letter, a digit or one of `# $ * + - . / : ? @ \ _`,
+or ending with a backslash, is quoted, and a double quote inside it is doubled. A program the script hands its arguments on to
+with `%*`, as npm's shims hand them to Node.js, reads each argument as given; the script's own `%~1` reads a double quote inside
+an argument as two. What `cmd.exe` cannot read as data is refused before anything starts, with the reason: a percent sign or a
+line break (or another control character) in an argument or the script's path, a double quote in the script's path, and a
+command longer than 8191 characters; `worker configure --setup-command` refuses such a setup command when you configure it.
+`cmd.exe` looks for what the script names bare (`node`, `git`) in `PATH` only, never in its working directory, the workspace or
+the repository: every program Vericairn starts on Windows receives `NoDefaultCurrentDirectoryInExePath=1`, which keeps the
+working directory out of that search. A script names a file of its working directory as `.\file`. An absolute path without an
+extension, such as one ending in `\tools\harness`, starts that folder's `harness.exe`, else its `harness.com`, and nothing from
+another folder. The [software guide](software.md#coding-agents-the-worker-and-its-launchers) gives the exact command `cmd.exe`
+is given.
+
 ## 8. Releases
 
 ### Release lines and channels in 0.9.0
@@ -1082,6 +1098,16 @@ revision is a commit means no clone registered here holds that commit at that pa
 with `vericairn sources clone <path> --resource <id>`. Submission writes only the estate's own working-tree
 files beside the basis object; commit them with it. Copies of exact-commit files that 0.9.1 and earlier
 wrote are no longer needed to read their bases. See [estate policies](policies.md) for the retention bound.
+
+From 0.9.4 (FIX-163), a basis larger than the estate's 8 MiB object limit, as an estate with many thousands of records
+produces, is retained in parts of exactly 8 MiB, the last no longer, named in order by a small canonical root object of
+format `vericairn.split-object/1` that records the whole basis's length and SHA-256; the evidence names the root, and
+`release basis <evidence-hash>` reads it exactly as a basis held in one object. A basis is at most 256 MiB, 32 parts, and
+`release submit --check` refuses a longer one with `release.basis-size`. A part that is missing, of the wrong length or
+changed is named as `basis-part:<n>@<hash>`. Commit the parts and the root with the basis's other objects: the estate
+check reports `objects.split` for a root committed without a part it names. A basis that fits one object is retained as
+that object, as before. A client before 0.9.4 reports a split basis as
+`No supported retained release basis has this hash`, and its estate check passes; read the basis with 0.9.4 or later.
 
 The repository adapter and release provider share one bounded runner: 30 seconds per adapter Git
 command, two minutes per provider gh command, and

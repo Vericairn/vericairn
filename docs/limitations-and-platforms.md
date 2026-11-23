@@ -314,6 +314,22 @@ Every run requires explicit model, effort, provider, destination and data bounda
 
 The custody guard refuses unattended launch while a locally held key of an operator or the sponsor signs without presence, unless the accountable person recorded a current, expiring exception for the goal revision. Revoked and unadmitted keys count too, because possession still permits signatures. This guard does not isolate the harness from the operating-system user's files or credentials. Use a separate user when that isolation is needed.
 
+From 0.9.4 (FIX-165), on Windows a harness command, a workspace setup command or a `check run` command that is a batch program
+(`.cmd`, `.bat`) runs through the system directory's `cmd.exe`, which reads no percent sign and no line break or other control
+character as data: an argument or a script path holding one is refused before anything starts, and so is a command longer than
+the 8191 characters `cmd.exe` reads. The native launchers pass the goal condition as an argument, so a condition holding a
+percent sign or a line break refuses a run started through a `.cmd` shim npm installs for a harness; name the harness's own
+executable to start it without `cmd.exe`. A double quote inside an argument reaches a program the script hands its arguments on
+to (`%*`) as given only when that program reads its command line the C runtime's way, as Node.js does; the script's own `%~1`
+reads it doubled, since `cmd.exe` has no other way to write one. What reaches the script is data on `cmd.exe`'s own command
+line; a script that expands an argument unquoted (`%~1`), passes it to `call` or turns delayed expansion on reads it again as a
+command line, and a program that reads its command line by rules older than the C runtime's current ones may split an argument
+holding a doubled quote. Every program Vericairn starts on Windows receives `NoDefaultCurrentDirectoryInExePath=1`, so `cmd.exe`
+and the system's own search find a program named bare in `PATH` only; a program that searches in its own way, without reading
+that variable, can still look in its working directory. The launch binding hashes the script, not `cmd.exe` and, for an npm
+shim, not the runtime and script the shim starts. An absolute path whose file name ends with a dot or a space, or that names a
+stream of a file, is refused.
+
 Codex receives a fresh `CODEX_HOME` with only the approved harness login imported; effective MCP configuration is probed and extra servers or incompatible managed policy refuse launch. Claude Code receives a fresh `CLAUDE_CONFIG_DIR`, restricted settings, hooks/plugins disabled and strict MCP configuration; detected managed policy refuses launch. Remote or undetected managed policy and managed Claude accounts are unsupported. These controls do not stop deliberate same-user file or keychain access.
 
 From 0.9.4 (CODE-82), each run's record shows what it could reach, and nothing is blocked by the showing. Before the intent the worker plants a marker file outside the workspace and the run's temporary directory and a test host on the loopback interface, and a probe in the harness's place (the vericairn executable, as the same operating-system user, with the harness's environment and working directory) reports whether it read each; a format-3 intent records `execution.reach` with `readable`, `blocked` or `unknown` for the file and `reachable`, `blocked` or `unknown` for the host, and the count and kinds of the secret-bearing paths the user can open. Qualification records the same marker and host outcome. On today's launchers both read `readable` and `reachable`: neither confines its harness process, and Codex's sandbox confines only its shell commands' writes and network. The probe stands where the harness process stands; it does not run inside Codex's shell sandbox, and it cannot show what a harness tool would do that the probe does not (another protocol, another host). The test host is on the loopback interface, so a network control that admits loopback and blocks other hosts reads `reachable`. The secret-path inventory covers conventional locations under the harness's home, the run's imported harness login and the Vericairn home's device keys; secrets elsewhere (an estate clone's files, other repositories, browser profiles, a keychain item's own access control) are not listed, and a listed path is one the user could open, not one the run did open. The inventory opens without blocking and stops, incomplete, after ten seconds. The list of paths stays on the machine that ran the run, in `estates/<estate>/reach/<run>.json` under the Vericairn home, outside the run's directory, whose temporary directory and stop file the harness is told of; a process of the same user can still read it.
@@ -697,6 +713,12 @@ unavailable, as is one whose records, signatures included, differ from those its
 (FIX-54, 0.8.2), and a single source file over the object limit is named but not kept. A preview grants no submission
 authority. An effect already dispatched remains under its original identity if later observation fails;
 a client cancellation does not roll it back. See [estate policies](policies.md).
+
+From 0.9.4 (FIX-163), a basis that still outgrows the 8 MiB object limit, as one naming the records of an estate with many
+thousands of them does, is no longer refused: it is retained in parts of the limit, named in order by a small root object
+with the whole basis's length and SHA-256, and reads as before. A basis is at most 256 MiB (32 parts); a longer one is
+refused with `release.basis-size` before anything is written. Its reader refuses a root past that bound, or naming parts
+that do not follow from its length, before it reads any part. A client before 0.9.4 reports such a basis as unsupported.
 
 ## Release dispatch and bounded commands
 

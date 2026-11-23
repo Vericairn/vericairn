@@ -627,6 +627,22 @@ reports two new findings, `record.duplicate-refused` (warning) and `record.dupli
 and preparation, a standing goal step, record writes, checkpoint writes, record preparation for a device and pairing-code issuance
 return a `refused` problem naming the errors as described above. `EstateStatus.ReconcileCodes` is unchanged.
 
+## A release basis past the object limit is retained as a split object (FIX-163)
+
+`Vericairn.Records` adds the content-addressed split object in `Vericairn.Records.Estate`: the static class `SplitObject`
+(`Format`, `vericairn.split-object/1`; `MaxRootBytes`, `Plan`, `Write`, `IsRoot`, `Read` and `Join`), the interface
+`ISplitObjectSource`, which measures an object before it is read and takes a cancellation token, the records `SplitObjectPlan`, `SplitObjectContent`
+(with `Split`) and `SplitObjectProblem`, and the enum `SplitObjectFault`. These are additions; no member changes. A reader
+states the longest content it accepts, with no default; it bounds the root, ties the count to the length and measures every
+part before it reads any.
+Release submission retains a basis past the object limit as a split object, up to 256 MiB, and names its root in the
+operation's evidence; `release.basis-size` refuses a longer basis. The release-basis read returns the response it gives for
+the basis held in one object, under the root's hash. The estate check adds `objects.split` for a canonical root whose parts
+are missing or of the wrong length, measuring each distinct part once and reading none. No record field, record type or format number changes, and
+`vericairn.release-basis/3` is unchanged. A 0.9.3 estate check passes an estate holding split objects; 0.9.3's
+`release basis` reports a root as `No supported retained release basis has this hash` and exits 2, its API answers HTTP 404
+and its SDK null.
+
 ## Git on a repository Vericairn did not create starts no program its configuration names (FIX-147)
 
 No route, interface member, protocol type, record type or field changes, and no public member of a package is added or changed. The
@@ -676,6 +692,24 @@ program receives `PATH` without its empty and relative entries when its environm
 no absolute entry is left; a `PATH` a caller sets is passed as given. A launch binding's executable and MCP server hashes are of the
 files that lookup finds. A configured relative program path that used to start, read against the current directory, is now refused.
 No record, record format or wire value changes.
+
+## Windows batch programs start through cmd.exe (FIX-165)
+
+No route, interface member, protocol type, record type or field changes, and no public member is added or changed.
+`BatchArgumentRefusedException`, a `Win32Exception` with native error 160, is a new internal type of `Vericairn.Records`
+(namespace `Vericairn.Records.Processes`), thrown before anything starts for a batch program whose path or arguments `cmd.exe`
+cannot read as data, so every caller that handles a start that fails handles it. On Windows a program whose extension is `.cmd`
+or `.bat` is no longer passed to `CreateProcessW` as the application name: the containment primitive and every other start pass
+`cmd.exe` from the system directory, with `/d /e:on /v:off /s /c` and the script's quoted path and arguments. Every program
+started on Windows, by either start, receives `NoDefaultCurrentDirectoryInExePath=1` in its environment, replacing any spelling
+or value of that variable the environment held, as it receives `PATH` without empty and relative entries. An absolute Windows
+path without an extension resolves to the `.exe`, else the `.com`, of that name in its folder, where FIX-161 used it as given
+and the start failed; one whose file name ends with a dot or a space, or that names a stream of a file, is refused with
+`ProgramNotFoundException`. Behavior change of public members: on Windows `WorkerConfigurationStore.WriteSetup`
+(`Vericairn.Runtime`) refuses, with `ProviderRefusedException`, a batch setup command with an argument holding a percent sign or
+a control character other than a tab, and `ReadSetup` refuses, and `ListSetup` lists with its problem, a stored one. A launch
+binding's executable hash is of the script for a batch program, as before, and of the `.exe` or `.com` an absolute path without
+an extension resolves to. No record, record format or wire value changes.
 
 ## Operations, the OpenAPI document, MCP and the record reader
 
