@@ -80,10 +80,10 @@ public sealed partial class RemoteViewModel : Observable
     {
         this.connections = connections ?? throw new ArgumentNullException(nameof(connections));
         this.clock = clock ?? TimeProvider.System;
-        PairCommand = new AsyncCommand(PairAsync, () => !Busy && CanPair);
-        RefreshCommand = new AsyncCommand(RefreshAsync, () => !Busy && Selected is not null);
-        AddEstateCommand = new AsyncCommand(() => { Pairing = true; return Task.CompletedTask; }, () => !Busy);
-        CancelPairingCommand = new AsyncCommand(() => { Pairing = false; return Task.CompletedTask; }, () => !Busy && Estates.Count > 0);
+        PairCommand = Command(PairAsync, () => !Busy && CanPair);
+        RefreshCommand = Command(RefreshAsync, () => !Busy && Selected is not null);
+        AddEstateCommand = Command(() => { Pairing = true; return Task.CompletedTask; }, () => !Busy);
+        CancelPairingCommand = Command(() => { Pairing = false; return Task.CompletedTask; }, () => !Busy && Estates.Count > 0);
         InitializeDecisionCommands();
         InitializeAnswerCommands();
         InitializeActCommands();
@@ -344,12 +344,40 @@ public sealed partial class RemoteViewModel : Observable
         {
             PairingMessage = $"Not paired ({failure.Code}): {failure.Message}";
         }
+        catch (ArgumentException exception)
+        {
+            // From 0.9.5 (FIX-164): an address, code or name the SDK refuses before anything is sent, such as a mistyped code.
+            string said = exception.ParamName is string name ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message;
+            PairingMessage = $"Not paired (refused): {said}";
+        }
         finally
         {
             Busy = false;
         }
 
         if (!Pairing && Selected is not null) await RefreshAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>A command of this shell, whose unhandled exceptions <see cref="Unexpected"/> shows.</summary>
+    private AsyncCommand Command(Func<Task> execute, Func<bool> canExecute) => new(execute, canExecute, Unexpected);
+
+    /// <summary>
+    /// From 0.9.5 (FIX-164): an exception no command expected is shown where the person is, on the pairing form or under the home's
+    /// connection line, and Remote stays open; nothing is retried. Its type is named because a phone's own messages can be terse.
+    /// </summary>
+    private void Unexpected(Exception exception)
+    {
+        Busy = false;
+        string said = $"{exception.GetType().Name}: {exception.Message.TrimEnd()}";
+        if (!said.EndsWith('.')) said += ".";
+        if (Pairing || Selected is null)
+        {
+            PairingMessage = $"Not paired: the pairing stopped on an unexpected error, {said}";
+        }
+        else
+        {
+            ConnectionMessage = $"The last action stopped on an unexpected error, {said} Refresh before relying on what is shown.";
+        }
     }
 
     private async Task RefreshAsync()
