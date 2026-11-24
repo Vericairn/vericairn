@@ -1,11 +1,17 @@
 name: ci
 
+# CI-12: a pull request gets a light run, and the merge queue the full gate on the merged result. The plan job decides what
+# an event runs: for a pull request, Linux build-test in its shares, or only the documentation check when it changes nothing
+# but documentation; for a merge queue group, a push and a manual run, the three-platform build-test in every share the shard
+# plan (.github/test-shards.json) gives each platform, both Remote builds and the packaging path. ci-gate, the one check the
+# branches require, passes only when every job the event's plan runs has passed, so the same required check holds a pull
+# request and the queue whichever jobs ran. Release branches are treated as main is: the queue's group, the push and its
+# lookup are the same.
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/*']
   pull_request:
-  # The merge queue's event. Every job runs for a queued group exactly as for a pull request, so each check the default
-  # branch requires reports on the commit the queue would move main to.
+  # The merge queue's event: its group is the commit the queue would move main or a release branch to.
   merge_group:
   workflow_dispatch:
 
@@ -13,8 +19,8 @@ permissions:
   contents: read
 
 # A newer commit on a pull request cancels that pull request's run still in progress: no merge can use the head it tests.
-# Every other run, a push to main, a merge queue group or a manual run, has a group of its own, so none is ever cancelled or
-# held back by another. The jobs package.yml runs for this workflow belong to this run and stop with it.
+# Every other run, a push to main or a release branch, a merge queue group or a manual run, has a group of its own, so none is
+# ever cancelled or held back by another. The jobs package.yml runs for this workflow belong to this run and stop with it.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pull-request-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -24,11 +30,11 @@ env:
   AVALONIA_TELEMETRY_OPTOUT: "1"
 
 jobs:
-  # A merge queue moves main to the exact commit its group's run tested, so main's push run would repeat a run that passed.
-  # This job finds that run: on a push to main whose exact commit has a successful merge_group run of this workflow, every
-  # other job is skipped and the commit's three-platform run is the queue's. Any other push builds in full, as does a pull
-  # request, a queue group or a manual run, for which the job looks nothing up. A lookup that cannot be completed builds in
-  # full: only a found, passing run of the same commit skips anything.
+  # A merge queue moves main or a release branch to the exact commit its group's run tested, so the branch's push run would
+  # repeat a run that passed. This job finds that run: on a push whose exact commit has a successful merge_group run of this
+  # workflow, every other job is skipped and the commit's three-platform run is the queue's. Any other push builds in full,
+  # as does a queue group or a manual run, and a pull request runs its plan; for none of them does the job look anything up.
+  # A lookup that cannot be completed builds in full: only a found, passing run of the same commit skips anything.
   queue-tested:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -53,6 +59,30 @@ jobs:
           fi
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
           echo "event $EVENT, commit $COMMIT: skip=$skip"
+
+  # What this event runs (ci-plan.py): full for a merge queue group, a push and a manual run; for a pull request, Linux
+  # build-test, or the documentation check alone when every changed file is documentation (docs/ outside docs/releases/,
+  # README.md, ROADMAP.md). A pull request's checkout is its merge commit, whose first parent is the base it is tested on.
+  plan:
+    needs: [queue-tested]
+    if: needs.queue-tested.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+      build: ${{ steps.plan.outputs.build }}
+      docs: ${{ steps.plan.outputs.docs }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Plan this event's jobs
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+        run: python3 .github/scripts/ci-plan.py --event "$EVENT" >> "$GITHUB_OUTPUT"
 
   workflow-policy:
     needs: [queue-tested]
@@ -94,6 +124,14 @@ jobs:
         # every run script through the pinned ShellCheck. Its Python integration is off, since no pinned pyflakes is installed.
         run: '"$RUNNER_TEMP/lint/actionlint" -shellcheck "$RUNNER_TEMP/lint/shellcheck" -pyflakes= .github/workflows/*.yml'
 
+  # The full gate's jobs that do not depend on the plan wait only on the lookup and decide on the event itself, as ci-plan.py
+  # does (full for every event but a pull request). They start before build-test, which waits on the plan as well, so the
+  # iOS build and the packaging path's enclave helper ask for macOS runners before the macOS shares do. The organization runs at
+  # most five macOS jobs at once; the iOS build, the helper and four shares want six, and the helper needs about a minute, so
+  # one share starts a minute late rather than the packaging path waiting a share's length. The packaging path's published
+  # macOS command line, a seventh, starts after its package job, about ten minutes in, and waits for the first macOS job to
+  # finish, near the end of the shares; a second queue group building at once shares the same five runners.
+  #
   # Remote's heads build only where their platform's workload is installed, so they are in src/Vericairn.Mobile.slnx, not the
   # solution build-test builds. The workload set is pinned so CI builds with the SDKs the heads were built with. These are
   # developer builds: neither job signs, installs on or qualifies a real device. The workloads are installed afresh on every
@@ -104,9 +142,9 @@ jobs:
   remote-ios:
     # iOS alone is pinned to workload set 10.0.401 (iOS 26.5, Xcode 26.6): Avalonia.iOS does not build against the iOS 27.1
     # bindings of the band's later sets yet. The phone head is a developer build, not a release artifact: that set's Mono
-    # runtime (10.0.12) ships in no release, and the distributables embed the SDK's own runtime.
+    # runtime (10.0.12) ships in no release, and the distributables embed the SDK's own runtime. Part of the full gate only.
     needs: [queue-tested]
-    if: needs.queue-tested.outputs.skip != 'true'
+    if: needs.queue-tested.outputs.skip != 'true' && github.event_name != 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -141,8 +179,9 @@ jobs:
 
   remote-android:
     # Android follows the SDK's patch: workload set 10.0.404 carries the Mono runtime 10.0.15 that the phone head embeds.
+    # Part of the full gate only.
     needs: [queue-tested]
-    if: needs.queue-tested.outputs.skip != 'true'
+    if: needs.queue-tested.outputs.skip != 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -170,14 +209,15 @@ jobs:
           dotnet build src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj --no-restore --configuration Release
           -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME_17_X64"
 
+  # Each leg builds once and runs one share of every test assembly's classes, balanced by their measured durations; the
+  # shard plan gives each platform its number of shares. The full gate runs every platform's shares, so every test runs on
+  # every platform; a pull request runs Linux's.
   build-test:
-    needs: [queue-tested]
-    if: needs.queue-tested.outputs.skip != 'true'
+    needs: [plan]
+    if: needs.plan.outputs.build == 'true'
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        share: [1, 2, 3]
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -247,7 +287,7 @@ jobs:
       - name: Test
         if: runner.os != 'Linux'
         # Each failed test is retried once and reported in the run's summary; a second failure fails the job.
-        run: python .github/scripts/run-tests.py --share ${{ matrix.share }}
+        run: python .github/scripts/run-tests.py --share ${{ matrix.share }} --platform ${{ matrix.os }} --reports artifacts/test-reports
       - name: Test, with a secret service
         if: runner.os == 'Linux'
         env:
@@ -260,7 +300,16 @@ jobs:
             printf throwaway | gnome-keyring-daemon --unlock --components=secrets > /dev/null
             printf probe | secret-tool store --label "Vericairn CI probe" application vericairn-ci probe 1
             test "$(secret-tool lookup application vericairn-ci probe 1)" = probe
-            python3 .github/scripts/run-tests.py --share ${{ matrix.share }}'
+            python3 .github/scripts/run-tests.py --share ${{ matrix.share }} --platform ${{ matrix.os }} --reports artifacts/test-reports'
+      - name: Keep the test reports
+        # Each test's time in its share, for shard-durations.py to rebalance the shares from (README.md beside this file).
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports-${{ matrix.os }}-${{ matrix.share }}
+          path: artifacts/test-reports
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Measure history checkpoints at 100,000 records
         if: matrix.share == 1
         # The signed history design's section 11 cost test, on each platform beside the suites rather than in their time budget:
@@ -327,10 +376,106 @@ jobs:
               dotnet("build", project, "--no-restore", "--configuration", "Release")
 
   package:
-    # The release's packaging path on every change, everything but the draft: release.yml runs the same package.yml. It runs
-    # beside the tests rather than after them, so it adds no time to the run's critical path.
+    # The release's packaging path in the full gate, everything but the draft: release.yml runs the same package.yml. It runs
+    # beside the tests rather than after them, so it adds no time to the run's critical path. A pull request does not run it:
+    # its enclave helper and published macOS command line need macOS runners, of which the organization runs at most five at
+    # once, and a queue group's run holds them all.
     needs: [queue-tested]
-    if: needs.queue-tested.outputs.skip != 'true'
+    if: needs.queue-tested.outputs.skip != 'true' && github.event_name != 'pull_request'
     uses: ./.github/workflows/package.yml
     with:
       release: false
+
+  # A pull request that changes only documentation runs this instead of build-test: the solution's build and the test classes
+  # that read the repository's documentation (docs_classes.py), retried as every test is. The merge queue still runs the full
+  # gate on it.
+  docs-check:
+    needs: [plan]
+    if: needs.plan.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        timeout-minutes: 10
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            **/packages.lock.json
+      - name: Restore (locked)
+        timeout-minutes: 10
+        run: dotnet restore --locked-mode
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+      - name: Test the classes that read the documentation
+        run: python3 .github/scripts/run-tests.py --docs
+
+  # The one check the default and release branches require, for pull requests and the merge queue alike: it runs whatever
+  # happened before it (always(): a job skipped because a job it needs failed would otherwise report as passing). A push the
+  # merge queue already tested passes with every job skipped; no other event may skip, since the lookup skips only a push.
+  # For every other event but a pull request it requires the full gate whatever the plan says: every job but the
+  # documentation check passed, the plan full, and each platform's shares in build-test's matrix exactly 1 to the count the
+  # tested commit's shard plan gives it, as run-tests.py splits the classes, so a faulty plan cannot shrink what a queue
+  # group runs. A pull request requires the plan, the workflow policy and whichever of build-test and the documentation
+  # check its plan runs, Linux's shares counted the same way, every other job skipped. A cancelled run fails it. The shard
+  # plan is the one file it checks out, without credentials, and it is read as data only.
+  ci-gate:
+    needs: [queue-tested, plan, workflow-policy, build-test, remote-ios, remote-android, package, docs-check]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/test-shards.json
+          sparse-checkout-cone-mode: false
+      - name: Require every job this event runs
+        env:
+          EVENT: ${{ github.event_name }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -eu
+          result() { jq -r --arg job "$1" '.[$job].result' <<< "$NEEDS"; }
+          output() { jq -r --arg job "$1" --arg name "$2" '.[$job].outputs[$name] // ""' <<< "$NEEDS"; }
+          failed=0
+          expect() {
+            actual=$(result "$1")
+            echo "$1: $actual (expected $2)"
+            if [ "$actual" != "$2" ]; then failed=1; fi
+          }
+          shares() {
+            actual=$(output plan matrix | jq -c --arg os "$1" '[.include[] | select(.os == $os) | .share] | sort') || actual=unreadable
+            wanted=$(jq -c --arg os "$1" '.platforms[$os].shares | if type == "number" and . == floor and . >= 1 and . <= 12 then [range(1; . + 1)] else "unusable" end' .github/test-shards.json) || wanted=unreadable
+            echo "$1 shares: $actual (the shard plan's: $wanted)"
+            if [ "$actual" != "$wanted" ]; then failed=1; fi
+          }
+          expect queue-tested success
+          skip=$(output queue-tested skip)
+          if [ "$skip" = true ] && [ "$EVENT" = push ]; then
+            for job in plan workflow-policy build-test remote-ios remote-android package docs-check; do expect "$job" skipped; done
+          elif [ "$skip" = true ]; then
+            echo "queue-tested: skip on a $EVENT run, where only a push can skip"
+            failed=1
+          elif [ "$EVENT" != pull_request ]; then
+            for job in plan workflow-policy build-test remote-ios remote-android package; do expect "$job" success; done
+            expect docs-check skipped
+            planned="$(output plan full) $(output plan build) $(output plan docs)"
+            echo "plan: full, build, docs = $planned"
+            if [ "$planned" != "true true false" ]; then failed=1; fi
+            for os in ubuntu-latest macos-latest windows-latest; do shares "$os"; done
+          else
+            expect plan success
+            expect workflow-policy success
+            on() { if [ "$(output plan "$1")" = true ]; then echo success; else echo skipped; fi; }
+            expect build-test "$(on build)"
+            expect docs-check "$(on docs)"
+            for job in remote-ios remote-android package; do expect "$job" skipped; done
+            if [ "$(output plan build)" = "$(output plan docs)" ]; then failed=1; fi
+            if [ "$(output plan build)" = true ]; then shares ubuntu-latest; fi
+          fi
+          exit "$failed"
