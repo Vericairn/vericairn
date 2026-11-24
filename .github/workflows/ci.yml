@@ -416,17 +416,24 @@ jobs:
 
   # The one check the default and release branches require, for pull requests and the merge queue alike: it runs whatever
   # happened before it (always(): a job skipped because a job it needs failed would otherwise report as passing). A push the
-  # merge queue already tested passes with every job skipped. For every other event but a pull request it requires the full
-  # gate whatever the plan says: every job but the documentation check passed, the plan full, and every platform's shares,
-  # numbered from 1, in build-test's matrix, so a faulty plan cannot shrink what a queue group runs. A pull request requires
-  # the plan, the workflow policy and whichever of build-test and the documentation check its plan runs, every other job
-  # skipped. A cancelled run fails it.
+  # merge queue already tested passes with every job skipped; no other event may skip, since the lookup skips only a push.
+  # For every other event but a pull request it requires the full gate whatever the plan says: every job but the
+  # documentation check passed, the plan full, and each platform's shares in build-test's matrix exactly 1 to the count the
+  # tested commit's shard plan gives it, as run-tests.py splits the classes, so a faulty plan cannot shrink what a queue
+  # group runs. A pull request requires the plan, the workflow policy and whichever of build-test and the documentation
+  # check its plan runs, Linux's shares counted the same way, every other job skipped. A cancelled run fails it. The shard
+  # plan is the one file it checks out, without credentials, and it is read as data only.
   ci-gate:
     needs: [queue-tested, plan, workflow-policy, build-test, remote-ios, remote-android, package, docs-check]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/test-shards.json
+          sparse-checkout-cone-mode: false
       - name: Require every job this event runs
         env:
           EVENT: ${{ github.event_name }}
@@ -441,20 +448,26 @@ jobs:
             echo "$1: $actual (expected $2)"
             if [ "$actual" != "$2" ]; then failed=1; fi
           }
+          shares() {
+            actual=$(output plan matrix | jq -c --arg os "$1" '[.include[] | select(.os == $os) | .share] | sort') || actual=unreadable
+            wanted=$(jq -c --arg os "$1" '.platforms[$os].shares | if type == "number" and . == floor and . >= 1 and . <= 12 then [range(1; . + 1)] else "unusable" end' .github/test-shards.json) || wanted=unreadable
+            echo "$1 shares: $actual (the shard plan's: $wanted)"
+            if [ "$actual" != "$wanted" ]; then failed=1; fi
+          }
           expect queue-tested success
-          if [ "$(output queue-tested skip)" = true ]; then
+          skip=$(output queue-tested skip)
+          if [ "$skip" = true ] && [ "$EVENT" = push ]; then
             for job in plan workflow-policy build-test remote-ios remote-android package docs-check; do expect "$job" skipped; done
+          elif [ "$skip" = true ]; then
+            echo "queue-tested: skip on a $EVENT run, where only a push can skip"
+            failed=1
           elif [ "$EVENT" != pull_request ]; then
             for job in plan workflow-policy build-test remote-ios remote-android package; do expect "$job" success; done
             expect docs-check skipped
             planned="$(output plan full) $(output plan build) $(output plan docs)"
             echo "plan: full, build, docs = $planned"
             if [ "$planned" != "true true false" ]; then failed=1; fi
-            for os in ubuntu-latest macos-latest windows-latest; do
-              shares=$(output plan matrix | jq -c --arg os "$os" '[.include[] | select(.os == $os) | .share] | sort')
-              echo "$os shares: $shares"
-              if [ "$(jq -r 'length > 0 and . == [range(1; length + 1)]' <<< "$shares")" != true ]; then failed=1; fi
-            done
+            for os in ubuntu-latest macos-latest windows-latest; do shares "$os"; done
           else
             expect plan success
             expect workflow-policy success
@@ -463,5 +476,6 @@ jobs:
             expect docs-check "$(on docs)"
             for job in remote-ios remote-android package; do expect "$job" skipped; done
             if [ "$(output plan build)" = "$(output plan docs)" ]; then failed=1; fi
+            if [ "$(output plan build)" = true ]; then shares ubuntu-latest; fi
           fi
           exit "$failed"

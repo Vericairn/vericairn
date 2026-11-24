@@ -811,27 +811,36 @@ public class ContinuousIntegrationTests
         Assert.Equal(others.Order(StringComparer.Ordinal), needs["    needs: [".Length..^1].Split(", ").Order(StringComparer.Ordinal));
         Assert.Contains("\n    if: always()\n", gate, StringComparison.Ordinal);
         Assert.DoesNotContain("continue-on-error", gate, StringComparison.Ordinal);
-        Assert.DoesNotContain("uses:", gate, StringComparison.Ordinal);
+        // Its one action checks out the tested commit's shard plan alone, keeping no credentials, which the step reads as data.
+        string checkout = Assert.Single(gate.Split('\n'), line => line.Contains("uses:", StringComparison.Ordinal));
+        Assert.StartsWith("      - uses: actions/checkout@", checkout, StringComparison.Ordinal);
+        string fetch = Assert.Single(Steps(gate), item => item.Contains("uses: actions/checkout@", StringComparison.Ordinal));
+        Assert.EndsWith("\n        with:\n          persist-credentials: false\n          sparse-checkout: .github/test-shards.json\n          sparse-checkout-cone-mode: false", fetch.TrimEnd('\n'), StringComparison.Ordinal);
         string step = Block(gate, "- name: Require every job this event runs", 6);
         Assert.Contains("NEEDS: ${{ toJSON(needs) }}\n", step, StringComparison.Ordinal);
         Assert.Contains("EVENT: ${{ github.event_name }}\n", step, StringComparison.Ordinal);
         Assert.Contains("set -eu\n", step, StringComparison.Ordinal);
-        // The lookup must pass, and a push the queue tested passes with everything else skipped.
+        // The lookup must pass, and a push the queue tested passes with everything else skipped; no other event may skip.
         Assert.Contains("          expect queue-tested success\n", step, StringComparison.Ordinal);
-        Assert.Contains("          if [ \"$(output queue-tested skip)\" = true ]; then\n", step, StringComparison.Ordinal);
+        Assert.Contains("          if [ \"$skip\" = true ] && [ \"$EVENT\" = push ]; then\n", step, StringComparison.Ordinal);
         Assert.Contains("for job in plan workflow-policy build-test remote-ios remote-android package docs-check; do expect \"$job\" skipped; done\n", step, StringComparison.Ordinal);
-        // Every other event but a pull request: the full gate whatever the plan says, every platform's shares numbered from 1.
+        Assert.Contains("          elif [ \"$skip\" = true ]; then\n", step, StringComparison.Ordinal);
+        // Every other event but a pull request: the full gate whatever the plan says, each platform's shares exactly 1 to the
+        // count the shard plan gives it.
         Assert.Contains("          elif [ \"$EVENT\" != pull_request ]; then\n", step, StringComparison.Ordinal);
         Assert.Contains("for job in plan workflow-policy build-test remote-ios remote-android package; do expect \"$job\" success; done\n            expect docs-check skipped\n", step, StringComparison.Ordinal);
         Assert.Contains("            if [ \"$planned\" != \"true true false\" ]; then failed=1; fi\n", step, StringComparison.Ordinal);
-        Assert.Contains("            for os in ubuntu-latest macos-latest windows-latest; do\n", step, StringComparison.Ordinal);
-        Assert.Contains("'length > 0 and . == [range(1; length + 1)]'", step, StringComparison.Ordinal);
+        Assert.Contains("            for os in ubuntu-latest macos-latest windows-latest; do shares \"$os\"; done\n", step, StringComparison.Ordinal);
+        Assert.Contains("[range(1; . + 1)] else \"unusable\" end' .github/test-shards.json) || wanted=unreadable\n", step, StringComparison.Ordinal);
+        Assert.Contains("            if [ \"$actual\" != \"$wanted\" ]; then failed=1; fi\n", step, StringComparison.Ordinal);
         // A pull request: the plan, the workflow policy and whichever of build-test and the documentation check it runs.
         Assert.Contains("            expect plan success\n            expect workflow-policy success\n", step, StringComparison.Ordinal);
         Assert.Contains("on() { if [ \"$(output plan \"$1\")\" = true ]; then echo success; else echo skipped; fi; }\n", step, StringComparison.Ordinal);
         Assert.Contains("            expect build-test \"$(on build)\"\n            expect docs-check \"$(on docs)\"\n", step, StringComparison.Ordinal);
         Assert.Contains("for job in remote-ios remote-android package; do expect \"$job\" skipped; done\n", step, StringComparison.Ordinal);
         Assert.Contains("            if [ \"$(output plan build)\" = \"$(output plan docs)\" ]; then failed=1; fi\n", step, StringComparison.Ordinal);
+        Assert.Contains("            if [ \"$(output plan build)\" = true ]; then shares ubuntu-latest; fi\n", step, StringComparison.Ordinal);
+        // .github/scripts/test_ci_gate.py runs this script on simulated needs.
         Assert.Contains("            if [ \"$actual\" != \"$2\" ]; then failed=1; fi\n", step, StringComparison.Ordinal);
         Assert.EndsWith("\n          exit \"$failed\"", step.TrimEnd('\n'), StringComparison.Ordinal);
     }
@@ -884,11 +893,36 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
+    public void TheRulesetRollbackSendsOnlyTheFieldsTheRulesetEndpointsTake()
+    {
+        // The apply procedure beside the workflows saves the default branch's live ruleset through a filter, so the rollback's
+        // PUT sends the six fields the committed rulesets send and none of the read-only ones GitHub's answer adds. The
+        // release branches' ruleset is added last, once the change has merged and every covered branch carries its workflows.
+        string github = Path.Combine(RepositoryRoot(), ".github");
+        string procedure = Read(Path.Combine(github, "workflows/README.md"));
+        const string fields = "{name, target, enforcement, conditions, bypass_actors, rules}";
+        const string saved = "<scratch>/default-branch-merge-queue.live.json";
+        const string ruleset = "repos/Vericairn/vericairn/rulesets";
+        int save = procedure.IndexOf($"\ngh api {ruleset}/27077099 --jq '{fields}' > {saved}\n", StringComparison.Ordinal);
+        int replace = procedure.IndexOf($"\ngh api --method PUT {ruleset}/27077099 --input .github/rulesets/default-branch-merge-queue.json\n", StringComparison.Ordinal);
+        int restore = procedure.IndexOf($"\ngh api --method PUT {ruleset}/27077099 --input {saved}\n", StringComparison.Ordinal);
+        int add = procedure.IndexOf($"\ngh api --method POST {ruleset} --input .github/rulesets/release-branches.json\n", StringComparison.Ordinal);
+        Assert.True(save >= 0 && save < replace && replace < restore && restore < add, $"{save} {replace} {restore} {add}");
+        string[] writable = fields.Trim('{', '}').Split(", ").Order(StringComparer.Ordinal).ToArray();
+        foreach (string file in new[] { "default-branch-merge-queue.json", "release-branches.json" })
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(github, "rulesets", file)));
+            Assert.Equal(writable, document.RootElement.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
+        }
+    }
+
+    [Fact]
     public void ARunThatOnlyItsRunnersFailedIsRerunOnceAndNeverATestFailure()
     {
         // CI-12: GitHub has no job-level retry. retry.yml runs from the default branch when a ci.yml run fails, and re-runs a
-        // first attempt's failed jobs once when every one is a runner failure in setup (runner-failures.py). A queue group's
-        // run is not re-run: its pull request has already left the queue, and the builder's queue script queues it again.
+        // first attempt's failed jobs once when every job that did not pass is a runner failure in setup (runner-failures.py).
+        // A queue group's run is not re-run: its pull request has already left the queue, and the builder's queue script
+        // queues it again.
         string workflow = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "retry.yml"));
         Assert.Equal("on:\n  workflow_run:\n    workflows: [ci]\n    types: [completed]\n\n", Block(workflow, "on:", 0));
         Assert.Contains("\npermissions:\n  contents: read\n", workflow, StringComparison.Ordinal);

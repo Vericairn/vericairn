@@ -60,13 +60,20 @@ From CI-12 the `plan` job (`.github/scripts/ci-plan.py`) decides what else runs:
 | `push` to main or `release/*`, not queue-tested; `workflow_dispatch` | as for `merge_group` | none |
 | `push` the queue tested | `queue-tested`, `ci-gate` (every other job skipped) | none |
 
-`ci-gate` needs every other job and runs whatever they did (`always()`): a job that
-a failed `needs` skips reports as skipped, which a required check counts as passing,
-so the gate itself checks each result. It passes only when the lookup and the plan
+`ci-gate` needs every other job and runs whatever they did (`always()`): a job that a
+failed `needs` skips reports as skipped, which a required check counts as passing, so
+the gate itself checks each result. It passes only when the lookup and the plan
 passed and every job the plan runs for the event passed, with every other job
-skipped; a push the queue tested passes with all of them skipped, and a cancelled run
-fails it. The branches' rulesets therefore require `ci-gate` and `secret-scan` alone,
-for pull requests and the merge queue alike, whichever jobs the event ran.
+skipped; a push the queue tested passes with all of them skipped, a skip on any other
+event fails it, and so does a cancelled run. For every event but a pull request it
+requires the full gate whatever the plan says. Each platform `build-test` must run,
+all three in the full gate and Linux for a pull request that builds, must have
+exactly the shares 1 to the count that the tested commit's `.github/test-shards.json`
+gives it, as `run-tests.py` splits the classes, so a faulty plan cannot leave a
+share's classes untested. The gate checks out that one file, keeping no credentials,
+and reads it as data; `test_ci_gate.py` runs its script on simulated results. The
+branches' rulesets therefore require `ci-gate` and `secret-scan` alone, for pull
+requests and the merge queue alike, whichever jobs the event ran.
 
 A pull request does not run `package`: its enclave helper and published macOS
 command line need macOS runners, of which the organization runs at most five at
@@ -206,30 +213,53 @@ merge queue.
 
 A release branch these rules cover must carry this `ci.yml` and `secret-scan.yml`:
 without them its pull requests never report `ci-gate` or `secret-scan` and its queue
-groups never start, so it could not be merged into, nor deleted. The only existing
-release branch, `release/0.3`, predates both and is excluded; it keeps no rules, as
-today. A release branch cut before this change merges needs the two workflows first,
-or an exclusion of its own.
+groups never start, so it could not be merged into. The deletion rule keeps a covered
+branch from being deleted whatever workflows it carries. `release/0.3` predates both
+and is excluded; it keeps no rules, as today. `release/0.9.4`, cut at 0.9.4's release
+commit before this change merged, is covered but carries neither yet, so the release
+branches' ruleset is added only once it does (below). A release branch cut from a
+main that holds this change carries both.
 
 To apply, with the queue empty and the change that adds `ci-gate` having passed its
-pull request run:
+pull request run, save the default branch's live ruleset and replace it:
 
 ```sh
-gh api repos/Vericairn/vericairn/rulesets/27077099 > <scratch>/default-branch-merge-queue.live.json
+gh api repos/Vericairn/vericairn/rulesets/27077099 --jq '{name, target, enforcement, conditions, bypass_actors, rules}' > <scratch>/default-branch-merge-queue.live.json
 gh api --method PUT repos/Vericairn/vericairn/rulesets/27077099 --input .github/rulesets/default-branch-merge-queue.json
-gh api --method POST repos/Vericairn/vericairn/rulesets --input .github/rulesets/release-branches.json
 ```
 
-Then queue that change; if its group fails, restore the saved ruleset with the same
-PUT. Before the PUT its own pull request cannot be queued, since its run has no
-macOS legs, which the live ruleset requires. A pull request whose last run used the
-older `ci.yml` reports no `ci-gate` and can be queued only after a new push, or a
-close and reopen, builds a fresh merge commit: re-running its old run reuses the old
-merge commit. An entry already queued at the PUT was built with the older `ci.yml`
-and holds the queue until the 90-minute check timeout, hence the empty queue. Every
-misstep fails closed. The queue builds up to two groups at once; each full gate wants
-the five macOS runners, so two groups share them and take longer, and building one
-group at a time (`max_entries_to_build: 1`) keeps a group's run at its own length.
+Then queue that change. Before the PUT its own pull request cannot be queued, since
+its run has no macOS legs, which the live ruleset requires. A pull request whose last
+run used the older `ci.yml` reports no `ci-gate` and can be queued only after a new
+push, or a close and reopen, builds a fresh merge commit: re-running its old run
+reuses the old merge commit. An entry already queued at the PUT was built with the
+older `ci.yml` and holds the queue until the 90-minute check timeout, hence the empty
+queue. Every misstep fails closed. The queue builds up to two groups at once; each
+full gate wants the five macOS runners, so two groups share them and take longer, and
+building one group at a time (`max_entries_to_build: 1`) keeps a group's run at its
+own length.
+
+If that change's group fails, restore the saved ruleset:
+
+```sh
+gh api --method PUT repos/Vericairn/vericairn/rulesets/27077099 --input <scratch>/default-branch-merge-queue.live.json
+```
+
+The saved file holds exactly the six fields the ruleset update and create endpoints
+take in their request body, the same six the files in `../rulesets` hold. GitHub's
+answer to the read also carries fields that body does not list (`id`, `node_id`,
+`source_type`, `source`, `created_at`, `updated_at`, `current_user_can_bypass`,
+`_links`); the `--jq` filter leaves them out, so the rollback sends nothing the
+endpoint does not describe.
+
+Once the change has merged and every release branch the rules cover carries this
+`ci.yml` and `secret-scan.yml` (today `release/0.9.4`, through a pull request into
+it, which merges under no ruleset until this one exists), add the release branches'
+ruleset:
+
+```sh
+gh api --method POST repos/Vericairn/vericairn/rulesets --input .github/rulesets/release-branches.json
+```
 
 ## Shards
 
@@ -290,20 +320,24 @@ target can): one more attempt of its own code with its own token, which the queu
 full gate still follows.
 
 A queue group's run is not re-run: when its `ci-gate` fails, the queue has already
-removed the pull request. The builder's queue script (`merge_queue.zsh`) handles it:
+removed the pull request. The builder's queue script (`merge_queue.zsh` in the
+builder's tools) handles it wherever the base branch's rules require `ci-gate`:
 
 - It waits on the pull request's `ci-gate` and `secret-scan` checks, not on
   `build-test`, since a pull request runs Linux shares only and a docs-only one none.
   When `ci-gate` fails, it runs `runner-failures.py` on that `ci.yml` run without
   `--rerun`; on exit 0 it waits for `retry.yml`'s second attempt, otherwise it stops.
-- When the pull request leaves the queue without merging, it finds the group's run:
-  the latest `merge_group` run of `ci.yml` whose `head_branch` starts
+- It counts the pull request as having left the queue only when its timeline records
+  a removal for a reason other than its merge and it is still open, never on an empty
+  queue entry alone. It then finds the group's run: the latest `merge_group` run of
+  `ci.yml` since the pull request was queued whose `head_branch` starts
   `gh-readonly-queue/<branch>/pr-<number>-`. It queues the pull request once more only
-  if that run concluded `failure`, the group's `secret-scan` run passed, the pull
-  request is still open and mergeable, it has not been queued again for this reason,
-  and `runner-failures.py` exits 0 on the run. A removal for any other reason, a
-  failed secret scan, a conflict or a cancelled group, is never re-queued, even when a
-  `ci.yml` job also had a runner failure.
+  if the queue removed it for failed checks, that run concluded `failure` at its first
+  attempt, the group's `secret-scan` run passed, the pull request is still open and
+  mergeable, it has not been queued again for this reason, and `runner-failures.py`
+  exits 0 on the run. A removal for any other reason, a failed secret scan, a conflict
+  or a cancelled group, is never re-queued, even when a `ci.yml` job also had a runner
+  failure.
 
 ## Superseded runs
 

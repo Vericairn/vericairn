@@ -858,18 +858,19 @@ workflow, not a product behavior: `changes merge` observes the target branch's p
 commit in repositories that require no merge queue, and from 0.9.3 (CODE-71), for a merge a required queue
 made, that commit's `merge_group` runs beside its push runs.
 
-From 0.9.5 (CI-12), a pull request gets a light run and the merge queue the full gate on the merged result.
-A pull request runs the workflow policy and Linux's test shares; one that changes only documentation (files
+From 0.9.5 (CI-12), a pull request gets a light run and the merge queue the full gate on the merged result. A
+pull request runs the workflow policy and Linux's test shares; one that changes only documentation (files
 under `docs/` outside `docs/releases/`, and the root `README.md` and `ROADMAP.md`) runs instead the build and
 the test classes that read the repository's documentation. A merge queue group, a push to main or a
-`release/*` branch and a manual run run the full gate: every platform's shares, both Remote builds and the
-packaging path, docs-only groups included. The shares are balanced by each test class's measured duration,
-with six on Windows, four on macOS and three on Linux. `ci-gate`, the one `ci.yml` check the branch rulesets
-require beside `secret-scan`, passes only when every job the event runs passed, and for every event but a pull
-request it requires the full gate whatever the run planned. A run that failed only because GitHub's runners
+`release/*` branch whose commit the queue has not already tested (above), and a manual run run the full gate:
+every platform's shares, both Remote builds and the packaging path, docs-only groups included. The shares are
+balanced by each test class's measured duration, with six on Windows, four on macOS and three on Linux.
+`ci-gate`, the one `ci.yml` check the branch rulesets require beside `secret-scan`, passes only when every job
+the event runs passed, and for every event but a pull request it requires the full gate whatever the run
+planned, with every share the shard plan gives each platform. A run that failed only because GitHub's runners
 did, killed or lost while still setting up, is re-run once by `retry.yml`; a test failure, a timeout or a
-cancellation never is, and a queue group's run is queued again by the builder instead. This is the
-repository's own workflow, not a product behavior.
+cancellation never is, and the pull request of a queue group that only its runners failed is queued again by
+the builder's queue script instead. This is the repository's own workflow, not a product behavior.
 
 The self-contained publishes restore locked from committed runtime-specific lock files:
 `packages.distributable.lock.json` beside each `packages.lock.json` of the projects the command line and

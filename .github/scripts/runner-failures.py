@@ -13,8 +13,8 @@ never re-run. Only a first attempt is re-run, only if it is still the run's late
 newer run of its branch exists, since a re-run joins the pull request's concurrency group and would cancel the newer head's run.
 It re-runs the failed jobs and the jobs that need them (ci-gate among them), so nothing a test decided is retried.
 
-Exit status: 0 when every failed job of the attempt is a runner failure (re-run with --rerun), 3 when not, 1 when GitHub
-could not be read.
+Exit status: 0 when every job of the attempt that neither passed nor was skipped, ci-gate apart, is a runner failure (with
+--rerun, re-run), 3 when not or when the run may not be re-run, 1 when GitHub could not be read.
 """
 
 import argparse
@@ -130,7 +130,7 @@ def main():
     parser.add_argument("--repository", required=True, help="owner/name")
     parser.add_argument("--run", required=True, type=int, help="The ci.yml run's id.")
     parser.add_argument("--attempt", type=int, default=1, help="The attempt to judge; only a first attempt is ever re-run.")
-    parser.add_argument("--rerun", action="store_true", help="Re-run the failed jobs when every one is a runner failure.")
+    parser.add_argument("--rerun", action="store_true", help="Re-run the failed jobs when every job that did not pass is a runner failure.")
     args = parser.parse_args()
     try:
         jobs = read_jobs(args.repository, args.run, args.attempt)
@@ -165,7 +165,7 @@ def main():
             return 1
         print(f"Re-ran the failed jobs of run {args.run} once.")
     else:
-        print("Every failed job is a runner failure.")
+        print("Every job that neither passed nor was skipped, ci-gate apart, is a runner failure.")
     return 0
 
 
