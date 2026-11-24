@@ -40,7 +40,20 @@ public sealed partial class EstateService
                 steps.Add(synced
                     ? $"The estate's repository could not be read when the restore point was made, so it names no commit: return {EstateLayout.ManifestPath} and the records to their state before the upgrade from your own history of the repository."
                     : "The estate's records are in its live store, which the next step puts back with everything else.");
-            steps.Add($"Put back this machine's local state from before the upgrade: with no runtime serving the estate, copy every file in {Quote(restore.StateDirectory)} into {Quote(clone)}, first removing {live}-wal and {live}-shm there.");
+            // From 0.9.5 (FIX-174) every database is exported as one file, so a -wal or -shm the upgraded runtime left beside the live store
+            // would be read with the copy put back, and is removed first; a repository-synced clone that kept no live store before the
+            // upgrade returns to none, and the previous release builds its own.
+            bool kept = restore.Files.Contains(live, StringComparer.Ordinal);
+            var removed = new List<string>();
+            if (!kept) removed.Add(live);
+            foreach (string database in UpgradeReturns.Databases(restore).Where(d => d != live).Prepend(live))
+            {
+                removed.Add(database + "-wal");
+                removed.Add(database + "-shm");
+            }
+
+            steps.Add($"Put back this machine's local state from before the upgrade: with no runtime serving the estate, copy every file in {Quote(restore.StateDirectory)} into {Quote(clone)}, first removing {Listed(removed)} there."
+                + (kept ? string.Empty : $" This machine kept no live store for the clone before the upgrade, so none is put back; {plan.FromPin} builds it again from the repository's records."));
             steps.Add(release
                 ? $"Run the previous release: in the estate's directory, ./bootstrap runtime start (.\\bootstrap.ps1 runtime start on Windows) fetches and runs the release the manifest pins, {plan.FromPin}."
                 : $"Run the previous build: {plan.FromPin}, the source commit the manifest pins.");
@@ -71,4 +84,7 @@ public sealed partial class EstateService
     }
 
     private static string Quote(string path) => path.Contains(' ', StringComparison.Ordinal) ? "\"" + path + "\"" : path;
+
+    // "a", "a and b", "a, b and c".
+    private static string Listed(List<string> names) => names.Count <= 1 ? string.Concat(names) : string.Join(", ", names.Take(names.Count - 1)) + " and " + names[^1];
 }

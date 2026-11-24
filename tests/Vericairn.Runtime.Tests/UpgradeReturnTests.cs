@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Data.Sqlite;
 using Vericairn.Adapters.Git;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
@@ -182,6 +183,170 @@ public sealed class UpgradeReturnTests
         }
     }
 
+    [Fact]
+    public void WithNoDaemonARepositorySyncedEstatesRestorePointHoldsItsPopulatedLiveStore()
+    {
+        // FIX-174 (issue 440): the command line's upgrade with no daemon opens the estate read-only (CommandContext.WithApi takes
+        // EstateService.OpenForUpgrade), and that session's repository-synced store is transient, in memory; the live store's export
+        // came from it and wrote no file.
+        using var f = new EstateLineFixture();
+        f.Publish("0.9.4");
+        AdmitFirstDevice(f);
+        f.Follow(version: "0.9.1");
+        string clone = PopulateLiveStore(f);
+        string live = Path.Combine(clone, "live.db");
+        IReadOnlyDictionary<string, long> before = RestorePointInspection.Rows(live);
+        Assert.True(before["files"] > 0 && before["meta"] > 0);
+
+        using EstateService api = EstateService.OpenForUpgrade(f.Estate.Root);
+        Assert.True(api.Session.IsReadOnly);
+        (UpgradeResponse? applied, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false) { OneWay = true });
+        Assert.Null(problem);
+        Assert.True(applied!.Applied);
+        Assert.True(applied.Return!.OneWay);
+        UpgradeRestorePoint point = applied.Return.RestorePoint!;
+        Assert.Equal(["live.db", "observers.json"], point.Files);
+        // The kept live store passes SQLite's integrity check and holds every row the clone's did.
+        Assert.Equal(before, RestorePointInspection.Rows(Path.Combine(point.Directory, "state", "live.db")));
+        Assert.Contains("first removing live.db-wal and live.db-shm there.", applied.Return.Steps[2], StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("deleted", "its export of live.db wrote no file")]
+    [InlineData("emptied", "its export of live.db holds no table files, where live.db holds")]
+    [InlineData("short", "rows in table files, where live.db holds")]
+    [InlineData("truncated", "its export of live.db is not a database SQLite reads")]
+    public void WithNoDaemonAnExportThatFailsItsCheckRefusesTheOneWayUpgradeAndNothingChanges(string damage, string reason)
+    {
+        using var f = new EstateLineFixture();
+        f.Publish("0.9.4");
+        AdmitFirstDevice(f);
+        f.Follow(version: "0.9.1");
+        string clone = PopulateLiveStore(f);
+        string[] estate = Snapshot(f.Estate.Root);
+        string[] state = Snapshot(clone);
+
+        // The export reports success and its copy is not what the live store holds, as the transient store's export did.
+        UpgradeReturns.ExportWritten = path =>
+        {
+            if (path.StartsWith(clone + Path.DirectorySeparatorChar, StringComparison.Ordinal)) RestorePointInspection.Damage(path, damage);
+        };
+        try
+        {
+            using EstateService api = EstateService.OpenForUpgrade(f.Estate.Root);
+            (UpgradeResponse? refused, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false) { OneWay = true });
+            Assert.Null(refused);
+            Assert.Equal("refused", problem!.Code);
+            Assert.StartsWith("The upgrade's restore point could not be recorded on this machine: ", problem.Message, StringComparison.Ordinal);
+            Assert.Contains(reason, problem.Message, StringComparison.Ordinal);
+            Assert.EndsWith("Nothing was applied, and nothing changed.", problem.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            UpgradeReturns.ExportWritten = null;
+        }
+
+        // Nothing changed: the estate's files, the clone's live store and every file beside it, and no restore point is left.
+        Assert.Equal(estate, Snapshot(f.Estate.Root));
+        Assert.Equal(state, Snapshot(clone));
+        Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
+        EstateModel model = f.Estate.Load();
+        Assert.Equal("release 0.9.1", model.Manifest!.Describe());
+        Assert.Empty(model.OfType("migration"));
+    }
+
+    [Fact]
+    public void WithNoDaemonALiveStoreThatCannotBeReadRefusesTheUpgradeAndNamesItsRebuild()
+    {
+        using var f = new EstateLineFixture();
+        f.Publish("0.9.4");
+        AdmitFirstDevice(f);
+        f.Follow(version: "0.9.1");
+        string clone = PopulateLiveStore(f);
+        RestorePointInspection.Damage(Path.Combine(clone, "live.db"), "truncated");
+        string[] estate = Snapshot(f.Estate.Root);
+        string[] state = Snapshot(clone);
+
+        using (EstateService api = EstateService.OpenForUpgrade(f.Estate.Root))
+        {
+            (UpgradeResponse? refused, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false) { OneWay = true });
+            Assert.Null(refused);
+            Assert.Equal("refused", problem!.Code);
+            Assert.Contains("The upgrade's restore point could not be recorded on this machine: live.db could not be read for its export (", problem.Message, StringComparison.Ordinal);
+            Assert.Contains("this clone's live store is a cache of the repository's records, which 'vericairn estate cache rebuild' builds again", problem.Message, StringComparison.Ordinal);
+            Assert.EndsWith("Nothing was applied, and nothing changed.", problem.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(estate, Snapshot(f.Estate.Root));
+        Assert.Equal(state, Snapshot(clone));
+        Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
+    }
+
+    [Fact]
+    public void ARestorePointCopiesTheEventJournalADaemonHoldsOpenAsOneConsistentFile()
+    {
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        using EstateService api = EstateService.Open(f.Estate.Root);
+        string clone = Path.GetDirectoryName(api.Session.Live.Path)!;
+        // As the daemon serves the estate: its journal beside the live store, held open, its first observation in the write-ahead log,
+        // and the search index, whose full-text tables keep their rows in shadow tables.
+        api.EnableEvents(clone);
+        api.DeriveEvents();
+        Assert.Null(api.SearchIndex(new SearchIndexRequest()).Problem);
+        string journal = Path.Combine(clone, "events.db");
+        string search = Path.Combine(clone, "search.db");
+        Assert.True(File.Exists(journal + "-wal") && File.Exists(journal + "-shm") && File.Exists(search));
+
+        (UpgradeResponse? applied, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+        Assert.Null(problem);
+        UpgradeRestorePoint point = applied!.Return!.RestorePoint!;
+        Assert.Contains("events.db", point.Files);
+        Assert.Contains("live.db", point.Files);
+        // One file each, read through SQLite, never the -wal and -shm a runtime holds open copied beside it.
+        Assert.DoesNotContain(point.Files, name => name.EndsWith("-wal", StringComparison.Ordinal) || name.EndsWith("-shm", StringComparison.Ordinal));
+        IReadOnlyDictionary<string, long> kept = RestorePointInspection.Rows(Path.Combine(point.Directory, "state", "events.db"));
+        Assert.True(kept["observed"] > 0);
+        Assert.Equal(RestorePointInspection.Rows(journal), kept);
+        Assert.Contains("search.db", point.Files);
+        Assert.Equal(RestorePointInspection.Rows(search), RestorePointInspection.Rows(Path.Combine(point.Directory, "state", "search.db")));
+        Assert.Contains("first removing live.db-wal, live.db-shm, events.db-wal, events.db-shm, search.db-wal and search.db-shm there.", applied.Return.Steps[2], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithNoDaemonAndNoLiveStoreOnDiskTheRestorePointHoldsNoneAndTheWayBackSaysSo()
+    {
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        using EstateService api = EstateService.OpenForUpgrade(f.Estate.Root);
+        string live = api.Session.Live.Path;
+        Assert.False(File.Exists(live));
+        (UpgradeResponse? applied, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+        Assert.Null(problem);
+        UpgradeRestorePoint point = applied!.Return!.RestorePoint!;
+        Assert.DoesNotContain("live.db", point.Files);
+        Assert.Contains("first removing live.db, live.db-wal and live.db-shm there. This machine kept no live store for the clone before the upgrade, so none is put back; release 0.9.3 builds it again from the repository's records.", applied.Return.Steps[2], StringComparison.Ordinal);
+    }
+
+    // Opens the estate writable, as a command or daemon before the upgrade did, so the clone's live store holds its records and
+    // metadata, and an observer beside it; closed, it leaves the live store alone on disk. Returns the clone's directory.
+    private static string PopulateLiveStore(EstateLineFixture f)
+    {
+        string clone;
+        using (EstateService api = EstateService.Open(f.Estate.Root))
+        {
+            Assert.False(api.Session.Load().Findings.HasErrors);
+            Assert.True(api.ObserverDeclare(new(f.Estate.OperatorId, "ci-main", "ci", 3600, 900)).Ok);
+            clone = Path.GetDirectoryName(api.Session.Live.Path)!;
+        }
+
+        Assert.True(File.Exists(Path.Combine(clone, "live.db")));
+        Assert.False(File.Exists(Path.Combine(clone, "live.db-wal")));
+        return clone;
+    }
+
     private static void AdmitFirstDevice(EstateLineFixture f)
     {
         using EstateService api = EstateService.Open(f.Estate.Root);
@@ -213,5 +378,75 @@ public sealed class UpgradeReturnTests
         process.WaitForExit();
         Assert.True(process.ExitCode == 0, error);
         return output.Trim();
+    }
+}
+
+/// <summary>From 0.9.5 (FIX-174): what a restore point's exported databases hold, read from disposable copies of them.</summary>
+public static class RestorePointInspection
+{
+    /// <summary>
+    /// Every table's rows in the database, read from a copy of it and its write-ahead log, so nothing is created beside it; the copy must
+    /// pass SQLite's integrity check. A virtual table keeps its rows in shadow tables, which are counted instead.
+    /// </summary>
+    public static IReadOnlyDictionary<string, long> Rows(string database)
+    {
+        string directory = Directory.CreateTempSubdirectory("vericairn-restore-point-").FullName;
+        try
+        {
+            string copy = Path.Combine(directory, "copy.db");
+            File.Copy(database, copy);
+            if (File.Exists(database + "-wal")) File.Copy(database + "-wal", copy + "-wal");
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = copy, Pooling = false }.ToString());
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA integrity_check;";
+            Assert.Equal("ok", command.ExecuteScalar());
+            var tables = new List<string>();
+            command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND sql NOT LIKE 'CREATE VIRTUAL TABLE%' ORDER BY name;";
+            using (SqliteDataReader reader = command.ExecuteReader())
+                while (reader.Read()) tables.Add(reader.GetString(0));
+            var rows = new SortedDictionary<string, long>(StringComparer.Ordinal);
+            foreach (string table in tables)
+            {
+                command.CommandText = $"SELECT COUNT(*) FROM \"{table}\";";
+                rows[table] = (long)command.ExecuteScalar()!;
+            }
+
+            return rows;
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>Damages an exported copy as a test forces its export to fail: deleted, emptied, a row short, or truncated.</summary>
+    public static void Damage(string copy, string damage)
+    {
+        switch (damage)
+        {
+            case "deleted":
+                File.Delete(copy);
+                break;
+            case "emptied":
+                File.WriteAllBytes(copy, []);
+                break;
+            case "short":
+                using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = copy, Pooling = false }.ToString()))
+                {
+                    connection.Open();
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = "DELETE FROM files WHERE rowid = (SELECT MIN(rowid) FROM files);";
+                    Assert.Equal(1, command.ExecuteNonQuery());
+                }
+
+                break;
+            case "truncated":
+                using (var stream = new FileStream(copy, FileMode.Open, FileAccess.Write))
+                    stream.SetLength(4096);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(damage), damage, null);
+        }
     }
 }

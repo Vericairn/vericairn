@@ -1928,6 +1928,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 RepositoryObservation? repository = model.Manifest!.Profile == "repository-synced" ? RestoreRepository(session.Root) : null;
                 restore = UpgradeReturns.Record(session, plan.FromPin, plan.ToPin, repository?.Commit, repository is null || repository.Clean, PolicyClock.GetUtcNow());
             }
+            catch (SqliteExportException exception)
+            {
+                // From 0.9.5 (FIX-174): a restore point without a checked copy of the live store, and of each database beside it, is no
+                // way back, so the upgrade, one-way or not, is refused before it writes anything, saying what failed.
+                return (null, new Problem("refused", $"The upgrade's restore point could not be recorded on this machine: {exception.Message}. Nothing was applied, and nothing changed.", []));
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
             {
                 return (null, new Problem("refused", $"The upgrade's restore point could not be recorded on this machine ({exception.GetType().Name}), so nothing was applied. Nothing changed.", []));

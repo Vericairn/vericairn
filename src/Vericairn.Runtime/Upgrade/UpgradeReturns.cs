@@ -172,10 +172,25 @@ public static class UpgradeReturns
     }
 
     /// <summary>
+    /// Test seam (FIX-174): called with the path of each database a restore point exported, once it is written and before it is checked.
+    /// </summary>
+    internal static Action<string>? ExportWritten { get; set; }
+
+    /// <summary>
     /// Records a restore point before an upgrade writes anything: a consistent copy of the clone's live store and every other file of its
     /// local state beside it (the daemon's endpoint, locks and temporary files excepted), with an inventory of their hashes, in a new
     /// directory beside the live store under the user's Vericairn home. Nothing is written to the estate.
     /// </summary>
+    /// <remarks>
+    /// From 0.9.5 (FIX-174), the live store and every other SQLite database beside it are exported from their files on disk, whatever
+    /// session the upgrade opened, through <see cref="SqliteExport"/>, each with its <c>-wal</c>, <c>-shm</c> and <c>-journal</c> left
+    /// out, and each copy is checked before the upgrade goes on: a copy that is missing, fails SQLite's integrity check or holds other row
+    /// counts than its database throws a <see cref="SqliteExportException"/>, and the restore point is removed, so nothing is applied.
+    /// The command line's upgrade with no daemon opens the estate read-only, and a repository-synced estate's read-only session holds its
+    /// records in a transient store in memory, not in the live store's file; an export through that session's connection wrote no file.
+    /// A repository-synced clone with no live store on disk, which only read-only sessions have opened, has none to keep, and its restore
+    /// point holds none.
+    /// </remarks>
     internal static RestorePoint Record(EstateSession session, string fromPin, string toPin, string? commit, bool clean, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -189,13 +204,33 @@ public static class UpgradeReturns
         try
         {
             string live = Path.GetFileName(session.Live.Path);
-            session.Live.ExportTo(Path.Combine(state, live));
-            foreach (string file in Directory.EnumerateFiles(clone).Order(StringComparer.Ordinal))
+            if (File.Exists(session.Live.Path))
             {
-                string name = Path.GetFileName(file);
+                try
+                {
+                    SqliteExport.Export(session.Live.Path, Path.Combine(state, live), ExportWritten);
+                }
+                catch (SqliteExportException exception) when (exception.Unreadable && session.Profile == "repository-synced")
+                {
+                    throw new SqliteExportException($"{exception.Message}; this clone's live store is a cache of the repository's records, which 'vericairn estate cache rebuild' builds again once no daemon or other command has the estate open", exception);
+                }
+            }
+            else if (session.Profile != "repository-synced")
+                throw new SqliteExportException($"{live}, the live store that holds this local-only estate's records, is not on this machine's disk");
+
+            string[] files = [.. Directory.EnumerateFiles(clone).Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal)];
+            var databases = new HashSet<string>(files.Where(name => !name.StartsWith(live, StringComparison.Ordinal) && SqliteExport.IsDatabase(Path.Combine(clone, name))), StringComparer.Ordinal);
+            foreach (string name in files)
+            {
+                string file = Path.Combine(clone, name);
                 if (name.StartsWith(live, StringComparison.Ordinal) || name is "daemon.json" || name.EndsWith(".tmp", StringComparison.Ordinal) || name.EndsWith(".lock", StringComparison.Ordinal)) continue;
+                // A database's -wal, -shm and -journal are in its export, never copied as files a runtime may be writing.
+                if (SqliteExport.Sidecars.Any(sidecar => name.EndsWith(sidecar, StringComparison.Ordinal) && databases.Contains(name[..^sidecar.Length]))) continue;
                 if (new FileInfo(file).LinkTarget is not null) continue;
-                File.Copy(file, Path.Combine(state, name));
+                if (databases.Contains(name))
+                    SqliteExport.Export(file, Path.Combine(state, name), ExportWritten);
+                else
+                    File.Copy(file, Path.Combine(state, name));
             }
 
             var inventory = new JsonArray();
@@ -227,16 +262,32 @@ public static class UpgradeReturns
         }
     }
 
-    /// <summary>Removes a restore point an upgrade that did not apply had made.</summary>
+    /// <summary>
+    /// Removes a restore point an upgrade that did not apply had made, and from 0.9.5 (FIX-174) the directory of restore points with it
+    /// when no other is kept there, so a refused upgrade leaves this machine's state as it was.
+    /// </summary>
     internal static void Discard(string directory)
     {
         try
         {
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            string? points = Path.GetDirectoryName(Path.GetFullPath(directory));
+            if (points is not null && Path.GetFileName(points) == RestorePointsDirectory && Directory.Exists(points) && !Directory.EnumerateFileSystemEntries(points).Any())
+                Directory.Delete(points);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             // A restore point left behind holds only this machine's own state, beside its live store.
         }
+    }
+
+    /// <summary>
+    /// From 0.9.5 (FIX-174): the SQLite databases a restore point holds, by name, in name order: each was exported as one file, so its
+    /// <c>-wal</c> and <c>-shm</c> beside the live store are removed before it is put back.
+    /// </summary>
+    internal static IReadOnlyList<string> Databases(RestorePoint restore)
+    {
+        ArgumentNullException.ThrowIfNull(restore);
+        return [.. restore.Files.Where(name => SqliteExport.IsDatabase(Path.Combine(restore.StateDirectory, name))).Order(StringComparer.Ordinal)];
     }
 }
