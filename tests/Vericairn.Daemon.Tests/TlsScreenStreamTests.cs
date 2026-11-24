@@ -15,16 +15,17 @@ namespace Vericairn.Daemon.Tests;
 public class TlsScreenStreamTests
 {
     [Theory]
-    [InlineData("Vericairn.Sdk.LocalNetworkTransport")]
-    [InlineData("Vericairn.Sdk.RuntimePairing")]
-    public void SdkHandshakesCannotRenegotiateAfterCertificateScreeningEnds(string typeName)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SdkHandshakesCannotRenegotiateAfterCertificateScreeningEnds(bool paired)
     {
-        Type type = typeof(RuntimePairing).Assembly.GetType(typeName, throwOnError: true)!;
-        System.Reflection.MethodInfo factory = type.GetMethod("CreateAuthenticationOptions", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        // From 0.9.5 (FIX-164) pairing (no client certificate) and a paired device's connection take their options from one place, for each platform's TLS.
+        using X509Certificate2? own = paired ? X509CertificateLoader.LoadCertificate(Clean()) : null;
         System.Net.Security.RemoteCertificateValidationCallback validate = (_, _, _, _) => false;
-        object?[] arguments = factory.GetParameters().Length == 2 ? [null, validate] : [validate];
-        var options = Assert.IsType<System.Net.Security.SslClientAuthenticationOptions>(factory.Invoke(null, arguments));
-        Assert.False(options.AllowRenegotiation);
+        foreach (LocalNetworkTls.Platform platform in Enum.GetValues<LocalNetworkTls.Platform>())
+        {
+            Assert.False(LocalNetworkTls.ClientOptions(platform, validate, own).AllowRenegotiation);
+        }
     }
 
     private const byte ChangeCipherSpec = 20;
