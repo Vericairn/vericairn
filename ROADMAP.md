@@ -4,40 +4,32 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.9.3 — current published release
+## 0.9.4 — current published release
 
-0.9.3 follows 0.9.2 and corrects what the estates running 0.9.2 reported. Export and restore keep each file's
-executable mode, a timestamp in the wrong form is refused with the form required, `doctor --json` returns one
-documented result, a failed document check names what failed, a goal is recorded impossible only after its
-evaluator's verdict, and work a planner proposes for a goal waits for its sponsor. Every operator action
-announces and counts its presence prompts before each one, release steps sign no throwaway signature with a
-presence key, and an estate with many key rotations or closings is checked in near-linear time. A change merges
-through a repository's required merge queue with its outcome recorded, an operator action's push and merge trail
-reaches the estate, and a work order whose current result is accepted reads as accepted, which readies the release
-flow for the next release. A command names an estate's first authority where its manifest needs one, a guide
-tells an expired, refused or timed-out presence prompt apart during enrollment and reconciles it safely, an
-estate's root can hold its owner's agent instruction files, and the large-artifact guide lists the three
-inventories of a cold recovery. 0.9.3 also corrects how keys in forms Vericairn does not make are read, which
-could stop the estate check and status, as the release notes' Security section describes; every distributable is
-still built on .NET SDK 10.0.404 and embeds the 10.0.15 runtimes. Accepted designs prepare the releases after it:
-measured agent work, the later milestones realigned into smaller, outcome-based ones, an opt-in estate advisor and
-one presence check per command. Everything 0.9.2 brought remains, with Remote still a developer build you make
-from source. Its [release notes](docs/releases/0.9.3/release-notes.md) and
-[documentation set](docs/releases/0.9.3/README.md) describe what shipped and its limits.
-
-## 0.9.4 — planned
-
-0.9.4 is the first release Vericairn's own estate runs on the software pack's release flow. A flow's steps run
-on their timing, at once, after a delay, at a time, on a schedule, in a window or on an event, and a step may end
-in a decision among named paths, made by a rule, an agent in a role or a person in a role. Standard and Pro carry
-a run from step to step by themselves, stopping only where a person holds the role, while Community keeps one
-step per command. Agents keep working on a product between releases as standing agents, within their sponsor's
-caps, and every output is a possibility a person adopts. When an agent holding work goes quiet, its sponsor is
-asked and the step moves to another holder. People say when they are away and set quiet hours that hold notices,
-letting incidents through by default. Removing a person's role closes what they may still write, and an estate
-shows its progress through a target its configuration chooses, GitHub Discussions first. Installers open
-without warnings on macOS and Windows, and Vericairn installs and upgrades with one command through Homebrew,
-winget or an install script that verifies the signed release manifest before installing.
+0.9.4 follows 0.9.3 and readies an estate for work that goes on between the commands a person runs. A flow's
+step takes its timing, at once, after a delay, at a time, on a schedule, in a window or on an event, and a step may
+end in a decision among named paths, made by a rule, an agent in a role or a person in a role; a run that will
+never complete is closed with a reason for each step it left unsettled. Agents keep working on a product between
+releases as standing agents: a standing goal's triggers make its occurrences due, each carried within its
+sponsor's caps, and every possibility, question or publication request a standing agent raises waits for someone
+else to adopt, answer or approve it. The duty carrier, a researcher that reads public sources only where its brief
+permits, and a bug hunter come as the first standing roles. A run, a timed step and a standing agent's occurrence
+are still taken one step per command. Before two assignments run at once in one repository, their permitted paths
+are compared, and an estate policy can hold an overlap until it is resolved. When an agent session holding work
+goes quiet, whoever is accountable for the goal is asked, a person can hand the step to another holder, and the
+displaced holder's late work is refused. People say when they are away, so routing passes over them, and record
+quiet hours, which hold notices once notifications arrive. Removing a person's role closes what they may still
+write, the operator answers open asks with their recommendations in one signed act and signs every ready item in
+one reviewed act, an observer that stops reporting becomes attention, and an estate keeps its progress at a target
+its configuration chooses, a GitHub discussion first. An upgrade says whether the release pinned before can still
+read the estate, records a restore point and states the way back, and status answers in a few seconds on an estate
+of about 8,000 records. 0.9.4 also runs git on a repository it did not create without letting that repository's
+configuration start a program, gives a checked push's secret scan only the inputs it writes itself and starts
+every program by its resolved absolute path, as the release notes' Security section describes; every
+distributable is still built on .NET SDK 10.0.404 and embeds the 10.0.15 runtimes. Everything 0.9.3 brought
+remains, with Remote still a developer build you make from source. Its
+[release notes](docs/releases/0.9.4/release-notes.md) and [documentation set](docs/releases/0.9.4/README.md)
+describe what shipped and its limits.
 
 ## 0.9.5 — planned
 
@@ -55,7 +47,9 @@ An estate follows the GitHub conversations it subscribes to and answers only und
 follows each report it files with another project through to the release that carries the fix. A release's
 advisories are drafted from its Security section for you to publish, and every release's bill of materials is
 checked against published advisories before acceptance and daily after. You can run Vericairn as an always-on
-server for your estates, with every hosted estate keeping a replica you hold.
+server for your estates, with every hosted estate keeping a replica you hold. Beside the server, Standard and Pro
+carry a run from step to step by themselves, stopping only where a person holds the role, while Community keeps
+one step per command.
 
 ## 0.10.x — planned
 

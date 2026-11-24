@@ -938,10 +938,41 @@ directory by directory and in `PATHEXT`'s order within each; a script (`.cmd`, `
 extension (`codex.cmd`) or by its absolute path, as before. A relative path (`./build.sh`, `bin\tool.exe`) is refused with a message
 saying so, except a workspace setup command's (below).
 
+From 0.9.4 (FIX-165), on Windows an absolute path without an extension, such as one ending in `\tools\harness`, starts that
+folder's `harness.exe`, else its `harness.com`; no other folder is looked in, and a script of that name is not started. An absolute
+path whose file name ends with a dot or a space, or that names a stream of a file (`tool.exe:stream`), is refused, since Windows
+would open a file of another name than the one Vericairn reads.
+
+From 0.9.4 (FIX-165), on Windows a batch program (`.cmd`, `.bat`) starts through `cmd.exe` in the system directory Windows reports
+(`%SystemRoot%\System32`), named by its absolute path; `ComSpec` and `PATH` take no part. The start is
+`cmd.exe /d /e:on /v:off /s /c ""<script>" <arguments>"`: `/d` runs no AutoRun command, `/e:on` and `/v:off` keep command
+extensions on and delayed expansion off whatever the registry says, so `!` is an ordinary character, and `/s` makes the command
+exactly the text between its outer quotes. The script's path is quoted. An argument made only of letters, digits and
+`# $ * + - . / : ? @ \ _`, not ending with a backslash, is written as it is; any other is quoted, each double quote in it doubled
+and the backslashes before a double quote or at its end doubled. `cmd.exe` turns its quoting on and off at each double quote, so
+every other character of the argument stays inside quotes, where `&`, `|`, `<`, `>`, `^`, `(`, `)`, spaces, `=`, `,` and `;` are
+read as data. A program the script hands its arguments on to with `%*`, as the shim npm installs for a harness hands them to
+Node.js, reads each argument as given when it reads its command line the C runtime's way; the script's own `%~1` reads a double
+quote inside an argument as two (`x"y` as `x""y`), since `cmd.exe` has no other way to write one. Refused before anything starts,
+with the reason and the argument's position but never its value: a percent sign in the script's path or an argument, which
+`cmd.exe` expands as a variable before it reads any quoting and which nothing escapes on its command line; a line break or another
+control character (a tab in an argument aside), since a line feed ends the command `cmd.exe` reads and a carriage return is
+dropped from it; a double quote in the script's path; and a command longer than the 8191 characters `cmd.exe` reads. `cmd.exe`
+looks for each program the script names bare in `PATH` only, never in its working directory (the workspace, for a launcher's
+command and a setup command; below). The process's job contains `cmd.exe` and everything the script starts, and the exit code is
+the script's. A launch binding hashes the script; `cmd.exe`, the operating system's own, is not hashed. What reaches the script is
+data; a script that expands an argument unquoted (`%~1`), passes it to `call` or turns delayed expansion on reads it again as a
+command line, and a program that reads its command line by rules older than the C runtime's current ones may split an argument
+that holds a doubled quote.
+
 The program then receives `PATH` without its empty and relative entries, its absolute entries kept as written and in order, so a
-program that starts another by name, as git, a harness or a setup script does, finds it in an absolute directory as well. With no
-absolute entry left, `PATH` is removed. This is the `PATH` Vericairn hands over; a program that sets its own search path, or reads
-another, decides for itself what it then starts.
+program that starts another by name, as git, a harness or a setup script does, finds it in an absolute directory as well, as far
+as its search reads only `PATH`. With no absolute entry left, `PATH` is removed. On Windows, `cmd.exe`, which runs every batch
+program, and the system's own search for a program named without a path also look in the working directory before `PATH`, unless
+the variable `NoDefaultCurrentDirectoryInExePath` exists; from 0.9.4 (FIX-165) every program Vericairn starts on Windows receives
+it, set to `1` whatever the environment held, so those searches read `PATH` only, and a batch program names a file of its working
+directory as `.\file`. This is the `PATH` Vericairn hands over; a program that sets its own search path, reads another, or
+searches in its own way decides for itself what it then starts.
 
 The launch binding records the hash of the file the start runs, found by the same lookup.
 
@@ -2082,6 +2113,12 @@ reason: one that names nothing or a directory, and on Windows a path rooted only
 to a drive's current directory (`C:setup.cmd`). A setup configuration stored earlier with such an executable is reported as
 unreadable, and refuses runs, until it is replaced or cleared.
 
+From 0.9.4 (FIX-165), on Windows a setup command that is a batch program (`scripts\setup.cmd`) runs through the system's `cmd.exe`
+as [the launchers' commands do](#coding-agents-the-worker-and-its-launchers), inside the setup's job, and its exit code is the
+script's. `worker configure --setup-command` refuses, with the reason, a batch program's argument that `cmd.exe` cannot read as data
+(one holding a percent sign, a line break or another control character), and a setup configuration stored earlier with one is
+reported as unreadable until it is replaced or cleared.
+
 Record credential checks exclude only encoding values validated by the record rules: a device body's
 `publicKey` and an envelope's `signatures[].signature`. The same credential-shaped text in any other field,
 including a nested field with the same name, is still scanned. Invalid encodings receive no exemption.
@@ -2290,7 +2327,9 @@ It repeats the entire preflight immediately before dispatch. Native preflight al
 change while probing. The additive `RunPreflight.LocalBindingHash` compares command arguments, the files the harness
 command and Vericairn's MCP server start as, entry files, explicit MCP content and environment values locally; from
 0.9.4 (FIX-161) those two files are found by the lookup every start uses, an absolute path as given or a bare name in
-the absolute directories of `PATH`. It is never copied into the intent or any other record. Thus machine bindings
+the absolute directories of `PATH`; from 0.9.4 (FIX-165) on Windows that is the `.exe`, else the `.com`, of an absolute path
+without an extension, and for a batch program the script itself, not the `cmd.exe` it runs in. It is never copied into the intent
+or any other record. Thus machine bindings
 cannot silently change while the portable inventory remains the same. Any difference after intent refuses dispatch and
 records an unstarted, zero-charge failure.
 

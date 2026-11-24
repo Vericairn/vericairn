@@ -476,7 +476,11 @@ the environment a harness would, without credential or loader variables, and
 0.9.4 (FIX-161) a relative executable with a directory part names the
 workspace's file, a bare name is found in an absolute directory of `PATH`, and
 an executable that can never be started is refused here and reported unreadable
-where it was stored earlier. `--clear-setup` removes it; `--repository` alone
+where it was stored earlier. From 0.9.4 (FIX-165), on Windows a `.cmd` or `.bat`
+executable runs through the system's `cmd.exe`, and an argument `cmd.exe` cannot
+read as data (one holding a percent sign, a line break or another control
+character) is refused here and reported unreadable where it was stored earlier.
+`--clear-setup` removes it; `--repository` alone
 shows it, and `worker configure` with no choices shows every setup command
 beside the workspace root. See [Preparing a workspace before the agent
 starts](software.md#coding-agents-the-worker-and-its-launchers) for the checks
