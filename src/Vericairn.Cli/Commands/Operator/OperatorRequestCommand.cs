@@ -2,8 +2,10 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using System.Globalization;
 using System.Text.Json;
 using Vericairn.Protocol;
+using Vericairn.Records.Model;
 
 namespace Vericairn.Cli;
 
@@ -50,13 +52,13 @@ internal sealed class OperatorRequestCloseCommand : Command
         var op = new Option<string?>("--operator") { Description = "For an agent: the operator whose words are cited." };
         var statement = new Option<string?>("--statement") { Description = "For an agent: the operator's exact words, verbatim." };
         var source = new Option<string?>("--source") { Description = "For an agent: the citation locating those words." };
-        var saidAt = new Option<string?>("--said-at") { Description = "For an agent: when the operator spoke, as a UTC record timestamp." };
+        var saidAt = new Option<string?>("--said-at") { Description = "For an agent: when the operator spoke, as a UTC record timestamp, written in whole seconds. Without it, the time of this recording." };
         Arguments.Add(id);
         foreach (Option option in new Option[] { by, expected, reason, link, evidence, op, statement, source, saidAt }) Options.Add(option);
         SetAction(parse =>
         {
             OperatorRequestWords? words = new[] { parse.GetValue(op), parse.GetValue(statement), parse.GetValue(source), parse.GetValue(saidAt) }.Any(v => v is not null)
-                ? new(parse.GetValue(op) ?? "", parse.GetValue(statement) ?? "", parse.GetValue(source) ?? "", parse.GetValue(saidAt) ?? "") : null;
+                ? new(parse.GetValue(op) ?? "", parse.GetValue(statement) ?? "", parse.GetValue(source) ?? "", SaidAt(parse.GetValue(saidAt), DateTimeOffset.UtcNow)) : null;
             int Close(JsonElement? proof) => context.WithApi(parse.GetValue(context.EstateOption)!, api =>
             {
                 var request = new OperatorRequestCloseRequest(parse.GetValue(by)!, parse.GetValue(expected), parse.GetValue(reason), parse.GetValue(link), proof, words);
@@ -65,4 +67,19 @@ internal sealed class OperatorRequestCloseCommand : Command
             return parse.GetValue(evidence) is string path ? context.WithBody(path, body => Close(body)) : Close(null);
         });
     }
+
+    /// <summary>
+    /// From 0.9.5 (FIX-171): when the operator's cited words were said, in the record's timestamp form, a UTC time in whole seconds. A
+    /// given time with fractional seconds or an offset is written in that form, and one in no ISO 8601 form is passed on for the record
+    /// to refuse with its field's name; without one, the time of this recording, which follows the request and precedes the record's own
+    /// time, as the record requires. Up to 0.9.4 an agent's close without <c>--said-at</c> wrote an empty time, which the record refused.
+    /// </summary>
+    internal static string SaidAt(string? given, DateTimeOffset now)
+    {
+        if (given is null) return RecordParser.FormatTimestamp(now);
+        return DateTimeOffset.TryParseExact(given.Trim(), SaidAtForms, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset at)
+            ? RecordParser.FormatTimestamp(at) : given;
+    }
+
+    private static readonly string[] SaidAtForms = ["yyyy-MM-dd'T'HH:mm:ssK", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK"];
 }

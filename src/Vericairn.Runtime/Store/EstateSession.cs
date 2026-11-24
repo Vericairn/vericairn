@@ -401,10 +401,14 @@ public sealed class EstateSession : IDisposable
         return (EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments), files.Files);
     }
 
+    // From 0.9.5 (FIX-171) a read-only load keeps the files it judged, as a writable one does, so a read of a record's bytes
+    // (LoadedFile) answers from them: up to 0.9.4 it found none, and a read-only command reading records, such as docs pass --before
+    // without --previous and --by, failed parsing empty bytes.
     private (EstateModel Model, IReadOnlyList<RecordFile> Files) ReadOnlyJudgment()
     {
         using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
         IReadOnlyList<RecordFile> read = ReadFiles();
+        loadedFiles = new LiveStore.FileSnapshot(read, read.ToDictionary(f => f.Path, StringComparer.Ordinal), 0);
         ClientOperationActivity.Report(JudgingStage(read.Count));
         return (EstateLoader.Load(Root, read, null, objects: ObjectReader, context: Judgments), read);
     }

@@ -99,6 +99,12 @@ The same citation options apply to `dismiss`, together with `--reason`. The word
 must follow the exact request and precede their recording. An agent's paraphrase
 or inference is not the operator's statement.
 
+From 0.9.5 (FIX-171) the command writes `--said-at` in the record's timestamp
+form, a UTC time in whole seconds, whatever fractional seconds or offset it was
+given with, and without `--said-at` it writes the time of the recording, the
+latest the words can have been said. Up to 0.9.4 a close without `--said-at`
+wrote an empty time, which the record refused (`body.timestamp`).
+
 ## An observation closes a request
 
 A signed `observation` with `kind: "operator-request"` and the exact request as its

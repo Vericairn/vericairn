@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 46, November 24, 2026. An agent's `operator done` or `operator dismiss` citing the operator's words writes `--said-at` in whole seconds UTC, and the time of the recording without it, and `docs pass --before` without `--previous` and `--by` reads the estate's releases read-only, in the development build.
+
 Revision 45, November 24, 2026. `doctor` reports the `vericairn-enclave` helper's version beside the command line's and flags a mismatch, `doctor --json` adds the `helper` probe, and a command line refuses to sign through a helper older than itself, in the development build.
 
 Revision 44, November 22, 2026. Describe 0.9.4's command additions as released commands rather than development builds.
