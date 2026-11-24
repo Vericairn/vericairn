@@ -56,8 +56,11 @@ gives every current limit.
   pushing from a repository received as a folder or one whose configuration others can change, and upgrade every
   machine that makes checked pushes or runs Vericairn in an estate root or a clone others can add files to; until
   then take the interim steps the Security section gives, and check what an earlier release read or pushed as it
-  describes. The section says a GitHub security advisory for each is published with the release; none is
-  published yet. Restart running workers after upgrading; the upgrade's runtime step replaces a daemon of an
+  describes. Each has a published advisory: FIX-147
+  ([GHSA-4fhm-q93f-486j](https://github.com/Vericairn/vericairn/security/advisories/GHSA-4fhm-q93f-486j)),
+  FIX-160 ([GHSA-xj33-r655-4385](https://github.com/Vericairn/vericairn/security/advisories/GHSA-xj33-r655-4385))
+  and FIX-161 ([GHSA-w6cw-x3cg-gwpg](https://github.com/Vericairn/vericairn/security/advisories/GHSA-w6cw-x3cg-gwpg)),
+  which also states FIX-161's reach on each platform. Restart running workers after upgrading; the upgrade's runtime step replaces a daemon of an
   older release. 0.9.3's
   [Security](0.9.3/release-notes.md#security) section: one correction, FIX-132. Before 0.9.3, a record file carrying a public key in a form Vericairn does not make,
   signed or not, such as a key with its curve parameters written out in full, on another named curve or with a
