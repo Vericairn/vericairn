@@ -163,7 +163,7 @@ public sealed class LocalNetworkAndroidTlsTests : IDisposable
         AuthenticationException refused;
         if (pairing)
         {
-            // Pairing reports it as a refusal, sends no hello and closes its TLS stream.
+            // Pairing reports it as a refusal and sends no hello; FailedPairingTlsTests shows that it closes its TLS stream at once.
             ClientRefusedException failure = await Assert.ThrowsAsync<ClientRefusedException>(() => RuntimePairing.PairAsync(stranger.Address, PairingProtocol.NewCode(),
                 new PairingOptions("Phone") { Tls = platform, Timeout = TestTiming.HangTimeout }, TestContext.Current.CancellationToken));
             refused = Assert.IsType<AuthenticationException>(failure.InnerException);
@@ -200,7 +200,7 @@ public sealed class LocalNetworkAndroidTlsTests : IDisposable
     /// A TLS 1.2 server on loopback for one connection, choosing from the suites it is given, that keeps every byte of application
     /// data it receives until the client closes.
     /// </summary>
-    private sealed class Stranger : IAsyncDisposable
+    internal sealed class Stranger : IAsyncDisposable
     {
         private readonly TcpListener listener = new(IPAddress.Loopback, 0);
         private readonly MemoryStream received = new();
