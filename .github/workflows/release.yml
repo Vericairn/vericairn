@@ -2,8 +2,8 @@ name: release
 
 # Builds a release candidate from an exact commit: the three-platform test matrix is the evidence, the
 # archives are self-contained per platform, NuGet packages are framework-dependent, and a software bill
-# of materials and the notices travel with them. package.yml, which ci.yml also runs on every change,
-# builds them; everything lands in a DRAFT GitHub release under SHA256SUMS. Publishing the draft is the operator's reserved action after acceptance in the estate;
+# of materials and the notices travel with them. package.yml, which ci.yml's full gate also runs for every merge queue
+# group, builds them; everything lands in a DRAFT GitHub release under SHA256SUMS. Publishing the draft is the operator's reserved action after acceptance in the estate;
 # only nuget.yml, triggered by that publication, pushes the package assets to NuGet, once the operator approves its run in the
 # protected environment release. The draft job publishes nothing, so it runs outside that environment.
 
@@ -86,7 +86,8 @@ jobs:
             python3 .github/scripts/run-tests.py --share ${{ matrix.share }}'
 
   package:
-    # The packaging path ci.yml runs on every change, here for the version being released, once every platform and share has passed.
+    # The packaging path ci.yml's full gate runs for every merge queue group, here for the version being released, once every
+    # platform and share has passed.
     needs: [verify]
     uses: ./.github/workflows/package.yml
     with:

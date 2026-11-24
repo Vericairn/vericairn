@@ -299,7 +299,8 @@ The phone heads are in `src/Vericairn.Mobile.slnx`, not in `Vericairn.slnx`, bec
 - Android: the .NET `android` workload (workload set `10.0.404`), an Android SDK and JDK 17.
   `dotnet build src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj -p:AndroidSdkDirectory=<sdk> -p:JavaSdkDirectory=<jdk>`.
 
-Continuous integration builds both heads on every change: iOS on macOS, Android on Linux. Installing on a real iPhone needs
+From 0.9.5 (CI-12), continuous integration builds both heads in the merge queue's full gate, which every change passes
+before it merges, rather than on each pull request: iOS on macOS, Android on Linux. Installing on a real iPhone needs
 your own Apple signing; Remote is not distributed through the App Store or Google Play.
 
 ## Limits

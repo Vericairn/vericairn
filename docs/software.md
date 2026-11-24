@@ -836,8 +836,8 @@ ShellCheck 0.11.0, each installed by pinned version and checked against its rele
 any finding.
 
 From 0.8.2 (CI-03) the release's packaging path is one definition, `.github/workflows/package.yml`, which
-`release.yml` calls after its test matrix and `ci.yml` runs on every change beside the tests, so no
-release-only step can first fail during a release. It checks the version, restores locked, compares the
+`release.yml` calls after its test matrix and `ci.yml` runs beside the tests (from 0.9.5, in the merge
+queue's full gate rather than on every pull request), so no release-only step can first fail during a release. It checks the version, restores locked, compares the
 documentation set with the build over the full history, packs, publishes the self-contained command line and
 Workbench for six platforms, writes the bill of materials, the documentation archive, the readable build
 reports, the checksums and the notes, and runs the same package verifier publication uses. Until release
@@ -851,12 +851,26 @@ interpolated into it. `nuget.yml` has no pull-request trigger, so no pull reques
 From 0.9.3 (CI-07), Vericairn's own `ci.yml` builds a commit on main once. A merge queue moves main to the
 exact commit its group's run tested, so the workflow's first job looks that run up: on a push to main whose
 exact commit has a successful `merge_group` run of `ci.yml`, every other job is skipped, and that commit's
-three-platform run is the queue's. Every other push to main builds in full, as do pull requests, queue groups
-and manual runs; a lookup that cannot be completed also builds in full. A main commit's run is therefore its
+three-platform run is the queue's. Every other push to main builds in full, as do queue groups and manual
+runs (from 0.9.5 a pull request runs a lighter plan, below); a lookup that cannot be completed also builds in full. A main commit's run is therefore its
 `merge_group` run when the queue merged it, and its push run otherwise. This is the repository's own
 workflow, not a product behavior: `changes merge` observes the target branch's push runs at the merge
 commit in repositories that require no merge queue, and from 0.9.3 (CODE-71), for a merge a required queue
 made, that commit's `merge_group` runs beside its push runs.
+
+From 0.9.5 (CI-12), a pull request gets a light run and the merge queue the full gate on the merged result. A
+pull request runs the workflow policy and Linux's test shares; one that changes only documentation (files
+under `docs/` outside `docs/releases/`, and the root `README.md` and `ROADMAP.md`) runs instead the build and
+the test classes that read the repository's documentation. A merge queue group, a push to main or a
+`release/*` branch whose commit the queue has not already tested (above), and a manual run run the full gate:
+every platform's shares, both Remote builds and the packaging path, docs-only groups included. The shares are
+balanced by each test class's measured duration, with six on Windows, four on macOS and three on Linux.
+`ci-gate`, the one `ci.yml` check the branch rulesets require beside `secret-scan`, passes only when every job
+the event runs passed, and for every event but a pull request it requires the full gate whatever the run
+planned, with every share the shard plan gives each platform. A run that failed only because GitHub's runners
+did, killed or lost while still setting up, is re-run once by `retry.yml`; a test failure, a timeout or a
+cancellation never is, and the pull request of a queue group that only its runners failed is queued again by
+the builder's queue script instead. This is the repository's own workflow, not a product behavior.
 
 The self-contained publishes restore locked from committed runtime-specific lock files:
 `packages.distributable.lock.json` beside each `packages.lock.json` of the projects the command line and
