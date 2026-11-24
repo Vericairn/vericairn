@@ -1,14 +1,16 @@
 # Release documentation sets
 
-The current published release is **0.9.3**, published on November 14, 2026 at 14:22:33 UTC,
-with tag `v0.9.3` at `0416289d5e5061baa739e107f29d0364d0bc4c35`
-(estate release record `01M7D71HQ4TAD2EY07QVG16QBM`). It follows 0.9.2, published on November 12, 2026
-at 19:09:15 UTC with tag `v0.9.2` at `2aa8adfdaa0d61182a7d71fc22c4ca7bb5ef6c79`
-(estate release record `01M78KCZ048RT5CFX35M0XW0PK`). 0.9.3 was published after the Reviewer's review of
-its candidate passed and the operator's acceptance was recorded: review `01M7D5XQ9CR660NF3K45CD6CWS` passed
-with three warnings and three informational findings, none blocking the release, and acceptance
-`01M7D67VZTC9YE07T2G53DT2VR` followed. 0.9.3's [Security section](0.9.3/release-notes.md#security)
-discloses FIX-132's correction to how public keys in forms Vericairn does not make, and local-network client
+The current published release is **0.9.4**, published on November 24, 2026 at 01:16:39 UTC,
+with tag `v0.9.4` at `2b45bff0855eb454710e2ae70f1e084e325691a0`
+(estate release record `01M85J11PSYZGYGEE6H75BVNGA`). It follows 0.9.3, published on November 14, 2026
+at 14:22:33 UTC with tag `v0.9.3` at `0416289d5e5061baa739e107f29d0364d0bc4c35`
+(estate release record `01M7D71HQ4TAD2EY07QVG16QBM`). 0.9.4 was published after the Reviewer's review of
+its candidate passed and the operator's acceptance was recorded: review `01M85BE7FPZR4XPYGFY56JJQ8X` passed
+with four warnings and three informational findings, none blocking the release, and acceptance
+`01M85HANZXZCJZSGX8MEGM8M74` followed. 0.9.4's [Security section](0.9.4/release-notes.md#security)
+discloses FIX-147's, FIX-160's and FIX-161's corrections to how git runs on a repository Vericairn did not
+create, to what the secret scan of a checked push takes from the clone and to how Vericairn finds a program
+before it starts it, 0.9.3's [Security section](0.9.3/release-notes.md#security) FIX-132's correction to how public keys in forms Vericairn does not make, and local-network client
 certificates dated at the edge of the calendar, are read, 0.9.2's [Security section](0.9.2/release-notes.md#security)
 FIX-102's, FIX-110's, FIX-111's, FIX-104's, FIX-105's, FIX-106's and FIX-115's corrections to how
 admissions and an estate's root of trust are read, to which records give roles and scopes, to policy
@@ -30,12 +32,37 @@ discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 an
 
 ## Readiness disclosures
 
-Read these before relying on the current published release, 0.9.3. They moved here from the repository's
+Read these before relying on the current published release, 0.9.4. They moved here from the repository's
 README, which links to this section; the [limitations and platforms](../limitations-and-platforms.md) guide
 gives every current limit.
 
-- **Security.** 0.9.3's release notes open with a [Security](0.9.3/release-notes.md#security) section:
-  one correction, FIX-132. Before 0.9.3, a record file carrying a public key in a form Vericairn does not make,
+- **Security.** 0.9.4's release notes open with a [Security](0.9.4/release-notes.md#security) section:
+  three corrections. FIX-147: in every published release from 0.2.0 through 0.9.3, Vericairn ran git on a
+  repository it did not create with that repository's own configuration in force, so a program the configuration
+  names, such as an fsmonitor hook, a filter driver, a signature program or a partial clone's fetch command,
+  started as the user running Vericairn whenever it read such a repository, through the commands and runtime
+  reads the Security section lists; a repository received as a folder carries its configuration, while a
+  `git clone` does not copy it. From 0.9.4 every git process on a repository Vericairn inspects or adopts, on a
+  registered clone or on a checked push's clone runs without the system configuration, with an empty global
+  configuration and a hooks path of its own and with those commands overridden, and fetches no missing object;
+  these reads no longer apply your own system git configuration, nor, with git 2.32 or later, your global one.
+  FIX-160: from 0.8.0 through 0.9.3, the secret scan of a checked push applied a `.gitleaksignore` it found in the
+  clone, so whoever could add a file to the clone could let a push carrying a secret pass; from 0.9.4 the scan
+  runs in an empty folder of its own and applies only the rules and the empty ignore file it writes. FIX-161: from
+  0.1.0 through 0.9.3, a program Vericairn started by name, such as git, gitleaks, gh or dotnet, could be taken
+  from the directory Vericairn ran in or from an empty or relative `PATH` entry; from 0.9.4 every program is
+  chosen as one absolute path before it starts, a bare name only from the absolute directories of `PATH`, and a
+  `check run` command named by a relative path is refused. Upgrade before inspecting, adopting, registering or
+  pushing from a repository received as a folder or one whose configuration others can change, and upgrade every
+  machine that makes checked pushes or runs Vericairn in an estate root or a clone others can add files to; until
+  then take the interim steps the Security section gives, and check what an earlier release read or pushed as it
+  describes. Each has a published advisory: FIX-147
+  ([GHSA-4fhm-q93f-486j](https://github.com/Vericairn/vericairn/security/advisories/GHSA-4fhm-q93f-486j)),
+  FIX-160 ([GHSA-xj33-r655-4385](https://github.com/Vericairn/vericairn/security/advisories/GHSA-xj33-r655-4385))
+  and FIX-161 ([GHSA-w6cw-x3cg-gwpg](https://github.com/Vericairn/vericairn/security/advisories/GHSA-w6cw-x3cg-gwpg)),
+  which also states FIX-161's reach on each platform. Restart running workers after upgrading; the upgrade's runtime step replaces a daemon of an
+  older release. 0.9.3's
+  [Security](0.9.3/release-notes.md#security) section: one correction, FIX-132. Before 0.9.3, a record file carrying a public key in a form Vericairn does not make,
   signed or not, such as a key with its curve parameters written out in full, on another named curve or with a
   point off the curve, could make the platform's or the framework's own key reader raise an error Vericairn did
   not handle, so `vericairn estate check`, `vericairn status` and the runtime operations behind them failed
@@ -101,43 +128,47 @@ gives every current limit.
   [Security](0.7.2/release-notes.md#security) section discloses F-01, which affected export restoration in
   every published release from 0.1.0 through 0.7.1. Upgrade to 0.7.2 or later before restoring an export.
   The fix binds restored bytes to the verified inventory; it does not authenticate the export's producer.
-- **Candidate and review.** 0.9.3's candidate `01M7C0T01S57RWG8NP5TS72N1H`, at `0416289`, was submitted
-  once. The Reviewer's independent review `01M7D5XQ9CR660NF3K45CD6CWS` passed with three warnings and three
+- **Candidate and review.** 0.9.4's candidate `01M857F2H6K488B1NB9N76RV5W`, at `2b45bff`, was submitted
+  once. The Reviewer's independent review `01M85BE7FPZR4XPYGFY56JJQ8X` passed with four warnings and three
   informational findings, none blocking the release, and the operator's acceptance
-  `01M7D67VZTC9YE07T2G53DT2VR` followed. Its assets are exactly the reviewed candidate's.
-- **Known issues.** None blocks the release. The Reviewer's three warnings concern the frozen text. The
-  release record's 93 limitations are fuller than the frozen
-  [limitations guide](0.9.3/limitations-and-platforms.md): several are stated only in the release notes, the
-  API compatibility notes or the operator's guide, and a few in no document of the set, such as that the
-  manifest pins only the six command-line distributables; the record is the authority. The frozen set
-  disagrees with itself on `vericairn estate first-authority`: its
-  [API compatibility notes](0.9.3/api-compatibility-0.9.3.md) say that after a write `remaining` lists each
-  other self-admission, while its [release notes](0.9.3/release-notes.md) record that a forged self-admission
-  beside the named one is reported by `vericairn estate check` and not in `remaining`. The code at the release
-  commit lists in `remaining` only the root-of-trust errors, among them `signature.self-admission` for each
-  other self-admission whose signature verifies, and the errors on the admission named; a forged one reads
-  `signature.invalid` and only `estate check` reports it, as the maintained
-  [API compatibility notes](../api-compatibility-0.9.3.md) now say. The release notes also state a trust
-  residual before its fix: a manifest-named self-admission whose signature does not verify is still read as the
-  first authority, which needs write access to the manifest, which already roots trust; FIX-134, placed in 0.9.4, makes the first authority count only when its
-  self-admission's signature verifies. The frozen 0.9.3 set keeps its bytes, and 0.9.4's set notes the
-  correction. The 0.9.2 set states FIX-102's remedy for an estate with several self-admissions of the root
-  operator's device without removing the extra one; 0.9.3's set corrects it.
-- **Interfaces.** [API compatibility](../api-compatibility-0.9.3.md) lists 0.9.3's interface and record
-  changes. `IEstateApi` adds `PresencePrompts` and `FirstAuthority`, each with a default implementation, so
-  existing implementations stay source-compatible, and the daemon adds the machine-local routes
-  `POST /v1/presence/prompts` and `POST /v1/estate/first-authority`. The record format stays 3 and adds no
-  record type. New records are refused when written where 0.9.2 wrote them: a goal-status of `impossible`
-  without its evaluator's verdict (FIX-116) and an operation revision that changes its intent or drops a
-  recorded target fact (FIX-109); records already in an estate read as before. An estate's root may hold its
-  owner's `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, which releases before 0.9.3 report as
-  `layout.unexpected` errors (CODE-70). [API compatibility for 0.9.2](../api-compatibility-0.9.2.md) lists the
-  changes 0.9.2 made.
+  `01M85HANZXZCJZSGX8MEGM8M74` followed. Its assets are exactly the reviewed candidate's.
+- **Known issues.** None blocks the release. The Reviewer's four warnings: a release basis's evidence records
+  git commit ids that the checked push's secret scan reads as access tokens (`sourcegraph-access-token`), as the
+  33 findings that stopped the estate's checked push of 0.9.4's candidate records show, and 0.9.4's own scan
+  finds them again, so such a push goes outside the checked flow until FIX-168, placed in 0.9.5, admits exactly
+  those revisions. On macOS the 0.9.4 command line signs each record through its helper's new `sign-record`,
+  which an earlier release's `vericairn-enclave` lacks: beside one, every Secure Enclave signature fails with
+  `the device's key store refused to sign, InvalidOperationException` and nothing is written, so keep the
+  command line and the helper from the same archive. The frozen guides do not say so; the maintained
+  [install guide](../install.md) now does. The shipped archives are also development builds to presence
+  sessions, so they honor `VERICAIRN_ENCLAVE_HELPER`, which the guides say a release build ignores, as one of
+  the informational findings notes; a variable naming an earlier helper fails the same way. The Security
+  section's account of FIX-161 fits Windows: on macOS the Reviewer found that 0.9.3 started a planted program
+  only through an empty or relative `PATH` entry, resolved in the repository being read, never from the
+  directory the command line ran in, so there only removing such entries helps short of upgrading, and folders
+  Vericairn inspects are exposed too. The frozen [limitations guide](0.9.4/limitations-and-platforms.md)'s
+  bullet on the overlap check says the `concurrent-paths` kind's findings, assignment-start refusals and pair
+  exceptions (POLICY-08) are not in this build; the build installs that kind, as the next bullet, the release
+  notes, the API compatibility notes and the release record say, and the maintained
+  [limitations guide](../limitations-and-platforms.md) now says so. The release record's 127 limitations are
+  fuller than the frozen limitations guide; the record is the authority. The frozen 0.9.4 set keeps its bytes,
+  and 0.9.5's set notes the corrections. The 0.9.3 set's API compatibility notes list every other
+  self-admission in `estate first-authority`'s `remaining`, where a forged one is not; 0.9.4's set corrects it.
+- **Interfaces.** [API compatibility](../api-compatibility-0.9.4.md) lists 0.9.4's interface and record
+  changes. `IEstateApi` adds nineteen operations, among them presence leases, a standing agent's due
+  occurrences and outputs, a decision step's decision, closing a run, the overlap check, the operator's answers
+  and reviewed act, observers and the stop drill, each with a default implementation, so existing
+  implementations stay source-compatible; the daemon adds their routes, such as `GET /v1/overlaps`,
+  `POST /v1/goals/{id}/decide` and `POST /v1/observers/report`, 175 operations where 0.9.3 had 156. The MCP
+  server adds six tools, and every tool definition carries behavior annotations. The record format stays 3 and
+  adds no record type, but releases before 0.9.4 refuse the record fields 0.9.4 adds, among them a decision's
+  `act`, an optional request and a run's closing, so an estate writes them only once every clone that writes it
+  has upgraded. [API compatibility for 0.9.3](../api-compatibility-0.9.3.md) lists the changes 0.9.3 made.
 - **Record format 3.** Upgrading an estate to record format 3 is forward-only, and a format-2-only binary
   refuses the upgraded estate, so every writer and clone moves to 0.8.0 or later together. The upgrade
   declares no policy or duty; the operator adopts them explicitly, as the
   [adoption guide](../policy-adoption.md) describes.
-- **Sources and guides.** Ordinary source builds retain `0.9.3-dev`. The maintained guides describe 0.9.3;
+- **Sources and guides.** Ordinary source builds retain `0.9.4-dev`. The maintained guides describe 0.9.4;
   earlier release sets keep their original bytes.
 - **Release checks.** Release checks reach only GitHub, ignore system proxies, are disabled with
   `vericairn updates configure --enabled false` and retain cached information when disabled. From 0.9.0 a
@@ -145,22 +176,24 @@ gives every current limit.
 - **Signals and attention.** Command observations remain signals, not an enforcement boundary. Required
   attention cannot infer closure from prose or missing evidence; its [rules](../required-attention.md) keep
   undecidable items visible as unknown.
-- **Platforms and downloads.** For 0.9.3, the command line is qualified on `linux-x64`, `osx-arm64` and
+- **Platforms and downloads.** For 0.9.4, the command line is qualified on `linux-x64`, `osx-arm64` and
   `win-x64`, where the release's tests ran. The `linux-arm64`, `osx-x64` and `win-arm64` archives are
   provided but unqualified. Workbench is not qualified on any platform. The archives are unsigned developer
-  builds, without code signing or notarization; verify downloads as the [install guide](0.9.3/install.md)
-  describes. 0.9.3's `SHA256SUMS` also lists `vericairn-0.9.3-companions.zip`, the readable build reports,
-  which the release run keeps in its CI artifact and does not attach; check the attached assets with
-  `--ignore-missing`, as the guide does. Remote, the phone companion, is a developer build: the release
-  carries no iOS or Android client, it is not distributed through the App Store or Google Play, and no
-  real-device qualification is recorded; [Remote](0.9.3/remote.md) describes building it from source.
-- **NuGet.** All eight command-line and library packages are available at 0.9.3 on nuget.org, pushed by the
+  builds, without code signing or notarization; verify downloads as the [install guide](0.9.4/install.md)
+  describes. From 0.9.4 every file `SHA256SUMS` names is attached to the release, among them
+  `vericairn-0.9.4-companions.zip`, the readable build reports, which earlier releases listed and left out:
+  0.9.4 attaches 31 files and `SHA256SUMS`. Check the files you download with `--ignore-missing`, as the guide does. Remote,
+  the phone companion, is a developer build: the release carries no iOS or Android client, it is not
+  distributed through the App Store or Google Play, and no real-device qualification is recorded;
+  [Remote](0.9.4/remote.md) describes building it from source.
+- **NuGet.** All eight command-line and library packages are available at 0.9.4 on nuget.org, pushed by the
   release event's Trusted Publishing run
-  ([run 43604538081](https://github.com/Vericairn/vericairn/actions/runs/43604538081)) with the symbol packages
+  ([run 45303829744](https://github.com/Vericairn/vericairn/actions/runs/45303829744)) with the symbol packages
   of the seven that carry assemblies; `Vericairn`, which brings the SDK's packages, carries none. The release
-  event's `mcp-registry` run ([run 43604538022](https://github.com/Vericairn/vericairn/actions/runs/43604538022))
-  listed `io.github.Vericairn/vericairn` at 0.9.3, the latest version, in the official MCP Registry, as 0.9.2's
-  run first listed it (FIX-101). The `dotnet-vc`
+  event's `mcp-registry` run ([run 45303829737](https://github.com/Vericairn/vericairn/actions/runs/45303829737))
+  listed `io.github.Vericairn/vericairn` at 0.9.4, the latest version, in the official MCP Registry, as 0.9.2's
+  run first listed it (FIX-101). From 0.9.4 (CI-08) each of the two runs published only after its approval in
+  the repository's protected `release` environment. The `dotnet-vc`
   tool is framework-dependent; the self-contained archives continue to ship `vericairn` for machines without
   the SDK, and the macOS archives also carry the Secure Enclave helper. The NuGet tool does not bundle that
   helper or Workbench. The worker's agent-side MCP command still resolves `vericairn`; keep the archive
@@ -209,7 +242,8 @@ gives every current limit.
   own temporary directory (FIX-74) and settlement after an unrecorded settlement or a dead supervising process
   (FIX-76, FIX-82), establish no further live qualification, and neither do 0.9.1's, FIX-86's workspace
   preparation and setup commands and FIX-88's temporary directory for the MCP server, or 0.9.2's, among them
-  FIX-96's filtered setup environment.
+  FIX-96's filtered setup environment, or 0.9.4's, among them what a run can reach (CODE-82), public retrieval
+  for research runs (RUN-04) and starting every program by its absolute path (FIX-161).
   0.8.2's worker changes, FIX-32 through FIX-35, have live runs on macOS from the estate's 0.8.3 worker runs.
   The [software guide](../software.md#native-inventory-qualification-run-02-and-run-03) retains all seven
   observations and FIX-81's run.
@@ -219,9 +253,10 @@ gives every current limit.
   [software guide](../software.md#launch-accounting-and-containment). The local
   [efficiency adapter](../efficiency-adapter.md) is built and disabled by default: it runs only after the
   operator's machine configuration admits it for named launchers and a run selects it, and 0.9.0's release
-  security review covers it. Context tokens remain unknown without a qualified local tokenizer. Remote is a
-  developer build, as above. Community build guides and the proposed catalog repository are prepared locally
-  only; publishing them and opening implementation requests remain the operator's separate decisions
+  security review covers it. Standing agents and timed steps are carried one `goal step` at a time, by hand or
+  by the owner's script, until the carrier planned for 0.9.6. Context tokens remain unknown without a qualified
+  local tokenizer. Remote is a developer build, as above. Community build guides and the proposed catalog
+  repository are prepared locally only; publishing them and opening implementation requests remain the operator's separate decisions
   ([community build guides](../community-build-guides.md)). A disclosure hold is enforced only by Vericairn's
   checked push to a repository recorded as public, and the support bundle redacts by the shapes the estate
   check knows, so review a bundle before sharing it. Spending, containment and these limits remain as the
@@ -229,9 +264,9 @@ gives every current limit.
 
 ## Documentation sets
 
-The [0.9.4 set](0.9.4/README.md) is prepared for the next release and is not yet published; the current published release stays 0.9.3 until 0.9.4 is accepted and published, when the living-document pass updates this index and the readiness disclosures above. It follows published 0.9.3 and carries standing agents and their outputs, with the duty carrier, researcher and bug hunter as built-in roles (GOAL-07, GOAL-08 and PROC-08, with FIX-155); step timing and decision transitions (PROC-18 and PROC-19), with a run closed with a reason for each unsettled step (FIX-143) and FIX-142, FIX-144 and FIX-146; concurrent assignments compared by their permitted paths and the concurrent-paths policy (CODE-73 and POLICY-08); presence leases, availability and quiet hours (ID-11, GOAL-11 and DOCS-25) and presence sessions (ID-15, ID-16, CODE-80 and DOCS-37); the dispatcher's scope, role closings and what a run can reach, with public retrieval for research runs (ID-07, ID-14, CODE-82 and RUN-04); the operator's answers, reviewed acts and optional requests (OPS-16, OPS-24 and OPS-22); automated observers, the stop drill and progress targets (OPS-20, OPS-21 and WATCH-06); an upgrade's restore point and way back (FIX-145); reads that judge the estate once (FIX-136, FIX-148 and FIX-152); the held guides' fragments, each set's llms files and MCP tool annotations (OPS-17, DOCS-38 and MCP-07); and CODE-81, FIX-134, FIX-135, FIX-137 to FIX-141, FIX-149, FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. Its [Security section](0.9.4/release-notes.md#security) discloses FIX-147, FIX-160 and FIX-161: how git runs on a repository Vericairn did not create, what the secret scan of a checked push takes from the clone, and how Vericairn finds a program before it starts it. An estate at format 3 upgrades to it without a format step. Every distributable is still built with .NET SDK 10.0.404 and embeds the 10.0.15 runtimes. The source version is `0.9.4-dev`. Its references retain build commit `3c7c31c8547e52173e388fc583e24cfd62689ac9`, with 227 commands, 175 API operations, 48 record types and 64 required documents. Its notes render the estate's records with `--from 0.9.3 --to 0.9.4` and open with the Security section. It corrects the 0.9.3 set's API compatibility notes, which list every other self-admission in `estate first-authority`'s `remaining`, where a forged one is not. The set was frozen before publication, so it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish once it publishes; every file's checksum is in `frozen-sha256.json`.
+The [0.9.4 set](0.9.4/README.md) documents the current published release, published on November 24, 2026 at tag `v0.9.4`, commit `2b45bff0855eb454710e2ae70f1e084e325691a0` (estate release record `01M85J11PSYZGYGEE6H75BVNGA`), after published 0.9.3. It follows published 0.9.3 and carries standing agents and their outputs, with the duty carrier, researcher and bug hunter as built-in roles (GOAL-07, GOAL-08 and PROC-08, with FIX-155); step timing and decision transitions (PROC-18 and PROC-19), with a run closed with a reason for each unsettled step (FIX-143) and FIX-142, FIX-144 and FIX-146; concurrent assignments compared by their permitted paths and the concurrent-paths policy (CODE-73 and POLICY-08); presence leases, availability and quiet hours (ID-11, GOAL-11 and DOCS-25) and presence sessions (ID-15, ID-16, CODE-80 and DOCS-37); the dispatcher's scope, role closings and what a run can reach, with public retrieval for research runs (ID-07, ID-14, CODE-82 and RUN-04); the operator's answers, reviewed acts and optional requests (OPS-16, OPS-24 and OPS-22); automated observers, the stop drill and progress targets (OPS-20, OPS-21 and WATCH-06); an upgrade's restore point and way back (FIX-145); reads that judge the estate once (FIX-136, FIX-148 and FIX-152); the held guides' fragments, each set's llms files and MCP tool annotations (OPS-17, DOCS-38 and MCP-07); and CODE-81, FIX-134, FIX-135, FIX-137 to FIX-141, FIX-149, FIX-150, FIX-154, FIX-156, FIX-157, FIX-159, FIX-163, FIX-165, CI-08, CI-09, DOCS-35, DOCS-41, DOCS-45, DOCS-46 and DOCS-48. Its [Security section](0.9.4/release-notes.md#security) discloses FIX-147, FIX-160 and FIX-161: how git runs on a repository Vericairn did not create, what the secret scan of a checked push takes from the clone, and how Vericairn finds a program before it starts it. An estate at format 3 upgrades to it without a format step. Every distributable is still built with .NET SDK 10.0.404 and embeds the 10.0.15 runtimes. The source version is `0.9.4-dev`. Its references retain build commit `a7a7e5de6863997cf44394c6336ba41216e537b4`, with 227 commands, 175 API operations, 48 record types and 64 required documents. Its notes render the estate's records with `--from 0.9.3 --to 0.9.4` and open with the Security section. It corrects the 0.9.3 set's API compatibility notes, which list every other self-admission in `estate first-authority`'s `remaining`, where a forged one is not. The set was frozen before publication, so it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish; every file's checksum is in `frozen-sha256.json`. Its limitations guide says the `concurrent-paths` kind's findings, refusals and exceptions (POLICY-08) are not in the build, which installs them, and its guides do not say that on macOS the 0.9.4 command line cannot sign with an earlier release's Secure Enclave helper; the maintained guides correct both and 0.9.5's set notes the corrections.
 
-The [0.9.3 set](0.9.3/README.md) documents the current published release, published on November 14, 2026 at tag `v0.9.3`, commit `0416289d5e5061baa739e107f29d0364d0bc4c35` (estate release record `01M7D71HQ4TAD2EY07QVG16QBM`), after published 0.9.2. It follows published 0.9.2 and carries presence prompts announced and counted, with release steps that sign only what they store (FIX-124 and FIX-130); required merge queues, the operator action's push and merge trail and accepted work read as accepted, so a release can run on its declared flow (CODE-71, FIX-126 and FIX-128, with FIX-125 and FIX-127); `estate first-authority` (CODE-72) and the enrollment troubleshooting guide (DOCS-33); the impossible verdict and proposals that wait for a goal's sponsor (FIX-116 and FIX-117); the estates' reported fixes FIX-107, FIX-109, FIX-112, FIX-113, FIX-114, FIX-119, FIX-120, FIX-122 and CODE-70; near-linear judging of key closings and admissions (FIX-121 and FIX-131); the cold-recovery inventories (DOCS-32); and CI-07, FIX-118 and FIX-133. Its [Security section](0.9.3/release-notes.md#security) discloses FIX-132: keys in forms Vericairn does not make, which stopped the estate check and status, and client certificates at the edge of the calendar. An estate at format 3 upgrades to it without a format step. Every distributable is still built with .NET SDK 10.0.404 and embeds the 10.0.15 runtimes. The source version is `0.9.3-dev`. Its references retain build commit `05cbc6aca523e6ac47a16196afaa43cb995a7e5d`, with 206 commands, 156 API operations, 48 record types and 57 required documents. Its notes render the estate's records with `--from 0.9.2 --to 0.9.3` and open with the Security section. It corrects the 0.9.2 set's statement of FIX-102's remedy for an estate with several self-admissions of the root operator's device, which leaves out removing the extra one. The set was frozen before publication, so it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish; every file's checksum is in `frozen-sha256.json`. Its API compatibility notes say that after a write `estate first-authority`'s `remaining` lists each other self-admission, where a forged one is reported by `vericairn estate check` and not in `remaining`, as its release notes record; the maintained notes correct it and 0.9.4's set notes the correction.
+The [0.9.3 set](0.9.3/README.md) documents an earlier published release, published on November 14, 2026 at tag `v0.9.3`, commit `0416289d5e5061baa739e107f29d0364d0bc4c35` (estate release record `01M7D71HQ4TAD2EY07QVG16QBM`), after published 0.9.2. It follows published 0.9.2 and carries presence prompts announced and counted, with release steps that sign only what they store (FIX-124 and FIX-130); required merge queues, the operator action's push and merge trail and accepted work read as accepted, so a release can run on its declared flow (CODE-71, FIX-126 and FIX-128, with FIX-125 and FIX-127); `estate first-authority` (CODE-72) and the enrollment troubleshooting guide (DOCS-33); the impossible verdict and proposals that wait for a goal's sponsor (FIX-116 and FIX-117); the estates' reported fixes FIX-107, FIX-109, FIX-112, FIX-113, FIX-114, FIX-119, FIX-120, FIX-122 and CODE-70; near-linear judging of key closings and admissions (FIX-121 and FIX-131); the cold-recovery inventories (DOCS-32); and CI-07, FIX-118 and FIX-133. Its [Security section](0.9.3/release-notes.md#security) discloses FIX-132: keys in forms Vericairn does not make, which stopped the estate check and status, and client certificates at the edge of the calendar. An estate at format 3 upgrades to it without a format step. Every distributable is still built with .NET SDK 10.0.404 and embeds the 10.0.15 runtimes. The source version is `0.9.3-dev`. Its references retain build commit `05cbc6aca523e6ac47a16196afaa43cb995a7e5d`, with 206 commands, 156 API operations, 48 record types and 57 required documents. Its notes render the estate's records with `--from 0.9.2 --to 0.9.3` and open with the Security section. It corrects the 0.9.2 set's statement of FIX-102's remedy for an estate with several self-admissions of the root operator's device, which leaves out removing the extra one. The set was frozen before publication, so it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish; every file's checksum is in `frozen-sha256.json`. Its API compatibility notes say that after a write `estate first-authority`'s `remaining` lists each other self-admission, where a forged one is reported by `vericairn estate check` and not in `remaining`, as its release notes record; the maintained notes correct it and 0.9.4's set notes the correction.
 
 The [0.9.2 set](0.9.2/README.md) documents an earlier published release, published on November 12, 2026 at tag `v0.9.2`, commit `2aa8adfdaa0d61182a7d71fc22c4ca7bb5ef6c79` (estate release record `01M78KCZ048RT5CFX35M0XW0PK`), after published 0.9.1. It follows published 0.9.1 and carries flows and their stops with the software pack's release and upgrade flows (PROC-05, PROC-06, PROC-07 and PROC-10); signed history with checkpoints, closings and authority read as it stood at a record's time (ID-05, ID-06, OPS-07, FIX-108 and DOCS-15); the event journal and MCP subscriptions (WATCH-05 and MCP-05); network MCP over Streamable HTTP (MCP-03); keyword search and search-selected context (CONTEXT-02); security reports that hold a release until triaged (OPS-11); an upgrade's runtime step (OPS-05); the documentation-set tooling (DOCS-11); the large-artifact guide (DOCS-29); the merge queue (CI-06); FIX-85, FIX-89, FIX-93 to FIX-101, FIX-103 and FIX-123; and FIX-115's update to .NET SDK 10.0.404 with the 10.0.15 runtimes. Its [Security section](0.9.2/release-notes.md#security) discloses FIX-102, FIX-104, FIX-105, FIX-106, FIX-110, FIX-111 and FIX-115: how admissions and the root of trust are read, which records give roles and scopes, policy authority after an operator role is removed, per-user state on Linux, held-term and blocked-term matching, request authentication and the .NET runtime every 0.9.1 distributable embeds. An estate at format 3 upgrades to it without a format step; the upgrade names the estate's first authority in the manifest, which earlier releases refuse. The source version is `0.9.2-dev`. Its references retain build commit `3ed419acd5a157cea43a2d86a346f710d05cf986`, with 205 commands, 154 API operations, 48 record types and 55 required documents. Its notes render the estate's records with `--from 0.9.1 --to 0.9.2` and open with the Security section. It corrects the 0.9.1 set's Remote guide, which places PROMPT-02 in 0.9.2. The set was frozen before publication, so it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish; every file's checksum is in `frozen-sha256.json`. Its README, release notes, install guide and operator's guide state FIX-102's remedy for an estate with several self-admissions of the root operator's device without the removal of the extra one, which the maintained guides add and 0.9.3's set corrects (decision `01M78HY4YZWESCWM83GSXJCMDN`).
 
@@ -304,8 +339,9 @@ The [0.6.0 set](0.6.0/README.md) stays frozen. Its candidate was withdrawn befor
 
 ## NuGet publication setup
 
-The 0.9.3 release event's Trusted Publishing run, [run 43604538081](https://github.com/Vericairn/vericairn/actions/runs/43604538081),
-pushed all eight packages at 0.9.3, with the symbol packages of the seven that carry assemblies, and each lists that version on nuget.org. The 0.9.2 release event's Trusted Publishing run, [run 43287217463](https://github.com/Vericairn/vericairn/actions/runs/43287217463),
+The 0.9.4 release event's Trusted Publishing run, [run 45303829744](https://github.com/Vericairn/vericairn/actions/runs/45303829744),
+pushed all eight packages at 0.9.4, with the symbol packages of the seven that carry assemblies, after its approval in the protected `release` environment, and each lists that version on nuget.org. The 0.9.3 release event's Trusted Publishing run, [run 43604538081](https://github.com/Vericairn/vericairn/actions/runs/43604538081),
+pushed all eight packages at 0.9.3, with the symbol packages of the seven that carry assemblies. The 0.9.2 release event's Trusted Publishing run, [run 43287217463](https://github.com/Vericairn/vericairn/actions/runs/43287217463),
 pushed all eight packages at 0.9.2, with the symbol packages of the seven that carry assemblies. The 0.9.1 release event's Trusted Publishing run, [run 42326835491](https://github.com/Vericairn/vericairn/actions/runs/42326835491),
 pushed all eight packages with their symbol packages at 0.9.1. The 0.9.0 release event's Trusted Publishing run, [run 41523809649](https://github.com/Vericairn/vericairn/actions/runs/41523809649),
 pushed all eight packages with their symbol packages at 0.9.0. The 0.8.4 release event's Trusted Publishing run, [run 40733360890](https://github.com/Vericairn/vericairn/actions/runs/40733360890),
@@ -315,7 +351,7 @@ pushed all eight packages with their symbol packages, and each lists 0.8.2 on nu
 `dotnet-vc`, `Vericairn`, `Vericairn.Daemon`, `Vericairn.Mcp`, `Vericairn.Protocol`, `Vericairn.Records`,
 `Vericairn.Runtime` and `Vericairn.Sdk`. Installation of 0.8.2 is available. 0.8.0's own run,
 [run 39415232377](https://github.com/Vericairn/vericairn/actions/runs/39415232377), published 0.8.0 the same way.
-The recovery below belongs to 0.7.1's first publication, not to the 0.7.2, 0.7.3, 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1, 0.9.2 or 0.9.3 events.
+The recovery below belongs to 0.7.1's first publication, not to the 0.7.2, 0.7.3, 0.8.0, 0.8.2, 0.8.3, 0.8.4, 0.9.0, 0.9.1, 0.9.2, 0.9.3 or 0.9.4 events.
 
 On October 17, 2026, [run 39028643979](https://github.com/Vericairn/vericairn/actions/runs/39028643979)
 of `nuget.yml` pushed `dotnet-vc` and the seven Vericairn packages at 0.7.1, with their produced symbol packages,
@@ -362,7 +398,7 @@ the macOS Secure Enclave helper nor Workbench.
 | `required-attention.md` | a person, frozen copy | Included from 0.7.3 and required from 0.8.0: exact resolution rules, portable status and local worker observations, including unknown cases |
 | `communication-adoption.md` | a person, frozen copy | The first-party operator's explicit personal-setting adoption procedure (declared from 0.7.0) |
 | `communication-qualification.md` | a person, frozen copy | The tested communication/context surfaces and deferred qualifications (declared from 0.7.0) |
-| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.2.md`, `api-compatibility-0.8.3.md`, `api-compatibility-0.8.4.md`, `api-compatibility-0.9.0.md`, `api-compatibility-0.9.1.md`, `api-compatibility-0.9.2.md`, `api-compatibility-0.9.3.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.2, also that release's interface changes, which the withdrawn 0.8.1 set lists as `api-compatibility-0.8.1.md`; from 0.8.3, 0.8.4, 0.9.0, 0.9.1, 0.9.2 and 0.9.3, each release's interface additions |
+| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.2.md`, `api-compatibility-0.8.3.md`, `api-compatibility-0.8.4.md`, `api-compatibility-0.9.0.md`, `api-compatibility-0.9.1.md`, `api-compatibility-0.9.2.md`, `api-compatibility-0.9.3.md`, `api-compatibility-0.9.4.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.2, also that release's interface changes, which the withdrawn 0.8.1 set lists as `api-compatibility-0.8.1.md`; from 0.8.3, 0.8.4, 0.9.0, 0.9.1, 0.9.2, 0.9.3 and 0.9.4, each release's interface additions |
 | `cli-client-outcomes.md` | the build | From 0.8.0, the generated interrupted-request excerpt with retained input provenance |
 | `policies.md`, `policy-evaluator.md` | a person, frozen copies | From 0.8.0, declarations, writing exceptions, recurring duties, evaluation and release admission |
 | `policy-adoption.md`, `policy-adoption-proposals.md` | a person, frozen copies | From 0.8.0, explicit adoption, exact proposed definitions and unresolved operator inputs |
@@ -379,6 +415,11 @@ the macOS Secure Enclave helper nor Workbench.
 | `community-build-guides.md` | a person, frozen copy | From 0.9.0, community build guides and the catalog repository's local preparation |
 | `large-artifacts.md` | a person, frozen copy | From 0.9.2, custody and cold recovery of a large private artifact with today's records |
 | `enrollment-troubleshooting.md` | a person, frozen copy | From 0.9.3, telling an expired, refused or timed-out presence prompt apart during enrollment and reconciling it safely |
+| `events-and-presence.md` | a person, frozen copy | From 0.9.4, events, presence leases, availability and quiet hours, and the displaced holder |
+| `presence-session-qualification.md` | a person, frozen copy | From 0.9.4, qualifying a release candidate's signed helper for presence sessions |
+| `observers.md` | a person, frozen copy | From 0.9.4, automated observers and the attention a silent one raises |
+| `progress-targets.md` | a person, frozen copy | From 0.9.4, the estate's progress kept at a target, such as a GitHub discussion |
+| `llms.txt`, `llms-full.txt` | the build tooling (`vericairn-docs llms`) | From 0.9.4, an index of the set's documents, and every document in one file, both in the manifest's order |
 | `release-notes.md` | `vericairn docs notes` | What changed, from the estate's records since the previous set's notes ended (before 0.6.0, since the previous publication) |
 | `limitations-and-platforms.md` | a person, from the release record | Remaining limits, signing and expected artifacts; the release record supplies authoritative hashes and platform qualification |
 | `manifest.json` | the build tooling (`vericairn-docs generate`); its `notes` by `vericairn docs notes` | The set's version, commit, generator, the documents the product declares, commands, operations and record types; from 0.6.0 also the record formats the build reads and writes (`recordFormat`) and the window of records the notes cover (`notes`) |

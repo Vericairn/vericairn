@@ -28,7 +28,8 @@ internal sealed partial class ReleaseCoordinationService(
     Func<ReleasePolicyAssessment, IReadOnlyList<string>, IReadOnlyList<RecordReference>, string> retainBasis,
     Func<DateTimeOffset> now,
     Action<string> boundary,
-    Func<string?, bool, bool, IReadOnlyList<FindingDto>> securityReports)
+    Func<string?, bool, bool, IReadOnlyList<FindingDto>> securityReports,
+    Func<long> basisBound)
 {
     private readonly object gate = recordAccess.Gate;
     private readonly EstateSession session = recordAccess.Session;
@@ -147,13 +148,20 @@ internal sealed partial class ReleaseCoordinationService(
         CheckBuild(model, request, objections);
         CheckSources(model, request, commit, provider, destination, assessment, objections);
         byte[] basis = serializeBasis(assessment, compared, excluded ?? []);
-        if (basis.LongLength > EstateLayout.MaxObjectBytes)
-            objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes; the object limit is {EstateLayout.MaxObjectBytes} bytes."));
+        // From 0.9.4 (FIX-163) a basis past the object limit is retained as a split object, its parts named by a root: what is judged
+        // is each object retention would write and the basis's bound, which its reader holds it to, and the evidence names the object
+        // retention would name.
+        SplitObjectPlan retention = SplitObject.Plan(basis);
+        long bound = basisBound();
+        if (basis.LongLength > bound)
+            objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes; a release basis is at most {bound} bytes, the most its reader reads."));
+        else if (retention.Refusal is not null)
+            objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes. {retention.Refusal}"));
         objections.AddRange(ReleaseBasisRetention.Objections(assessment.Basis));
         if (probe)
         {
             JsonObject proposedBody = body.DeepClone().AsObject();
-            proposedBody["evidence"]!.AsArray().Add(BasisReference(assessment, ContentHash.Sha256(basis)));
+            proposedBody["evidence"]!.AsArray().Add(BasisReference(assessment, retention.Reference));
             AddDocuments(proposedBody, compared);
             objections.AddRange(recordAccess.CheckReleaseRecord(new("operation", request.By, Element(proposedBody), new("product", request.Product, null), previous, now()), model));
         }

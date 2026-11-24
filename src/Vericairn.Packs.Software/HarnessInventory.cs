@@ -113,7 +113,9 @@ internal static class HarnessInventory
     /// <summary>
     /// The file a launch of <paramref name="command"/> runs, whose hash its binding records. From 0.9.4 (FIX-161) it is what the program
     /// resolver gives, as for the start itself: an absolute path as given, or a bare name found as a program in an absolute directory
-    /// of this process's PATH. A relative path is refused, and so is a file that is not there.
+    /// of this process's PATH. A relative path is refused, and so is a file that is not there. From 0.9.4 (FIX-165) that is also the
+    /// .exe, else the .com, of an absolute Windows path without an extension, and for a batch program (.cmd, .bat) the script itself:
+    /// the system directory's cmd.exe it runs in is the operating system's own and is not hashed.
     /// </summary>
     public static string Executable(IReadOnlyList<string> command)
     {

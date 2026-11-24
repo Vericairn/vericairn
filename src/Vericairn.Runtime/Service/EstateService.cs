@@ -61,7 +61,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         recordAccess.Sessions = PresenceSessions;
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
             AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary),
-            SecurityReportObjections);
+            SecurityReportObjections, () => ReleaseBasisBound);
     }
 
     /// <summary>

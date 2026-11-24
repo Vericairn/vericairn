@@ -2948,16 +2948,16 @@ Options:
 - `--reason <reason>`: Why&#46;
 - `--grace <grace>`: Seconds the harness has to stop once the stop is transmitted before its process tree is killed&#59; the worker&#39;s default&#44; ten&#44; when omitted&#46;
 
-Build version: 0&#46;9&#46;4; provenance instant: 2026&#45;11&#45;22T21&#58;27&#58;33Z.
+Build version: 0&#46;9&#46;4; provenance instant: 2026&#45;11&#45;23T14&#58;15&#58;23Z.
 
 ## Generation basis
 
-Build commit: `3c7c31c8547e52173e388fc583e24cfd62689ac9`.
+Build commit: `a7a7e5de6863997cf44394c6336ba41216e537b4`.
 
 Generator: `vericairn.software/cli-reference/1`; implementation: `vericairn.software.companions/1`; source digest: `sha256:da60e7f17012bdfc621f3d22a3180cf8345a1efe066dbb23f4192ff28ac910c6`.
 
-Input digest: `sha256:dee11870b5af9c2cd109ab436e0c58fb27239f126483f304280b22d1d991f46e`.
+Input digest: `sha256:40a8a52b50a7cb6a24d271d3b3e1548425245c231b4fb10990a83e31a9d58248`.
 
 | Input | SHA-256 | Bytes |
 |---|---|---|
-| inputs&#47;commands&#46;json | `sha256:5fea44fcbd921956722aad7c64ef82e14d5ff0db15db4b5902ba05f95d67c0ca` | 173829 |
+| inputs&#47;commands&#46;json | `sha256:20f6a040e27dc93b59896e2fcf572a88f00ef83e727dacb0be496a5b59b4e131` | 173829 |

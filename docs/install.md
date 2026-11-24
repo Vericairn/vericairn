@@ -4,7 +4,7 @@ The 0.9.4 workflow builds self-contained distributables per platform: no separat
 
 The archives install `vericairn`. Introduced in published 0.7.1, the NuGet tool installs `dotnet-vc`, canonically invoked as `dotnet vc`; the two command lines take the same estate arguments. Workbench is installed by direct download only (section 3). The SDK is a separate NuGet package (section 9). Remote, the phone companion, has no distributable: it is a developer build made from source, as [Remote](remote.md#building-from-source) describes.
 
-Use the 0.9.4 archives after the operator accepts and publishes the release. NuGet installation goes live when that publication triggers the Trusted Publishing workflow and it succeeds; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
+0.9.4 was published on November 24, 2026; use its archives from the release page. Its Trusted Publishing workflow published all eight NuGet packages at 0.9.4; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
 
 0.9.4 is the release after 0.9.3. It readies an estate for work that goes on between the commands a person runs. A
 standing agent carries each occurrence its triggers make due, within its caps, and every output it raises lands as a
@@ -128,7 +128,7 @@ If the manifest pins a source commit instead of a release (the default for `esta
 2. Verify the download. Linux: `sha256sum -c SHA256SUMS --ignore-missing`. macOS: `shasum -a 256 -c SHA256SUMS --ignore-missing`. Windows PowerShell: `(Get-FileHash .\vericairn-0.9.4-win-x64.zip).Hash` and compare with the line in `SHA256SUMS`. The expected hashes are in the estate's published release record, which is the authority: a tag can be moved, a record cannot.
 3. Unpack: `tar -xzf vericairn-0.9.4-<platform>.tar.gz -C <directory>` on Linux and macOS; `Expand-Archive` on Windows. The archive holds `bin/vericairn` (with `bin/vericairn-enclave` beside it on macOS), `LICENSE`, `NOTICE`, the third-party notices and `licenses/` with the license and notice texts of every component the command line bundles.
 4. Run `<directory>/bin/vericairn version` (`bin\vericairn.exe` on Windows). It prints `0.9.4+<commit>`.
-5. Put `bin` on your `PATH` if you want to type `vericairn` alone. Every command takes `--estate <path>`; without it the current directory is the estate. Keep `vericairn-enclave` beside `vericairn`: the command line looks for the helper next to itself, and without it Secure Enclave custody is unavailable.
+5. Put `bin` on your `PATH` if you want to type `vericairn` alone. Every command takes `--estate <path>`; without it the current directory is the estate. Keep `vericairn-enclave` beside `vericairn`: the command line looks for the helper next to itself, and without it Secure Enclave custody is unavailable. From 0.9.4 the command line signs each record through the helper's `sign-record`, which an earlier release's helper lacks: beside one, every Secure Enclave signature fails with `the device's key store refused to sign, InvalidOperationException` and nothing is written, so when you upgrade, replace the helper with the command line from the same archive.
 
 Platform notes, stated honestly because the build is unsigned:
 
@@ -622,7 +622,7 @@ the `mcp-registry` workflow ([MCP Registry publication](operator-actions.md#mcp-
 each release from 0.9.2 on when it was published. For each later release these are publication targets, not evidence that its
 listing is live.
 
-After 0.9.4 is published, a client with the .NET 10 SDK can start the server without
+With 0.9.4 published, a client with the .NET 10 SDK can start the server without
 installing a global tool:
 
 ```sh
