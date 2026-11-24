@@ -2940,8 +2940,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
-    /// <summary>A signing failure by its kind and exception type, without its message, which may name a path on this machine.</summary>
-    private static string SigningFailure(Exception exception) => "The record could not be signed on this machine (" + (exception switch
+    /// <summary>
+    /// A signing failure by its kind and exception type, without its message, which may name a path on this machine; from 0.9.5 (FIX-169)
+    /// the refusal of a Secure Enclave helper this command line does not sign through is shown whole, since it names only versions and the
+    /// remedy.
+    /// </summary>
+    private static string SigningFailure(Exception exception) => exception is EnclaveHelperMismatchException mismatch
+        ? "The record could not be signed on this machine. " + mismatch.Message
+        : "The record could not be signed on this machine (" + (exception switch
     {
         UnauthorizedAccessException => "access to the signing key was denied",
         IOException => "the signing key could not be read",
