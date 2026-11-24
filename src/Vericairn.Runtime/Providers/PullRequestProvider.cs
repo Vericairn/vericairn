@@ -42,9 +42,10 @@ public sealed record ChangeReceipt(string? PullRequest = null, string? MergeComm
 /// </summary>
 /// <param name="Required">The target branch requires merging through its merge queue.</param>
 /// <param name="State">
-/// <c>absent</c> when the pull request is not in the queue and the host reports no removal; <c>queued</c> while it waits or its group
-/// runs; <c>unmergeable</c> while it is still listed but the queue found it cannot merge; <c>failed</c> when the queue took it out for a
-/// failure, as of checks or a conflict; <c>removed</c> when it left the queue unmerged otherwise.
+/// <c>absent</c> when the pull request is not in the queue and the host reports no removal that took it out unmerged: none, or, from
+/// 0.9.5 (FIX-173), one the host records because the queue merged it, while its pull request may not read merged yet; <c>queued</c>
+/// while it waits or its group runs; <c>unmergeable</c> while it is still listed but the queue found it cannot merge; <c>failed</c> when
+/// the queue took it out for a failure, as of checks or a conflict; <c>removed</c> when it left the queue unmerged otherwise.
 /// </param>
 /// <param name="Head">The pull request's own head commit, read together with its place in the queue; never the queue's group commit.</param>
 /// <param name="Reason">The host's reason for its latest removal from the queue, as a short upper-case token, when the host gives one.</param>

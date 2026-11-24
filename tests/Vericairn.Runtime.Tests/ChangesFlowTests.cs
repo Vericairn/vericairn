@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
+using Vericairn.Providers.GitHub;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
@@ -651,6 +652,60 @@ public sealed class ChangesFlowTests
         Assert.Equal(0, f.Service.Validate().Errors);
     }
 
+    // FIX-173: changes merge reads the merge queue's removal as GitHub sends it, the GitHub provider reading gh answers that carry the
+    // reasons GitHub's timeline recorded on real pull requests. A removal for failed checks or a conflict settles the merge as the queue's
+    // failure, where failed_checks read as a plain removal; the removal GitHub records beside the merge it makes takes nothing out
+    // unmerged, so the merge stays uncertain until its pull request reads merged, where it was settled as a known failure.
+    [Theory]
+    [InlineData("failed_checks")]
+    [InlineData("merge_conflict")]
+    [InlineData("merged")]
+    public void AMergeQueueRemovalIsReadAsGitHubSendsIt(string reason)
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        bool queued = false;
+        string? removedAt = null;
+        f.Provider.BeforeEffect = action => queued |= action == "change-merge";
+        f.Provider.QueueHost = new GitHubPullRequestProvider(info =>
+        {
+            string query = info.ArgumentList.Single(a => a.StartsWith("query=", StringComparison.Ordinal));
+            object answer = query.Contains("timelineItems", StringComparison.Ordinal)
+                ? new { data = new { repository = new { pullRequest = new { timelineItems = new { nodes = removedAt is null ? [] : new[] { new { createdAt = removedAt, reason } } } } } } }
+                : new { data = new { repository = new { pullRequest = new { id = "PR_kwDOexample", number = 1, headRefOid = Head, isMergeQueueEnabled = true,
+                    mergeQueueEntry = queued ? new { state = "AWAITING_CHECKS", headCommit = new { oid = Merged } } : null } } } };
+            return new(ProcessOutcome.Exited, true, 0, JsonSerializer.Serialize(answer), string.Empty);
+        });
+        ChangeResponse enqueued = f.Service.ChangesMerge(f.Merge);
+        Assert.Equal(("dispatched", "queued"), (enqueued.Status, enqueued.CheckStatus));
+
+        // The queue takes the change out, a second after this attempt was dispatched, while its pull request still reads open.
+        queued = false;
+        removedAt = DateTimeOffset.UtcNow.AddSeconds(1).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
+        ChangeResponse observed = f.Service.ChangesObserve(new(enqueued.Operation!.Id, f.Estate.OperatorId));
+        JsonElement place = f.Service.Session.Load().ById[observed.Observation!.Id].Body.GetProperty("target");
+        Assert.Equal(reason.ToUpperInvariant(), place.GetProperty("queueReason").GetString());
+        if (reason != "merged")
+        {
+            Assert.Equal(("known-failure", false), (observed.Status, observed.Ok));
+            Assert.StartsWith($"The merge queue took the change out unmerged for a failure ({reason.ToUpperInvariant()}).", observed.Message, StringComparison.Ordinal);
+            Assert.Equal("failed", place.GetProperty("queue").GetString());
+        }
+        else
+        {
+            Assert.Equal(("uncertain", "uncertain", false), (observed.Status, observed.CheckStatus, observed.Ok));
+            Assert.Equal("absent", place.GetProperty("queue").GetString());
+            f.Provider.Memory.Set("Example/widget", new("1", "work/change", "main", Head, "merged", Merged, Checks(Head)));
+            ChangeResponse merged = f.Service.ChangesObserve(new(enqueued.Operation.Id, f.Estate.OperatorId));
+            Assert.True(merged.Ok, merged.Message);
+            Assert.Equal(("observed-success", Merged), (merged.Status, merged.MergeCommit));
+        }
+
+        Assert.Equal(1, f.Provider.Memory.Effects);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
     [Fact]
     public void AStaleRemovalFromBeforeThisAttemptIsNotItsOutcome()
     {
@@ -944,8 +999,15 @@ public sealed class ChangesFlowTests
         { Read(); ObservedTarget = commit; return Memory.ObserveTarget(destination, branch, commit); }
         internal string? EnqueuedHead { get; private set; }
         internal string? ObservedQueuedTarget { get; private set; }
+        // A host, when set, answers the pull request's place in the queue in place of the memory provider, such as the GitHub provider over
+        // recorded gh answers.
+        internal IPullRequestProvider? QueueHost { get; set; }
         public MergeQueueObservation ObserveQueue(string destination, string number)
-        { Read(); return QueueUnavailable ? Memory.ObserveQueue(destination, number) with { Complete = false } : Memory.ObserveQueue(destination, number); }
+        {
+            Read();
+            MergeQueueObservation place = (QueueHost ?? Memory).ObserveQueue(destination, number);
+            return QueueUnavailable ? place with { Complete = false } : place;
+        }
         public ChangeReceipt Enqueue(string destination, string number, string head)
         { Effect("change-merge"); EnqueuedHead = head; ChangeReceipt result = Memory.Enqueue(destination, number, head); AfterEffect?.Invoke(); return result; }
         public TargetObservation ObserveQueuedTarget(string destination, string branch, string commit)

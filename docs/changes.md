@@ -466,6 +466,18 @@ shows as merged, never as an open change out of the queue:
   observation settles it or the operator's `--cancel` reconciles it, as for any
   uncertain effect.
 
+From 0.9.5 (FIX-173), the GitHub provider reads a removal's reason as GitHub
+sends it. Its pull request timeline records reasons such as `failed_checks`,
+`merge_conflict` and `merged`; the upper-case reasons GitHub documents for its
+`dequeued` webhook, such as `CI_FAILURE`, read alike. A removal for failed
+checks is `failed`, so the merge's summary says the queue took the change out
+for a failure (`FAILED_CHECKS`), where 0.9.3 and 0.9.4 read it as `removed`.
+The removal GitHub records beside each merge its queue makes (`merged`) takes
+nothing out unmerged: the place reads `absent`, with that reason, and the merge
+stays `uncertain` until its pull request reads merged, where before, a pull
+request that did not read merged yet at that moment settled it as a
+`known-failure`.
+
 A retry keeps its route. A merge recorded through the queue is refused if the
 branch no longer requires one; push a new head to merge it directly.
 
