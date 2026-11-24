@@ -12,16 +12,39 @@ import shares
 
 
 class PartitionTests(unittest.TestCase):
-    def test_new_classes_are_assigned_once_without_moving_existing_classes(self):
+    def test_longest_first_balances_the_measured_seconds(self):
+        measured = {"A": 10, "B": 9, "C": 8, "D": 3, "E": 2, "F": 1}
+        actual = shares.partition(measured, 3, measured)
+        shares.check_partition(set(measured), actual)
+        self.assertEqual([["A", "F"], ["B", "E"], ["C", "D"]], actual)
+        self.assertEqual([11, 11, 11], [sum(measured[name] for name in share) for share in actual])
+
+    def test_the_same_classes_and_seconds_give_the_same_shares_in_any_order(self):
         classes = {f"Example.Tests.Class{index}" for index in range(100)}
-        original = shares.partition(classes)
-        shares.check_partition(classes, original)
-        self.assertTrue(all(original))
-        extended = shares.partition(classes | {"Example.Tests.NewTests"})
-        shares.check_partition(classes | {"Example.Tests.NewTests"}, extended)
-        for before, after in zip(original, extended):
-            self.assertTrue(set(before).issubset(after))
-        self.assertEqual(original, shares.partition(reversed(sorted(classes))))
+        measured = {name: (index * 37) % 23 + 0.5 for index, name in enumerate(sorted(classes))}
+        expected = shares.partition(classes, 6, measured, 0.1)
+        self.assertEqual(expected, shares.partition(reversed(sorted(classes)), 6, dict(reversed(list(measured.items()))), 0.1))
+        shares.check_partition(classes, expected, 6)
+        self.assertTrue(all(expected))
+
+    def test_a_class_without_a_measurement_weighs_its_assemblys_median(self):
+        weights = shares.weights_for({"A", "B", "C", "New"}, {"A": 1, "B": 5, "C": 9, "Gone": 100})
+        self.assertEqual({"A": 1.0, "B": 5.0, "C": 9.0, "New": 5.0}, weights)
+        self.assertEqual({"X": 1.0, "Y": 1.0}, shares.weights_for({"X", "Y"}, {}))
+
+    def test_a_reserve_gives_the_first_share_less_of_every_assembly(self):
+        measured = {f"C{index:02}": 1 for index in range(40)}
+        plain = shares.partition(measured, 4, measured)
+        reserved = shares.partition(measured, 4, measured, 0.2)
+        self.assertEqual([10, 10, 10, 10], [len(share) for share in plain])
+        self.assertEqual([4, 12, 12, 12], [len(share) for share in reserved])
+
+    def test_every_share_gets_a_class_when_the_assembly_has_enough(self):
+        measured = {"Long": 100, "Short1": 1, "Short2": 1, "Short3": 1}
+        actual = shares.partition(measured, 4, measured, 0.5)
+        shares.check_partition(set(measured), actual, 4)
+        self.assertTrue(all(actual), actual)
+        self.assertEqual([[], ["Only"]], shares.partition({"Only"}, 2, {}, 0.5))
 
     def test_guard_refuses_a_class_in_no_share(self):
         with self.assertRaisesRegex(ValueError, "Missing: in 0 shares"):
@@ -84,7 +107,8 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_guard_checks_what_the_test_platform_actually_selects(self):
         classes = {f"Example.Tests.Class{index}" for index in range(30)}
-        with patch("shares.test_assemblies", return_value=[self.assembly]), patch("shares.discover", return_value=classes):
+        with patch("shares.load_plan", return_value=None), patch("shares.test_assemblies", return_value=[self.assembly]), \
+                patch("shares.discover", return_value=classes):
             # A runner that ignores the filter would otherwise run every class in every share.
             with self.assertRaisesRegex(ValueError, "class filter disagrees with discovery"):
                 shares.checked_shares(Path("."))
@@ -95,10 +119,34 @@ class DiscoveryTests(unittest.TestCase):
         def discover(assembly, selected=None):
             return classes if selected is None else set(selected)
 
-        with patch("shares.test_assemblies", return_value=[self.assembly]), patch("shares.discover", side_effect=discover) as run:
+        with patch("shares.load_plan", return_value=None), patch("shares.test_assemblies", return_value=[self.assembly]), \
+                patch("shares.discover", side_effect=discover) as run:
             actual = shares.checked_shares(Path("."))
         self.assertEqual(shares.partition(classes), actual)
         self.assertEqual(4, run.call_count)
+
+    def test_a_platform_takes_its_share_count_reserve_and_seconds_from_the_plan(self):
+        classes = {f"Example.Tests.Class{index}" for index in range(30)}
+        measured = {name: index + 1 for index, name in enumerate(sorted(classes))}
+        plan = {"platforms": {"windows-latest": {"shares": 6, "reserve": 0.1}}, "classes": {"Example.Tests": measured}}
+
+        def discover(assembly, selected=None):
+            return classes if selected is None else set(selected)
+
+        with patch("shares.load_plan", return_value=plan), patch("shares.test_assemblies", return_value=[self.assembly]), \
+                patch("shares.discover", side_effect=discover) as run:
+            actual = shares.checked_shares(Path("."), "windows-latest")
+            with self.assertRaisesRegex(ValueError, "names no platform 'macos-latest'"):
+                shares.checked_shares(Path("."), "macos-latest")
+        self.assertEqual(shares.partition(classes, 6, measured, 0.1), actual)
+        self.assertEqual(7, run.call_count)
+
+    def test_platform_settings_refuse_an_unusable_count_or_reserve(self):
+        for entry in ({"shares": 0}, {"shares": 13}, {"shares": "3"}, {"shares": True}, {"shares": 3, "reserve": 1},
+                      {"shares": 3, "reserve": -0.1}, {"shares": 3, "reserve": "0.1"}):
+            with self.subTest(entry=entry), self.assertRaises(ValueError):
+                shares.platform_settings({"platforms": {"p": entry}, "classes": {}}, "p")
+        self.assertEqual((4, 0.0), shares.platform_settings({"platforms": {"p": {"shares": 4}}, "classes": {}}, "p"))
 
     def test_every_test_project_must_be_built_and_in_the_solution(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -121,3 +169,23 @@ class DiscoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CommittedPlanTests(unittest.TestCase):
+    """The repository's own shard plan: every platform ci-plan.py runs, with a usable count and reserve, and seconds for
+    every test project's classes."""
+
+    root = Path(__file__).resolve().parents[2]
+
+    def test_the_plan_names_every_platform_with_a_usable_count_and_reserve(self):
+        plan = shares.load_plan(self.root)
+        self.assertEqual({"ubuntu-latest", "macos-latest", "windows-latest"}, set(plan["platforms"]))
+        for platform in plan["platforms"]:
+            count, reserve = shares.platform_settings(plan, platform)
+            self.assertGreaterEqual(count, 3)
+            self.assertLess(reserve, 0.5)
+        projects = {path.stem for path in (self.root / "tests").rglob("*.csproj") if "<IsTestProject>true" in path.read_text()}
+        self.assertEqual(projects, set(plan["classes"]))
+        for assembly, measured in plan["classes"].items():
+            self.assertTrue(measured, assembly)
+            self.assertTrue(all(name.startswith(assembly + ".") and seconds >= 0 for name, seconds in measured.items()), assembly)
