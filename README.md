@@ -6,8 +6,8 @@ and history kept as records you own: by default in a git repository beside your 
 machine, with hosted options planned. People and agents do the work, and nothing is released until you
 accept it. Software is its first domain, and the one that ships today.
 
-**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.9.3, from
-November 14, 2026.
+**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.9.4, from
+November 24, 2026.
 [Latest release](https://github.com/Vericairn/vericairn/releases/latest) ·
 [NuGet](https://www.nuget.org/packages/dotnet-vc) · [Install](docs/install.md) ·
 [Limitations](docs/limitations-and-platforms.md) ·
@@ -153,7 +153,7 @@ release and pins the one it runs on.
 
 ## What is here
 
-The following capabilities are in 0.9.3.
+The following capabilities are in 0.9.4.
 
 - `Vericairn.Records`: record formats 1, 2 and 3 (canonical JSON, ULIDs, content hashes, signed records, devices
   and admission, estate loading, validation, cleanliness checks, status, living documents), documented in
@@ -179,8 +179,8 @@ The following capabilities are in 0.9.3.
   record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `connections`, `release`, `sources`,
   `check`, `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `handoff`, `resume`,
-  `communication`, `context`, `policies`, `operator`, `changes`, `doctor`, `version`, `updates`, and from 0.9.2
-  `events`, `search` and `security-reports`; a
+  `communication`, `context`, `policies`, `operator`, `changes`, `doctor`, `version`, `updates`, from 0.9.2
+  `events`, `search` and `security-reports`, and from 0.9.4 `observers`; a
   client of the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
   report from the records, with repository-check findings: where the estate stands, the work orders by state, each
   published release and what it contained, what comes next by release, the next eligible work and what waits on the
@@ -210,7 +210,10 @@ The following capabilities are in 0.9.3.
   a goal can run a flow, a template of kind `flow` declaring roles and ordered steps with their
   hand-off contract: `vericairn goal show` derives each step's state, and each item it must hand on with its
   provenance, evidence and review, from the records, and `vericairn goal step` moves the run one work or review step
-  per command, routed by the step's role, its brief pinning the inputs by hash; a reserved step is never dispatched. Multi-step planning and scheduling are outside this Community implementation.
+  per command, routed by the step's role, its brief pinning the inputs by hash; a reserved step is never dispatched. From 0.9.4
+  a step takes its timing and may end in a decision among named paths, made by a rule, an agent or a person in a role, and a
+  standing goal's triggers make its occurrences due; `vericairn goal step`, run by hand or by the owner's script, still takes
+  each one at a time. Multi-step planning and scheduling are outside this Community implementation.
   `vericairn devices pair` issues a short-lived pairing
   code under an administrator's authority, `vericairn connections add` pairs another machine with the runtime over
   the local network, and `vericairn connections list` shows each connection's state; a revoked device is refused at
