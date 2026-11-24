@@ -158,7 +158,12 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     /// The cost of how the strongest acts read principal lines (FIX-108): a chain of 800 appointments, each appointee holding a device and
     /// appointing the next, and a flat set of 1,600 appointments by one operator, each loaded while that operator stands and after the root
     /// operator removes its role. Each load stays within twice the load of the same estate whose appointments the root operator wrote,
-    /// where those reads settle in one pass.
+    /// where those reads settle in one pass. From 0.9.5 (FIX-170) the loads' work is counted, not timed, since a time ratio failed on a
+    /// busy macOS runner: each load has a judgment context of its own with empty signature tables, which counts the record files it
+    /// parses, the signatures it asks the platform to verify and the keys it imports; its trust counts the verifications against sets of
+    /// admissions, the judgments of which admissions count and the steps joining them; and the bytes the load allocates on the test's
+    /// thread, where it runs alone, measure the work the reading does in memory. Each count stays within twice the root operator's
+    /// estate's. The times are written to the test output and bound nothing.
     /// </summary>
     [Theory]
     [InlineData(800, true)]
@@ -166,18 +171,45 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     public void StrictAuthorityReadsStayWithinTwiceAnEstateOfTheRootOperatorsAppointments(int count, bool chain)
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The appointment cost test runs when {EnvironmentVariable} is 1.");
-        (TimeSpan rootStanding, TimeSpan rootRemoved) = Appointments(count, chain, byRoot: true);
-        (TimeSpan standing, TimeSpan removed) = Appointments(count, chain, byRoot: false);
-        output.WriteLine($"strict authority reads, {count:N0} appointments {(chain ? "in a chain" : "by one operator")}: {standing.TotalMilliseconds:N0} ms standing and {removed.TotalMilliseconds:N0} ms after its base is removed; {rootStanding.TotalMilliseconds:N0} ms and {rootRemoved.TotalMilliseconds:N0} ms when the root operator wrote them");
-        Assert.True(standing <= 2 * rootStanding + TimeSpan.FromMilliseconds(50), $"Standing: {standing.TotalMilliseconds:N0} ms against {rootStanding.TotalMilliseconds:N0} ms.");
-        Assert.True(removed <= 2 * rootRemoved + TimeSpan.FromMilliseconds(50), $"Removed: {removed.TotalMilliseconds:N0} ms against {rootRemoved.TotalMilliseconds:N0} ms.");
+        (LoadWork rootStanding, LoadWork rootRemoved) = Appointments(count, chain, byRoot: true);
+        (LoadWork standing, LoadWork removed) = Appointments(count, chain, byRoot: false);
+        output.WriteLine($"strict authority reads, {count:N0} appointments {(chain ? "in a chain" : "by one operator")}:");
+        output.WriteLine($"  standing: {standing}; when the root operator wrote them: {rootStanding}");
+        output.WriteLine($"  after its base is removed: {removed}; when the root operator wrote them: {rootRemoved}");
+        WithinTwice("Standing", standing, rootStanding);
+        WithinTwice("Removed", removed, rootRemoved);
+
+        static void WithinTwice(string when, LoadWork work, LoadWork root)
+        {
+            foreach (((string what, long counted), (_, long byRoot)) in work.Counts.Zip(root.Counts))
+                Assert.True(counted <= 2 * byRoot, $"{when}: {counted:N0} {what} against {byRoot:N0} when the root operator wrote the appointments.");
+        }
+    }
+
+    /// <summary>What one load of an estate did, counted, and the time it took, which bounds nothing.</summary>
+    private sealed record LoadWork(long Parses, long Verifications, long KeyImports, long SetVerifications, long AdmissionJudgments, long JoinSteps,
+        long Allocated, TimeSpan Elapsed)
+    {
+        /// <summary>Each count, with what it counts.</summary>
+        public (string What, long Count)[] Counts =>
+        [
+            ("record files parsed", Parses), ("signatures verified", Verifications), ("keys imported", KeyImports),
+            ("verifications against sets of admissions", SetVerifications), ("judgments of which admissions count", AdmissionJudgments),
+            ("steps joining admissions", JoinSteps), ("bytes allocated", Allocated),
+        ];
+
+        public override string ToString() =>
+            string.Join(", ", Counts.Select(c => c.Count.ToString("N0", CultureInfo.InvariantCulture) + " " + c.What))
+            + " in " + Elapsed.TotalMilliseconds.ToString("N0", CultureInfo.InvariantCulture) + " ms";
     }
 
     /// <summary>
     /// Loads an adopted estate in which a second operator, or the root operator when <paramref name="byRoot"/>, writes the appointments,
-    /// once while the second operator stands and once after the root operator removes its role; returns the faster of two loads each time.
+    /// once while the second operator stands and once after the root operator removes its role, twice each time; returns what the second
+    /// load counted, with the fewer bytes allocated and the faster time of the two, since the process's first load also allocates what
+    /// the runtime initializes once.
     /// </summary>
-    private static (TimeSpan Standing, TimeSpan Removed) Appointments(int count, bool chain, bool byRoot)
+    private static (LoadWork Standing, LoadWork Removed) Appointments(int count, bool chain, bool byRoot)
     {
         static string Person(string name, string role) => $$"""{"kind":"human","name":"{{name}}","roles":["{{role}}"]}""";
         using var f = new HistoryFixture();
@@ -200,32 +232,37 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
 
         RecordEnvelope bySecond = f.Close("device", f.BuilderDevice.Id, second.Id, f.Signer(secondDevice));
         RecordEnvelope byLast = f.Close("device", f.BuilderDevice.Id, author.Id, f.Signer(authorDevice));
-        TimeSpan standing = Fastest(f, model =>
+        LoadWork standing = Counted(f, model =>
         {
             Assert.Contains(model.Trust.Closings, c => c.Record.Id == bySecond.Id);
             Assert.Contains(model.Trust.Closings, c => c.Record.Id == byLast.Id);
         });
         f.Estate.Add("principal", f.Estate.OperatorId, Person("Second operator", "reviewer"), supersedes: second.Id, signer: f.OperatorSigner);
-        TimeSpan removed = Fastest(f, model =>
+        LoadWork removed = Counted(f, model =>
         {
             Assert.DoesNotContain(model.Trust.Closings, c => c.Record.Id == bySecond.Id);
             Assert.Equal(byRoot && chain, model.Trust.Closings.Any(c => c.Record.Id == byLast.Id));
         });
         return (standing, removed);
 
-        static TimeSpan Fastest(HistoryFixture f, Action<EstateModel> check)
+        static LoadWork Counted(HistoryFixture f, Action<EstateModel> check)
         {
-            TimeSpan best = TimeSpan.MaxValue;
+            LoadWork? least = null;
             for (int run = 0; run < 2; run++)
             {
+                var context = new JudgmentContext(new SignatureTables());
+                long before = GC.GetAllocatedBytesForCurrentThread();
                 var watch = Stopwatch.StartNew();
-                EstateModel model = f.Load();
+                EstateModel model = EstateLoader.Load(f.Root, EstateLoader.EnumerateRecordFiles(f.Root), null, context: context);
                 watch.Stop();
+                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
                 check(model);
-                if (watch.Elapsed < best) best = watch.Elapsed;
+                var work = new LoadWork(context.Parses, context.Verifications, context.KeyImports, model.Trust.SetVerifications,
+                    model.Trust.AdmissionJudgments, model.Trust.JoinSteps, allocated, watch.Elapsed);
+                least = least is null ? work : work with { Allocated = Math.Min(least.Allocated, allocated), Elapsed = least.Elapsed < work.Elapsed ? least.Elapsed : work.Elapsed };
             }
 
-            return best;
+            return least!;
         }
     }
 
