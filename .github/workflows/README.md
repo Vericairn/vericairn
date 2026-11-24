@@ -40,17 +40,46 @@ pyflakes integration is off, since no pinned pyflakes is installed. Run the same
 `actionlint -shellcheck <path to shellcheck 0.11.0> -pyflakes= .github/workflows/*.yml`.
 A ShellCheck finding that is intended is disabled on its own line with a comment saying why.
 
-`ci.yml` runs on pull requests, merge queue groups, main pushes and manual dispatch.
-Tests run in three shares on each of Linux, macOS and Windows. Its first job,
-`queue-tested`, looks up whether a push to main brings a commit whose merge queue
-run of `ci.yml` passed: the queue moves main to the exact commit its group's run
-tested, so on such a push every other job is skipped and that commit's
-three-platform run is the queue's. Every other push to main builds in full, as do
-pull requests, queue groups and manual runs, for which nothing is looked up; a
-lookup that cannot be completed also builds in full. Each commit on main thus has
-exactly one passing three-platform run. Look for a main commit's run among its
-`merge_group` runs first, then its push run. It also calls
-`package.yml`, the same packaging workflow that `release.yml` calls after its tests.
+`ci.yml` runs on pull requests, merge queue groups, pushes to main and `release/*`
+branches, and manual dispatch. Its first job, `queue-tested`, looks up whether a push
+brings a commit whose merge queue run of `ci.yml` passed: the queue moves the branch
+to the exact commit its group's run tested, so on such a push every other job is
+skipped and that commit's three-platform run is the queue's. Every other push builds
+in full, as do queue groups and manual runs, for which nothing is looked up; a lookup
+that cannot be completed also builds in full. Each commit on main or a release branch
+thus has exactly one passing three-platform run. Look for its run among its
+`merge_group` runs first, then its push run.
+
+From CI-12 the `plan` job (`.github/scripts/ci-plan.py`) decides what else runs:
+
+| Event | Jobs | Required check |
+| --- | --- | --- |
+| `pull_request`, a product change | `plan`, `workflow-policy`, `build-test` on Linux (its shares), `ci-gate` | `ci-gate`, `secret-scan` |
+| `pull_request`, documentation only | `plan`, `workflow-policy`, `docs-check`, `ci-gate` | `ci-gate`, `secret-scan` |
+| `merge_group` | `plan`, `workflow-policy`, `build-test` on Linux, macOS and Windows (every share), `remote-ios`, `remote-android`, `package` (four jobs), `ci-gate` | `ci-gate`, `secret-scan` |
+| `push` to main or `release/*`, not queue-tested; `workflow_dispatch` | as for `merge_group` | none |
+| `push` the queue tested | `queue-tested`, `ci-gate` (every other job skipped) | none |
+
+`ci-gate` needs every other job and runs whatever they did (`always()`): a job that a
+failed `needs` skips reports as skipped, which a required check counts as passing, so
+the gate itself checks each result. It passes only when the lookup and the plan
+passed and every job the plan runs for the event passed, with every other job
+skipped; a push the queue tested passes with all of them skipped, a skip on any other
+event fails it, and so does a cancelled run. For every event but a pull request it
+requires the full gate whatever the plan says. Each platform `build-test` must run,
+all three in the full gate and Linux for a pull request that builds, must have
+exactly the shares 1 to the count that the tested commit's `.github/test-shards.json`
+gives it, as `run-tests.py` splits the classes, so a faulty plan cannot leave a
+share's classes untested. The gate checks out that one file, keeping no credentials,
+and reads it as data; `test_ci_gate.py` runs its script on simulated results. The
+branches' rulesets therefore require `ci-gate` and `secret-scan` alone, for pull
+requests and the merge queue alike, whichever jobs the event ran.
+
+A pull request does not run `package`: its enclave helper and published macOS
+command line need macOS runners, of which the organization runs at most five at
+once, and a queue group's run holds them all (`remote-ios` and four `build-test`
+shares). A queue group runs it on the merged result before main moves. The full gate
+calls `package.yml`, the same packaging workflow that `release.yml` calls after its tests.
 Packaging builds and verifies NuGet packages, CLI and Workbench archives,
 documentation, the bill of materials and checksums. It executes the published Linux
 CLI on `sources inspect`, which starts Git. The macOS arm64 and Windows x64 jobs
@@ -62,9 +91,13 @@ Every runnable job has an explicit `timeout-minutes` limit:
 | Workflow | Job | Minutes |
 | --- | --- | --- |
 | `ci.yml` | `queue-tested` | 10 |
+| `ci.yml` | `plan` | 10 |
 | `ci.yml` | `workflow-policy` | 15 |
 | `ci.yml` | `build-test` (each platform and share) | 60 |
 | `ci.yml` | `remote-ios`, `remote-android` | 45 |
+| `ci.yml` | `docs-check` | 30 |
+| `ci.yml` | `ci-gate` | 10 |
+| `retry.yml` | `runner-failures` | 10 |
 | `release.yml` | `verify` (each platform and share) | 60 |
 | `package.yml` | `enclave-helper` | 20 |
 | `package.yml` | `package` | 45 |
@@ -80,7 +113,7 @@ the local tool and SDK feed check, API baseline downloads, the bill of materials
 step that installs CycloneDX, and package or artifact downloads. A hung install
 fails its step when that limit expires. The job limit bounds the whole job,
 including a hung test and its retry; it does not restart for each step. These
-limits leave headroom over normal runs: test shares usually take 5 to 25 minutes.
+limits leave headroom over normal runs: test shares usually take 8 to 15 minutes.
 
 The `package` callers in `ci.yml` and `release.yml` use a reusable workflow.
 GitHub does not support `timeout-minutes` on those caller jobs; the limits apply
@@ -148,47 +181,184 @@ leave the build sources clean.
 
 ## Merge queue
 
-When the default branch's ruleset requires a merge queue, a pull request reaches main
-through it. The pull request's required checks pass first; it need not be up to date
-with main. `gh pr merge <number>` (or Merge when ready) then adds it to the queue,
-and GitHub builds a temporary `gh-readonly-queue/main/...` branch holding main and
-every pull request queued ahead of it, merged as merge commits, and sends
-`merge_group`. `ci.yml` and `secret-scan.yml` run on that event with the same jobs as
-on a pull request, so every required check reports on the exact commit main would
-move to. When they all pass, main moves to that tested commit; when one fails, the pull
-request leaves the queue and the groups behind it are built again without it. Main's
-own push run still follows every merge.
+When a branch's ruleset requires a merge queue, a pull request reaches it through
+the queue. The pull request's required checks pass first; it need not be up to date
+with the branch. `gh pr merge <number>` (or Merge when ready) then adds it to the
+queue, and GitHub builds a temporary `gh-readonly-queue/<branch>/...` branch holding
+the branch and every pull request queued ahead of it, merged as merge commits, and
+sends `merge_group`. `ci.yml` runs the full gate on that event and `secret-scan.yml`
+its scan, so the required checks report on the exact commit the branch would move
+to. When they all pass, the branch moves to that tested commit; when one fails, the
+pull request leaves the queue and the groups behind it are built again without it.
+The branch's own push run still follows every merge, and finds the queue's run.
 
-No job of either workflow, and none of the jobs `package.yml` runs for `ci.yml`,
-depends on its event: a job skipped for one event never reports its check, and a
-required check that never reports holds the queue. Require every job by its check
-name from GitHub Actions, the packaging chain's jobs each on their own: a job that
-its failed `needs` skips reports as skipped, which counts as passing. `release.yml`,
-`nuget.yml` and `mcp-registry.yml` never run for the queue, so none of their jobs can
-be required. `vericairn changes merge` uses the synchronous merge API and refuses a
-repository that requires a queue ([checked repository changes](../../docs/changes.md)),
-so here a pull request is queued instead.
+A required check that never reports holds the queue, so only checks every pull
+request and every group report are required: `ci-gate` and `secret-scan`, each from
+GitHub Actions. A docs-only group still runs the full gate: documentation is an input
+of tests on every platform (the guides' checks, the generated references under
+`docs/reference`) and of every package (`docs/nuget-readme.md`), and each commit on
+the branch keeps one passing three-platform run, the queue's, which its push run
+relies on. `release.yml`, `nuget.yml` and `mcp-registry.yml` never run for the queue,
+so none of their jobs can be required. `vericairn changes merge` uses the synchronous
+merge API and refuses a repository that requires a queue
+([checked repository changes](../../docs/changes.md)), so here a pull request is
+queued instead.
+
+`../rulesets` holds the rulesets this needs, which the builder applies; nothing in a
+workflow changes a repository setting. `default-branch-merge-queue.json` is the
+default branch's ruleset with `ci-gate` and `secret-scan` as its only required checks,
+and `release-branches.json` gives `refs/heads/release/*` the same rules: no deletion
+or force push, pull requests merged by merge commit, the same required checks and
+merge queue.
+
+A release branch these rules cover must carry this `ci.yml` and `secret-scan.yml`:
+without them its pull requests never report `ci-gate` or `secret-scan` and its queue
+groups never start, so it could not be merged into. The deletion rule keeps a covered
+branch from being deleted whatever workflows it carries. `release/0.3` predates both
+and is excluded; it keeps no rules, as today. `release/0.9.4`, cut at 0.9.4's release
+commit before this change merged, is covered but carries neither yet, so the release
+branches' ruleset is added only once it does (below). A release branch cut from a
+main that holds this change carries both.
+
+To apply, with the queue empty and the change that adds `ci-gate` having passed its
+pull request run, save the default branch's live ruleset and replace it:
+
+```sh
+gh api repos/Vericairn/vericairn/rulesets/27077099 --jq '{name, target, enforcement, conditions, bypass_actors, rules}' > <scratch>/default-branch-merge-queue.live.json
+gh api --method PUT repos/Vericairn/vericairn/rulesets/27077099 --input .github/rulesets/default-branch-merge-queue.json
+```
+
+Then queue that change. Before the PUT its own pull request cannot be queued, since
+its run has no macOS legs, which the live ruleset requires. A pull request whose last
+run used the older `ci.yml` reports no `ci-gate` and can be queued only after a new
+push, or a close and reopen, builds a fresh merge commit: re-running its old run
+reuses the old merge commit. An entry already queued at the PUT was built with the
+older `ci.yml` and holds the queue until the 90-minute check timeout, hence the empty
+queue. Every misstep fails closed. The queue builds up to two groups at once; each
+full gate wants the five macOS runners, so two groups share them and take longer, and
+building one group at a time (`max_entries_to_build: 1`) keeps a group's run at its
+own length.
+
+If that change's group fails, restore the saved ruleset:
+
+```sh
+gh api --method PUT repos/Vericairn/vericairn/rulesets/27077099 --input <scratch>/default-branch-merge-queue.live.json
+```
+
+The saved file holds exactly the six fields the ruleset update and create endpoints
+take in their request body, the same six the files in `../rulesets` hold. GitHub's
+answer to the read also carries fields that body does not list (`id`, `node_id`,
+`source_type`, `source`, `created_at`, `updated_at`, `current_user_can_bypass`,
+`_links`); the `--jq` filter leaves them out, so the rollback sends nothing the
+endpoint does not describe.
+
+Once the change has merged and every release branch the rules cover carries this
+`ci.yml` and `secret-scan.yml` (today `release/0.9.4`, through a pull request into
+it, which merges under no ruleset until this one exists), add the release branches'
+ruleset:
+
+```sh
+gh api --method POST repos/Vericairn/vericairn/rulesets --input .github/rulesets/release-branches.json
+```
+
+## Shards
+
+`build-test` runs one share of every test assembly's classes per leg.
+`.github/test-shards.json` gives each platform its number of shares and holds every
+class's measured seconds; `shares.py` splits each assembly's classes longest first,
+each to the share with the least so far, so the assemblies, which run side by side,
+finish together in every share. A class the plan does not list yet weighs its
+assembly's median. A platform's `reserve` starts its first share with that fraction
+of each assembly's total, because share 1 also runs the companion check, the cost
+measurements, the CLI smoke and the local feed check. `release.yml` runs three shares
+per platform from the same seconds, without a reserve. Every share is checked against
+test discovery before it runs, so every class runs exactly once per platform.
+
+Each leg uploads its xUnit XML reports as `test-reports-<platform>-<share>` for 14
+days. To rebalance, download the reports of a full gate, a `merge_group` or push run
+of `ci.yml` and never a pull request's, which holds Linux's only and ran that pull
+request's code, and write their times into the plan; review the change like any
+other. Nothing reads the reports otherwise, and the plan only weighs the classes
+discovery lists, so a bad time can unbalance the shares but never drop a class:
+
+```sh
+gh run download <run> --pattern 'test-reports-*' --dir <reports>
+python3 .github/scripts/shard-durations.py <reports>
+```
+
+## Documentation fast path
+
+A pull request whose changed files are all documentation (under `docs/` but not
+`docs/releases/`, and the root `README.md` and `ROADMAP.md`) runs `docs-check`
+instead of `build-test`: the solution's Release build and only the test classes that
+read the repository's documentation, those whose sources find the repository root by
+`Vericairn.slnx` and name `docs/`, `README.md` or `ROADMAP.md` (`docs_classes.py`),
+each failed test retried once as elsewhere. The classes need the build: they run the
+command line and the documentation tooling. A pull request's files are its merge
+commit's difference from its base, renames as a deletion and an addition, and any
+file outside documentation, or a difference that cannot be read, makes it a product
+change. The queue still runs the full gate.
+
+## Runner failures
+
+GitHub has no job-level retry. `retry.yml` runs when a `ci.yml` run completes and
+fails, from the default branch's own files, and re-runs that run's failed jobs once
+(with the jobs that need them, `ci-gate` among them) when every job that neither
+passed nor was skipped, `ci-gate` apart, is a runner failure: GitHub's annotations
+say the process was killed (exit code 137) or the runner was lost, shut down or never
+acquired, and every step up to the one that ended the job is a setup step (its
+set-up, the checkout, the .NET SDK, a locked restore, a pinned tool or workload
+install). A test or build failure, a timeout or a cancellation is never re-run, and
+since GitHub's re-run of failed jobs also takes timed-out and cancelled jobs, a run
+holding one is not re-run at all. Only a first attempt is re-run, and only while it
+is still the run's latest; a pull request's run only while no newer run of its branch
+exists, since the re-run joins the pull request's concurrency group and would cancel
+the newer head's run. `runner-failures.py` decides; its exit status is 0 for a run
+only runners failed, 3 otherwise. A pull request can earn its own run one re-run by
+naming a step like a setup step or making a setup step report exit code 137 (a restore
+target can): one more attempt of its own code with its own token, which the queue's
+full gate still follows.
+
+A queue group's run is not re-run: when its `ci-gate` fails, the queue has already
+removed the pull request. The builder's queue script (`merge_queue.zsh` in the
+builder's tools) handles it wherever the base branch's rules require `ci-gate`:
+
+- It waits on the pull request's `ci-gate` and `secret-scan` checks, not on
+  `build-test`, since a pull request runs Linux shares only and a docs-only one none.
+  When `ci-gate` fails, it runs `runner-failures.py` on that `ci.yml` run without
+  `--rerun`; on exit 0 it waits for `retry.yml`'s second attempt, otherwise it stops.
+- It counts the pull request as having left the queue only when its timeline records
+  a removal for a reason other than its merge and it is still open, never on an empty
+  queue entry alone. It then finds the group's run: the latest `merge_group` run of
+  `ci.yml` since the pull request was queued whose `head_branch` starts
+  `gh-readonly-queue/<branch>/pr-<number>-`. It queues the pull request once more only
+  if the queue removed it for failed checks, that run concluded `failure` at its first
+  attempt, the group's `secret-scan` run passed, the pull request is still open and
+  mergeable, it has not been queued again for this reason, and `runner-failures.py`
+  exits 0 on the run. A removal for any other reason, a failed secret scan, a conflict
+  or a cancelled group, is never re-queued, even when a `ci.yml` job also had a runner
+  failure.
 
 ## Superseded runs
 
 `ci.yml` and `secret-scan.yml` group each pull request's runs, and a newer commit
-cancels the run still testing the older head; the jobs `package.yml` runs for that
-`ci.yml` run stop with it. A push, to main or any other branch, a merge queue group
-and a manual run each have a group of their own, so none is ever cancelled or held
-back; a push's scan reads only the commits that push brings, so it must finish.
-`release.yml`, `package.yml`, `nuget.yml` and `mcp-registry.yml` define no group, so
-no release or publication run is ever cancelled.
+cancels the run still testing the older head. A push, to main, a release branch or
+any other branch, a merge queue group and a manual run each have a group of their
+own, so none is ever cancelled or held back; a push's scan reads only the commits that
+push brings, so it must finish. `release.yml`, `package.yml`, `nuget.yml`,
+`mcp-registry.yml` and `retry.yml` define no group, so no release, publication or
+re-run is ever cancelled.
 
 ## Caching
 
-`build-test`, `remote-ios`, `remote-android` and a change's `package` job cache the
+`build-test`, `docs-check`, `remote-ios`, `remote-android` and a change's `package` job cache the
 NuGet global packages folder with the pinned `actions/setup-dotnet`'s own cache; no
 other cache action is used. The key is the runner's operating system and the hash of
 these files:
 
 | Job | Hashed files |
 | --- | --- |
-| `build-test` | `global.json` and every `packages.lock.json` |
+| `build-test`, `docs-check` | `global.json` and every `packages.lock.json` |
 | `remote-ios`, `remote-android` | the same and `ci.yml`, which pins the workload set whose runtime packs their restores download |
 | `package`, for a change | `global.json`, every `packages.lock.json` and every `packages.distributable.lock.json` |
 
