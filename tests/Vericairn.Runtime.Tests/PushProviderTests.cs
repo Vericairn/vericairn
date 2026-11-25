@@ -3,7 +3,10 @@
 
 using System.Diagnostics;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Vericairn.Adapters.Git;
 using Vericairn.Runtime.Providers;
 
@@ -309,6 +312,9 @@ public sealed class PushProviderTests
                 };
             }
 
+            // FIX-168: the searches for a release basis's objects find none here.
+            if (info.FileName == "git" && info.ArgumentList.Contains("grep") && info.ArgumentList[info.ArgumentList.IndexOf("-e") + 1] != "^" + GitleaksScanner.InventoryLine + "$")
+                return new(ProcessOutcome.Exited, true, 1, string.Empty, string.Empty);
             if (info.FileName == "git" && info.ArgumentList.Contains("grep"))
             {
                 greps.Add(info);
@@ -340,6 +346,89 @@ public sealed class PushProviderTests
         Assert.Equal(allowance ? GitleaksScanner.Configuration : GitleaksScanner.ConfigurationWithoutInventories, applied);
         Assert.Equal("8.30.1; rules " + (allowance ? GitleaksScanner.ConfigurationHash : GitleaksScanner.ConfigurationWithoutInventoriesHash), scan.Version);
         Assert.Equal(range is "none" or "log fails" or "path before commit" ? 0 : range is "grep fails" or "unasked path" or "other commit" ? 1 : 2, greps.Count);
+    }
+
+    // How a release basis's one object and a split object's root begin, which the scan searches the range's objects for (FIX-168).
+    private static readonly string[] BasisSearches =
+        ["^\\{\"basis\":\\{", "^\\{\"bytes\":[1-9][0-9]*,\"digest\":\"sha256:[0-9a-f]{64}\",\"format\":\"vericairn\\.split-object/1\",\"parts\":\\["];
+
+    // FIX-168: the scan appends one allowance for the release bases the range carries: for the Sourcegraph rule alone, exactly the
+    // revisions they record, in exactly the objects that hold their bytes, read whole and checked against their names, a split basis
+    // through its root. A file that is no basis, cannot be read or is not named by its hash, or a search that fails, adds nothing.
+    [Theory]
+    [InlineData("whole", true)]
+    [InlineData("split", true)]
+    [InlineData("named by another hash", false)]
+    [InlineData("another format", false)]
+    [InlineData("part without its root", false)]
+    [InlineData("read fails", false)]
+    [InlineData("grep fails", false)]
+    [InlineData("log fails", false)]
+    public void TheReleaseBasisAllowanceNamesExactlyTheRevisionsTheRangesBasesRecord(string range, bool allowance)
+    {
+        string commit = new('b', 40);
+        byte[] basis = ReleaseBasisEvidenceFixture.Basis(range is "split" or "part without its root" ? 6_000 : 40,
+            format: range == "another format" ? "vericairn.release-plan/1" : "vericairn.release-basis/3");
+        (string Path, byte[] Content)[] held = ReleaseBasisEvidenceFixture.Objects(basis);
+        if (range == "named by another hash") held = [("objects/" + new string('e', 64), basis)];
+        if (range == "part without its root") held = held[..^1];
+        Dictionary<string, byte[]> objects = held.ToDictionary(o => o.Path, o => o.Content, StringComparer.Ordinal);
+        string other = "objects/" + new string('f', 64);
+        byte[]? applied = null;
+        var scanner = new GitleaksScanner(info =>
+        {
+            if (AsksForTheGitDirectory(info)) return Success(GitDirectory + "\n");
+            if (info.FileName == "git" && info.ArgumentList.Contains("--name-only"))
+                return range == "log fails" ? new(ProcessOutcome.Exited, true, 128, string.Empty, string.Empty)
+                    : Success("commit " + commit + "\n\n" + string.Concat(objects.Keys.Append(other).Order(StringComparer.Ordinal).Select(p => p + "\n")));
+            if (info.FileName == "git" && info.ArgumentList.Contains("grep"))
+            {
+                string pattern = info.ArgumentList[info.ArgumentList.IndexOf("-e") + 1];
+                Assert.Equal([commit, "--", .. objects.Keys.Append(other).Order(StringComparer.Ordinal).Select(p => ":(top)" + p)],
+                    info.ArgumentList.Skip(info.ArgumentList.IndexOf("-e") + 2));
+                if (pattern == "^" + GitleaksScanner.InventoryLine + "$") return new(ProcessOutcome.Exited, true, 1, string.Empty, string.Empty);
+                Assert.Contains(pattern, BasisSearches);
+                if (range == "grep fails") return new(ProcessOutcome.Exited, true, 128, string.Empty, string.Empty);
+                string[] found = [.. objects.Where(o => new Regex(pattern).IsMatch(Encoding.UTF8.GetString(o.Value)))
+                    .Select(o => commit + ":" + o.Key + "\n")];
+                return found.Length == 0 ? new(ProcessOutcome.Exited, true, 1, string.Empty, string.Empty) : Success(string.Concat(found));
+            }
+
+            if (info.FileName == "git" && info.ArgumentList.Contains("cat-file"))
+            {
+                string[] request = Requested(info);
+                Assert.Equal("--no-replace-objects", request[0]);
+                Assert.Equal("cat-file", request[1]);
+                Assert.StartsWith(commit + ":objects/", request[3], StringComparison.Ordinal);
+                if (!objects.TryGetValue(request[3][(commit.Length + 1)..], out byte[]? content)) return new(ProcessOutcome.Exited, true, 128, string.Empty, string.Empty);
+                if (request[2] == "-s") return Success(content.Length.ToString(CultureInfo.InvariantCulture) + "\n");
+                Assert.Equal("blob", request[2]);
+                Assert.Equal(4, request.Length);
+                Assert.Equal("utf-8", info.StandardOutputEncoding?.WebName);
+                return range == "read fails" ? new(ProcessOutcome.Exited, true, 128, string.Empty, string.Empty) : Success(Encoding.UTF8.GetString(content));
+            }
+
+            if (info.FileName == "git") return Success("2");
+            if (info.ArgumentList[0] == "version") return Success("8.30.1");
+            string configuration = info.ArgumentList.Single(a => a.StartsWith("--config=", StringComparison.Ordinal)).Split('=', 2)[1];
+            applied = File.ReadAllBytes(configuration);
+            string report = info.ArgumentList.Single(a => a.StartsWith("--report-path=", StringComparison.Ordinal)).Split('=', 2)[1];
+            File.WriteAllText(report, "0");
+            return Success();
+        });
+        SecretScan scan = scanner.Scan(Path.GetTempPath(), Plan);
+        Assert.Equal("passed", scan.Verdict);
+        byte[] rules = range == "log fails" ? GitleaksScanner.ConfigurationWithoutInventories : GitleaksScanner.Configuration;
+        string[] paths = range == "split" ? [.. held[..^1].Select(o => o.Path).Order(StringComparer.Ordinal)] : [held[0].Path];
+        byte[] expected = !allowance ? rules : Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(rules)
+            + "\n[[allowlists]]\n"
+            + "description = \"Release basis evidence: the git revisions a release basis records, in the objects that hold the basis\"\n"
+            + "targetRules = [\"sourcegraph-access-token\"]\n"
+            + "condition = \"AND\"\n"
+            + "paths = [\n    '''^objects/(?:" + string.Join('|', paths.Select(p => p["objects/".Length..])) + ")$''',\n]\n"
+            + "regexes = [\n    '''^(?:" + string.Join('|', ReleaseBasisEvidenceFixture.Recorded.Order(StringComparer.Ordinal)) + ")$''',\n]\n");
+        Assert.Equal(Encoding.UTF8.GetString(expected), Encoding.UTF8.GetString(applied!));
+        Assert.Equal("8.30.1; rules sha256:" + Convert.ToHexStringLower(SHA256.HashData(expected)), scan.Version);
     }
 
     [Theory]

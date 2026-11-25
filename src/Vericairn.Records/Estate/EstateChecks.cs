@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -265,9 +266,12 @@ public static partial class EstateChecks
                 findings.Error("portability.absolute-path", $"{relative}:{lineNumber}", "Machine-specific absolute path. Use repository-relative paths or placeholders.");
             }
 
-            if (SecretShapes.Secret().IsMatch(credentialLines[lineNumber - 1]))
+            // From 0.9.5 (FIX-172), each match is its own finding, placed on its line by its columns and, on a line holding inline data,
+            // by the element it lies in, so that a reviewer finds it on a long line without the finding carrying anything of the line.
+            string credentialLine = credentialLines[lineNumber - 1];
+            foreach (Match credential in SecretShapes.Secret().Matches(credentialLine))
             {
-                findings.Error("secrets.pattern", $"{relative}:{lineNumber}", "Looks like a credential. Credentials never enter the estate; reference them by purpose instead.");
+                findings.Error("secrets.pattern", $"{relative}:{lineNumber}", CredentialMessage(credentialLine, credential));
             }
         }
 
@@ -282,6 +286,30 @@ public static partial class EstateChecks
             else
                 foreach (SpacingOccurrence occurrence in WritingScanner.ScanFile(model, model.Manifest?.Estate, text, relative)) findings.Add(occurrence.Diagnostic);
         }
+    }
+
+    /// <summary>
+    /// The message of a secrets.pattern finding (FIX-172): where on its line the credential-shaped match lies, by its first and last
+    /// columns, counted in characters from 1, and, where the line holds inline data such as data: URIs, by the ordinal of the element it
+    /// lies in, counted from the line's start, or that it lies outside them. It never carries the match, the inline data or any other text
+    /// of the line.
+    /// </summary>
+    internal static string CredentialMessage(string line, Match credential)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        ArgumentNullException.ThrowIfNull(credential);
+        var where = new StringBuilder(string.Create(CultureInfo.InvariantCulture, $"at columns {credential.Index + 1}-{credential.Index + credential.Length}"));
+        MatchCollection elements = SecretShapes.InlineData().Matches(line);
+        int ordinal = 0;
+        for (int i = 0; i < elements.Count && ordinal == 0; i++)
+        {
+            if (credential.Index >= elements[i].Index && credential.Index < elements[i].Index + elements[i].Length) ordinal = i + 1;
+        }
+
+        string kind = elements.Count == 1 ? "a data: URI" : "data: URIs";
+        if (ordinal > 0) where.Append(CultureInfo.InvariantCulture, $", in inline data element {ordinal} of {elements.Count} on this line ({kind}). Decode that element to check it: its file type alone does not show that its content is safe");
+        else if (elements.Count > 0) where.Append(CultureInfo.InvariantCulture, $", outside the {(elements.Count == 1 ? "one inline data element" : elements.Count + " inline data elements")} on this line ({kind})");
+        return "Looks like a credential " + where + ". Credentials never enter the estate; reference them by purpose instead.";
     }
 
     // Mask only exact, format-validated encoding values, preserving every other byte and every line number.

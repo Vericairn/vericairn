@@ -52,8 +52,8 @@ public sealed partial class ShellViewModel : Observable
 
     internal ShellViewModel(Func<string, IEstateConnection> connect, IRuntimeManager runtime, Preferences preferences, ReleaseUpdates updates)
     {
-        RefreshCommand = new AsyncCommand(() => RefreshAsync(), () => !IsBusy);
-        CancelCommand = new AsyncCommand(() => { CancelCurrentRequest(); return Task.CompletedTask; }, () => IsBusy);
+        RefreshCommand = new AsyncCommand(() => RefreshAsync(), () => !IsBusy, Unexpected);
+        CancelCommand = new AsyncCommand(() => { CancelCurrentRequest(); return Task.CompletedTask; }, () => IsBusy, Unexpected);
         this.connect = connect;
         this.runtime = runtime;
         this.preferences = preferences;

@@ -84,8 +84,8 @@ public sealed partial class RemoteViewModel
 
     private void InitializeAnswerCommands()
     {
-        ReadAnswersCommand = new(ReadAnswersAsync, () => !Busy && Selected?.Current == true);
-        SignAnswersCommand = new(SignAnswersAsync, CanSignAnswers);
+        ReadAnswersCommand = Command(ReadAnswersAsync, () => !Busy && Selected?.Current == true);
+        SignAnswersCommand = Command(SignAnswersAsync, CanSignAnswers);
     }
 
     private bool CanSignAnswers() => !Busy && Selected?.Current == true && answersCurrent && AnswersReviewed && HasPresenceKey &&
