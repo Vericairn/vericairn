@@ -157,13 +157,11 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     /// <summary>
     /// The cost of how the strongest acts read principal lines (FIX-108): a chain of 800 appointments, each appointee holding a device and
     /// appointing the next, and a flat set of 1,600 appointments by one operator, each loaded while that operator stands and after the root
-    /// operator removes its role. Each load stays within twice the load of the same estate whose appointments the root operator wrote,
-    /// where those reads settle in one pass. From 0.9.5 (FIX-170) the loads' work is counted, not timed, since a time ratio failed on a
-    /// busy macOS runner: each load has a judgment context of its own with empty signature tables, which counts the record files it
-    /// parses, the signatures it asks the platform to verify and the keys it imports; its trust counts the verifications against sets of
-    /// admissions, the judgments of which admissions count and the steps joining them; and the bytes the load allocates on the test's
-    /// thread, where it runs alone, measure the work the reading does in memory. Each count stays within twice the root operator's
-    /// estate's. The times are written to the test output and bound nothing.
+    /// operator removes its role. From 0.9.5 (FIX-170), fresh judgment contexts count parses, signature verifications and key imports;
+    /// trust counts the verifications against sets of admissions, judgments of which admissions count and steps joining them. Each
+    /// count and the allocated bytes stay within twice the equivalent root-written estate's. The estates are loaded in turn three
+    /// times each. Their fastest times have a separate bound of twice the root-written load plus 50 ms, which also covers work in the
+    /// level-by-level reads that does not allocate or show up in the counts.
     /// </summary>
     [Theory]
     [InlineData(800, true)]
@@ -171,22 +169,44 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     public void StrictAuthorityReadsStayWithinTwiceAnEstateOfTheRootOperatorsAppointments(int count, bool chain)
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The appointment cost test runs when {EnvironmentVariable} is 1.");
-        (LoadWork rootStanding, LoadWork rootRemoved) = Appointments(count, chain, byRoot: true);
-        (LoadWork standing, LoadWork removed) = Appointments(count, chain, byRoot: false);
+        using HistoryFixture rootEstate = new(), operatorEstate = new();
+        var rootAppointments = WriteAppointments(rootEstate, count, chain, byRoot: true);
+        var operatorAppointments = WriteAppointments(operatorEstate, count, chain, byRoot: false);
+        (LoadWork rootStanding, LoadWork standing) = MeasurePair(secondStands: true);
+        Demote(rootEstate, rootAppointments.Second);
+        Demote(operatorEstate, operatorAppointments.Second);
+        (LoadWork rootRemoved, LoadWork removed) = MeasurePair(secondStands: false);
         output.WriteLine($"strict authority reads, {count:N0} appointments {(chain ? "in a chain" : "by one operator")}:");
         output.WriteLine($"  standing: {standing}; when the root operator wrote them: {rootStanding}");
         output.WriteLine($"  after its base is removed: {removed}; when the root operator wrote them: {rootRemoved}");
         WithinTwice("Standing", standing, rootStanding);
         WithinTwice("Removed", removed, rootRemoved);
 
+        (LoadWork Root, LoadWork Second) MeasurePair(bool secondStands)
+        {
+            LoadWork? rootWork = null, operatorWork = null;
+            for (int run = 0; run < 3; run++)
+            {
+                rootWork = Counted(rootEstate, rootAppointments.Closings, secondStands, secondStands || chain, rootWork);
+                operatorWork = Counted(operatorEstate, operatorAppointments.Closings, secondStands, secondStands, operatorWork);
+            }
+
+            return (rootWork!, operatorWork!);
+        }
+
+        static void Demote(HistoryFixture f, string second) => f.Estate.Add("principal", f.Estate.OperatorId,
+            """{"kind":"human","name":"Second operator","roles":["reviewer"]}""", supersedes: second, signer: f.OperatorSigner);
+
         static void WithinTwice(string when, LoadWork work, LoadWork root)
         {
             foreach (((string what, long counted), (_, long byRoot)) in work.Counts.Zip(root.Counts))
                 Assert.True(counted <= 2 * byRoot, $"{when}: {counted:N0} {what} against {byRoot:N0} when the root operator wrote the appointments.");
+            Assert.True(work.Elapsed <= 2 * root.Elapsed + TimeSpan.FromMilliseconds(50),
+                $"{when}: fastest load {work.Elapsed.TotalMilliseconds:N0} ms against {root.Elapsed.TotalMilliseconds:N0} ms when the root operator wrote the appointments.");
         }
     }
 
-    /// <summary>What one load of an estate did, counted, and the time it took, which bounds nothing.</summary>
+    /// <summary>The last load's work counts, and the least allocation and shortest elapsed time across the loads of that estate.</summary>
     private sealed record LoadWork(long Parses, long Verifications, long KeyImports, long SetVerifications, long AdmissionJudgments, long JoinSteps,
         long Allocated, TimeSpan Elapsed)
     {
@@ -204,16 +224,12 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     }
 
     /// <summary>
-    /// Loads an adopted estate in which a second operator, or the root operator when <paramref name="byRoot"/>, writes the appointments,
-    /// once while the second operator stands and once after the root operator removes its role, twice each time; returns what the second
-    /// load counted, with the fewer bytes allocated and the faster time of the two, since the process's first load also allocates what
-    /// the runtime initializes once.
+    /// Writes the appointments and closings in an adopted estate; returns the second operator and the two closings to check after loading.
     /// </summary>
-    private static (LoadWork Standing, LoadWork Removed) Appointments(int count, bool chain, bool byRoot)
+    private static (string Second, (string BySecond, string ByLast) Closings) WriteAppointments(HistoryFixture f, int count, bool chain, bool byRoot)
     {
-        static string Person(string name, string role) => $$"""{"kind":"human","name":"{{name}}","roles":["{{role}}"]}""";
-        using var f = new HistoryFixture();
-        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, Person("Second operator", "operator"), signer: f.OperatorSigner);
+        static string Operator(string name) => $$"""{"kind":"human","name":"{{name}}","roles":["operator"]}""";
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, Operator("Second operator"), signer: f.OperatorSigner);
         (RecordEnvelope secondDevice, _) = f.Admitted(second.Id, "The second operator's device");
         f.Require();
         f.Adopt();
@@ -223,8 +239,8 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         {
             string name = "Appointee " + i.ToString(CultureInfo.InvariantCulture);
             RecordEnvelope next = byRoot
-                ? f.Estate.Add("principal", f.Estate.OperatorId, Person(name, "operator"), signer: f.OperatorSigner)
-                : f.Estate.Add("principal", author.Id, Person(name, "operator"), signer: f.Signer(authorDevice));
+                ? f.Estate.Add("principal", f.Estate.OperatorId, Operator(name), signer: f.OperatorSigner)
+                : f.Estate.Add("principal", author.Id, Operator(name), signer: f.Signer(authorDevice));
             if (!chain) continue;
             (authorDevice, _) = f.Admitted(next.Id, name + "'s device");
             author = next;
@@ -232,38 +248,26 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
 
         RecordEnvelope bySecond = f.Close("device", f.BuilderDevice.Id, second.Id, f.Signer(secondDevice));
         RecordEnvelope byLast = f.Close("device", f.BuilderDevice.Id, author.Id, f.Signer(authorDevice));
-        LoadWork standing = Counted(f, model =>
-        {
-            Assert.Contains(model.Trust.Closings, c => c.Record.Id == bySecond.Id);
-            Assert.Contains(model.Trust.Closings, c => c.Record.Id == byLast.Id);
-        });
-        f.Estate.Add("principal", f.Estate.OperatorId, Person("Second operator", "reviewer"), supersedes: second.Id, signer: f.OperatorSigner);
-        LoadWork removed = Counted(f, model =>
-        {
-            Assert.DoesNotContain(model.Trust.Closings, c => c.Record.Id == bySecond.Id);
-            Assert.Equal(byRoot && chain, model.Trust.Closings.Any(c => c.Record.Id == byLast.Id));
-        });
-        return (standing, removed);
+        return (second.Id, (bySecond.Id, byLast.Id));
+    }
 
-        static LoadWork Counted(HistoryFixture f, Action<EstateModel> check)
+    private static LoadWork Counted(HistoryFixture f, (string BySecond, string ByLast) closings, bool secondActs, bool lastActs, LoadWork? least)
+    {
+        var context = new JudgmentContext(new SignatureTables());
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var watch = Stopwatch.StartNew();
+        EstateModel model = EstateLoader.Load(f.Root, EstateLoader.EnumerateRecordFiles(f.Root), null, context: context);
+        watch.Stop();
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(secondActs, model.Trust.Closings.Any(c => c.Record.Id == closings.BySecond));
+        Assert.Equal(lastActs, model.Trust.Closings.Any(c => c.Record.Id == closings.ByLast));
+        var work = new LoadWork(context.Parses, context.Verifications, context.KeyImports, model.Trust.SetVerifications,
+            model.Trust.AdmissionJudgments, model.Trust.JoinSteps, allocated, watch.Elapsed);
+        return least is null ? work : work with
         {
-            LoadWork? least = null;
-            for (int run = 0; run < 2; run++)
-            {
-                var context = new JudgmentContext(new SignatureTables());
-                long before = GC.GetAllocatedBytesForCurrentThread();
-                var watch = Stopwatch.StartNew();
-                EstateModel model = EstateLoader.Load(f.Root, EstateLoader.EnumerateRecordFiles(f.Root), null, context: context);
-                watch.Stop();
-                long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-                check(model);
-                var work = new LoadWork(context.Parses, context.Verifications, context.KeyImports, model.Trust.SetVerifications,
-                    model.Trust.AdmissionJudgments, model.Trust.JoinSteps, allocated, watch.Elapsed);
-                least = least is null ? work : work with { Allocated = Math.Min(least.Allocated, allocated), Elapsed = least.Elapsed < work.Elapsed ? least.Elapsed : work.Elapsed };
-            }
-
-            return least!;
-        }
+            Allocated = Math.Min(least.Allocated, allocated),
+            Elapsed = least.Elapsed < work.Elapsed ? least.Elapsed : work.Elapsed,
+        };
     }
 
     /// <summary>
