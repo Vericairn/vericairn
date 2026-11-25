@@ -143,17 +143,23 @@ gives every current limit.
   [install guide](../install.md) now does. The shipped archives are also development builds to presence
   sessions, so they honor `VERICAIRN_ENCLAVE_HELPER`, which the guides say a release build ignores, as one of
   the informational findings notes; a variable naming an earlier helper fails the same way. The Security
-  section's account of FIX-161 fits Windows: on macOS the Reviewer found that 0.9.3 started a planted program
-  only through an empty or relative `PATH` entry, resolved in the repository being read, never from the
-  directory the command line ran in, so there only removing such entries helps short of upgrading, and folders
-  Vericairn inspects are exposed too. The frozen [limitations guide](0.9.4/limitations-and-platforms.md)'s
+  section's account of FIX-161 fits Windows; its published advisory
+  ([GHSA-w6cw-x3cg-gwpg](https://github.com/Vericairn/vericairn/security/advisories/GHSA-w6cw-x3cg-gwpg)) states
+  the reach on Linux and macOS too, where 0.9.3 could also take a program from the directory the command line
+  ran in and folders Vericairn inspects were exposed. The frozen [limitations guide](0.9.4/limitations-and-platforms.md)'s
   bullet on the overlap check says the `concurrent-paths` kind's findings, assignment-start refusals and pair
   exceptions (POLICY-08) are not in this build; the build installs that kind, as the next bullet, the release
   notes, the API compatibility notes and the release record say, and the maintained
   [limitations guide](../limitations-and-platforms.md) now says so. The release record's 127 limitations are
   fuller than the frozen limitations guide; the record is the authority. The frozen 0.9.4 set keeps its bytes,
   and 0.9.5's set notes the corrections. The 0.9.3 set's API compatibility notes list every other
-  self-admission in `estate first-authority`'s `remaining`, where a forged one is not; 0.9.4's set corrects it.
+  self-admission in `estate first-authority`'s `remaining`, where a forged one is not; 0.9.4's set corrects it. Found after publication
+  ([issue 440](https://github.com/Vericairn/vericairn/issues/440)): when a repository-synced estate is upgraded
+  by the command line with no daemon running, the restore point 0.9.4's upgrade records holds no `live.db`,
+  though it reports success; the records stay in the repository and the earlier release rebuilds its index
+  from them. Until a fix ships, keep a cold copy of the estate before a one-way upgrade, or run the upgrade
+  while the new release's daemon serves the estate; with a daemon serving, or on a local-only estate, the
+  restore point holds `live.db`.
 - **Interfaces.** [API compatibility](../api-compatibility-0.9.4.md) lists 0.9.4's interface and record
   changes. `IEstateApi` adds nineteen operations, among them presence leases, a standing agent's due
   occurrences and outputs, a decision step's decision, closing a run, the overlap check, the operator's answers

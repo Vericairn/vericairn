@@ -136,7 +136,10 @@ allowances are its own, each for a value that is not the credential its rule fin
 - for NuGet configuration passwords, environment variable references;
 - for Vault service tokens, a value without a digit;
 - from 0.9.4, for every rule, a line of a history checkpoint's inventory in the
-  estate's objects, as the next paragraph describes.
+  estate's objects, as the next paragraph describes;
+- from 0.9.5, for the Sourcegraph rule alone, a git revision that a release basis
+  the push carries records, in the objects that hold that basis, as the paragraph
+  after next describes.
 
 From 0.9.4 (FIX-150, decision 01M7N48B8CGR54YTJZMAMJTYGH), the scan passes a
 history checkpoint's inventory whatever its record ids contain. An inventory
@@ -166,6 +169,39 @@ the allowance trusts the shape, not the checkpoint's signature, which the
 estate's checks verify. The recorded scan's version names the configuration the
 scan applied, the configuration with this allowance or the same configuration
 without it, each by its own SHA-256.
+
+From 0.9.5 (FIX-168, decision 01M85A6F7T3MVC1EXHAAXH1ZDV), the scan passes the
+git revisions a release basis records. A basis names the candidate's commit and
+each repository it read at an exact commit by that commit's id, 40 hexadecimal
+digits, and gitleaks' Sourcegraph rule takes any 40 hexadecimal digits standing
+alone for a token wherever the text names Sourcegraph, as a basis does that lists
+a file such as `DocumentSourceGraph.cs`; 0.9.4's candidate records were refused
+for it with 33 findings in six evidence objects, each a commit id. Before
+gitleaks runs, the scanner finds the release bases the pushed commits add or
+change in the `objects/` folder at the repository's root: a file named by 64
+lower-case hexadecimal digits whose bytes hash to its name and are a release
+basis the product writes, or a split object's root there whose parts, joined
+and checked as the product's basis reader checks them, are one (FIX-163). It
+reads their bytes, and keeps only their revisions: the submission's commit, each
+repository's revision and the two commits of each of its tree comparisons, in
+the basis itself, in the basis its policy view holds and in its repositories,
+wherever each is 40 lower-case hexadecimal digits. The scan then applies one more
+allowance, for the Sourcegraph rule alone: a value that is exactly one of those
+revisions, in exactly the objects that hold those bases' bytes, a basis's one
+object or the parts of a split one. Every other value, rule and path is scanned
+exactly as before: a secret of any other kind in a basis, any other 40-digit
+hexadecimal value in it, a revision written there in upper case, the same
+revision in any other object, a file that is no such basis, cannot be read whole
+or is not named by its hash, and the parts of a split basis pushed without its
+root; no repository exception, allow comment or ignore file is honored. The
+allowance trusts the basis's form, not its signature, which the estate's checks
+verify: a value written in a basis's revision position passes, as a commit id
+does. When a split basis's part begins or ends inside one of the hashes the
+basis records and leaves exactly 40 of its digits alone at its edge, those
+digits are no revision and are found. The recorded scan's version names the
+configuration the scan applied by its SHA-256; with a basis's allowance that
+configuration follows from the bases the pushed commits carry, so it is derived
+again from them.
 
 The recorded scan's version names gitleaks' version and the configuration's SHA-256,
 for example `8.30.1; rules sha256:…`, so each scan identifies the rules it applied.

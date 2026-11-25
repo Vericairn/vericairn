@@ -421,14 +421,15 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
         return Git([.. arguments]);
     }
 
-    // Scans base..head with the installed gitleaks; adjust sees each process the scanner starts after the scanner has prepared it.
+    // Scans base..head with the installed gitleaks; adjust sees each process the scanner starts after the scanner has prepared it. Each
+    // process's output is bounded as the product bounds it, by an object of the estate's object limit (FIX-168).
     internal SecretScan Scan(string basis, string head, Action<ProcessStartInfo>? adjust = null)
     {
         var scanner = new GitleaksScanner(info =>
         {
             if (info.FileName == "gitleaks") info.FileName = Gitleaks!;
             adjust?.Invoke(info);
-            return BoundedProcess.Run(info, TestTiming.HangTimeout);
+            return BoundedProcess.Run(info, TestTiming.HangTimeout, (int)Vericairn.Records.Estate.EstateLayout.MaxObjectBytes);
         });
         return scanner.Scan(Repository, new PushPlan("work/change", "main", head, basis, null, basis));
     }

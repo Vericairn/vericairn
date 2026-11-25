@@ -25,8 +25,10 @@ internal static class LocalNetworkTransport
     /// </summary>
     public static X509ChainPolicy OfflineChainPolicy() => new() { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
 
-    public static async ValueTask<Stream> ConnectAsync(RuntimeConnection connection, IRequestSigner signer, LocalNetworkCredential credential, CancellationToken cancellationToken, bool classifyRefusal = false)
+    public static async ValueTask<Stream> ConnectAsync(RuntimeConnection connection, IRequestSigner signer, LocalNetworkCredential credential, CancellationToken cancellationToken, bool classifyRefusal = false,
+        LocalNetworkTls.Platform? platform = null)
     {
+        LocalNetworkTls.Platform tlsPlatform = platform ?? LocalNetworkTls.Current;
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         SslStream? tls = null;
         TlsScreenStream? screen = null;
@@ -38,13 +40,13 @@ internal static class LocalNetworkTransport
             tls = new SslStream(screen, leaveInnerStreamOpen: false);
             X509Certificate2 own = credential.Current();
             byte[]? presented = null;
-            await tls.AuthenticateAsClientAsync(
-                CreateAuthenticationOptions(own, (_, certificate, _, _) =>
-                {
-                    presented = certificate?.GetRawCertData();
-                    return certificate is not null;
-                }),
-                cancellationToken).ConfigureAwait(false);
+            // Any certificate completes the handshake: the runtime identity's proof that follows decides whether it is the runtime's.
+            SslClientAuthenticationOptions options = LocalNetworkTls.ClientOptions(tlsPlatform, (_, certificate, _, _) =>
+            {
+                presented = certificate?.GetRawCertData();
+                return certificate is not null;
+            }, own);
+            await LocalNetworkTls.AuthenticateAsync(tls, options, tlsPlatform, cancellationToken).ConfigureAwait(false);
             await ProveAsync(tls, connection, signer, RuntimeIdentityScheme.CertificateFingerprint(presented ?? []), RuntimeIdentityScheme.CertificateFingerprint(own.RawData), cancellationToken).ConfigureAwait(false);
             return tls;
         }
@@ -64,25 +66,6 @@ internal static class LocalNetworkTransport
             throw;
         }
     }
-
-    private static SslClientAuthenticationOptions CreateAuthenticationOptions(X509Certificate2 own, RemoteCertificateValidationCallback validate) =>
-        new SslClientAuthenticationOptions
-        {
-            TargetHost = "vericairn-runtime",
-            AllowTlsResume = false,
-            AllowRenegotiation = false,
-            ApplicationProtocols = [SslApplicationProtocol.Http11],
-
-            // TLS 1.2 only, so the runtime's certificate travels in the clear, where the screen reads it first.
-            EnabledSslProtocols = TlsScreenStream.Protocols,
-            CipherSuitesPolicy = TlsScreenStream.CipherSuites,
-            CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-            CertificateChainPolicy = OfflineChainPolicy(),
-            LocalCertificateSelectionCallback = (_, _, _, _, _) => own,
-
-            // Any certificate completes the handshake: the runtime identity's proof that follows decides whether it is the runtime's.
-            RemoteCertificateValidationCallback = validate,
-        };
 
     /// <summary>Asks for the runtime identity's proof of this connection's certificates with a fresh nonce, and verifies it with the pinned identity.</summary>
     private static async Task ProveAsync(SslStream tls, RuntimeConnection connection, IRequestSigner signer, string certificate, string client, CancellationToken cancellationToken)

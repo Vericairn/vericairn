@@ -45,9 +45,9 @@ public sealed partial class RemoteViewModel
 
     private void InitializePolicyCommands()
     {
-        RefreshPolicyCommand = new(() => ReadPolicyAsync(policyDetail!.Notice, false), () => !Busy && policyDetail is not null && Selected?.Current == true);
-        PolicyHandoffCommand = new(() => ReadPolicyAsync(policyDetail!.Notice, true), () => !Busy && policyDetail is not null && Selected?.Current == true);
-        ClosePolicyCommand = new(() => { SetPolicyDetail(null); return Task.CompletedTask; }, () => !Busy && policyDetail is not null);
+        RefreshPolicyCommand = Command(() => ReadPolicyAsync(policyDetail!.Notice, false), () => !Busy && policyDetail is not null && Selected?.Current == true);
+        PolicyHandoffCommand = Command(() => ReadPolicyAsync(policyDetail!.Notice, true), () => !Busy && policyDetail is not null && Selected?.Current == true);
+        ClosePolicyCommand = Command(() => { SetPolicyDetail(null); return Task.CompletedTask; }, () => !Busy && policyDetail is not null);
     }
 
     private void NotifyPolicyCommands()

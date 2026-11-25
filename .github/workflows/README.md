@@ -206,19 +206,26 @@ queued instead.
 
 `../rulesets` holds the rulesets this needs, which the builder applies; nothing in a
 workflow changes a repository setting. `default-branch-merge-queue.json` is the
-default branch's ruleset with `ci-gate` and `secret-scan` as its only required checks,
-and `release-branches.json` gives `refs/heads/release/*` the same rules: no deletion
-or force push, pull requests merged by merge commit, the same required checks and
-merge queue.
+default branch's ruleset with `ci-gate` and `secret-scan` as its only required checks.
+`release-branches.json` gives `refs/heads/release/*` the same rules but the queue: no
+deletion or force push, pull requests merged by merge commit, the same required
+checks. GitHub refuses a merge queue on a wildcard ref ("Wildcard ref names are not
+supported when merge queue is enabled"), so from CI-14 each release branch has a
+ruleset of its own that requires the same merge queue on its exact ref.
+`release-branch-merge-queue.template.json` is that ruleset with `@VERSION@` standing
+for the release's version in its name and its one ref: filled in, it is
+`release-<version>-merge-queue` for `refs/heads/release/<version>`. It is never
+applied as it stands. `ContinuousIntegrationTests` fails when a ruleset here pairs a
+merge queue with a wildcard ref.
 
 A release branch these rules cover must carry this `ci.yml` and `secret-scan.yml`:
 without them its pull requests never report `ci-gate` or `secret-scan` and its queue
 groups never start, so it could not be merged into. The deletion rule keeps a covered
 branch from being deleted whatever workflows it carries. `release/0.3` predates both
-and is excluded; it keeps no rules, as today. `release/0.9.4`, cut at 0.9.4's release
-commit before this change merged, is covered but carries neither yet, so the release
-branches' ruleset is added only once it does (below). A release branch cut from a
-main that holds this change carries both.
+and is excluded; it keeps no rules, as today. A release branch cut from a main that
+holds this change carries both. `release/0.9.4`, cut at 0.9.4's release commit before
+CI-12 merged, received them through a pull request into it; its rulesets were then
+applied as `release-branches` (28004737) and `release-0.9.4-merge-queue` (28004740).
 
 To apply, with the queue empty and the change that adds `ci-gate` having passed its
 pull request run, save the default branch's live ruleset and replace it:
@@ -253,13 +260,25 @@ answer to the read also carries fields that body does not list (`id`, `node_id`,
 endpoint does not describe.
 
 Once the change has merged and every release branch the rules cover carries this
-`ci.yml` and `secret-scan.yml` (today `release/0.9.4`, through a pull request into
-it, which merges under no ruleset until this one exists), add the release branches'
-ruleset:
+`ci.yml` and `secret-scan.yml`, create the release branches' ruleset, once; it covers
+each release branch cut later from the moment it exists:
 
 ```sh
 gh api --method POST repos/Vericairn/vericairn/rulesets --input .github/rulesets/release-branches.json
 ```
+
+Then, for each release branch, once it is cut and carries `ci-gate`, create its
+merge-queue ruleset from the template, with `<version>` the branch's version (`0.9.5`
+for `release/0.9.5`):
+
+```sh
+sed 's/@VERSION@/<version>/g' .github/rulesets/release-branch-merge-queue.template.json | gh api --method POST repos/Vericairn/vericairn/rulesets --input -
+```
+
+Until then the branch's pull requests merge without a queue once their checks pass;
+a queue on a branch whose `ci.yml` has no `ci-gate` would hold every entry until the
+check timeout. The version is the branch's exact name after `release/`, never a
+pattern, since GitHub refuses the merge queue on a wildcard ref.
 
 ## Shards
 
