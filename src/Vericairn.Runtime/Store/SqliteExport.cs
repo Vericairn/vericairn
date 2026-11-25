@@ -11,12 +11,10 @@ namespace Vericairn.Runtime.Store;
 /// From 0.9.5 (FIX-174): a consistent, checked copy of a SQLite database as it is on disk, read through a connection of its own whichever
 /// connection holds it open, as an upgrade's restore point keeps the live store and every other database beside it. A database that a
 /// connection holds, or did not close, has its <c>-wal</c>, <c>-shm</c> or <c>-journal</c> file beside it, and is read through a read-only
-/// connection, which reads every page its holder committed in one snapshot and creates nothing that is not there already. One with none
-/// of them was closed cleanly and no connection holds it, so its file alone holds every committed page: it is read as an immutable file,
-/// which takes no lock and creates nothing beside it. Like a read-only session's disposable snapshot (<see cref="SqliteReadSnapshot"/>),
-/// that assumes the documented single-runtime ownership of the state on this machine. The copy is one rollback-journal file, which is
-/// checked before it is kept: it exists, passes SQLite's integrity check and holds as many rows in each table as the database did in the
-/// snapshot it was copied from.
+/// connection, which reads every committed page in one snapshot. With no sidecars, the database can be read as an immutable file,
+/// which takes no lock and creates nothing beside it. After an immutable read, the sidecars, file size and modification time are
+/// checked again before the copy is accepted. The copy is one rollback-journal file, which is checked before it is kept: it exists,
+/// passes SQLite's integrity check and holds as many rows in each table as the database did in the snapshot it was copied from.
 /// </summary>
 internal static class SqliteExport
 {
@@ -49,10 +47,19 @@ internal static class SqliteExport
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         source = Path.GetFullPath(source);
         string name = Path.GetFileName(source);
+        FileInfo? immutableSource = null;
         IReadOnlyDictionary<string, long>? held = null;
         try
         {
-            using SqliteConnection from = Open(Held(source) ? source : Immutable(source), SqliteOpenMode.ReadOnly);
+            string readPath = source;
+            if (!Held(source) && Immutable(source) is { } immutablePath)
+            {
+                immutableSource = new FileInfo(source);
+                immutableSource.Refresh();
+                readPath = immutablePath;
+            }
+
+            using SqliteConnection from = Open(readPath, SqliteOpenMode.ReadOnly);
             // The rows are counted and the pages copied in one read transaction, so the counts are those of the snapshot copied, whatever
             // the database's holder commits meanwhile.
             using SqliteTransaction read = from.BeginTransaction(deferred: true);
@@ -71,11 +78,16 @@ internal static class SqliteExport
         catch (SqliteException exception)
         {
             throw held is null
-                ? new SqliteExportException($"{name} could not be read for its export ({Cause(exception)})", exception) { Unreadable = true }
-                : new SqliteExportException($"{name} could not be copied for its export ({Cause(exception)})", exception);
+                ? new SqliteExportException($"{name} could not be read ({Cause(exception)})", exception)
+                : new SqliteExportException($"{name} could not be copied ({Cause(exception)})", exception);
         }
 
         written?.Invoke(destination);
+        if (immutableSource is not null && Changed(immutableSource))
+        {
+            throw new SqliteExportException($"{name} changed while its restore copy was being made. Stop any daemon and let other commands using the estate finish, then retry the upgrade") { SourceChanged = true };
+        }
+
         Check(name, destination, held);
     }
 
@@ -84,10 +96,16 @@ internal static class SqliteExport
 
     // An immutable file is read without a lock and without its -wal and -shm, which a database closed cleanly does not have. A network
     // share's path names a host, which SQLite's file names do not take, so it is read as a held database is.
-    private static string Immutable(string source)
+    private static string? Immutable(string source)
     {
         var uri = new Uri(source);
-        return uri.IsUnc ? source : uri.AbsoluteUri + "?immutable=1";
+        return uri.IsUnc ? null : uri.AbsoluteUri + "?immutable=1";
+    }
+
+    private static bool Changed(FileInfo before)
+    {
+        var after = new FileInfo(before.FullName);
+        return !before.Exists || !after.Exists || before.Length != after.Length || before.LastWriteTimeUtc != after.LastWriteTimeUtc || Held(before.FullName);
     }
 
     private static void Check(string name, string copy, IReadOnlyDictionary<string, long> held)
@@ -106,7 +124,7 @@ internal static class SqliteExport
                 string verdict = integrity.ExecuteScalar() as string ?? "no verdict";
                 if (verdict != "ok")
                 {
-                    throw new SqliteExportException($"its export of {name} fails SQLite's integrity check ({Bounded(verdict)})");
+                    throw new SqliteExportException($"SQLite's integrity check found damage in {name} ({Bounded(verdict)})");
                 }
             }
 
@@ -123,7 +141,7 @@ internal static class SqliteExport
         }
         catch (SqliteException exception)
         {
-            throw new SqliteExportException($"its export of {name} is not a database SQLite reads ({Cause(exception)})", exception);
+            throw new SqliteExportException($"SQLite could not check {name} ({Cause(exception)})", exception);
         }
     }
 
@@ -175,10 +193,10 @@ internal static class SqliteExport
 /// <summary>From 0.9.5 (FIX-174): a database that could not be exported, or whose copy failed its check; the message says which and why.</summary>
 internal sealed class SqliteExportException : IOException
 {
-    internal SqliteExportException(string message) : base(message) { }
+    internal SqliteExportException(string message) : base(message.ReplaceLineEndings(" ")) { }
 
-    internal SqliteExportException(string message, Exception inner) : base(message, inner) { }
+    internal SqliteExportException(string message, Exception inner) : base(message.ReplaceLineEndings(" "), inner) { }
 
-    /// <summary>True when the database itself could not be read, rather than its copy written or checked.</summary>
-    internal bool Unreadable { get; init; }
+    /// <summary>True when retrying with the estate idle is the remedy.</summary>
+    internal bool SourceChanged { get; init; }
 }

@@ -11,6 +11,8 @@ using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Updates;
+using Vericairn.Runtime.Events;
+using Vericairn.Runtime.Search;
 using Vericairn.Runtime.Store;
 
 namespace Vericairn.Runtime.Upgrade;
@@ -204,22 +206,15 @@ public static class UpgradeReturns
         try
         {
             string live = Path.GetFileName(session.Live.Path);
+            bool synced = session.Profile == "repository-synced";
             if (File.Exists(session.Live.Path))
-            {
-                try
-                {
-                    SqliteExport.Export(session.Live.Path, Path.Combine(state, live), ExportWritten);
-                }
-                catch (SqliteExportException exception) when (exception.Unreadable && session.Profile == "repository-synced")
-                {
-                    throw new SqliteExportException($"{exception.Message}; this clone's live store is a cache of the repository's records, which 'vericairn estate cache rebuild' builds again once no daemon or other command has the estate open", exception);
-                }
-            }
-            else if (session.Profile != "repository-synced")
-                throw new SqliteExportException($"{live}, the live store that holds this local-only estate's records, is not on this machine's disk");
+                ExportDatabase(session.Live.Path, state, live, synced);
+            else if (!synced)
+                throw new SqliteExportException($"{live}, the live store that holds this local-only estate's records, is not on this machine's disk. {Recovery(live, live, synced)}");
 
             string[] files = [.. Directory.EnumerateFiles(clone).Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal)];
-            var databases = new HashSet<string>(files.Where(name => !name.StartsWith(live, StringComparison.Ordinal) && SqliteExport.IsDatabase(Path.Combine(clone, name))), StringComparer.Ordinal);
+            var databases = new HashSet<string>(files.Where(name => !name.StartsWith(live, StringComparison.Ordinal)
+                && (name is EventJournal.FileName or KeywordIndex.FileName or "objects.db" || SqliteExport.IsDatabase(Path.Combine(clone, name)))), StringComparer.Ordinal);
             foreach (string name in files)
             {
                 string file = Path.Combine(clone, name);
@@ -228,7 +223,7 @@ public static class UpgradeReturns
                 if (SqliteExport.Sidecars.Any(sidecar => name.EndsWith(sidecar, StringComparison.Ordinal) && databases.Contains(name[..^sidecar.Length]))) continue;
                 if (new FileInfo(file).LinkTarget is not null) continue;
                 if (databases.Contains(name))
-                    SqliteExport.Export(file, Path.Combine(state, name), ExportWritten);
+                    ExportDatabase(file, state, live, synced);
                 else
                     File.Copy(file, Path.Combine(state, name));
             }
@@ -260,6 +255,33 @@ public static class UpgradeReturns
             Discard(directory);
             throw;
         }
+    }
+
+    private static void ExportDatabase(string file, string state, string live, bool synced)
+    {
+        string name = Path.GetFileName(file);
+        try
+        {
+            SqliteExport.Export(file, Path.Combine(state, name), ExportWritten);
+        }
+        catch (SqliteExportException exception) when (!exception.SourceChanged)
+        {
+            throw new SqliteExportException($"{exception.Message}. {Recovery(name, live, synced)}", exception);
+        }
+    }
+
+    private static string Recovery(string name, string live, bool synced)
+    {
+        string remedy = name switch
+        {
+            _ when name == live && synced => "run 'vericairn estate cache rebuild' to rebuild this clone's live store from the repository's records",
+            _ when name == live => "recover the live store and its sidecars from a known-good backup",
+            KeywordIndex.FileName => "move the search index and its sidecars aside and run 'vericairn search index --rebuild'",
+            EventJournal.FileName => "move the event journal and its sidecars aside so the daemon can start a new journal",
+            "objects.db" => "recover the object store and its sidecars from a known-good backup",
+            _ => "move the database and its sidecars aside if it can be rebuilt, or recover them from a known-good backup",
+        };
+        return $"Stop any daemon and let other commands using the estate finish. If the database is damaged or missing, {remedy}. Then retry the upgrade";
     }
 
     /// <summary>

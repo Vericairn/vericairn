@@ -209,13 +209,127 @@ public sealed class UpgradeReturnTests
         // The kept live store passes SQLite's integrity check and holds every row the clone's did.
         Assert.Equal(before, RestorePointInspection.Rows(Path.Combine(point.Directory, "state", "live.db")));
         Assert.Contains("first removing live.db-wal and live.db-shm there.", applied.Return.Steps[2], StringComparison.Ordinal);
+        Assert.Contains("its live store included", api.Session.Load().OfType("migration").Single().Body.GetProperty("changes").GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("-wal")]
+    [InlineData("-shm")]
+    [InlineData("-journal")]
+    [InlineData("length")]
+    [InlineData("mtime")]
+    public void WithNoDaemonAChangeDuringAnImmutableExportRefusesTheUpgrade(string change)
+    {
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        string clone = PopulateLiveStore(f);
+        string source = Path.Combine(clone, "probe.db");
+        CreateDatabase(source, "CREATE TABLE payload (value INTEGER); INSERT INTO payload VALUES (1);");
+        var stamp = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(source, stamp);
+        string[] estate = Snapshot(f.Estate.Root);
+
+        UpgradeReturns.ExportWritten = path =>
+        {
+            if (!path.StartsWith(clone + Path.DirectorySeparatorChar, StringComparison.Ordinal) || Path.GetFileName(path) != "probe.db") return;
+            switch (change)
+            {
+                case "length":
+                    using (var stream = new FileStream(source, FileMode.Append, FileAccess.Write)) stream.WriteByte(0);
+                    File.SetLastWriteTimeUtc(source, stamp);
+                    break;
+                case "mtime":
+                    File.SetLastWriteTimeUtc(source, stamp.AddSeconds(2));
+                    break;
+                default:
+                    File.WriteAllBytes(source + change, []);
+                    break;
+            }
+        };
+        try
+        {
+            using EstateService api = EstateService.OpenForUpgrade(f.Estate.Root);
+            (UpgradeResponse? refused, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+            Assert.Null(refused);
+            Assert.Equal("refused", problem!.Code);
+            Assert.Contains("probe.db changed while its restore copy was being made", problem.Message, StringComparison.Ordinal);
+            Assert.Contains("let other commands using the estate finish, then retry the upgrade", problem.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            UpgradeReturns.ExportWritten = null;
+        }
+
+        Assert.Equal(estate, Snapshot(f.Estate.Root));
+        Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
+    }
+
+    [Theory]
+    [InlineData("search.db", "move the search index and its sidecars aside and run 'vericairn search index --rebuild'")]
+    [InlineData("events.db", "move the event journal and its sidecars aside so the daemon can start a new journal")]
+    [InlineData("objects.db", "recover the object store and its sidecars from a known-good backup")]
+    [InlineData("extra.db", "move the database and its sidecars aside if it can be rebuilt, or recover them from a known-good backup")]
+    public void ADatabaseThatFailsIntegrityNamesItsOwnRemedyOnOneLine(string name, string remedy)
+    {
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        string clone = PopulateLiveStore(f);
+        // Change the index expression in the schema without rebuilding its entries. SQLite can still read the table, but its integrity
+        // verdict names the inconsistent index, whose name includes a newline.
+        CreateDatabase(Path.Combine(clone, name), """
+            CREATE TABLE payload (value INTEGER);
+            CREATE INDEX "probe
+            rows" ON payload(value);
+            INSERT INTO payload VALUES (1), (2);
+            PRAGMA writable_schema=ON;
+            UPDATE sqlite_master SET sql = replace(sql, 'payload(value)', 'payload(value + 1)') WHERE type = 'index';
+            PRAGMA writable_schema=RESET;
+            """);
+        string[] estate = Snapshot(f.Estate.Root), state = Snapshot(clone);
+
+        using (EstateService api = EstateService.OpenForUpgrade(f.Estate.Root))
+        {
+            (UpgradeResponse? refused, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+            Assert.Null(refused);
+            Assert.Equal("refused", problem!.Code);
+            Assert.Multiple(
+                () => Assert.Contains(remedy, problem.Message, StringComparison.Ordinal),
+                () => Assert.Contains($"SQLite's integrity check found damage in {name} (row 1 missing from index probe rows)", problem.Message, StringComparison.Ordinal),
+                () => Assert.DoesNotContain('\r', problem.Message),
+                () => Assert.DoesNotContain('\n', problem.Message),
+                () => Assert.DoesNotContain("its export", problem.Message, StringComparison.Ordinal));
+        }
+
+        Assert.Equal(estate, Snapshot(f.Estate.Root));
+        Assert.Equal(state, Snapshot(clone));
+        Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
+    }
+
+    [Fact]
+    public void AKnownDatabaseWithADamagedHeaderRefusesTheUpgrade()
+    {
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        string clone = PopulateLiveStore(f);
+        File.WriteAllText(Path.Combine(clone, "search.db"), "Damaged header");
+
+        using EstateService api = EstateService.OpenForUpgrade(f.Estate.Root);
+        (UpgradeResponse? refused, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+        Assert.Null(refused);
+        Assert.Equal("refused", problem!.Code);
+        Assert.Contains("search.db could not be read", problem.Message, StringComparison.Ordinal);
+        Assert.Contains("'vericairn search index --rebuild'", problem.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
     }
 
     [Theory]
     [InlineData("deleted", "its export of live.db wrote no file")]
     [InlineData("emptied", "its export of live.db holds no table files, where live.db holds")]
     [InlineData("short", "rows in table files, where live.db holds")]
-    [InlineData("truncated", "its export of live.db is not a database SQLite reads")]
+    [InlineData("truncated", "SQLite could not check live.db")]
     public void WithNoDaemonAnExportThatFailsItsCheckRefusesTheOneWayUpgradeAndNothingChanges(string damage, string reason)
     {
         using var f = new EstateLineFixture();
@@ -272,8 +386,8 @@ public sealed class UpgradeReturnTests
             (UpgradeResponse? refused, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false) { OneWay = true });
             Assert.Null(refused);
             Assert.Equal("refused", problem!.Code);
-            Assert.Contains("The upgrade's restore point could not be recorded on this machine: live.db could not be read for its export (", problem.Message, StringComparison.Ordinal);
-            Assert.Contains("this clone's live store is a cache of the repository's records, which 'vericairn estate cache rebuild' builds again", problem.Message, StringComparison.Ordinal);
+            Assert.Contains("The upgrade's restore point could not be recorded on this machine: live.db could not be read (", problem.Message, StringComparison.Ordinal);
+            Assert.Contains("run 'vericairn estate cache rebuild' to rebuild this clone's live store from the repository's records", problem.Message, StringComparison.Ordinal);
             Assert.EndsWith("Nothing was applied, and nothing changed.", problem.Message, StringComparison.Ordinal);
         }
 
@@ -326,8 +440,21 @@ public sealed class UpgradeReturnTests
         (UpgradeResponse? applied, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
         Assert.Null(problem);
         UpgradeRestorePoint point = applied!.Return!.RestorePoint!;
+        Assert.Null(point.Commit);
         Assert.DoesNotContain("live.db", point.Files);
+        string changes = api.Session.Load().OfType("migration").Single().Body.GetProperty("changes").GetRawText();
+        Assert.Contains($"restore point {point.Id}: this machine's local state, inventory {point.StateHash}", changes, StringComparison.Ordinal);
+        Assert.DoesNotContain("its live store included", changes, StringComparison.Ordinal);
         Assert.Contains("first removing live.db, live.db-wal and live.db-shm there. This machine kept no live store for the clone before the upgrade, so none is put back; release 0.9.3 builds it again from the repository's records.", applied.Return.Steps[2], StringComparison.Ordinal);
+    }
+
+    private static void CreateDatabase(string path, string sql)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
     }
 
     // Opens the estate writable, as a command or daemon before the upgrade did, so the clone's live store holds its records and
