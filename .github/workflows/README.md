@@ -282,7 +282,10 @@ check timeout. The version is the branch's exact name after `release/`, never a
 pattern, since GitHub refuses the merge queue on a wildcard ref.
 
 Each create returns the new ruleset's `id`. To undo one, a ruleset created too early or
-for the wrong branch, delete it by that id; a create that GitHub refused made nothing:
+for the wrong branch, delete it by that id; a create that GitHub refused made nothing.
+Take the id from the create's output, or find it by the ruleset's name with
+`gh api repos/Vericairn/vericairn/rulesets --jq '.[] | {id, name}'`. Never delete 27077099,
+the default branch's ruleset, whose undo is the PUT of the saved file above:
 
 ```sh
 gh api --method DELETE repos/Vericairn/vericairn/rulesets/<id>

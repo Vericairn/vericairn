@@ -979,6 +979,8 @@ public class ContinuousIntegrationTests
         int queue = procedure.IndexOf($"\nsed 's/@VERSION@/<version>/g' .github/rulesets/release-branch-merge-queue.template.json | gh api --method POST {ruleset} --input -\n", StringComparison.Ordinal);
         // CI-15: each create's undo follows them, a DELETE by the id the create returned.
         int undo = procedure.IndexOf($"\ngh api --method DELETE {ruleset}/<id>\n", StringComparison.Ordinal);
+        Assert.Contains("Never delete 27077099,", procedure, StringComparison.Ordinal);
+        Assert.Contains("once it is cut and carries `ci.yml` and\n`secret-scan.yml`", procedure, StringComparison.Ordinal);
         Assert.True(save >= 0 && save < replace && replace < restore && restore < add && add < queue && queue < undo, $"{save} {replace} {restore} {add} {queue} {undo}");
         string[] writable = fields.Trim('{', '}').Split(", ").Order(StringComparer.Ordinal).ToArray();
         string[] files = Directory.GetFiles(Path.Combine(github, "rulesets")).Select(file => Path.GetFileName(file)).Order(StringComparer.Ordinal).ToArray();
