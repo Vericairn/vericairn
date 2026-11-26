@@ -120,6 +120,96 @@ public class StandingAgentRoutingTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    [Trait("Journey", "D07-E")]
+    public void AnEventBurstWaitsForConcurrencyAndDefersAtTheOpenOutputCap()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 3, ["concurrency"] = 1 },
+            triggers: new JsonArray(new JsonObject
+            {
+                ["key"] = "bugs", ["kind"] = "event", ["recordType"] = "work-order", ["fields"] = new JsonObject { ["title"] = "Open bug" },
+            }), outputs: new JsonObject { ["open"] = 1 });
+        AllowStandInWithFixtureKey(run, goal);
+        RecordEnvelope activated = Assert.Single(GoalRules.Statuses(run.Estate.Load(), run.Estate.Load().ById[goal]));
+        Assert.True(SpinWait.SpinUntil(() => DateTimeOffset.UtcNow >= activated.AtTime.AddSeconds(1), TestTiming.HangTimeout),
+            "the event records must postdate activation at record timestamp precision");
+        for (int i = 1; i <= 3; i++)
+        {
+            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json($$"""
+                {"key":"BUG-{{i}}","kind":"ordinary","title":"Open bug","intent":"Inspect the reported bug.",
+                 "scope":["Inspect the widget"],"exitQuestion":"Was the bug inspected?","inputs":[],"deliverables":["Findings"]}
+                """))));
+        }
+
+        JsonElement[] due = [.. run.Service.GoalDue(goal)!.Json.GetProperty("occurrences").EnumerateArray()];
+        Assert.Equal(3, due.Length);
+        Assert.All(due, occurrence => Assert.Equal("due", occurrence.GetProperty("state").GetString()));
+        string firstKey = due[0].GetProperty("key").GetString()!;
+        string[] heldKeys = [.. due.Skip(1).Select(occurrence => occurrence.GetProperty("key").GetString()!)];
+        GoalStepResponse first = Step(run, goal, "hold-first-event", firstKey, "ack-stop");
+        Assert.True(first.Ok, first.Message);
+        Assert.Equal("run", first.Outcome);
+        string running = first.Run!.Run;
+        run.WaitUntil(() => run.Row(running).Observed && File.Exists(run.Report("hold-first-event")));
+        AssertHeld("its concurrency of 1");
+
+        string ask = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(run.Estate.BuilderId, first.Assignment!.Id, "ask",
+            RunEstate.Json("""
+                {"question":"Which bug should be investigated first?","recommendation":"Start with the first report.",
+                 "consequence":"The remaining reports wait."}
+                """)))).Id;
+        Assert.True(run.Service.RunStop(running, new RunStopRequest(op, "Stop the first stand-in.", 5)).Ok);
+        run.Settled(running);
+        AssertHeld("1 of its outputs are open, its cap of 1");
+        Assert.Contains(run.Estate.Load().OfType("ask"), record => record.Id == ask && EstateModel.BodyString(record, "state") == "open");
+        Assert.Equal(0, run.Service.Check().Errors);
+
+        void AssertHeld(string reason)
+        {
+            foreach (string key in heldKeys)
+            {
+                Assert.Equal((key, "deferred"), StandingDutyJourneyTests.Occurrence(run, goal, key));
+                GoalStepResponse held = Step(run, goal, "held", key);
+                Assert.Equal("none", held.Outcome);
+                Assert.Contains(reason, held.Message, StringComparison.Ordinal);
+                Assert.DoesNotContain(run.Estate.Load().OfType("assignment"), assignment => StandingAgents.KeyOf(assignment) == key);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Journey", "D07-E")]
+    public void ResumingCoalescesScheduleTicksAndKeepsEveryMonthlyDutyOwed()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        RecordEnvelope policy = StandingDutyJourneyTests.DeclareDuty(run);
+        DateTimeOffset first = policy.AtTime;
+        string goal = Standing(run, until: RecordParser.FormatTimestamp(first.AddMonths(12)),
+            triggers: new JsonArray(StandingFlows.Monthly(firstAt: RecordParser.FormatTimestamp(first)), StandingDutyJourneyTests.DutyTrigger(policy)));
+        RunEstate.Ok(run.Service.GoalPause(goal, new GoalActionRequest(op)));
+        run.Service.FlowClock = new WorkerClock(first.AddMonths(2).AddDays(4));
+        GoalDueResponse paused = run.Service.GoalDue(goal)!;
+        Assert.Equal("paused", paused.Json.GetProperty("state").GetString());
+        Assert.Null(Step(run, goal, "while-paused").Assignment);
+        RunEstate.Ok(run.Service.GoalResume(goal, new GoalActionRequest(op)));
+
+        GoalDueResponse resumed = run.Service.GoalDue(goal)!;
+        Assert.Equal("active", resumed.Json.GetProperty("state").GetString());
+        JsonElement[] occurrences = [.. resumed.Json.GetProperty("occurrences").EnumerateArray()];
+        Assert.All(occurrences, occurrence => Assert.Equal("due", occurrence.GetProperty("state").GetString()));
+        JsonElement tick = Assert.Single(occurrences, occurrence => occurrence.GetProperty("trigger").GetString() == "monthly");
+        Assert.EndsWith("/interval-2", tick.GetProperty("key").GetString(), StringComparison.Ordinal);
+        string[] debts = [.. occurrences.Where(occurrence => occurrence.GetProperty("trigger").GetString() == "maintenance")
+            .Select(occurrence => occurrence.GetProperty("key").GetString()!).Order(StringComparer.Ordinal)];
+        Assert.Equal(Enumerable.Range(0, 3).Select(number =>
+            $"duty/{policy.Id}:{run.Estate.Estate.Id}:{{\"kind\":\"interval\",\"number\":{number}}}"), debts);
+        Assert.DoesNotContain(run.Estate.Load().OfType("assignment"), assignment => StandingAgents.KeyOf(assignment) is not null);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     // Three failures pause dispatch and ask the sponsor.
     [Trait("Journey", "D07-E")]
     [Fact]
@@ -925,7 +1015,7 @@ public class StandingAgentRoutingTests
     /// Installs the researcher flow and a standing agent of it the operator sponsors and activates: a daily schedule whose first tick was
     /// two days ago, the request trigger, the builder (or the holders given) in the researcher role; returns the goal's id.
     /// </summary>
-    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null, string[]? holders = null, string role = "researcher")
+    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null, string[]? holders = null, string role = "researcher", JsonObject? outputs = null)
     {
         string op = run.Estate.OperatorId;
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}"""), Supersedes: run.Estate.BuilderId)));
@@ -956,6 +1046,7 @@ public class StandingAgentRoutingTests
             },
             ["inputs"] = new JsonArray(),
         };
+        if (outputs is not null) body["plan"]!["standing"]!["outputs"] = outputs;
         string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
         RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
         return goal;
