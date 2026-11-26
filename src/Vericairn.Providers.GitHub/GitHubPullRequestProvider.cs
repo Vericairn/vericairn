@@ -45,11 +45,16 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
     // Enqueues the pull request only while its head is the expected one.
     private const string EnqueueMutation = "mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{state}}}";
 
-    // Removal reasons that mean the change itself could not merge, as against a person or the queue taking it out.
+    // Removal reasons, read upper-cased, as GitHub sends them (FIX-173): the timeline's RemovedFromMergeQueueEvent gives words such as
+    // failed_checks, merge_conflict and merged, and the dequeued webhook's documented reasons are words such as CI_FAILURE and MERGE.
+    // These mean the change itself could not merge, as against a person or the queue taking it out.
     private static readonly HashSet<string> FailureReasons = new(StringComparer.Ordinal)
     {
-        "MERGE_CONFLICT", "CI_FAILURE", "CI_TIMEOUT", "BRANCH_PROTECTIONS", "GIT_TREE_INVALID", "INVALID_MERGE_COMMIT",
+        "FAILED_CHECKS", "MERGE_CONFLICT", "CI_FAILURE", "CI_TIMEOUT", "BRANCH_PROTECTIONS", "GIT_TREE_INVALID", "INVALID_MERGE_COMMIT",
     };
+
+    // These mean the queue merged the change: GitHub records such a removal beside each merge it makes, and it takes nothing out unmerged.
+    private static readonly HashSet<string> MergedReasons = new(StringComparer.Ordinal) { "MERGED", "MERGE", "ALREADY_MERGED" };
 
     /// <inheritdoc />
     public string PushRemote(string destination)
@@ -203,9 +208,10 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
             }
             if (entry.ValueKind != JsonValueKind.Null) throw new InvalidOperationException("The merge queue entry is unreadable.");
             if (!required) return new(false, "absent", head);
-            (string Reason, DateTimeOffset? At)? removal = Removal(destination, n);
-            return removal is not { } removed ? new(required, "absent", head)
-                : new(required, FailureReasons.Contains(removed.Reason) ? "failed" : "removed", head, removed.Reason) { RemovedAt = removed.At };
+            if (Removal(destination, n) is not { } removed) return new(required, "absent", head);
+            // A removal because the queue merged the change leaves it absent, with that reason, until its pull request reads merged.
+            string state = MergedReasons.Contains(removed.Reason) ? "absent" : FailureReasons.Contains(removed.Reason) ? "failed" : "removed";
+            return new(required, state, head, removed.Reason) { RemovedAt = removed.At };
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {

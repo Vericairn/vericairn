@@ -45,7 +45,7 @@ internal sealed class FileSignal : IDisposable
             Assert.True(Directory.Exists(directory), "The test-owned directory must exist before watching it.");
         if (OperatingSystem.IsMacOS())
         {
-            native = new MacFileNotifications(directories, Notify, error => changes.Writer.TryComplete(error));
+            native = new MacFileNotifications(directories, Notify, Failed);
             return;
         }
 
@@ -60,7 +60,7 @@ internal sealed class FileSignal : IDisposable
             watcher.Created += Changed;
             watcher.Deleted += Changed;
             watcher.Renamed += Changed;
-            watcher.Error += (_, args) => changes.Writer.TryComplete(args.GetException());
+            watcher.Error += (_, args) => Failed(args.GetException());
             watcher.EnableRaisingEvents = true;
             watchers.Add(watcher);
         }
@@ -68,6 +68,16 @@ internal sealed class FileSignal : IDisposable
 
     private void Changed(object sender, FileSystemEventArgs args) => changes.Writer.TryWrite(true);
     internal void Notify() => changes.Writer.TryWrite(true);
+
+    /// <summary>
+    /// A watcher's failure. One whose buffer overflowed, as Windows' does under heavy file activity, lost which changes it saw, not that
+    /// something changed, and goes on watching: the condition is checked again (FIX-170). Any other failure ends the wait with it.
+    /// </summary>
+    internal void Failed(Exception error)
+    {
+        if (error is InternalBufferOverflowException) changes.Writer.TryWrite(true);
+        else changes.Writer.TryComplete(error);
+    }
 
     internal async Task UntilAsync(Func<bool> condition, string because, CancellationToken cancellationToken = default)
     {
