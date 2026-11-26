@@ -112,7 +112,7 @@ public sealed class JsonOutputContractTests : IDisposable
         CliHarness.Outcome json = CliHarness.Ok("--estate", root, "--json", "doctor");
         using JsonDocument document = JsonDocument.Parse(json.Out);
         JsonElement result = document.RootElement;
-        string[] probes = ["version", "runtime", "git", "dotnet", "estate", "custody", "enclave", "presence", "records", "search", "daemon"];
+        string[] probes = ["version", "runtime", "git", "dotnet", "estate", "custody", "enclave", "helper", "presence", "records", "search", "daemon"];
         Assert.Equal(probes.Append("stateWarnings").Order(StringComparer.Ordinal), result.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         foreach (string name in probes)
         {
@@ -128,6 +128,9 @@ public sealed class JsonOutputContractTests : IDisposable
         Assert.Equal("1, 2, 3", result.GetProperty("records").GetProperty("value").GetString());
         Assert.Equal(OperatingSystem.IsMacOS() ? JsonValueKind.String : JsonValueKind.Null, result.GetProperty("enclave").GetProperty("detail").ValueKind);
         if (!OperatingSystem.IsMacOS()) Assert.Equal("not-applicable", State(result, "enclave"));
+        // From 0.9.5 (FIX-169): on a Mac, the helper's version beside the command line's; elsewhere not applicable.
+        Assert.Equal(OperatingSystem.IsMacOS() ? JsonValueKind.String : JsonValueKind.Null, result.GetProperty("helper").GetProperty("detail").ValueKind);
+        if (!OperatingSystem.IsMacOS()) Assert.Equal("not-applicable", State(result, "helper"));
         // From 0.9.4 (ID-16): a build from source is a development build, so presence sessions are off on a Mac, and doctor says why.
         if (OperatingSystem.IsMacOS())
         {
@@ -151,6 +154,7 @@ public sealed class JsonOutputContractTests : IDisposable
         Assert.EndsWith(Detail(result, "custody")!.Split("; per-user state at ")[1], lines[5], StringComparison.Ordinal);
         int next = 6;
         if (OperatingSystem.IsMacOS()) Assert.StartsWith("enclave   Secure Enclave custody ", lines[next++], StringComparison.Ordinal);
+        if (OperatingSystem.IsMacOS()) Assert.Equal("helper    " + Detail(result, "helper"), lines[next++]);
         if (OperatingSystem.IsMacOS()) Assert.Equal("presence  " + Detail(result, "presence"), lines[next++]);
         Assert.Equal($"records   reads record formats 1, 2, 3; {Detail(result, "records")}", lines[next++]);
         Assert.StartsWith("search    ", lines[next++], StringComparison.Ordinal);

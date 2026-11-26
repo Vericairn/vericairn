@@ -19,6 +19,17 @@
 //   vericairn-enclave session <blob>                    a presence session (design/presence-sessions.md §§ 6 to 9): one presence
 //                                                       check, then signatures only on records the announced list covers, for at
 //                                                       most its limit, over the protocol below
+//   vericairn-enclave version                           prints the helper's version and the commands it serves as one compact
+//                                                       canonical JSON object, {"commands":[...],"version":"<version>"}; from 0.9.5,
+//                                                       so a helper that answers it with the usage line is older
+//
+// The helper's version. The command line asks for it before its first signature and refuses a helper that does not serve a command it
+// calls or whose version is older than the helper version it was built with (SecureEnclaveCustody.HelperVersion in
+// src/Vericairn.Records/Signing/SecureEnclaveKeyStore.cs): the helper and the command line come from the same release archive. The
+// version names the release whose helper this is, and changes, together with the command line's, in a release that changes the
+// helper; an older helper answers `version` with its usage line, which lists the commands it serves. A test pins this file's SHA-256
+// beside that constant (SecureEnclaveCustody.HelperSourceSha256), so any change here fails it until both versions name the release in
+// preparation and the pinned hash is updated.
 //
 // Exit codes: 0 done (a session closed by its runtime), 2 usage, 3 no Secure Enclave on this machine, 4 the operation failed or
 // was declined (a session ended for any reason but close), 5 a record was refused as not being in the compact canonical form.
@@ -1893,7 +1904,13 @@ func signRecord(_ blobPath: String, _ reason: String?) -> Never {
 
 // MARK: - Commands
 
-let usage = "usage: vericairn-enclave available | create <blob> [--presence] | public <blob> | sign <blob> <digest-hex> [reason] | sign-record <blob> [reason] | session <blob>"
+/// The helper's version (see the header): the release whose helper this is.
+let helperVersion = "0.9.5"
+
+/// The commands a release build of the helper serves, in the canonical order `version` lists them; a test build's hooks are not among them.
+let helperCommands = ["available", "create", "public", "session", "sign", "sign-record", "version"]
+
+let usage = "usage: vericairn-enclave available | create <blob> [--presence] | public <blob> | sign <blob> <digest-hex> [reason] | sign-record <blob> [reason] | session <blob> | version"
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else { fail(2, usage) }
 
@@ -1950,6 +1967,12 @@ do {
     case "session":
         guard arguments.count == 3 else { fail(2, usage) }
         runSession(arguments[2])
+
+    case "version":
+        // Needs no Secure Enclave: a command line asks it before anything that uses one.
+        guard arguments.count == 2 else { fail(2, usage) }
+        let commands = helperCommands.map { "\"" + $0 + "\"" }.joined(separator: ",")
+        print("{\"commands\":[" + commands + "],\"version\":\"" + helperVersion + "\"}")
 
     #if VERICAIRN_SESSION_TESTS
     case "canonical":

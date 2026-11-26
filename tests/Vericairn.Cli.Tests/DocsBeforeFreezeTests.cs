@@ -261,6 +261,33 @@ public sealed class DocsBeforeFreezeTests
         Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
     }
 
+    /// <summary>
+    /// FIX-171 (0.9.5): without --previous and --by the check opens the estate read-only and reads the product and its earlier releases
+    /// from it, which up to 0.9.4 failed with "The input does not contain any JSON tokens": the read-only load kept none of the record files
+    /// it judged, so each record read parsed empty bytes.
+    /// </summary>
+    [Fact]
+    public void WithoutPreviousOrByTheCheckReadsTheEstatesEarlierReleasesThroughAReadOnlyRuntime()
+    {
+        using var f = new DocumentPassFixture();
+        string declaration = Path.Combine(f.Repository.Root, "docs", "releases", "documents.json");
+        f.Repository.WriteFile("docs/releases/documents.json", """["install.md"]""");
+        f.Repository.WriteFile("docs/install.md", "# Installing Widget 0.2.0\n");
+        int before = f.Estate.Load().Records.Count;
+
+        CliHarness.Outcome trapped = CliHarness.Run("--estate", f.Estate.Root, "docs", "pass", "0.3.0", "--before", "--documents", declaration, "--product", "widget");
+        Assert.True(trapped.Code == 1, trapped.Out + trapped.Err);
+        Assert.DoesNotContain("JSON tokens", trapped.Err, StringComparison.Ordinal);
+        Assert.Contains("read for 0.2.0, 0.1.0", trapped.Out, StringComparison.Ordinal);
+        Assert.Contains("docs/install.md:1: prior-version token 0.2.0 named as the current release", trapped.Out, StringComparison.Ordinal);
+
+        f.Repository.WriteFile("docs/install.md", "# Installing Widget 0.3.0\n");
+        CliHarness.Outcome passed = CliHarness.Run("--estate", f.Estate.Root, "docs", "pass", "0.3.0", "--before", "--documents", declaration, "--product", "widget");
+        Assert.True(passed.Code == 0, passed.Out + passed.Err);
+        Assert.Contains($"{GuidesBeforeFreeze.PriorVersionMethod}: passed", passed.Out, StringComparison.Ordinal);
+        Assert.Equal(before, f.Estate.Load().Records.Count);
+    }
+
     [Fact]
     public void BeforeOptionsAreRefusedOutsideTheirModeAndExplicitPreviousVersionsNeedNoEstate()
     {

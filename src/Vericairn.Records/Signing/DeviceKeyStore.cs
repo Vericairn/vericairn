@@ -96,7 +96,9 @@ public static class DeviceKeyStores
             return new CngKeyStore();
         }
 
-        if (OperatingSystem.IsMacOS() && enclave && SecureEnclaveKeyStore.Available())
+        // From 0.9.5 a helper that cannot be started counts as one beside a Secure Enclave: its version check (FIX-169) refuses it before
+        // the key is made, where a weaker custody would otherwise be taken without a word.
+        if (OperatingSystem.IsMacOS() && enclave && SecureEnclaveKeyStore.Probe() is not false)
         {
             return new SecureEnclaveKeyStore(VericairnHome.Path(), presence);
         }
@@ -118,7 +120,7 @@ public static class DeviceKeyStores
             "file" or "file-owner-only" => new FileKeyStore(VericairnHome.Path()),
             "cng" or "windows-cng" when OperatingSystem.IsWindows() => new CngKeyStore(),
             "cng" or "windows-cng" => throw new PlatformNotSupportedException("CNG custody exists on Windows only."),
-            "secure-enclave" or SecureEnclaveCustody.Kind when OperatingSystem.IsMacOS() && SecureEnclaveKeyStore.Available() => new SecureEnclaveKeyStore(VericairnHome.Path(), presence),
+            "secure-enclave" or SecureEnclaveCustody.Kind when OperatingSystem.IsMacOS() && SecureEnclaveKeyStore.Probe() is not false => new SecureEnclaveKeyStore(VericairnHome.Path(), presence),
             "secure-enclave" or SecureEnclaveCustody.Kind => throw new PlatformNotSupportedException($"Secure Enclave custody needs a Mac with a Secure Enclave and the {SecureEnclaveCustody.HelperName} helper beside the command line."),
             "secret-service" or SecretServiceCustody.Kind when OperatingSystem.IsLinux() && SecretServiceKeyStore.Available() => new SecretServiceKeyStore(VericairnHome.Path()),
             "secret-service" or SecretServiceCustody.Kind => throw new PlatformNotSupportedException($"Secret-service custody needs Linux with a running secret service and {SecretServiceCustody.Tool} (libsecret)."),

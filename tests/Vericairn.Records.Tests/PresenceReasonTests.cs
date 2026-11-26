@@ -37,8 +37,10 @@ public sealed class PresenceReasonTests : IDisposable
         Directory.CreateDirectory(home);
         string captured = Path.Combine(home, "reason.txt");
         string helper = Path.Combine(home, "helper.sh");
-        // A stand-in for the helper: it keeps the reason its dialog would show and answers with a signature of the right size.
-        File.WriteAllText(helper, $"#!/bin/sh\nprintf '%s' \"$4\" > '{captured}'\necho {new string('A', 86)}==\n");
+        // A stand-in for the helper: it keeps the reason its dialog would show and answers with a signature of the right size; from 0.9.5
+        // (FIX-169) it answers version as this release's helper does, since the store asks that before its first signature.
+        string version = $$"""{"commands":["available","create","public","session","sign","sign-record","version"],"version":"{{SecureEnclaveCustody.HelperVersion}}"}""";
+        File.WriteAllText(helper, $"#!/bin/sh\nif [ \"$1\" = version ]; then echo '{version}'; exit 0; fi\nprintf '%s' \"$4\" > '{captured}'\necho {new string('A', 86)}==\n");
         File.SetUnixFileMode(helper, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var store = new SecureEnclaveKeyStore(home, helper: helper);
         byte[] digest = RecordSigning.Digest("sha256:" + new string('c', 64));

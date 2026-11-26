@@ -141,8 +141,9 @@ gives every current limit.
   `the device's key store refused to sign, InvalidOperationException` and nothing is written, so keep the
   command line and the helper from the same archive. The frozen guides do not say so; the maintained
   [install guide](../install.md) now does. The shipped archives are also development builds to presence
-  sessions, so they honor `VERICAIRN_ENCLAVE_HELPER`, which the guides say a release build ignores, as one of
-  the informational findings notes; a variable naming an earlier helper fails the same way. The Security
+  sessions, so they honor `VERICAIRN_ENCLAVE_HELPER`, which the frozen guides say a release build ignores, as one of
+  the informational findings notes; a variable naming an earlier helper fails the same way. The maintained guides
+  now say which builds honor it. The Security
   section's account of FIX-161 fits Windows; its published advisory
   ([GHSA-w6cw-x3cg-gwpg](https://github.com/Vericairn/vericairn/security/advisories/GHSA-w6cw-x3cg-gwpg)) states
   the reach on Linux and macOS too, where 0.9.3 could also take a program from the directory the command line

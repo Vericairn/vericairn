@@ -584,10 +584,12 @@ On a desktop, only Secure Enclave custody enforces interactive presence, for a p
 signed with Vericairn's Developer ID and the hardened runtime, checked against its designated requirement before each session, on a
 macOS major version the release lists as qualified. The signing is planned with `DIST-21`, and a release lists a macOS version only once
 its candidate's signed helper passes the [qualification](presence-session-qualification.md) on a real Mac; until a release does, the list
-is empty and every signature keeps its own check on every Mac. A development build, a build from source and a release on an unlisted
-macOS version keep one check per signature, and a development build honors `VERICAIRN_ENCLAVE_HELPER`, which a release build ignores.
-The helper is started with an empty environment and no inherited descriptor but its three standard streams. Release builds start the
-runtime processes the command line launches (the daemon and its launchd or systemd service) with the .NET diagnostics channel off
+is empty and every signature keeps its own check on every Mac. The published 0.9.4 archives, the `dotnet-vc` tool and builds from
+source carry no Developer ID team identifier in their build metadata, so `vericairn doctor` calls them development builds: they open
+no presence session, keep one check per signature and honor `VERICAIRN_ENCLAVE_HELPER`. A build carrying the team identifier uses the
+helper beside the command line and ignores the override; on an unlisted macOS version it keeps one check per signature. A session's
+helper starts with an empty environment and no inherited descriptor but its three standard streams. Builds carrying the team
+identifier start the runtime processes the command line launches (the daemon and its launchd or systemd service) with the .NET diagnostics channel off
 (`DOTNET_EnableDiagnostics=0`), which .NET reads only from a process's environment at its start, never from its runtime configuration
 file. The command line itself, which hosts the embedded runtime and holds a presence session whenever no daemon runs, keeps the channel
 its own environment gives it: it does not restart itself to close it. Set `DOTNET_EnableDiagnostics=0` (or
@@ -709,7 +711,8 @@ Sources, authority, exceptions and deadlines are rechecked after preparation and
 The retained basis is inspectable with `release basis <evidence-hash>`. From 0.8.2 (FIX-51) it names records, sources
 and objects by hash instead of copying them, so it no longer outgrows the estate's 8 MiB object limit: 0.8.0's
 copied basis did, which refused every submission from an estate with more than a few megabytes of records and
-documents. Reading a basis needs the estate's records and objects; one whose reference no longer resolves is
+documents. Reading a full basis needs the estate's records and objects and a registered local clone, holding the recorded
+commit, of every source repository the basis names at an exact commit (`release-basis.missing` otherwise); one whose reference no longer resolves is
 unavailable, as is one whose records, signatures included, differ from those its stored record digest covers
 (FIX-54, 0.8.2), and a single source file over the object limit is named but not kept. A preview grants no submission
 authority. An effect already dispatched remains under its original identity if later observation fails;
@@ -956,10 +959,11 @@ In 0.9.3 `IEstateApi` gained members for presence prompts and the estate's first
 `IRecordCommitAdapter` and `IPullRequestProvider` gained members, all with default implementations, so implementations outside
 Vericairn need supply none; [API compatibility for 0.9.3](api-compatibility-0.9.3.md) lists these changes.
 0.9.4 adds `IEstateApi` members for presence leases, standing agents and their outputs, a decision step's decision, concurrent
-assignments, the operator's answers and reviewed acts, automated observers and the timed stop drill, members of
-`IDeviceKeyStore`, `ISourceAdapter`, `IWorkspaceProvider` and `IAgentLauncher`, and the progress-target adapter contract, all
-with default implementations where they extend an existing interface, so implementations outside Vericairn need supply none;
-[API compatibility for 0.9.4](api-compatibility-0.9.4.md) lists these changes.
+assignments, the operator's answers and reviewed acts, automated observers and the timed stop drill. It also adds members of
+`IDeviceKeyStore`, `ISourceAdapter`, `IWorkspaceProvider`, `IAgentLauncher`, `IPushAdapter`, `IPullRequestProvider` and
+`IRecordCommitAdapter`. The added members of existing interfaces have default implementations. The new interfaces are
+`IRecordContentSigner`, `IProgressTargetAdapter` and `ISplitObjectSource`. [API compatibility for 0.9.4](api-compatibility-0.9.4.md)
+lists the defaults and which operations require the new adapter implementations.
 
 ## Reading repositories Vericairn did not create (0.9.4)
 
