@@ -953,14 +953,25 @@ public class StandingAgentRoutingTests
 
     // One renewal ask summarizes the period and the evaluation state before the term ends.
     [Trait("Journey", "D07-F")]
-    [Fact]
-    public void TheRenewalAskComesOnceBeforeTheUntilTimeAndDispatchesNothing()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheRenewalAskComesOnceBeforeTheUntilTimeAndDispatchesNothing(bool hasEvaluation)
     {
         using var run = new RunEstate(recordFormat: 3);
         string op = run.Estate.OperatorId;
         // A term of six hours asks within its last three, half of it; the clock is controlled to an hour before its until time.
         DateTimeOffset until = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddHours(6).ToUnixTimeSeconds());
         string goal = Standing(run, until: RecordParser.FormatTimestamp(until));
+        const string summary = "The inventory needs one more source.";
+        RecordEnvelope? evaluation = null;
+        if (hasEvaluation)
+        {
+            RecordWritten written = RunEstate.Ok(run.Service.GoalEvaluate(goal, new GoalEvaluateRequest(run.Estate.BuilderId, summary)));
+            evaluation = run.Estate.Load().ById[written.Id];
+            Assert.Equal(summary, EstateModel.BodyString(evaluation, "summary"));
+        }
+
         run.Service.FlowClock = new FixedClock(until.AddHours(-1));
         GoalStepResponse renewal = Step(run, goal, "renewal");
         Assert.True(renewal.Ok, renewal.Message);
@@ -969,10 +980,19 @@ public class StandingAgentRoutingTests
         string? question = EstateModel.BodyString(run.Estate.Load().ById[renewal.Ask!.Id], "question");
         Assert.StartsWith(StandingAgents.RenewalAsk + " Research the widget before its until time", question, StringComparison.Ordinal);
         Assert.Contains("this period it has had", question, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("it has no evaluation of this revision", question, StringComparison.Ordinal);
+        if (evaluation is null)
+        {
+            Assert.Contains("it has no evaluation of this revision", question, StringComparison.Ordinal);
+        }
+        else
+        {
+            string outcome = EstateModel.BodyString(evaluation, "outcome")!;
+            Assert.Contains($"its current evaluation {evaluation.Id} reads {outcome}: {summary}", question, StringComparison.Ordinal);
+        }
         GoalStepResponse next = Step(run, goal, "after-renewal");
         Assert.True(next.Outcome == "run", next.Message);
         run.Settled(next.Run!.Run);
+        Assert.Single(run.Estate.Load().OfType("ask"), a => a.Subject?.Id == goal);
     }
 
     [Fact]
