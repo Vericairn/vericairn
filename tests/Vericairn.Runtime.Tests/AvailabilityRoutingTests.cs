@@ -55,6 +55,8 @@ public sealed class AvailabilityRoutingTests
         Assert.Contains("record format 3", refused.Problem!.Message, StringComparison.Ordinal);
     }
 
+    // An away reviewer is passed over, and a step with one away candidate waits on their ask.
+    [Trait("Journey", "J91")]
     [Fact]
     public void RoutingPassesOverAnAwayPersonAndAsksThemOnlyWhenNoOtherPrincipalOfTheRoleIsAvailable()
     {
@@ -187,6 +189,8 @@ public sealed class AvailabilityRoutingTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    // A person hands a lapsed step to a roster replacement and the displaced holder's result is refused.
+    [Trait("Journey", "J87")]
     [Fact]
     public void APersonHandsALapsedStepToAnotherPrincipalOfItsRoleCitingTheLapseAsk()
     {

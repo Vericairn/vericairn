@@ -61,6 +61,8 @@ public sealed class PresenceLeaseTests
         Assert.Equal("not-found", run.Service.PresenceHeartbeat(lease.Lease).Problem!.Code);
     }
 
+    // A lapsed holder first raises local attention and only later the sponsor's reassignment ask.
+    [Trait("Journey", "J87")]
     [Fact]
     public void ASilentSessionHoldingWorkIsNoticedThenAskedAboutAndAHeartbeatWithdrawsTheAsk()
     {
@@ -118,6 +120,8 @@ public sealed class PresenceLeaseTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    // The roster controls the reassignment delay.
+    [Trait("Journey", "J87")]
     [Fact]
     public void TheRosterSetsHowLongALapseStandsBeforeItIsAskedAboutAndOnlyFromRecordFormatThree()
     {

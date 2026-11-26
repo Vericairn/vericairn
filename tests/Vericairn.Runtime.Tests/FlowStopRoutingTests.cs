@@ -21,6 +21,8 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class FlowStopRoutingTests
 {
+    // A reserved release acceptance waits for the operator's own act.
+    [Trait("Journey", "J91")]
     [Fact]
     public void GoalStepPutsAReservedStepToTheOperatorWithItsExactCommandOnlyWhenItIsNext()
     {
