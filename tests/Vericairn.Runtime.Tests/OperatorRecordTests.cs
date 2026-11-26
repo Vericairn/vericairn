@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
@@ -622,6 +623,103 @@ public sealed class OperatorRecordTests
         Assert.Equal("Signed 25 of 25 with 2 presence checks.", notices[^1].Text);
         // The renewal lists the action's recorded operations as references, which the rest supersede and observe.
         Assert.NotEmpty(PresenceSessionRules.ReadTerms(helpers[1].Terms[0]).References);
+    }
+
+    [Theory]
+    [Trait("Journey", "J133")]
+    [InlineData("accept2")]
+    [InlineData("pushOtherBranch")]
+    [InlineData("unlist")]
+    public void AnExactOutsideListInputEndsTheHelperAndRaisesRuntimeAttention(string vector)
+    {
+        using var f = new Fixture();
+        var helpers = new List<PresenceHelperStandIn>();
+        OutsideRecordChannel? channel = null;
+        f.Service.KeyStores = [new RecordingCustody(VericairnHome.Path())];
+        f.Service.PresenceRequired = device => device == f.Device;
+        f.Service.HostsEmbedded = true;
+        f.Service.PresenceHost = StandInSessions.Host(helpers, channel: helper => channel = new OutsideRecordChannel(helper, vector));
+
+        OperatorRecordResponse result = f.Run();
+
+        Assert.False(result.Ok);
+        Assert.Single(helpers);
+        Assert.NotNull(channel);
+        Assert.NotNull(channel.Outside);
+        Assert.Equal(("record.outside", "refusal"), (channel.Code, channel.EndReason));
+        Assert.DoesNotContain(channel.Outside, helpers[0].SignedHashes);
+        Assert.DoesNotContain(channel.Original, helpers[0].SignedHashes);
+        Assert.Equal(vector == "accept2" ? 0 : 1, helpers[0].SignedHashes.Count);
+        Assert.DoesNotContain("push", f.Events);
+        Assert.DoesNotContain("merge", f.Events);
+
+        // The runtime reports its own attempted record's digest. The substituted bytes are visible to the helper alone.
+        PresenceOutsideList refusal = Assert.Single(f.Service.PresenceOutside);
+        Assert.Equal((channel.Original, "record.outside"), (refusal.Hash, refusal.Code));
+        AttentionNotice attention = Assert.Single(f.Service.AttentionGet(f.Request.By).Items, item => item.SubjectType == "presence.outside-list");
+        Assert.Equal(refusal.Hash, attention.SubjectId);
+        Assert.Contains($"refused to sign {refusal.Type}", attention.Why, StringComparison.Ordinal);
+    }
+
+    /// <summary>A stand-in peer sends one outside-list record after the runtime has finished its own independent check.</summary>
+    private sealed class OutsideRecordChannel(PresenceHelperStandIn helper, string vector) : IPresenceHelperChannel
+    {
+        internal string? Original { get; private set; }
+        internal string? Outside { get; private set; }
+        internal string? Code { get; private set; }
+        internal string? EndReason { get; private set; }
+        public bool Ended => helper.Ended;
+
+        public void Send(byte[] message)
+        {
+            JsonObject command = JsonNode.Parse(message)!.AsObject();
+            if (Outside is null && command["type"]!.GetValue<string>() == "sign")
+            {
+                byte[] bytes = PresenceText.Base64Url(command["record"]!.GetValue<string>())!;
+                JsonObject record = JsonNode.Parse(bytes)!.AsObject();
+                bool target = vector == "accept2" ? record["type"]!.GetValue<string>() == "acceptance"
+                    : record["body"]!["action"]?.GetValue<string>() == "change-push";
+                if (target)
+                {
+                    JsonObject outside = JsonNode.Parse(Vectors.Root.GetProperty("records").GetProperty(vector).GetRawText())!.AsObject();
+                    if (vector == "pushOtherBranch")
+                    {
+                        string other = outside["body"]!["target"]!["branch"]!.GetValue<string>();
+                        outside = (JsonObject)record.DeepClone();
+                        JsonNode body = outside["body"]!;
+                        string branch = body["target"]!["branch"]!.GetValue<string>();
+                        body["target"]!["branch"] = other;
+                        body["identity"] = body["identity"]!.GetValue<string>().Replace(branch, other, StringComparison.Ordinal);
+                    }
+
+                    outside["at"] = record["at"]!.DeepClone();
+                    outside["by"] = record["by"]!.DeepClone();
+                    byte[] substituted = CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(outside));
+                    Original = PresenceText.Hash(bytes);
+                    Outside = PresenceText.Hash(substituted);
+                    command["record"] = PresenceText.Base64UrlText(substituted);
+                    message = CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(command));
+                }
+            }
+
+            helper.Send(message);
+        }
+
+        public JsonElement? Receive(TimeSpan wait)
+        {
+            JsonElement? reply = helper.Receive(wait);
+            if (reply is { } received)
+            {
+                string? type = received.GetProperty("type").GetString();
+                if (type == "refused") Code = received.GetProperty("code").GetString();
+                if (type == "ended") EndReason = received.GetProperty("reason").GetString();
+            }
+
+            return reply;
+        }
+
+        public void Kill() => helper.Kill();
+        public void Dispose() => helper.Dispose();
     }
 
     [Fact]

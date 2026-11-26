@@ -906,7 +906,7 @@ internal static class PresenceSessionHostVariation
 internal static class StandInSessions
 {
     internal static PresenceSessionHost Host(List<PresenceHelperStandIn> helpers, string check = "passed", TimeProvider? clock = null,
-        Func<int, string>? checkForSession = null) => new()
+        Func<int, string>? checkForSession = null, Func<PresenceHelperStandIn, IPresenceHelperChannel>? channel = null) => new()
     {
         Clock = clock ?? TimeProvider.System,
         Build = PresenceSessionBuild.Parse("ABCDE12345", "vericairn-enclave", "26"),
@@ -918,7 +918,7 @@ internal static class StandInSessions
             var helper = new PresenceHelperStandIn(digest => key.Sign(signer.DeviceId, digest), key.PublicKey(signer.DeviceId)!, clock)
             { Check = checkForSession?.Invoke(helpers.Count) ?? check };
             helpers.Add(helper);
-            return helper;
+            return channel?.Invoke(helper) ?? helper;
         },
     };
 
