@@ -2,8 +2,10 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using System.Globalization;
 using System.Text.Json;
 using Vericairn.Protocol;
+using Vericairn.Records.Model;
 
 namespace Vericairn.Cli;
 
@@ -50,13 +52,15 @@ internal sealed class OperatorRequestCloseCommand : Command
         var op = new Option<string?>("--operator") { Description = "For an agent: the operator whose words are cited." };
         var statement = new Option<string?>("--statement") { Description = "For an agent: the operator's exact words, verbatim." };
         var source = new Option<string?>("--source") { Description = "For an agent: the citation locating those words." };
-        var saidAt = new Option<string?>("--said-at") { Description = "For an agent: when the operator spoke, as a UTC record timestamp." };
+        var saidAt = new Option<string?>("--said-at") { Description = "For an agent: when the operator spoke, with Z or an explicit offset (2026-11-24T10:00:00Z, 2026-11-24T04:00:00-06:00), written in UTC in whole seconds. Without it, the time of this recording." };
         Arguments.Add(id);
         foreach (Option option in new Option[] { by, expected, reason, link, evidence, op, statement, source, saidAt }) Options.Add(option);
         SetAction(parse =>
         {
+            // A time that names no instant is refused here, before the estate is opened or anything is signed.
+            if (SaidAt(parse.GetValue(saidAt), DateTimeOffset.UtcNow) is not string at) return context.Fail(SaidAtRefusal);
             OperatorRequestWords? words = new[] { parse.GetValue(op), parse.GetValue(statement), parse.GetValue(source), parse.GetValue(saidAt) }.Any(v => v is not null)
-                ? new(parse.GetValue(op) ?? "", parse.GetValue(statement) ?? "", parse.GetValue(source) ?? "", parse.GetValue(saidAt) ?? "") : null;
+                ? new(parse.GetValue(op) ?? "", parse.GetValue(statement) ?? "", parse.GetValue(source) ?? "", at) : null;
             int Close(JsonElement? proof) => context.WithApi(parse.GetValue(context.EstateOption)!, api =>
             {
                 var request = new OperatorRequestCloseRequest(parse.GetValue(by)!, parse.GetValue(expected), parse.GetValue(reason), parse.GetValue(link), proof, words);
@@ -65,4 +69,29 @@ internal sealed class OperatorRequestCloseCommand : Command
             return parse.GetValue(evidence) is string path ? context.WithBody(path, body => Close(body)) : Close(null);
         });
     }
+
+    /// <summary>
+    /// From 0.9.5 (FIX-171): the refusal of a <c>--said-at</c> without <c>Z</c> or an explicit offset, which names the form it takes.
+    /// </summary>
+    internal const string SaidAtRefusal = "--said-at takes the time the operator spoke with Z or an explicit offset, such as 2026-11-24T10:00:00Z or "
+        + "2026-11-24T04:00:00-06:00, and it is written in UTC in whole seconds; a time without either names no instant. Nothing was signed or written.";
+
+    /// <summary>
+    /// From 0.9.5 (FIX-171): when the operator's cited words were said, in the record's timestamp form, a UTC time in whole seconds. A
+    /// given time must carry <c>Z</c> or an explicit offset, and is written as the same instant in that form, without its fractional
+    /// seconds; any other text, a time without an offset included, is null, which the command refuses (<see cref="SaidAtRefusal"/>)
+    /// before anything is signed, since a local wall time read as UTC would be hours off. Without a given time, the time of this
+    /// recording, which follows the request and precedes the record's own time, as the record requires. Up to 0.9.4 the command passed
+    /// <c>--said-at</c> on as given and wrote an empty time without it, and the record refused any time but a whole-second UTC one.
+    /// </summary>
+    internal static string? SaidAt(string? given, DateTimeOffset now)
+    {
+        if (given is null) return RecordParser.FormatTimestamp(now);
+        return DateTimeOffset.TryParseExact(given.Trim(), SaidAtForms, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset at)
+            ? RecordParser.FormatTimestamp(at) : null;
+    }
+
+    // Each form names its offset: a literal Z, read as UTC, or zzz, an offset such as +02:00. None accepts a time without one.
+    private static readonly string[] SaidAtForms =
+        ["yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", "yyyy-MM-dd'T'HH:mm:sszzz", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz"];
 }

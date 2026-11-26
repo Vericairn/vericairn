@@ -32,7 +32,9 @@ internal sealed class MachineDiagnostics(CommandContext context)
         string custodyDetail = format is < 2
             ? $"the default for this estate, at record format {format}, which cannot name the Secure Enclave; {DeviceKeyStores.Default().Kind} once it is at format 2"
             : "default on this platform";
-        Probe enclave = !OperatingSystem.IsMacOS() ? new("not-applicable", null, null) : Enclave(SecureEnclaveKeyStore.Available(), SecureEnclaveCustody.HelperPath() is not null);
+        Probe enclave = !OperatingSystem.IsMacOS() ? new("not-applicable", null, null) : Enclave(SecureEnclaveKeyStore.Probe(), SecureEnclaveCustody.HelperPath() is not null);
+        Probe helper = !OperatingSystem.IsMacOS() ? new("not-applicable", null, null)
+            : Helper(SecureEnclaveCustody.HelperPath() is string path ? EnclaveHelperCheck.Ask(path) : null, EnclaveHelperCheck.CommandLineVersion);
         Probe presence = Presence(root, estate);
         string records = string.Join(", ", RecordFormats.Reads);
         string writes = $"writes an estate's own format, at most {RecordFormats.Current}";
@@ -57,6 +59,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
                 ["estate"] = estate ? new Probe("present", full, "manifest present") : new Probe("missing", full, $"not an estate root (no {EstateLayout.ManifestPath})"),
                 ["custody"] = new Probe("present", custody, $"{custodyDetail}; per-user state at {VericairnHome.Path()}"),
                 ["enclave"] = enclave,
+                ["helper"] = helper,
                 ["presence"] = presence,
                 ["records"] = new Probe("present", records, writes),
                 ["search"] = searchProblem is null ? new Probe("present", search, null) : new Probe("unavailable", null, searchProblem),
@@ -78,6 +81,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
         if (OperatingSystem.IsMacOS())
         {
             context.Output.WriteLine(EnclaveLine(enclave));
+            context.Output.WriteLine("helper    " + helper.Detail);
             context.Output.WriteLine("presence  " + presence.Detail);
         }
         context.Output.WriteLine($"records   reads record formats {records}; {writes}");
@@ -98,11 +102,28 @@ internal sealed class MachineDiagnostics(CommandContext context)
     /// <summary>
     /// The enclave probe on a Mac: present when the helper reports a Secure Enclave available to this process; otherwise unavailable,
     /// because the helper is not beside the command line or because it reports no Secure Enclave available to this process, which
-    /// describes the context the probe ran in, not the machine. The enrollment troubleshooting guide quotes each line (DOCS-45).
+    /// describes the context the probe ran in, not the machine. The enrollment troubleshooting guide quotes each line (DOCS-45). From
+    /// 0.9.5 <paramref name="available"/> is null for a helper that is beside the command line but cannot be started, which is said
+    /// without its path; up to 0.9.4 doctor ended there with the start failure.
     /// </summary>
-    internal static Probe Enclave(bool available, bool helper) => available
-        ? new("present", "secure-enclave", "Secure Enclave custody available (record format 2): a person's device asks for Touch ID or the login password at every signature unless it is created with --presence false; an agent's never asks")
-        : new("unavailable", null, helper ? "no Secure Enclave available to this process" : $"no {SecureEnclaveCustody.HelperName} helper beside the command line");
+    internal static Probe Enclave(bool? available, bool helper) => available switch
+    {
+        true => new("present", "secure-enclave", "Secure Enclave custody available (record format 2): a person's device asks for Touch ID or the login password at every signature unless it is created with --presence false; an agent's never asks"),
+        null => new("unavailable", null, $"the {SecureEnclaveCustody.HelperName} helper beside the command line could not be started"),
+        false => new("unavailable", null, helper ? "no Secure Enclave available to this process" : $"no {SecureEnclaveCustody.HelperName} helper beside the command line"),
+    };
+
+    /// <summary>
+    /// From 0.9.5 (FIX-169): the helper probe on a Mac, from what the helper beside the command line answered when asked its version: its
+    /// version beside the command line's, present when the command line signs through it, unavailable when it is refused, and a mismatch
+    /// flagged when it is older, newer or does not serve a command the command line calls; missing without a helper.
+    /// </summary>
+    internal static Probe Helper(EnclaveHelperReport? report, string commandLine) => report switch
+    {
+        null => new("missing", null, $"no {SecureEnclaveCustody.HelperName} helper beside the command line"),
+        { Refused: true } => new("unavailable", report.Version, report.Doctor(commandLine)),
+        _ => new("present", report.Version, report.Doctor(commandLine)),
+    };
 
     /// <summary>The report's enclave line for a probe on a Mac.</summary>
     internal static string EnclaveLine(Probe enclave) =>
