@@ -70,6 +70,10 @@ internal static class LiveStoreRecovery
     // From 0.9.5 (FIX-174) an upgrade holds the lock alone while it records its restore point, as a rebuild does while it rebuilds.
     internal const string WriterLockHeldAlone = "Another command on this machine holds this estate's writer lock alone: its derived cache is being rebuilt with 'vericairn estate cache rebuild', or an upgrade is recording its restore point. Try again when that finishes.";
 
+    // From 0.9.5 (FIX-174): a writable session that gave up its share of the writer lock for an upgrade's restore point and could not take it
+    // back. No full stop: it ends the restore point's refusal, which goes on.
+    internal const string ShareNotRetaken = "this runtime gave up its share of the estate's writer lock to record the restore point and could not take it back, because another command on this machine still holds the lock alone. Restart this runtime ('vericairn runtime stop', then start it again) so that a cache rebuild or another upgrade sees the estate as open, then run the upgrade again";
+
     internal static string LocalOnly(string lead, string databasePath) =>
         lead + " It is the estate's canonical copy, not a cache, so it is never moved, deleted or rebuilt: keep live.db with its -wal and -shm files together, stop any daemon and command using it, and recover from a backup of that directory or from an earlier 'vericairn estate export' ('vericairn estate restore' restores it as a repository-synced estate). Database: " + databasePath;
 

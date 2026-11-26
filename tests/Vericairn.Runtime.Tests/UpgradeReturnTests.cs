@@ -479,11 +479,11 @@ public sealed class UpgradeReturnTests
         Assert.Equal("refused", problem!.Code);
         Assert.StartsWith("The upgrade's restore point could not be recorded on this machine: ", problem.Message, StringComparison.Ordinal);
         Assert.Contains(writable
-            ? "another runtime on this machine has this estate open beside the one applying the upgrade, a run's MCP server or a command in flight, and holds its writer lock"
-            : "a runtime is serving this estate on this machine, a daemon, a run's MCP server or another command in flight, and holds its writer lock", problem.Message, StringComparison.Ordinal);
+            ? "another runtime on this machine has this estate open beside the one applying the upgrade: an MCP server ('vericairn mcp serve', as an AI client or a run starts it) or a command in flight, and holds its writer lock"
+            : "a runtime has this estate open on this machine and holds its writer lock: a daemon, an MCP server ('vericairn mcp serve', as an AI client or a run starts it) or another command in flight", problem.Message, StringComparison.Ordinal);
         Assert.Contains(writable
-            ? "Let it finish or stop it, then run the upgrade again through this runtime."
-            : "Run the upgrade through the daemon serving the estate, or after stopping that runtime ('vericairn runtime stop') and letting other commands finish.", problem.Message, StringComparison.Ordinal);
+            ? "Let it finish or close it, then run the upgrade again through this runtime."
+            : "Run the upgrade through the daemon serving the estate, or after stopping the daemon ('vericairn runtime stop'), closing any MCP server and letting other commands finish.", problem.Message, StringComparison.Ordinal);
         Assert.EndsWith("Nothing was applied, and nothing changed.", problem.Message, StringComparison.Ordinal);
         Assert.Equal(estate, Snapshot(f.Estate.Root));
         Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
@@ -560,6 +560,121 @@ public sealed class UpgradeReturnTests
         }
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void AWritableSessionTakesItsShareBackWhenAnotherCommandTookTheLockAloneInTheGap(int gap)
+    {
+        // FIX-174: a writable session, as the daemon's, gives up its share of the writer lock for the hold and takes it back afterwards.
+        // Another command can take the lock alone in the moment between: gap 1 falls before the hold, gap 2 after it. The session waits
+        // until that command releases the lock, so it never runs on without its share, which would let a rebuild or another upgrade go
+        // ahead as if the estate were closed.
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        string clone = PopulateLiveStore(f);
+        string live = Path.Combine(clone, "live.db");
+        using EstateService api = EstateService.Open(f.Estate.Root);
+        string path = api.Session.Live.Path;
+        int gaps = 0, refusals = 0;
+        bool took = false;
+        FileStream? competitor = null;
+        EstateSession.WriterLockGap = at =>
+        {
+            if (at != path || ++gaps != gap) return;
+            competitor = LiveStoreRecovery.ExclusiveWriterLock(live);
+            took = competitor is not null;
+        };
+        EstateSession.RetakeRefused = at =>
+        {
+            if (at != path) return;
+            refusals++;
+            // The other command finishes and releases the lock.
+            competitor?.Dispose();
+            competitor = null;
+        };
+        UpgradeResponse? response;
+        Problem? problem;
+        try
+        {
+            (response, problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+        }
+        finally
+        {
+            EstateSession.WriterLockGap = null;
+            EstateSession.RetakeRefused = null;
+            competitor?.Dispose();
+        }
+
+        Assert.True(took);
+        Assert.Equal(1, refusals);
+        if (gap == 1)
+        {
+            // The hold itself is refused while the other command holds the lock, and nothing is made.
+            Assert.Null(response);
+            Assert.Contains("another runtime on this machine has this estate open beside the one applying the upgrade", problem!.Message, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
+            Assert.Equal("release 0.9.3", f.Estate.Load().Manifest!.Describe());
+        }
+        else
+        {
+            Assert.Null(problem);
+            Assert.True(response!.Applied);
+            Assert.Contains("live.db", response.Return!.RestorePoint!.Files);
+        }
+
+        // Either way the session holds its share again.
+        using (FileStream? alone = LiveStoreRecovery.ExclusiveWriterLock(live)) Assert.Null(alone);
+    }
+
+    [Fact]
+    public void AWritableSessionThatCannotTakeItsShareBackRefusesTheUpgradeAndKeepsNoRestorePoint()
+    {
+        // FIX-174: when the other command still holds the lock alone after the session has tried for its bound, the hold ends inside the
+        // recording, so the restore point already written is discarded and the upgrade is refused, saying to restart the runtime; the
+        // session, still writable, takes its share back at its next hold.
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        string clone = PopulateLiveStore(f);
+        string live = Path.Combine(clone, "live.db");
+        using EstateService api = EstateService.Open(f.Estate.Root);
+        string path = api.Session.Live.Path;
+        api.Session.RetakeFor = TimeSpan.Zero;
+        string[] estate = Snapshot(f.Estate.Root);
+        int gaps = 0;
+        FileStream? competitor = null;
+        EstateSession.WriterLockGap = at =>
+        {
+            if (at == path && ++gaps == 2) competitor = LiveStoreRecovery.ExclusiveWriterLock(live);
+        };
+        UpgradeResponse? refused;
+        Problem? problem;
+        try
+        {
+            (refused, problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+            Assert.NotNull(competitor);
+        }
+        finally
+        {
+            EstateSession.WriterLockGap = null;
+            competitor?.Dispose();
+        }
+
+        Assert.Null(refused);
+        Assert.Equal("refused", problem!.Code);
+        Assert.Equal($"The upgrade's restore point could not be recorded on this machine: {LiveStoreRecovery.ShareNotRetaken}. Nothing was applied, and nothing changed.", problem.Message);
+        Assert.Equal(estate, Snapshot(f.Estate.Root));
+        Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
+        Assert.Equal("release 0.9.3", f.Estate.Load().Manifest!.Describe());
+
+        api.Session.RetakeFor = TimeSpan.FromSeconds(30);
+        (UpgradeResponse? applied, Problem? none) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+        Assert.Null(none);
+        Assert.True(applied!.Applied);
+        using (FileStream? alone = LiveStoreRecovery.ExclusiveWriterLock(live)) Assert.Null(alone);
+    }
+
     [Fact]
     public void ThePlanNamesTheLiveStoreOnlyWhileTheCloneKeepsOne()
     {
@@ -572,7 +687,9 @@ public sealed class UpgradeReturnTests
             Assert.False(File.Exists(api.Session.Live.Path));
             (UpgradeResponse? check, Problem? problem) = api.Upgrade(new("0.9.4", null, true));
             Assert.Null(problem);
-            Assert.Contains("an export of this machine's local state for this clone, which holds no live store, since this machine keeps none for the clone; release 0.9.3 builds it again from the repository's records, in a new directory under", check!.Return!.Steps[0], StringComparison.Ordinal);
+            Assert.Contains("an export of this machine's local state for this clone, in a new directory under", check!.Return!.Steps[0], StringComparison.Ordinal);
+            // The location comes before the clause, which says what the export holds, not where the previous release rebuilds the live store.
+            Assert.EndsWith(UpgradeReturns.RestorePointsDirectory + "; the export holds no live store, since this machine keeps none for the clone, and release 0.9.3 builds it again from the repository's records.", check.Return.Steps[0], StringComparison.Ordinal);
             Assert.DoesNotContain("its live store included", check.Return.Steps[0], StringComparison.Ordinal);
         }
 

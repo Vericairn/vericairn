@@ -27,9 +27,10 @@ public sealed partial class EstateService
         {
             // From 0.9.5 (FIX-174) a repository-synced clone that only read-only commands have opened keeps no live store on disk, and its
             // restore point holds none, so the plan names the live store only while there is one to export.
-            string liveStore = File.Exists(session.Live.Path) ? ", its live store included"
-                : synced ? $", which holds no live store, since this machine keeps none for the clone; {plan.FromPin} builds it again from the repository's records" : string.Empty;
-            steps.Add($"Applying records a restore point before it writes anything: {(synced ? "the estate repository's checked-out commit" : "no repository commit, since a local-only estate's records are in its live store")} and an export of this machine's local state for this clone{liveStore}, in a new directory under {Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)}.");
+            bool onDisk = File.Exists(session.Live.Path);
+            string liveStore = onDisk ? ", its live store included" : string.Empty;
+            string noLiveStore = !onDisk && synced ? $"; the export holds no live store, since this machine keeps none for the clone, and {plan.FromPin} builds it again from the repository's records" : string.Empty;
+            steps.Add($"Applying records a restore point before it writes anything: {(synced ? "the estate repository's checked-out commit" : "no repository commit, since a local-only estate's records are in its live store")} and an export of this machine's local state for this clone{liveStore}, in a new directory under {Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)}{noLiveStore}.");
             steps.Add($"From it, the way back to {plan.FromPin} is: stop the runtime serving the estate here, return the estate's files to that commit, put the exported local state back, and run {plan.FromPin}; the applied upgrade names each step with its paths.");
         }
         else

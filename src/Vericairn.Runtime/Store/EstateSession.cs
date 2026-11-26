@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -133,22 +134,67 @@ public sealed class EstateSession : IDisposable
     /// <summary>
     /// From 0.9.5 (FIX-174): takes the estate's writer lock alone, as a cache rebuild does, so that while the hold lasts no other runtime on
     /// this machine has the estate open for writing, and none opens it: every writable session holds the lock shared for its lifetime. Null,
-    /// and this session as it was, when another runtime holds the lock: a daemon, a run's MCP server or a command in flight. A writable
-    /// session gives up its own share of the lock for the hold and takes it again when the hold ends.
+    /// and this session as it was, when another runtime holds the lock: a daemon, an MCP server or a command in flight. A writable session
+    /// gives up its own share of the lock for the hold and takes it again when the hold ends, or here when the hold is refused; see
+    /// <see cref="RetakeShare"/>.
     /// </summary>
     internal WritersHeldAlone? HoldWritersAlone()
     {
+        // The lock's directory is made before the share is given up, so that only the two opens fall between giving it up and holding alone.
+        OwnerOnlyState.CreateDirectory(Path.GetDirectoryName(LiveStoreRecovery.WriterLockPath(Live.Path))!, home);
+        // A writable session holds a share for its lifetime and takes it back after the hold, even one that could not take it back after an
+        // earlier hold.
+        bool writable = !readOnly;
         FileStream? share = writers;
         writers = null;
         share?.Dispose();
+        if (writable) WriterLockGap?.Invoke(Live.Path);
         FileStream? alone = LiveStoreRecovery.ExclusiveWriterLock(Live.Path, home);
         if (alone is null)
         {
-            if (share is not null) writers = LiveStoreRecovery.ShareWriterLock(Live.Path);
+            if (writable) RetakeShare();
             return null;
         }
 
-        return new WritersHeldAlone(this, alone, share is not null);
+        return new WritersHeldAlone(this, alone, writable);
+    }
+
+    /// <summary>From 0.9.5 (FIX-174): how long this writable session keeps trying to take its share of the writer lock back after a hold.</summary>
+    internal TimeSpan RetakeFor { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// For tests: called with the live store's path while a writable session holds no share of the writer lock, between giving it up and
+    /// holding the lock alone, and between releasing it and taking its share back.
+    /// </summary>
+    internal static Action<string>? WriterLockGap { get; set; }
+
+    /// <summary>For tests: called with the live store's path each time taking the share back is refused, before the next try.</summary>
+    internal static Action<string>? RetakeRefused { get; set; }
+
+    /// <summary>
+    /// From 0.9.5 (FIX-174): takes this writable session's share of the writer lock back after it gave it up for a hold. Another command can
+    /// take the lock alone in the moment between, such as a cache rebuild or another upgrade's restore point; the session then tries again
+    /// until that command releases it, for at most <see cref="RetakeFor"/>, since a writable session without its share would let a rebuild
+    /// or another upgrade go ahead as if the estate were closed. Throws an <see cref="IOException"/> with
+    /// <see cref="LiveStoreRecovery.ShareNotRetaken"/> when the share cannot be taken back.
+    /// </summary>
+    private void RetakeShare()
+    {
+        var waited = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                writers = LiveStoreRecovery.ShareWriterLock(Live.Path);
+                return;
+            }
+            catch (IOException exception) when (exception.Message == LiveStoreRecovery.WriterLockHeldAlone)
+            {
+                if (waited.Elapsed >= RetakeFor) throw new IOException(LiveStoreRecovery.ShareNotRetaken, exception);
+                RetakeRefused?.Invoke(Live.Path);
+                Thread.Sleep(25);
+            }
+        }
     }
 
     /// <summary>From 0.9.5 (FIX-174): the estate's writer lock held alone by <see cref="HoldWritersAlone"/>, released on disposal.</summary>
@@ -166,15 +212,17 @@ public sealed class EstateSession : IDisposable
         }
 
         /// <summary>
-        /// Releases the lock and, for a writable session, takes its share again; that throws only when another command took the lock alone
-        /// in between, such as a cache rebuild started at that moment.
+        /// Releases the lock and, for a writable session, takes its share again, waiting while another command that took the lock alone in
+        /// between still holds it; throws when the share cannot be taken back (<see cref="RetakeShare"/>).
         /// </summary>
         public void Dispose()
         {
             if (alone is null) return;
             alone.Dispose();
             alone = null;
-            if (shared) session.writers = LiveStoreRecovery.ShareWriterLock(session.Live.Path);
+            if (!shared) return;
+            WriterLockGap?.Invoke(session.Live.Path);
+            session.RetakeShare();
         }
     }
 

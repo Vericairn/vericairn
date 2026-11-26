@@ -202,70 +202,101 @@ public static class UpgradeReturns
         string clone = Path.GetDirectoryName(session.Live.Path)!;
         // Every writable session holds the lock shared for its lifetime, so holding it alone means no other is open, and none opens, until
         // the restore point is recorded. A writable session applying the upgrade, as the daemon's, gives up its own share for the hold.
-        using EstateSession.WritersHeldAlone writers = session.HoldWritersAlone() ?? throw new SqliteExportException(session.IsReadOnly
-            ? "a runtime is serving this estate on this machine, a daemon, a run's MCP server or another command in flight, and holds its writer lock, so the clone's local state could change while the restore point copies it. Run the upgrade through the daemon serving the estate, or after stopping that runtime ('vericairn runtime stop') and letting other commands finish"
-            : "another runtime on this machine has this estate open beside the one applying the upgrade, a run's MCP server or a command in flight, and holds its writer lock, so the clone's local state could change while the restore point copies it. Let it finish or stop it, then run the upgrade again through this runtime");
+        EstateSession.WritersHeldAlone writers;
+        try
+        {
+            writers = session.HoldWritersAlone() ?? throw new SqliteExportException(session.IsReadOnly
+                ? "a runtime has this estate open on this machine and holds its writer lock: a daemon, an MCP server ('vericairn mcp serve', as an AI client or a run starts it) or another command in flight, so the clone's local state could change while the restore point copies it. Run the upgrade through the daemon serving the estate, or after stopping the daemon ('vericairn runtime stop'), closing any MCP server and letting other commands finish"
+                : "another runtime on this machine has this estate open beside the one applying the upgrade: an MCP server ('vericairn mcp serve', as an AI client or a run starts it) or a command in flight, and holds its writer lock, so the clone's local state could change while the restore point copies it. Let it finish or close it, then run the upgrade again through this runtime");
+        }
+        catch (IOException exception) when (exception.Message == LiveStoreRecovery.ShareNotRetaken)
+        {
+            throw new SqliteExportException(exception.Message, exception);
+        }
+
         string id = Ulid.NewUlid().Value;
         string directory = Path.Combine(clone, RestorePointsDirectory, id);
         string state = Path.Combine(directory, "state");
-        OwnerOnlyState.CreateDirectory(Path.Combine(clone, RestorePointsDirectory));
-        OwnerOnlyState.CreateDirectory(directory);
-        OwnerOnlyState.CreateDirectory(state);
         try
         {
-            string live = Path.GetFileName(session.Live.Path);
-            bool synced = session.Profile == "repository-synced";
-            if (File.Exists(session.Live.Path))
-                ExportDatabase(session.Live.Path, state, live, synced);
-            else if (!synced)
-                throw new SqliteExportException($"{live}, the live store that holds this local-only estate's records, is not on this machine's disk. {Recovery(live, live, synced)}");
-
-            // The live store, the daemon's endpoint, temporary files and locks are left out before any file is opened: the writer lock this
-            // upgrade holds alone refuses even a reader's handle.
-            string[] files = [.. Directory.EnumerateFiles(clone).Select(Path.GetFileName).OfType<string>()
-                .Where(name => !name.StartsWith(live, StringComparison.Ordinal) && name is not "daemon.json" && !name.EndsWith(".tmp", StringComparison.Ordinal) && !name.EndsWith(".lock", StringComparison.Ordinal))
-                .Order(StringComparer.Ordinal)];
-            var databases = new HashSet<string>(files.Where(name =>
-                name is EventJournal.FileName or KeywordIndex.FileName or "objects.db" || SqliteExport.IsDatabase(Path.Combine(clone, name))), StringComparer.Ordinal);
-            foreach (string name in files)
+            RestorePoint recorded;
+            try
             {
-                string file = Path.Combine(clone, name);
-                // A database's -wal, -shm and -journal are in its export, never copied as files a runtime may be writing.
-                if (SqliteExport.Sidecars.Any(sidecar => name.EndsWith(sidecar, StringComparison.Ordinal) && databases.Contains(name[..^sidecar.Length]))) continue;
-                if (new FileInfo(file).LinkTarget is not null) continue;
-                if (databases.Contains(name))
-                    ExportDatabase(file, state, live, synced);
-                else
-                    File.Copy(file, Path.Combine(state, name));
+                recorded = RecordHeld(session, fromPin, toPin, commit, clean, now, clone, id, directory, state);
+            }
+            finally
+            {
+                // The hold ends here, inside the try, so that a writable session that cannot take its share of the lock back discards the
+                // restore point and refuses the upgrade: no upgrade applies while that runtime holds no share.
+                writers.Dispose();
             }
 
-            var inventory = new JsonArray();
-            var names = new List<string>();
-            foreach (string file in Directory.EnumerateFiles(state).Order(StringComparer.Ordinal))
-            {
-                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                using FileStream stream = File.OpenRead(file);
-                inventory.Add(new JsonObject { ["name"] = Path.GetFileName(file), ["sha256"] = Convert.ToHexStringLower(SHA256.HashData(stream)), ["bytes"] = stream.Length });
-                names.Add(Path.GetFileName(file));
-            }
-
-            using JsonDocument listed = JsonDocument.Parse(inventory.ToJsonString());
-            string stateHash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(CanonicalJson.SerializeUtf8(listed.RootElement)));
-            string createdAt = RecordParser.FormatTimestamp(now);
-            var description = new JsonObject
-            {
-                ["format"] = RestorePointFormat, ["id"] = id, ["createdAt"] = createdAt, ["estate"] = session.Manifest.Estate,
-                ["fromPin"] = fromPin, ["toPin"] = toPin, ["commit"] = commit, ["clean"] = clean, ["state"] = inventory.DeepClone(), ["stateHash"] = stateHash,
-            };
-            using JsonDocument written = JsonDocument.Parse(description.ToJsonString());
-            File.WriteAllBytes(Path.Combine(directory, "restore-point.json"), CanonicalJson.SerializePrettyUtf8(written.RootElement));
-            return new(id, createdAt, commit, clean, directory, state, stateHash, names);
+            return recorded;
+        }
+        catch (IOException exception) when (exception.Message == LiveStoreRecovery.ShareNotRetaken)
+        {
+            Discard(directory);
+            throw new SqliteExportException(exception.Message, exception);
         }
         catch
         {
             Discard(directory);
             throw;
         }
+    }
+
+    private static RestorePoint RecordHeld(EstateSession session, string fromPin, string toPin, string? commit, bool clean, DateTimeOffset now, string clone, string id, string directory, string state)
+    {
+        OwnerOnlyState.CreateDirectory(Path.Combine(clone, RestorePointsDirectory));
+        OwnerOnlyState.CreateDirectory(directory);
+        OwnerOnlyState.CreateDirectory(state);
+        string live = Path.GetFileName(session.Live.Path);
+        bool synced = session.Profile == "repository-synced";
+        if (File.Exists(session.Live.Path))
+            ExportDatabase(session.Live.Path, state, live, synced);
+        else if (!synced)
+            throw new SqliteExportException($"{live}, the live store that holds this local-only estate's records, is not on this machine's disk. {Recovery(live, live, synced)}");
+
+        // The live store, the daemon's endpoint, temporary files and locks are left out before any file is opened: the writer lock this
+        // upgrade holds alone refuses even a reader's handle.
+        string[] files = [.. Directory.EnumerateFiles(clone).Select(Path.GetFileName).OfType<string>()
+            .Where(name => !name.StartsWith(live, StringComparison.Ordinal) && name is not "daemon.json" && !name.EndsWith(".tmp", StringComparison.Ordinal) && !name.EndsWith(".lock", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)];
+        var databases = new HashSet<string>(files.Where(name =>
+            name is EventJournal.FileName or KeywordIndex.FileName or "objects.db" || SqliteExport.IsDatabase(Path.Combine(clone, name))), StringComparer.Ordinal);
+        foreach (string name in files)
+        {
+            string file = Path.Combine(clone, name);
+            // A database's -wal, -shm and -journal are in its export, never copied as files a runtime may be writing.
+            if (SqliteExport.Sidecars.Any(sidecar => name.EndsWith(sidecar, StringComparison.Ordinal) && databases.Contains(name[..^sidecar.Length]))) continue;
+            if (new FileInfo(file).LinkTarget is not null) continue;
+            if (databases.Contains(name))
+                ExportDatabase(file, state, live, synced);
+            else
+                File.Copy(file, Path.Combine(state, name));
+        }
+
+        var inventory = new JsonArray();
+        var names = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(state).Order(StringComparer.Ordinal))
+        {
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            using FileStream stream = File.OpenRead(file);
+            inventory.Add(new JsonObject { ["name"] = Path.GetFileName(file), ["sha256"] = Convert.ToHexStringLower(SHA256.HashData(stream)), ["bytes"] = stream.Length });
+            names.Add(Path.GetFileName(file));
+        }
+
+        using JsonDocument listed = JsonDocument.Parse(inventory.ToJsonString());
+        string stateHash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(CanonicalJson.SerializeUtf8(listed.RootElement)));
+        string createdAt = RecordParser.FormatTimestamp(now);
+        var description = new JsonObject
+        {
+            ["format"] = RestorePointFormat, ["id"] = id, ["createdAt"] = createdAt, ["estate"] = session.Manifest.Estate,
+            ["fromPin"] = fromPin, ["toPin"] = toPin, ["commit"] = commit, ["clean"] = clean, ["state"] = inventory.DeepClone(), ["stateHash"] = stateHash,
+        };
+        using JsonDocument written = JsonDocument.Parse(description.ToJsonString());
+        File.WriteAllBytes(Path.Combine(directory, "restore-point.json"), CanonicalJson.SerializePrettyUtf8(written.RootElement));
+        return new(id, createdAt, commit, clean, directory, state, stateHash, names);
     }
 
     private static void ExportDatabase(string file, string state, string live, bool synced)

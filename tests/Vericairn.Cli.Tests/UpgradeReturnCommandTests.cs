@@ -112,8 +112,8 @@ public sealed class UpgradeReturnCommandTests
 
         Assert.NotEqual(0, refused.Code);
         string error = CliHarness.Unfold(refused.Err);
-        Assert.Contains("The upgrade's restore point could not be recorded on this machine: a runtime is serving this estate on this machine", error, StringComparison.Ordinal);
-        Assert.Contains("Run the upgrade through the daemon serving the estate, or after stopping that runtime ('vericairn runtime stop') and letting other commands finish.", error, StringComparison.Ordinal);
+        Assert.Contains("The upgrade's restore point could not be recorded on this machine: a runtime has this estate open on this machine and holds its writer lock", error, StringComparison.Ordinal);
+        Assert.Contains("Run the upgrade through the daemon serving the estate, or after stopping the daemon ('vericairn runtime stop'), closing any MCP server and letting other commands finish.", error, StringComparison.Ordinal);
         Assert.Contains("Nothing was applied, and nothing changed.", error, StringComparison.Ordinal);
         Assert.Equal(estate, Snapshot(f.Estate.Root));
         Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));

@@ -652,9 +652,11 @@ files copied while a runtime holds them open, so the restore point holds no data
 upgrade writes anything, each copy must exist, pass SQLite's integrity check and hold as many rows in each table as the database it
 copies; otherwise the upgrade, one-way or not, is refused (`refused`) with nothing changed, and the message names the database and
 what failed. The copies are made while the upgrade holds the clone's writer lock, `live.lock`, alone, as `estate cache rebuild`
-does, so no writable session opens meanwhile. While a daemon, a run's MCP server or another command has the estate open for writing,
-the upgrade is refused with nothing changed, and the message says to run it through the daemon serving the estate or after stopping
-it. A database that changes while it is copied, which only a process writing without the lock can do, refuses the upgrade too. The
+does, so no writable session opens meanwhile. While a daemon, an MCP server (`vericairn mcp serve`, as an AI client or a run starts
+it) or another command has the estate open for writing, the upgrade is refused with nothing changed, and the message says to run it
+through the daemon serving the estate, or after stopping the daemon and closing any MCP server. A change detected while a database is
+copied refuses the upgrade too; the check catches some changes by a process that writes without the lock, not all of them
+([limitations](limitations-and-platforms.md)). The
 way back names each database's `-wal` and `-shm` to remove before the exported state is copied back, and the clone's live store too
 when it kept none before the upgrade.
 
