@@ -89,6 +89,57 @@ public class StandingAgentRoutingTests
     }
 
     [Fact]
+    [Trait("Journey", "D07-A")]
+    public void ACommunityResearcherCarriesAndRecordsResultsForTwoMonthlyOccurrences()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string researcher = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op,
+            RunEstate.Json("""{"kind":"human","name":"Researcher","roles":["contributor"]}""")))).Id;
+        DateTimeOffset anchor = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds());
+        string goal = Standing(run, holder: researcher, until: RecordParser.FormatTimestamp(anchor.AddMonths(3)),
+            triggers: new JsonArray(StandingFlows.Monthly(firstAt: RecordParser.FormatTimestamp(anchor))));
+        var clock = new WorkerClock(anchor);
+        run.Service.FlowClock = clock;
+        run.Service.AuthoringClock = clock;
+        run.Service.PresenceHost = StandInSessions.Host([], clock: clock);
+
+        string first = Carry(0);
+        clock.Advance(anchor.AddMonths(1) - clock.GetUtcNow());
+        string next = Carry(1);
+        Assert.NotEqual(first, next);
+        Assert.Equal(2, run.Estate.Load().OfType("assignment").Count(a => StandingAgents.KeyOf(a) is not null));
+        Assert.Equal(0, run.Service.Check().Errors);
+
+        string Carry(int interval)
+        {
+            JsonElement due = Assert.Single(run.Service.GoalDue(goal)!.Json.GetProperty("occurrences").EnumerateArray(),
+                row => row.GetProperty("state").GetString() == "due");
+            string key = due.GetProperty("key").GetString()!;
+            Assert.EndsWith($"/interval-{interval}", key, StringComparison.Ordinal);
+            GoalStepResponse step = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)
+            {
+                Occurrence = key, Now = RecordParser.FormatTimestamp(clock.GetUtcNow()),
+            });
+            Assert.True(step.Ok, step.Message);
+            Assert.Equal(("ask", "person", key, researcher), (step.Outcome, step.Route, step.Step, step.Principal));
+            Assert.Equal(key, StandingAgents.KeyOf(run.Estate.Load().ById[step.Assignment!.Id]));
+
+            clock.Advance(TimeSpan.FromSeconds(1));
+            RecordWritten attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(step.Assignment.Id, researcher, "The widget inventory", "Read the current evidence.",
+                At: RecordParser.FormatTimestamp(clock.GetUtcNow()))));
+            JsonObject result = PolicyFixture.ResultBody();
+            result["outputs"] = new JsonArray(new JsonObject { ["name"] = "findings", ["hash"] = FlowFixture.Hash('a'), ["mediaType"] = "text/markdown" });
+            clock.Advance(TimeSpan.FromSeconds(1));
+            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("result", researcher, PolicyFixture.Element(result),
+                $"attempt:{attempt.Id}:{attempt.Hash}", At: RecordParser.FormatTimestamp(clock.GetUtcNow()))));
+            Assert.Equal((key, "settled"), StandingDutyJourneyTests.Occurrence(run, goal, key));
+            Assert.Null(run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource) { Occurrence = key }).Assignment);
+            return key;
+        }
+    }
+
+    [Fact]
     public void CallersRacingForOneOccurrenceRecordOneAssignmentOfItsKey()
     {
         using var run = new RunEstate(recordFormat: 3);

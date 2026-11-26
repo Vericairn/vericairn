@@ -196,6 +196,8 @@ public class StandingOutputTests
         Assert.Contains(Validate(fixture, "possibility", Possibility(raised, "late"), builder: true), f => f.Code == "standing.raised-by" && f.Message.Contains("settled", StringComparison.Ordinal));
     }
 
+    // Naming the declined possibility with new evidence admits the otherwise refused fingerprint.
+    [Trait("Journey", "D07-A")]
     [Fact]
     public void AnotherPrincipalDisposesOfAPossibilityAndADeclinedOneIsRaisedAgainOnlyByNamingIt()
     {
