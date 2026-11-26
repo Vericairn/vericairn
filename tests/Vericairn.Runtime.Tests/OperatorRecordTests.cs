@@ -551,6 +551,68 @@ public sealed class OperatorRecordTests
         Assert.DoesNotContain(notices, n => n.Kind is "revised" or "renewed");
     }
 
+    [Fact]
+    [Trait("Journey", "J132")]
+    public void TheDefaultWaitInEachCheckPhaseRenewsWithTheRemainingSignatures()
+    {
+        using var f = new Fixture();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var clock = new WorkerClock();
+        var helpers = new List<PresenceHelperStandIn>();
+        var custody = new RecordingCustody(VericairnHome.Path());
+        f.Service.KeyStores = [custody];
+        f.Service.PresenceRequired = device => device == f.Device;
+        f.Service.HostsEmbedded = true;
+        f.Service.PresenceHost = StandInSessions.Host(helpers, clock: clock);
+        f.Remote.Memory.QueueRequired = true;
+        var request = new OperatorRecordRequest(f.Request.Type, f.Request.By, f.Request.Body, f.Request.Subject);
+        Assert.Equal(120, request.WaitSeconds);
+
+        // The provider resolves each check synchronously after advancing elapsed time by the full default wait.
+        // The runtime's polling loop never sleeps. UTC still follows the fixture's authored record timestamps.
+        var phases = new List<string>();
+        f.Remote.Read = pull =>
+        {
+            if (phases.Count == 0) Wait("pull request checks");
+            return pull;
+        };
+        f.Remote.AfterEnqueue = (destination, number) =>
+        {
+            Wait("merge queue");
+            f.Remote.Memory.SettleQueue(destination, number, "merged");
+        };
+        f.Remote.BeforeQueuedTarget = () => Wait("target checks");
+
+        long start = f.Service.PresencePrompts(new()).Cursor;
+        OperatorRecordResponse result = f.Service.OperatorRecord(request, cancellation.Token);
+
+        Assert.True(result.Ok, result.Message + " " + result.NextStep);
+        Assert.Equal(["pull request checks", "merge queue", "target checks"], phases);
+        Assert.Equal(TimeSpan.FromSeconds(360), clock.GetElapsedTime(0));
+        Assert.Empty(custody.Reasons);
+        Assert.InRange(helpers.Count, 2, 3);
+        Assert.Equal(1, PresenceSessionRules.ReadTerms(Assert.Single(helpers[0].Terms)).ExactCount);
+        IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
+        PresenceNotice[] renewals = [.. notices.Where(n => n.Kind == "renewed" && n.Text.Contains("renews its presence session", StringComparison.Ordinal))];
+        Assert.Equal(helpers.Count - 1, renewals.Length);
+        foreach ((PresenceNotice renewal, PresenceHelperStandIn helper) in renewals.Zip(helpers.Skip(1)))
+        {
+            byte[] announced = Assert.Single(helper.Terms);
+            Assert.Equal(System.Text.Encoding.UTF8.GetString(announced), renewal.Session!.Terms);
+            Assert.NotEmpty(renewal.Session.Reason!);
+            PresenceSessionRules remainder = PresenceSessionRules.ReadTerms(announced);
+            Assert.Equal(0, remainder.ExactCount);
+            Assert.NotEmpty(remainder.References);
+            Assert.NotEmpty(helper.SignedHashes);
+        }
+
+        void Wait(string phase)
+        {
+            phases.Add(phase);
+            clock.Advance(TimeSpan.FromSeconds(request.WaitSeconds));
+        }
+    }
+
     [Theory]
     [InlineData("open")]
     [InlineData("merge")]
@@ -1316,17 +1378,25 @@ public sealed class OperatorRecordTests
         public MergeQueueObservation ObserveQueue(string destination, string number) => Memory.ObserveQueue(destination, number);
         // The process stops right after the enqueue was sent, before anything records its outcome.
         internal bool StopAfterEnqueue { get; set; }
+        internal Action<string, string>? AfterEnqueue { get; set; }
+        internal Action? BeforeQueuedTarget { get; set; }
         public ChangeReceipt Enqueue(string destination, string number, string head)
         {
             fixture.Step("enqueue");
             Assert.Equal(fixture.Local.Head, head);
             ChangeReceipt receipt = Memory.Enqueue(destination, number, head);
             if (StopAfterEnqueue) throw new NotSupportedException("The controlled process stopped.");
+            AfterEnqueue?.Invoke(destination, number);
             Receipt("enqueue");
             return receipt;
         }
         public TargetObservation ObserveQueuedTarget(string destination, string branch, string commit)
-        { fixture.Step("target"); Assert.Equal(Merged, commit); return Memory.ObserveQueuedTarget(destination, branch, commit); }
+        {
+            fixture.Step("target");
+            Assert.Equal(Merged, commit);
+            BeforeQueuedTarget?.Invoke();
+            return Memory.ObserveQueuedTarget(destination, branch, commit);
+        }
         private void Receipt(string step) { if (LoseReceipt == step) throw new ProviderUncertainException("The receipt was lost."); }
     }
 }
