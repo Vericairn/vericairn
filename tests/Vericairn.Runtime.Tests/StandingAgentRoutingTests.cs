@@ -470,9 +470,7 @@ public class StandingAgentRoutingTests
     internal static (string Goal, string Ask) PausedByThreeFailures(RunEstate run)
     {
         string goal = Standing(run, budget: new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 6 });
-        string hash = run.Service.Goal(goal)!.Json.GetProperty("goal").GetProperty("hash").GetString()!;
-        string expires = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(1));
-        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"The test's agent runs while the operator's key is held here.","expires":"{{expires}}"}"""), $"goal:{goal}:{hash}")));
+        AllowStandInWithFixtureKey(run, goal);
         string? assignment = null;
         for (int i = 0; i < 3; i++)
         {
@@ -927,11 +925,14 @@ public class StandingAgentRoutingTests
     /// Installs the researcher flow and a standing agent of it the operator sponsors and activates: a daily schedule whose first tick was
     /// two days ago, the request trigger, the builder (or the holders given) in the researcher role; returns the goal's id.
     /// </summary>
-    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null, string[]? holders = null)
+    internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null, string[]? holders = null, string role = "researcher")
     {
         string op = run.Estate.OperatorId;
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}"""), Supersedes: run.Estate.BuilderId)));
-        TemplateDefinition flow = FlowFixture.Install(run.Estate, StandingFlows.Researcher());
+        bool duty = role == "duty-carrier";
+        TemplateDefinition flow = duty
+            ? StandingRoleFlows.Definitions.Single(definition => definition.Id == StandingRoleFlows.DutyCarrier)
+            : FlowFixture.Install(run.Estate, StandingFlows.Researcher());
         string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"RES-1","kind":"ordinary","title":"Research the widget","intent":"Keep researching the widget.","scope":["path:research/"],"exitQuestion":"Is each occurrence's research recorded?","inputs":[],"deliverables":["cited findings"]}""")))).Id;
         DateTimeOffset first = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddDays(-2).AddMinutes(-5).ToUnixTimeSeconds());
         var body = new JsonObject
@@ -939,13 +940,13 @@ public class StandingAgentRoutingTests
             ["title"] = "Research the widget", ["objective"] = "Keep researching the widget between releases.",
             ["completion"] = new JsonArray(new JsonObject { ["record"] = FlowFixture.Marker("RESEARCHED") }), ["constraints"] = new JsonArray("nothing outside research/"),
             ["kind"] = "stewardship", ["sponsor"] = op, ["budget"] = budget ?? new JsonObject { ["wallMinutes"] = 30, ["attemptsPerStep"] = 3 },
-            ["roles"] = new JsonArray(FlowFixture.Role("researcher", holders ?? [holder ?? run.Estate.BuilderId])),
+            ["roles"] = new JsonArray(FlowFixture.Role(role, holders ?? [holder ?? run.Estate.BuilderId])),
             ["plan"] = new JsonObject
             {
                 ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(order),
                 ["standing"] = new JsonObject
                 {
-                    ["pin"] = FlowFixture.Pin(flow), ["subject"] = new JsonObject { ["topic"] = "the widget" },
+                    ["pin"] = FlowFixture.Pin(flow), ["subject"] = new JsonObject { [duty ? "duties" : "topic"] = duty ? "Monthly maintenance" : "the widget" },
                     ["triggers"] = triggers ?? new JsonArray(
                         new JsonObject { ["key"] = "daily", ["kind"] = "schedule", ["unit"] = "days", ["every"] = 1, ["firstAt"] = RecordParser.FormatTimestamp(first) },
                         new JsonObject { ["key"] = "asked", ["kind"] = "request" }),
@@ -958,6 +959,13 @@ public class StandingAgentRoutingTests
         string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
         RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
         return goal;
+    }
+
+    internal static void AllowStandInWithFixtureKey(RunEstate run, string goal)
+    {
+        string hash = run.Service.Goal(goal)!.Json.GetProperty("goal").GetProperty("hash").GetString()!;
+        string expires = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(1));
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"The test's agent runs while the operator's key is held here.","expires":"{{expires}}"}"""), $"goal:{goal}:{hash}")));
     }
 
     /// <summary>One goal step of a standing agent taken by the principal named, its run capped at ten minutes, with the stand-in.</summary>
