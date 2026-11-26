@@ -306,10 +306,11 @@ A work order can carry `"disclosure": "held"`, for example a security fix whose 
 While it is held, a checked push to a repository whose resource records `"visibility": "public"` is refused before anything is
 pushed if the push's commit messages or added lines contain the work order's key as a whole word, or a distinctive phrase of
 its title, intent or scope. Case, Unicode compatibility forms (full-width letters, ligatures such as `ﬁ`, circled and
-mathematical letters), whitespace and a sentence's closing punctuation are normalized for matching. A wrapped phrase can match
-when the collected text contains the whole phrase. For added lines, the adapter reads without surrounding context, so a phrase
-spread across an added line and an unchanged line can escape the match. From 0.9.2 the text is compared
-after Unicode NFKC normalization and full case folding computed by Vericairn itself from pinned Unicode 16.0.0 tables, the same
+mathematical letters), whitespace and a sentence's closing punctuation are normalized for matching: line breaks fold to one space,
+so a phrase wrapped across consecutive added lines matches. Two wrappings escape it (FIX-137's residual): a phrase split between an
+added line and an unchanged one, since added lines are read without their context, and a phrase wrapped across lines that each
+begin with a marker, such as `>`, `//` or `#` in quoted text, comments and headings, since the marker stays between its words. From
+0.9.2 the text is compared after Unicode NFKC normalization and full case folding computed by Vericairn itself from pinned Unicode 16.0.0 tables, the same
 on every platform and build. A phrase shorter than 24 characters, or one another current work order also uses, such as a standard closing step,
 is not matched on its own. The check applies whoever authored the commits.
 

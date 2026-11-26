@@ -18,7 +18,7 @@ below, says what happened.
 From 0.9.3 a command that signs with such a device announces every record it will sign before the first prompt, on standard
 error, and counts each prompt ([presence prompts](operator-guide.md#presence-prompts-announced-and-counted-093)). From 0.9.4
 each prompt's line ends with the record's short hash, the first twelve hexadecimal digits of its content hash, shown below as
-`<short hash>`; with the release build's helper the dialog's own label names the same short hash. Each of these lines begins with
+`<short hash>`; from 0.9.4 the helper's own label in the dialog names the same short hash. Each of these lines begins with
 `runtime:`, since its words are the runtime's: the command line marks every line it takes from the runtime so, shows its control
 characters escaped and folds a line longer than the terminal, or than 80 columns in a file or a pipe, into rows that each begin with
 `runtime:`. The examples show the rows of 80 columns, folded where the full identity, not its shorter placeholder, reaches the last

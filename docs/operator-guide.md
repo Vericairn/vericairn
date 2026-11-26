@@ -267,7 +267,7 @@ shown escaped and runs of spaces made one space; the command line folds a line l
 goes to a file or a pipe) into rows that each begin with `runtime:`, so no soft wrap starts a row of the runtime's words without the
 mark, and it cannot pass for a line the command line or Workbench derived itself. The system dialog's reason,
 which the `vericairn-enclave` helper passes to macOS, says the same in one bounded sentence that carries no secret or machine path.
-From 0.9.4 the release build's helper reads the record before it signs it and opens the dialog's text with its own label,
+From 0.9.4 the helper reads the record before it signs it and opens the dialog's text with its own label,
 `sign Vericairn record <type> <short hash>:`, before the action's sentence; a digest it cannot read as a record, such as a request's,
 opens with `sign an unread Vericairn digest:`. When the action ends it says how many it signed (`runtime: Signed 4 of 4.`). A command that signs
 nothing with presence prints nothing of this.
@@ -358,9 +358,9 @@ decision, a flow-decision observation; and the single write of a sponsor's ask, 
 is not an action of the list, so its records each keep their own check. The Developer ID signing is planned with `DIST-21`, and a
 release lists a macOS version only once its candidate's signed helper passes the
 [qualification](presence-session-qualification.md) on it. The published 0.9.4 archives and builds from source lack the Developer ID
-team identifier in their build metadata. For presence they run in development mode, honor `VERICAIRN_ENCLAVE_HELPER` and keep one
-check per signature. A build carrying the team identifier uses its bundled helper and needs a qualified macOS version to open
-sessions. `vericairn doctor` prints a `presence` line saying whether sessions can open and, when they cannot, why.
+team identifier in their build metadata, nor does the `dotnet-vc` tool, so `vericairn doctor` calls them development builds: they open
+no presence session, keep one check per signature and honor `VERICAIRN_ENCLAVE_HELPER`. A build carrying the team identifier uses the
+helper beside the command line and needs a qualified macOS version to open sessions. `vericairn doctor` prints a `presence` line saying whether sessions can open and, when they cannot, why.
 
 From 0.9.4, `operator act --ready` signs its chosen records under the session action `operator act` (decision
 `01M8001M0T9XRGF7SKHW3B45KF`): up to 16 records by exact hash to a check, a list for each 16. `operator answer` signs under
