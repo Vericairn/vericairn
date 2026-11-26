@@ -267,9 +267,10 @@ each release branch cut later from the moment it exists:
 gh api --method POST repos/Vericairn/vericairn/rulesets --input .github/rulesets/release-branches.json
 ```
 
-Then, for each release branch, once it is cut and carries `ci-gate`, create its
-merge-queue ruleset from the template, with `<version>` the branch's version (`0.9.5`
-for `release/0.9.5`):
+Then, for each release branch, once it is cut and carries `ci.yml` and
+`secret-scan.yml`, create its merge-queue ruleset from the template, with `<version>`
+the branch's version (`0.9.5` for `release/0.9.5`). Cutting a release branch includes
+this step, an operator act:
 
 ```sh
 sed 's/@VERSION@/<version>/g' .github/rulesets/release-branch-merge-queue.template.json | gh api --method POST repos/Vericairn/vericairn/rulesets --input -
@@ -279,6 +280,13 @@ Until then the branch's pull requests merge without a queue once their checks pa
 a queue on a branch whose `ci.yml` has no `ci-gate` would hold every entry until the
 check timeout. The version is the branch's exact name after `release/`, never a
 pattern, since GitHub refuses the merge queue on a wildcard ref.
+
+Each create returns the new ruleset's `id`. To undo one, a ruleset created too early or
+for the wrong branch, delete it by that id; a create that GitHub refused made nothing:
+
+```sh
+gh api --method DELETE repos/Vericairn/vericairn/rulesets/<id>
+```
 
 ## Shards
 

@@ -862,7 +862,7 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
-    public void ReleaseBranchesAreTreatedAsMainAndTheirRulesRequireTheSameChecksAndQueue()
+    public void ReleaseBranchesAreTreatedAsMainAndTheirRulesetRequiresTheSameChecksWithoutTheQueue()
     {
         // CI-12: a push to a release branch is looked up and built as a push to main is; merge_group and pull_request have no
         // branch filter, so a release branch's queue groups and pull requests run as main's do.
@@ -877,6 +877,8 @@ public class ContinuousIntegrationTests
         // from the template requires the same queue on its exact ref.
         using var main = Ruleset("default-branch-merge-queue.json");
         using var release = Ruleset("release-branches.json");
+        // CI-15: the name the operator applied (28004737) and the README's commands name.
+        Assert.Equal("release-branches", release.RootElement.GetProperty("name").GetString());
         Assert.Equal(["~DEFAULT_BRANCH"], Refs(main, "include"));
         Assert.Equal(["refs/heads/release/*"], Refs(release, "include"));
         // release/0.3 predates ci-gate and the secret scan, so the rules would leave it unmergeable; it stays outside them.
@@ -963,7 +965,8 @@ public class ContinuousIntegrationTests
         // The apply procedure beside the workflows saves the default branch's live ruleset through a filter, so the rollback's
         // PUT sends the six fields the committed rulesets send and none of the read-only ones GitHub's answer adds. The
         // release branches' ruleset is created next, once the change has merged and every covered branch carries its
-        // workflows, and then each release branch's merge-queue ruleset from the template, with its version filled in (CI-14).
+        // workflows, and then each release branch's merge-queue ruleset from the template, with its version filled in (CI-14);
+        // either create is undone by deleting the ruleset it made (CI-15).
         string github = Path.Combine(RepositoryRoot(), ".github");
         string procedure = Read(Path.Combine(github, "workflows/README.md"));
         const string fields = "{name, target, enforcement, conditions, bypass_actors, rules}";
@@ -974,7 +977,9 @@ public class ContinuousIntegrationTests
         int restore = procedure.IndexOf($"\ngh api --method PUT {ruleset}/27077099 --input {saved}\n", StringComparison.Ordinal);
         int add = procedure.IndexOf($"\ngh api --method POST {ruleset} --input .github/rulesets/release-branches.json\n", StringComparison.Ordinal);
         int queue = procedure.IndexOf($"\nsed 's/@VERSION@/<version>/g' .github/rulesets/release-branch-merge-queue.template.json | gh api --method POST {ruleset} --input -\n", StringComparison.Ordinal);
-        Assert.True(save >= 0 && save < replace && replace < restore && restore < add && add < queue, $"{save} {replace} {restore} {add} {queue}");
+        // CI-15: each create's undo follows them, a DELETE by the id the create returned.
+        int undo = procedure.IndexOf($"\ngh api --method DELETE {ruleset}/<id>\n", StringComparison.Ordinal);
+        Assert.True(save >= 0 && save < replace && replace < restore && restore < add && add < queue && queue < undo, $"{save} {replace} {restore} {add} {queue} {undo}");
         string[] writable = fields.Trim('{', '}').Split(", ").Order(StringComparer.Ordinal).ToArray();
         string[] files = Directory.GetFiles(Path.Combine(github, "rulesets")).Select(file => Path.GetFileName(file)).Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(["default-branch-merge-queue.json", "release-branch-merge-queue.template.json", "release-branches.json"], files);
