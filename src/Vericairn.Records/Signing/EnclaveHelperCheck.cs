@@ -119,7 +119,7 @@ internal static partial class EnclaveHelperCheck
             (int code, string text) = SecureEnclaveKeyStore.Run(path, TimeSpan.FromSeconds(30), "version");
             report = Read(code, text);
         }
-        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (CouldNotStart(exception))
         {
             // A helper that cannot be started answers nothing, as one that does not answer in time.
             report = new(EnclaveHelperAnswer.None, null, []);
@@ -128,6 +128,13 @@ internal static partial class EnclaveHelperCheck
         if (report.Answer != EnclaveHelperAnswer.None) Asked[path] = (length, written, report);
         return report;
     }
+
+    /// <summary>
+    /// Whether running the helper failed because it could not be started, such as a helper file without execute permission, as opposed
+    /// to a fault of the command line: such a failure names the helper's path, so it is never shown.
+    /// </summary>
+    internal static bool CouldNotStart(Exception exception) =>
+        exception is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException;
 
     /// <summary>
     /// Reads a helper's answer to <c>version</c>: its exit code and its standard output when it succeeded, else its standard error. A

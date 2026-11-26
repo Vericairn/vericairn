@@ -29,6 +29,17 @@ public static class SecureEnclaveCustody
     /// </summary>
     internal const string HelperVersion = "0.9.5";
 
+    /// <summary>
+    /// From 0.9.5: the SHA-256, in lowercase hex, of src/Vericairn.Enclave/vericairn-enclave.swift as it stands at
+    /// <see cref="HelperVersion"/>; the repository keeps that file with LF line endings on every platform, so <c>shasum -a 256</c> of a
+    /// checkout gives it. The version check above holds only if the helper's version changes whenever the helper does: a release that
+    /// changed an existing command without a new version would pass it and fail every signature as an older helper did. Nothing else
+    /// links the two, so a test holds the source to this hash. A change to the source fails it until <see cref="HelperVersion"/> and the
+    /// source's <c>helperVersion</c> both name the release in preparation, bumped together if they still name a released helper, and
+    /// this hash is updated.
+    /// </summary>
+    internal const string HelperSourceSha256 = "d2236b5a4197fedca147238b9c4337213fae8c934e3ab563f2b994777f802edd";
+
     /// <summary>From 0.9.5 (FIX-169): the helper commands this command line calls, each of which a helper it signs through must serve.</summary>
     internal static readonly ImmutableArray<string> HelperCommands = ["available", "create", "public", "sign", "sign-record", "session"];
 
@@ -79,11 +90,35 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
     /// <inheritdoc />
     public string Kind => SecureEnclaveCustody.Kind;
 
-    /// <summary>True when the helper is present and this Mac has a Secure Enclave the process can use.</summary>
-    public static bool Available()
+    /// <summary>
+    /// True when the helper is present and this Mac has a Secure Enclave the process can use. From 0.9.5 false, never a thrown start
+    /// failure, beside a helper that cannot be started (<see cref="Probe()"/> tells that case apart).
+    /// </summary>
+    public static bool Available() => Probe() == true;
+
+    /// <summary>
+    /// From 0.9.5: what the helper beside the command line says when asked whether this process can use a Secure Enclave: true when it
+    /// can, false when it cannot or no helper is beside the command line, and null for a helper that is there but cannot be started,
+    /// such as one without execute permission. Up to 0.9.4 that start failure escaped unhandled, with a stack trace naming the helper's
+    /// path, so doctor and devices create ended before the helper's version check (FIX-169) could refuse the helper. The key store
+    /// choice now takes the Secure Enclave beside such a helper, so that check refuses it before any key is made, rather than taking a
+    /// weaker custody in its place.
+    /// </summary>
+    internal static bool? Probe()
     {
-        string? path = SecureEnclaveCustody.HelperPath();
-        return path is not null && Run(path, Quick, "available").Code == 0;
+        if (SecureEnclaveCustody.HelperPath() is not string helper)
+        {
+            return false;
+        }
+
+        try
+        {
+            return Run(helper, Quick, "available").Code == 0;
+        }
+        catch (Exception exception) when (EnclaveHelperCheck.CouldNotStart(exception))
+        {
+            return null;
+        }
     }
 
     /// <inheritdoc />

@@ -113,6 +113,62 @@ public sealed class EnclaveHelperCommandTests
         finally { CliHarness.Delete(root, home); }
     }
 
+    /// <summary>
+    /// Beside a helper that is there but cannot be started, here a stand-in without execute permission, doctor reports the helper
+    /// unavailable and devices create refuses with the helper version check's refusal, both naming no path. Up to 0.9.4, and in FIX-169's
+    /// first build, both ended with an unhandled start failure from the Secure Enclave probe, a stack trace naming the helper's path and
+    /// the working directory, before the version check ran.
+    /// </summary>
+    [Fact]
+    [SupportedOSPlatform("macos")]
+    public async Task DoctorAndDevicesCreateRefuseAHelperThatCannotBeStartedNamingNoPath()
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        string home = CliHarness.TempDirectory("enclave-helper-stopped-home");
+        string root = CliHarness.TempDirectory("enclave-helper-stopped");
+        new ReleaseUpdateStore(home).Configure(false);
+        string version = EnclaveHelperCheck.CommandLineVersion;
+        try
+        {
+            using EnclaveHelperStandIn stopped = EnclaveHelperStandIn.Reporting(SecureEnclaveCustody.HelperVersion, [.. SecureEnclaveCustody.HelperCommands]);
+            File.SetUnixFileMode(stopped.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            string directory = Path.GetDirectoryName(stopped.Path)!;
+            string expected = "vericairn-enclave did not answer when asked for its version; vericairn " + version + " expects vericairn-enclave 0.9.5: mismatch, so Secure "
+                + "Enclave signatures are refused until the vericairn-enclave from this command line's release archive is beside it";
+
+            (int doctorCode, string report, string doctorError) = await Built(home, stopped.Path, "--estate", root, "doctor");
+            Assert.True(doctorCode == 0, doctorError);
+            Assert.Contains("\nhelper    " + expected + "\n", report, StringComparison.Ordinal);
+            Assert.Contains("\nenclave   Secure Enclave custody unavailable (the vericairn-enclave helper beside the command line could not be started)\n", report, StringComparison.Ordinal);
+            Assert.DoesNotContain(directory, report + doctorError, StringComparison.Ordinal);
+            JsonElement probe = await Doctor(home, stopped.Path, root);
+            Assert.Equal("unavailable", probe.GetProperty("state").GetString());
+            Assert.Equal(JsonValueKind.Null, probe.GetProperty("value").ValueKind);
+            Assert.Equal(expected, probe.GetProperty("detail").GetString());
+
+            (int initCode, string init, string initError) = await Built(home, stopped.Path, "--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example",
+                "--purpose", "Refuse a helper that cannot be started.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit);
+            Assert.True(initCode == 0, initError);
+            string op = JsonDocument.Parse(init).RootElement.GetProperty("operator").GetString()!;
+            int records = CommandContext.LoadCopy(root).Records.Count;
+            string refusal = "error: The vericairn-enclave helper beside this command line cannot sign for it: the helper did not answer when asked for its version, and this "
+                + "command line is version " + version + ", which needs vericairn-enclave 0.9.5 or later. The helper and the command line come from the same release archive: "
+                + "put the vericairn-enclave from this command line's archive beside it. Nothing was signed.";
+            foreach (string[] custody in new[] { Array.Empty<string>(), ["--custody", "secure-enclave"] })
+            {
+                (int created, string createdOut, string createdError) = await Built(home, stopped.Path, ["--estate", root, "devices", "create", "--principal", op, "--name", "Operator Mac", .. custody]);
+                Assert.True(created == 2, createdError);
+                Assert.Equal(refusal, CliHarness.Unfold(createdError).Trim());
+                Assert.Equal(string.Empty, createdOut);
+            }
+
+            Assert.Equal(records, CommandContext.LoadCopy(root).Records.Count);
+            Assert.False(Directory.Exists(Path.Combine(home, "keys")) && Directory.EnumerateFiles(Path.Combine(home, "keys"), "*.se").Any());
+            Assert.Empty(stopped.Asked);
+        }
+        finally { CliHarness.Delete(root, home); }
+    }
+
     [Fact]
     public void DoctorsHelperProbeIsMissingWithoutAHelperAndNamesBothVersionsWithOne()
     {

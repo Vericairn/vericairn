@@ -114,6 +114,22 @@ public sealed partial class EnclaveHelperVersionTests : IDisposable
         Assert.NotNull(EnclaveHelperCheck.Parse(SecureEnclaveCustody.HelperVersion));
     }
 
+    /// <summary>
+    /// From 0.9.5: the helper's source is the one whose hash is pinned beside <see cref="SecureEnclaveCustody.HelperVersion"/>
+    /// (<see cref="SecureEnclaveCustody.HelperSourceSha256"/>), so a change to the helper cannot ship under the version of a helper
+    /// already released without this test failing first and saying what to change.
+    /// </summary>
+    [Fact]
+    public void TheHelpersSourceIsTheOnePinnedBesideItsVersion()
+    {
+        string actual = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(EnclaveSessionBuild.Source))).ToLowerInvariant();
+        Assert.True(actual == SecureEnclaveCustody.HelperSourceSha256,
+            $"src/Vericairn.Enclave/vericairn-enclave.swift has SHA-256 {actual}, not the {SecureEnclaveCustody.HelperSourceSha256} pinned for helper version "
+            + $"{SecureEnclaveCustody.HelperVersion}. A change to the helper's source changes the helper: bump its helperVersion and "
+            + "SecureEnclaveCustody.HelperVersion together to the release in preparation (unless both already name it), then set "
+            + $"SecureEnclaveCustody.HelperSourceSha256 to the source's new SHA-256.");
+    }
+
     [Fact]
     [SupportedOSPlatform("macos")]
     public void TheHelperBuiltFromThisSourceAnswersItsVersionAndIsNotRefused()

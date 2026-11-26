@@ -27,7 +27,9 @@
 // calls or whose version is older than the helper version it was built with (SecureEnclaveCustody.HelperVersion in
 // src/Vericairn.Records/Signing/SecureEnclaveKeyStore.cs): the helper and the command line come from the same release archive. The
 // version names the release whose helper this is, and changes, together with the command line's, in a release that changes the
-// helper; an older helper answers `version` with its usage line, which lists the commands it serves.
+// helper; an older helper answers `version` with its usage line, which lists the commands it serves. A test pins this file's SHA-256
+// beside that constant (SecureEnclaveCustody.HelperSourceSha256), so any change here fails it until both versions name the release in
+// preparation and the pinned hash is updated.
 //
 // Exit codes: 0 done (a session closed by its runtime), 2 usage, 3 no Secure Enclave on this machine, 4 the operation failed or
 // was declined (a session ended for any reason but close), 5 a record was refused as not being in the compact canonical form.

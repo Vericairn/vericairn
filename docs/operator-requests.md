@@ -99,11 +99,16 @@ The same citation options apply to `dismiss`, together with `--reason`. The word
 must follow the exact request and precede their recording. An agent's paraphrase
 or inference is not the operator's statement.
 
-From 0.9.5 (FIX-171) the command writes `--said-at` in the record's timestamp
-form, a UTC time in whole seconds, whatever fractional seconds or offset it was
-given with, and without `--said-at` it writes the time of the recording, the
-latest the words can have been said. Up to 0.9.4 a close without `--said-at`
-wrote an empty time, which the record refused (`body.timestamp`).
+From 0.9.5 (FIX-171) `--said-at` takes a time with `Z` or an explicit offset,
+such as `2026-11-24T10:00:00Z` or `2026-11-24T04:00:00-06:00`, and the command
+writes it in the record's timestamp form, a UTC time in whole seconds, without
+any fractional seconds. A time without `Z` or an offset names no instant, so it
+is refused before anything is signed, as is any other text, and the refusal
+names the form. Without `--said-at` the command writes the time of the
+recording, the latest the words can have been said. Up to 0.9.4 the command
+passed `--said-at` on as given, and a close without it wrote an empty time; the
+record refused both unless the time was already a whole-second UTC one
+(`body.timestamp`).
 
 ## An observation closes a request
 
