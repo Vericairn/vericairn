@@ -145,6 +145,13 @@ public sealed class UpgradeReturnCommandTests
         return clone;
     }
 
+    // Each file is read sharing write and delete, as Windows requires beside a runtime that holds the live store or its lock open.
     private static string[] Snapshot(string root) => [.. Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-        .Select(file => Path.GetRelativePath(root, file) + " " + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)))).Order(StringComparer.Ordinal)];
+        .Select(file => Path.GetRelativePath(root, file) + " " + Hash(file)).Order(StringComparer.Ordinal)];
+
+    private static string Hash(string file)
+    {
+        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
+    }
 }

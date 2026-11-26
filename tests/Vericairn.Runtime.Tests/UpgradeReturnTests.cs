@@ -785,10 +785,17 @@ public sealed class UpgradeReturnTests
     public void AReleaseReadsWhatItsOwnOrALaterReleaseIntroducedAndAPrereleaseDoesNot(string version, string release, int order) =>
         Assert.Equal(order, Math.Sign(UpgradeReturns.Compare(version, release)));
 
-    // The repository's files, leaving out the directories named (git's own, and the clone's working directory the runtime keeps).
+    // The repository's files, leaving out the directories named (git's own, and the clone's working directory the runtime keeps). Each is
+    // read sharing write and delete, as Windows requires beside a runtime that holds the live store or its lock open for writing.
     private static string[] Snapshot(string root, string[]? exclude = null) => [.. Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
         .Where(file => exclude is null || !exclude.Contains(Path.GetRelativePath(root, file).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0], StringComparer.Ordinal))
-        .Select(file => Path.GetRelativePath(root, file) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)))).Order(StringComparer.Ordinal)];
+        .Select(file => Path.GetRelativePath(root, file) + ":" + Hash(file)).Order(StringComparer.Ordinal)];
+
+    private static string Hash(string file)
+    {
+        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
+    }
 
     private static string Git(string directory, params string[] arguments)
     {
