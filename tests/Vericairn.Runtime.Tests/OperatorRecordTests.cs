@@ -467,6 +467,8 @@ public sealed class OperatorRecordTests
             && o.Body.GetProperty("target").GetProperty("observation").GetString() == "pull-request"));
     }
 
+    // The acceptance action announces and asks for each per-signature check.
+    [Trait("Journey", "J135")]
     [Fact]
     public void EveryPresencePromptOfTheActionIsAnnouncedAndARepeatedObservationIsAnnouncedBeforeItAsks()
     {
@@ -511,6 +513,8 @@ public sealed class OperatorRecordTests
         Assert.StartsWith("sign Vericairn signature 25 of 25: operation ", custody.Reasons[^1], StringComparison.Ordinal);
     }
 
+    // The exact acceptance and the branch's operations share one check for 22 signatures.
+    [Trait("Journey", "J132")]
     [Fact]
     public void OneCheckCoversAWholeOperatorRecordThatFinishesWithinTheSessionsLimit()
     {
@@ -587,6 +591,8 @@ public sealed class OperatorRecordTests
         }
     }
 
+    // An extra observation renews the list with the action's remainder and another check.
+    [Trait("Journey", "J133")]
     [Fact]
     public void ChecksStillRunningBeyondTheAnnouncedRepetitionsRenewWithTheRemainderAndOneMoreCheck()
     {
@@ -616,6 +622,59 @@ public sealed class OperatorRecordTests
         Assert.Equal("Signed 25 of 25 with 2 presence checks.", notices[^1].Text);
         // The renewal lists the action's recorded operations as references, which the rest supersede and observe.
         Assert.NotEmpty(PresenceSessionRules.ReadTerms(helpers[1].Terms[0]).References);
+    }
+
+    [Fact]
+    [Trait("Journey", "J134")]
+    public void AnUnansweredRenewalInChecksLeavesTheMergeForAResumedAction()
+    {
+        using var f = new Fixture();
+        var helpers = new List<PresenceHelperStandIn>();
+        UseSessions();
+        int reads = 0;
+        f.Remote.Read = pull =>
+        {
+            if (++reads == 1) return pull with { Checks = [new(Required[0], Head, "queued", null)] };
+            if (reads == 2) Assert.Single(helpers).EndSession("limit");
+            return pull;
+        };
+
+        long start = f.Service.PresencePrompts(new()).Cursor;
+        OperatorRecordResponse stopped = f.Service.OperatorRecord(f.Request with { WaitSeconds = 120 }, TestContext.Current.CancellationToken);
+        Assert.False(stopped.Ok, stopped.Message);
+        Assert.Equal(2, helpers.Count);
+        Assert.Empty(helpers[1].SignedHashes);
+        Assert.DoesNotContain("merge", f.Events);
+        Assert.DoesNotContain(f.Service.Session.Load().OfType("operation"), operation => EstateModel.BodyString(operation, "action") == "change-merge");
+        Assert.Contains(f.Service.PresencePrompts(new(start)).Notices, notice => notice.Kind == "renewed");
+
+        OperatorUnfinishedAction unfinished = f.Service.OperatorUnfinished().Action!;
+        Assert.Equal(stopped.Record!.Id, unfinished.RecordId);
+        Assert.Equal(stopped.Branch, unfinished.Branch);
+        Assert.NotNull(unfinished.PullRequest);
+        Assert.Null(unfinished.Merge);
+        string opening = f.Service.Session.Load().Current("operation").Single(operation => EstateModel.BodyString(operation, "action") == "change-open").Id;
+
+        f.Remote.Read = null;
+        f.Reopen();
+        UseSessions();
+        OperatorRecordResponse resumed = f.Run();
+        Assert.True(resumed.Ok, resumed.Message + " " + resumed.NextStep);
+        Assert.Equal(stopped.Record.Id, resumed.Record!.Id);
+        Assert.Equal(3, helpers.Count);
+        Assert.NotEmpty(helpers[2].SignedHashes);
+        PresenceSessionRules terms = PresenceSessionRules.ReadTerms(Assert.Single(helpers[2].Terms));
+        Assert.Contains(terms.References, reference => reference.Id == opening);
+        Assert.Single(f.Events, effect => effect == "merge");
+        Assert.Null(f.Service.OperatorUnfinished().Action);
+
+        void UseSessions()
+        {
+            f.Service.KeyStores = [new RecordingCustody(VericairnHome.Path())];
+            f.Service.PresenceRequired = device => device == f.Device;
+            f.Service.HostsEmbedded = true;
+            f.Service.PresenceHost = StandInSessions.Host(helpers, checkForSession: index => index == 1 ? "unanswered" : "passed");
+        }
     }
 
     [Fact]

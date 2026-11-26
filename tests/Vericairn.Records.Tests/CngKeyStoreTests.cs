@@ -11,6 +11,8 @@ namespace Vericairn.Records.Tests;
 /// <summary>Windows custody: keys live in the software key storage provider, non-exportable, with no key file to copy. Skipped elsewhere.</summary>
 public class CngKeyStoreTests
 {
+    // The Windows CNG device continues to sign through its platform store.
+    [Trait("Journey", "J135")]
     [Fact]
     public void CngCustodyCreatesSignsVerifiesAndRemovesWithoutAKeyFile()
     {

@@ -110,6 +110,8 @@ public sealed class PresenceSessionTests
         Assert.Equal("Signed 18 of 18 with 2 presence checks.", Since(f, 0)[^1].Text);
     }
 
+    // An unsettled unattended run requires a check for every acceptance.
+    [Trait("Journey", "J135")]
     [Fact]
     public void WhileAnAgentRunThisMachineStartedIsUnsettledEachJudgmentKeepsItsOwnCheck()
     {
@@ -211,6 +213,8 @@ public sealed class PresenceSessionTests
         }
     }
 
+    // A helper refusal ends the session and raises attention.
+    [Trait("Journey", "J133")]
     [Fact]
     public void AHelperThatRefusesWhatTheRuntimesChecksAdmittedEndsTheSessionAndRaisesAttention()
     {
@@ -273,6 +277,8 @@ public sealed class PresenceSessionTests
         Assert.True(bad.Load().Findings.HasErrors);
     }
 
+    // Development and unlisted macOS builds give distinct reasons for disabling sessions.
+    [Trait("Journey", "J135")]
     [Fact]
     public void DoctorSaysWhySessionsAreOffForThisMachineAndBuild()
     {
@@ -347,6 +353,8 @@ public sealed class PresenceSessionTests
         Assert.Equal(opened == 1 ? 0 : 2, sessions.Custody.Reasons.Count);
     }
 
+    // The charter can require per-signature checks.
+    [Trait("Journey", "J135")]
     [Theory]
     [InlineData("per-action", false)]
     [InlineData("per-signature", true)]
@@ -897,7 +905,8 @@ internal static class PresenceSessionHostVariation
 /// <summary>A test host whose sessions are stand-ins signing with the device's file key, for an estate whose operator's device needs presence.</summary>
 internal static class StandInSessions
 {
-    internal static PresenceSessionHost Host(List<PresenceHelperStandIn> helpers, string check = "passed", TimeProvider? clock = null) => new()
+    internal static PresenceSessionHost Host(List<PresenceHelperStandIn> helpers, string check = "passed", TimeProvider? clock = null,
+        Func<int, string>? checkForSession = null) => new()
     {
         Clock = clock ?? TimeProvider.System,
         Build = PresenceSessionBuild.Parse("ABCDE12345", "vericairn-enclave", "26"),
@@ -906,7 +915,8 @@ internal static class StandInSessions
         Start = signer =>
         {
             var key = new FileKeyStore(VericairnHome.Path());
-            var helper = new PresenceHelperStandIn(digest => key.Sign(signer.DeviceId, digest), key.PublicKey(signer.DeviceId)!, clock) { Check = check };
+            var helper = new PresenceHelperStandIn(digest => key.Sign(signer.DeviceId, digest), key.PublicKey(signer.DeviceId)!, clock)
+            { Check = checkForSession?.Invoke(helpers.Count) ?? check };
             helpers.Add(helper);
             return helper;
         },

@@ -17,6 +17,8 @@ public sealed class PhoneCustodyTests : IDisposable
 {
     private readonly string home = Directory.CreateTempSubdirectory("vericairn-phone-custody-").FullName;
 
+    // Only a person's phone presence key claims presence.
+    [Trait("Journey", "J135")]
     [Theory]
     [InlineData("ios", DeviceKeyStores.IosSecureEnclaveKind)]
     [InlineData("android", DeviceKeyStores.AndroidKeystoreKind)]
