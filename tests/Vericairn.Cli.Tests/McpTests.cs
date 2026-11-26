@@ -582,7 +582,7 @@ public class McpTests
     }
 
     // The first of python3 and python that runs Python 3; an installation on Windows usually names it python.
-    private static string? Python()
+    internal static string? Python()
     {
         foreach (string candidate in new[] { "python3", "python" })
         {
