@@ -78,8 +78,9 @@ public class ConcurrentPathsPolicyTests
     {
         const string notes = "docs/api-compatibility-0.9.5.md";
         using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
-        Order(run, "FIX-1");
-        Order(run, "FIX-2");
+        Order(run, "FIX-1", run.Goal);
+        Order(run, "FIX-2", run.Goal);
+        StandingAgentRoutingTests.AllowStandInWithFixtureKey(run, run.Goal);
         Order(run, "DOCS-1");
         Declare(run, "compatibility-notes", [notes], "refuse");
         string first = RunEstate.Ok(Assign("FIX-1", Brief(["path:docs/**"], []))).Id;
@@ -90,6 +91,9 @@ public class ConcurrentPathsPolicyTests
         string second = RunEstate.Ok(Assign("FIX-2", Brief(["path:docs/**"], ["path:" + notes]))).Id;
         RunEstate.Ok(run.Service.Attempt(new AttemptRequest(first, run.Estate.BuilderId, "widget repository, branch work/fix-1", "Write the first fragment.")));
         RunEstate.Ok(run.Service.Attempt(new AttemptRequest(second, run.Estate.BuilderId, "widget repository, branch work/fix-2", "Write the second fragment.")));
+
+        WriteFragment("FIX-1", first);
+        WriteFragment("FIX-2", second);
 
         JsonElement owner = AfterAll(Brief(["path:" + notes], []).GetRawText(), first, second);
         string docs = RunEstate.Ok(Assign("DOCS-1", owner)).Id;
@@ -102,6 +106,25 @@ public class ConcurrentPathsPolicyTests
             AcceptOrder(run, key);
         }
         RunEstate.Ok(run.Service.Attempt(apply));
+
+        void WriteFragment(string key, string assignment)
+        {
+            string branch = "work/" + key.ToLowerInvariant();
+            var settings = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["command"] = FakeHarness.Setting("write-compatibility-fragment", run.Report(key)),
+            };
+            RunResponse work = run.Service.RunStart(new RunStartRequest(assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId,
+                run.Resource, Branch: branch, WallMinutes: 10, Settings: settings));
+            Assert.True(work.Ok, work.Message);
+            RunRow settled = run.Settled(work.Run);
+            Assert.Equal("observed-success", settled.Status);
+            Assert.Equal((1, 0), (settled.Scope!.Changed, settled.Scope.OutsideCount));
+            string workspace = Assert.Single(FakeHarness.Reports(run.Report(key)))["directory"]!.GetValue<string>();
+            string fragment = Path.Combine(workspace, "docs", "changes", "0.9.5", key + ".md");
+            Assert.Contains("## " + notes, File.ReadAllText(fragment), StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(workspace, notes.Replace('/', Path.DirectorySeparatorChar))));
+        }
 
         WriteOutcome Assign(string key, JsonElement brief) =>
             run.Service.Assign(new AssignRequest(key, run.Estate.BuilderId, run.Estate.OperatorId, brief) { Repository = run.Resource });

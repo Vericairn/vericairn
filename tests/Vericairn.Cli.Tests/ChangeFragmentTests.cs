@@ -35,6 +35,8 @@ public sealed partial class ChangeFragmentTests
         Assert.Contains("`docs/changes/<version>/<KEY>.md`", guide, StringComparison.Ordinal);
     }
 
+    // Two fixes can hand distinct valid fragments to the owner of the same compatibility notes.
+    [Trait("Journey", "J121")]
     [Fact]
     public void AWellFormedFragmentPassesAndEachDepartureFromTheLayoutIsNamed()
     {
@@ -42,6 +44,7 @@ public sealed partial class ChangeFragmentTests
         repository.Write("docs/changes/README.md", "# Per-change fragments\n");
         repository.Write("docs/releases/frozen-sha256.json", """{"format":"vericairn.frozen-docs/1","sets":{"0.9.3":{"README.md":"sha256:00"}}}""");
         repository.Write("docs/changes/0.9.4/POLICY-08.md", Fragment("POLICY-08", "0.9.4"));
+        repository.Write("docs/changes/0.9.4/FIX-9.md", Fragment("FIX-9", "0.9.4"));
         Assert.Empty(Problems(repository.Root));
 
         repository.Write("docs/changes/0.9.4/lower-case.md", Fragment("lower-case", "0.9.4"));

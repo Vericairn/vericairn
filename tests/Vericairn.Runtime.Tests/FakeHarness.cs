@@ -611,6 +611,21 @@ internal static class FakeHarness
                 Git("commit", "-q", "-m", "Commit inside the workspace");
                 if (scenario == "workspace-commit-ignored") WriteLargeIgnoredOutput(Environment.CurrentDirectory);
                 return 0;
+            case "write-compatibility-fragment":
+                string key = Path.GetFileNameWithoutExtension(report);
+                if (key is not ("FIX-1" or "FIX-2")) return 2;
+                string directory = Path.Combine("docs", "changes", "0.9.5");
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, key + ".md"), $"""
+                    # {key}: Record a compatibility change
+
+                    ## docs/api-compatibility-0.9.5.md
+
+                    ### Under the 0.9.5 changes
+
+                    > Compatibility change from {key}.
+                    """ + "\n");
+                return 0;
             case "scope-edits":
                 Directory.CreateDirectory("src");
                 Directory.CreateDirectory("docs");
