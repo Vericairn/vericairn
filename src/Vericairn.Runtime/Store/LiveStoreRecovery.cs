@@ -55,7 +55,7 @@ internal sealed record LiveStoreRebuilt(string Estate, string Cache, long Record
 /// <summary>
 /// Recovery of a repository-synced estate's derived cache (FIX-93). Every writable session holds the estate's writer lock shared;
 /// a rebuild holds it alone, so it refuses while a daemon or another command has the estate open, and no session opens the cache
-/// while it is being rebuilt.
+/// while it is being rebuilt. From 0.9.5 (FIX-174) an upgrade holds it alone in the same way while it records its restore point.
 /// </summary>
 internal static class LiveStoreRecovery
 {
@@ -67,12 +67,18 @@ internal static class LiveStoreRecovery
 
     internal const string WriterPresent = "Another runtime on this machine has this estate open: a daemon or a command in flight. Stop the daemon ('vericairn runtime stop') and let other commands finish, then rebuild. Nothing was moved.";
 
+    // From 0.9.5 (FIX-174) an upgrade holds the lock alone while it records its restore point, as a rebuild does while it rebuilds.
+    internal const string WriterLockHeldAlone = "Another command on this machine holds this estate's writer lock alone: its derived cache is being rebuilt with 'vericairn estate cache rebuild', or an upgrade is recording its restore point. Try again when that finishes.";
+
     internal static string LocalOnly(string lead, string databasePath) =>
         lead + " It is the estate's canonical copy, not a cache, so it is never moved, deleted or rebuilt: keep live.db with its -wal and -shm files together, stop any daemon and command using it, and recover from a backup of that directory or from an earlier 'vericairn estate export' ('vericairn estate restore' restores it as a repository-synced estate). Database: " + databasePath;
 
     internal static string WriterLockPath(string databasePath) => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(databasePath))!, WriterLockName);
 
-    /// <summary>Takes the estate's writer lock shared, as every writable session does for its lifetime; refused while a rebuild holds it.</summary>
+    /// <summary>
+    /// Takes the estate's writer lock shared, as every writable session does for its lifetime; refused while a rebuild holds it alone, or
+    /// from 0.9.5 (FIX-174) an upgrade recording its restore point.
+    /// </summary>
     internal static FileStream ShareWriterLock(string databasePath)
     {
         string path = WriterLockPath(databasePath);
@@ -83,14 +89,18 @@ internal static class LiveStoreRecovery
         }
         catch (IOException exception) when (exception is not FileNotFoundException and not DirectoryNotFoundException)
         {
-            throw new IOException("This estate's derived cache is being rebuilt on this machine. Try again when 'vericairn estate cache rebuild' finishes.", exception);
+            throw new IOException(WriterLockHeldAlone, exception);
         }
     }
 
-    private static FileStream? ExclusiveWriterLock(string databasePath)
+    /// <summary>
+    /// Takes the estate's writer lock alone, as a rebuild does and, from 0.9.5 (FIX-174), an upgrade while it records its restore point;
+    /// null while any other session holds it, shared or alone.
+    /// </summary>
+    internal static FileStream? ExclusiveWriterLock(string databasePath, string? home = null)
     {
         string path = WriterLockPath(databasePath);
-        OwnerOnlyState.CreateDirectory(Path.GetDirectoryName(path)!, VericairnHome.Path());
+        OwnerOnlyState.CreateDirectory(Path.GetDirectoryName(path)!, home ?? VericairnHome.Path());
         try
         {
             return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);

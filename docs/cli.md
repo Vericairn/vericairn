@@ -13,7 +13,7 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 45, November 24, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk and checks each copy before it writes anything, refusing an upgrade whose copy is incomplete, in the development build.
+Revision 45, November 24, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
 
 Revision 44, November 22, 2026. Describe 0.9.4's command additions as released commands rather than development builds.
 
@@ -651,8 +651,12 @@ daemon's `events.db` and a local-only estate's `objects.db`, is exported the sam
 files copied while a runtime holds them open, so the restore point holds no database's `-wal`, `-shm` or `-journal` file. Before the
 upgrade writes anything, each copy must exist, pass SQLite's integrity check and hold as many rows in each table as the database it
 copies; otherwise the upgrade, one-way or not, is refused (`refused`) with nothing changed, and the message names the database and
-what failed. The way back names each database's `-wal` and `-shm` to remove before the exported state is copied back, and the
-clone's live store too when it kept none before the upgrade.
+what failed. The copies are made while the upgrade holds the clone's writer lock, `live.lock`, alone, as `estate cache rebuild`
+does, so no writable session opens meanwhile. While a daemon, a run's MCP server or another command has the estate open for writing,
+the upgrade is refused with nothing changed, and the message says to run it through the daemon serving the estate or after stopping
+it. A database that changes while it is copied, which only a process writing without the lock can do, refuses the upgrade too. The
+way back names each database's `-wal` and `-shm` to remove before the exported state is copied back, and the clone's live store too
+when it kept none before the upgrade.
 
 `vericairn runtime status` adds a `release` line with the serving daemon's release against the estate's pin and, while they
 differ, a `mismatch:` line with the commands that settle it. Its `--json` adds `servingRelease`, `pin` (the manifest's pin as

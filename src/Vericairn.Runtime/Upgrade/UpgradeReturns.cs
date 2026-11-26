@@ -191,12 +191,20 @@ public static class UpgradeReturns
     /// The command line's upgrade with no daemon opens the estate read-only, and a repository-synced estate's read-only session holds its
     /// records in a transient store in memory, not in the live store's file; an export through that session's connection wrote no file.
     /// A repository-synced clone with no live store on disk, which only read-only sessions have opened, has none to keep, and its restore
-    /// point holds none.
+    /// point holds none. The restore point is recorded while the upgrade holds the clone's writer lock alone, as a cache rebuild does, so
+    /// no other runtime on this machine that honours the lock writes the live store or a database beside it during the copies; while
+    /// another runtime holds the lock, the upgrade is refused before anything is made. Each copy's own check of a change during the copy
+    /// stays as a second line, for a process that writes without the lock.
     /// </remarks>
     internal static RestorePoint Record(EstateSession session, string fromPin, string toPin, string? commit, bool clean, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(session);
         string clone = Path.GetDirectoryName(session.Live.Path)!;
+        // Every writable session holds the lock shared for its lifetime, so holding it alone means no other is open, and none opens, until
+        // the restore point is recorded. A writable session applying the upgrade, as the daemon's, gives up its own share for the hold.
+        using EstateSession.WritersHeldAlone writers = session.HoldWritersAlone() ?? throw new SqliteExportException(session.IsReadOnly
+            ? "a runtime is serving this estate on this machine, a daemon, a run's MCP server or another command in flight, and holds its writer lock, so the clone's local state could change while the restore point copies it. Run the upgrade through the daemon serving the estate, or after stopping that runtime ('vericairn runtime stop') and letting other commands finish"
+            : "another runtime on this machine has this estate open beside the one applying the upgrade, a run's MCP server or a command in flight, and holds its writer lock, so the clone's local state could change while the restore point copies it. Let it finish or stop it, then run the upgrade again through this runtime");
         string id = Ulid.NewUlid().Value;
         string directory = Path.Combine(clone, RestorePointsDirectory, id);
         string state = Path.Combine(directory, "state");
@@ -212,13 +220,16 @@ public static class UpgradeReturns
             else if (!synced)
                 throw new SqliteExportException($"{live}, the live store that holds this local-only estate's records, is not on this machine's disk. {Recovery(live, live, synced)}");
 
-            string[] files = [.. Directory.EnumerateFiles(clone).Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal)];
-            var databases = new HashSet<string>(files.Where(name => !name.StartsWith(live, StringComparison.Ordinal)
-                && (name is EventJournal.FileName or KeywordIndex.FileName or "objects.db" || SqliteExport.IsDatabase(Path.Combine(clone, name)))), StringComparer.Ordinal);
+            // The live store, the daemon's endpoint, temporary files and locks are left out before any file is opened: the writer lock this
+            // upgrade holds alone refuses even a reader's handle.
+            string[] files = [.. Directory.EnumerateFiles(clone).Select(Path.GetFileName).OfType<string>()
+                .Where(name => !name.StartsWith(live, StringComparison.Ordinal) && name is not "daemon.json" && !name.EndsWith(".tmp", StringComparison.Ordinal) && !name.EndsWith(".lock", StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)];
+            var databases = new HashSet<string>(files.Where(name =>
+                name is EventJournal.FileName or KeywordIndex.FileName or "objects.db" || SqliteExport.IsDatabase(Path.Combine(clone, name))), StringComparer.Ordinal);
             foreach (string name in files)
             {
                 string file = Path.Combine(clone, name);
-                if (name.StartsWith(live, StringComparison.Ordinal) || name is "daemon.json" || name.EndsWith(".tmp", StringComparison.Ordinal) || name.EndsWith(".lock", StringComparison.Ordinal)) continue;
                 // A database's -wal, -shm and -journal are in its export, never copied as files a runtime may be writing.
                 if (SqliteExport.Sidecars.Any(sidecar => name.EndsWith(sidecar, StringComparison.Ordinal) && databases.Contains(name[..^sidecar.Length]))) continue;
                 if (new FileInfo(file).LinkTarget is not null) continue;

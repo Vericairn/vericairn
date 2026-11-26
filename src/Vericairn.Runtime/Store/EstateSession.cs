@@ -130,6 +130,54 @@ public sealed class EstateSession : IDisposable
         readOnly = false;
     }
 
+    /// <summary>
+    /// From 0.9.5 (FIX-174): takes the estate's writer lock alone, as a cache rebuild does, so that while the hold lasts no other runtime on
+    /// this machine has the estate open for writing, and none opens it: every writable session holds the lock shared for its lifetime. Null,
+    /// and this session as it was, when another runtime holds the lock: a daemon, a run's MCP server or a command in flight. A writable
+    /// session gives up its own share of the lock for the hold and takes it again when the hold ends.
+    /// </summary>
+    internal WritersHeldAlone? HoldWritersAlone()
+    {
+        FileStream? share = writers;
+        writers = null;
+        share?.Dispose();
+        FileStream? alone = LiveStoreRecovery.ExclusiveWriterLock(Live.Path, home);
+        if (alone is null)
+        {
+            if (share is not null) writers = LiveStoreRecovery.ShareWriterLock(Live.Path);
+            return null;
+        }
+
+        return new WritersHeldAlone(this, alone, share is not null);
+    }
+
+    /// <summary>From 0.9.5 (FIX-174): the estate's writer lock held alone by <see cref="HoldWritersAlone"/>, released on disposal.</summary>
+    internal sealed class WritersHeldAlone : IDisposable
+    {
+        private readonly EstateSession session;
+        private readonly bool shared;
+        private FileStream? alone;
+
+        internal WritersHeldAlone(EstateSession session, FileStream alone, bool shared)
+        {
+            this.session = session;
+            this.alone = alone;
+            this.shared = shared;
+        }
+
+        /// <summary>
+        /// Releases the lock and, for a writable session, takes its share again; that throws only when another command took the lock alone
+        /// in between, such as a cache rebuild started at that moment.
+        /// </summary>
+        public void Dispose()
+        {
+            if (alone is null) return;
+            alone.Dispose();
+            alone = null;
+            if (shared) session.writers = LiveStoreRecovery.ShareWriterLock(session.Live.Path);
+        }
+    }
+
     /// <summary>Where the live store of an estate opened from a root lives: under the per-user state, keyed by estate id and root path.</summary>
     public static string LiveStorePath(string root, string estateId, string profile) => EstateLocations.LiveStorePath(root, estateId, profile);
 

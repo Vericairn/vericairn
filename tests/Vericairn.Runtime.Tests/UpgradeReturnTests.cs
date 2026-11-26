@@ -13,6 +13,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Upgrade;
 
 namespace Vericairn.Runtime.Tests;
@@ -447,6 +448,183 @@ public sealed class UpgradeReturnTests
         Assert.DoesNotContain("its live store included", changes, StringComparison.Ordinal);
         Assert.Contains("first removing live.db, live.db-wal and live.db-shm there. This machine kept no live store for the clone before the upgrade, so none is put back; release 0.9.3 builds it again from the repository's records.", applied.Return.Steps[2], StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhileAnotherRuntimeHoldsTheWriterLockTheUpgradeIsRefusedAndNothingChanges(bool writable)
+    {
+        // FIX-174: the restore point is recorded under the clone's writer lock held alone, as a cache rebuild holds it. The command line
+        // with no daemon opens the estate read-only; a writable session applying the upgrade, as the daemon's, holds its own share.
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        string clone = PopulateLiveStore(f);
+        string live = Path.Combine(clone, "live.db");
+        using EstateService api = writable ? EstateService.Open(f.Estate.Root) : EstateService.OpenForUpgrade(f.Estate.Root);
+        string[] estate = Snapshot(f.Estate.Root);
+        UpgradeResponse? refused;
+        Problem? problem;
+        // Another runtime has the estate open for writing, as a run's MCP server or a command in flight has: it holds the lock shared.
+        using (EstateService.Open(f.Estate.Root))
+        {
+            string[] state = StateSnapshot(clone);
+            IReadOnlyDictionary<string, long> rows = RestorePointInspection.Rows(live);
+            (refused, problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+            Assert.Equal(state, StateSnapshot(clone));
+            Assert.Equal(rows, RestorePointInspection.Rows(live));
+        }
+
+        Assert.Null(refused);
+        Assert.Equal("refused", problem!.Code);
+        Assert.StartsWith("The upgrade's restore point could not be recorded on this machine: ", problem.Message, StringComparison.Ordinal);
+        Assert.Contains(writable
+            ? "another runtime on this machine has this estate open beside the one applying the upgrade, a run's MCP server or a command in flight, and holds its writer lock"
+            : "a runtime is serving this estate on this machine, a daemon, a run's MCP server or another command in flight, and holds its writer lock", problem.Message, StringComparison.Ordinal);
+        Assert.Contains(writable
+            ? "Let it finish or stop it, then run the upgrade again through this runtime."
+            : "Run the upgrade through the daemon serving the estate, or after stopping that runtime ('vericairn runtime stop') and letting other commands finish.", problem.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Nothing was applied, and nothing changed.", problem.Message, StringComparison.Ordinal);
+        Assert.Equal(estate, Snapshot(f.Estate.Root));
+        Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
+        Assert.Equal("release 0.9.3", f.Estate.Load().Manifest!.Describe());
+        // A writable session keeps its share of the lock after the refusal, so a rebuild is still refused while it is open.
+        using (FileStream? alone = LiveStoreRecovery.ExclusiveWriterLock(live)) Assert.Equal(!writable, alone is not null);
+
+        // Once the other runtime has closed, the same upgrade applies.
+        (UpgradeResponse? applied, Problem? none) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+        Assert.Null(none);
+        Assert.True(applied!.Applied);
+        Assert.Contains("live.db", applied.Return!.RestorePoint!.Files);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhileTheRestorePointIsRecordedNoRuntimeThatHonoursTheLockOpensTheEstateToWrite(bool writable)
+    {
+        // FIX-174: a process that writes the clone's state opens a writable session, which takes the writer lock shared before it opens
+        // the live store; while the upgrade holds the lock alone, it is refused, so it cannot write the live store or a database beside
+        // it during the copy, and the copy is the database as it stood.
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        string clone = PopulateLiveStore(f);
+        string live = Path.Combine(clone, "live.db");
+        string probe = Path.Combine(clone, "probe.db");
+        CreateDatabase(probe, "CREATE TABLE ledger (id INTEGER PRIMARY KEY, amount INTEGER NOT NULL); INSERT INTO ledger VALUES (1, 5), (2, -5);");
+        var during = new List<string>();
+        UpgradeReturns.ExportWritten = path =>
+        {
+            if (Path.GetFileName(path) != "probe.db") return;
+            try
+            {
+                // A writer that honours the lock: it opens a writable session, and only then writes.
+                using EstateService writer = EstateService.Open(f.Estate.Root);
+                CreateDatabase(probe, "UPDATE ledger SET amount = amount + 7 WHERE id = 1;");
+                during.Add("opened and wrote");
+            }
+            catch (IOException exception)
+            {
+                during.Add(exception.Message);
+            }
+        };
+        try
+        {
+            using EstateService api = writable ? EstateService.Open(f.Estate.Root) : EstateService.OpenForUpgrade(f.Estate.Root);
+            IReadOnlyDictionary<string, long> before = RestorePointInspection.Rows(live);
+            (UpgradeResponse? applied, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+            Assert.Equal([LiveStoreRecovery.WriterLockHeldAlone], during);
+            Assert.Null(problem);
+            UpgradeRestorePoint point = applied!.Return!.RestorePoint!;
+            Assert.Equal(before, RestorePointInspection.Rows(Path.Combine(point.Directory, "state", "live.db")));
+            Assert.Equal(0L, Sum(Path.Combine(point.Directory, "state", "probe.db")));
+            Assert.Equal(0L, Sum(probe));
+            // The session that applied the upgrade holds its share of the lock again, as every writable session does.
+            using (FileStream? alone = LiveStoreRecovery.ExclusiveWriterLock(live)) Assert.Null(alone);
+        }
+        finally
+        {
+            UpgradeReturns.ExportWritten = null;
+        }
+
+        using (FileStream? free = LiveStoreRecovery.ExclusiveWriterLock(live)) Assert.NotNull(free);
+
+        static long Sum(string database)
+        {
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT TOTAL(amount) FROM ledger;";
+            return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
+
+    [Fact]
+    public void ThePlanNamesTheLiveStoreOnlyWhileTheCloneKeepsOne()
+    {
+        // FIX-174: a repository-synced clone that only read-only commands have opened keeps no live store, and its restore point holds none.
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        f.Publish("0.9.4");
+        using (EstateService api = EstateService.OpenForUpgrade(f.Estate.Root))
+        {
+            Assert.False(File.Exists(api.Session.Live.Path));
+            (UpgradeResponse? check, Problem? problem) = api.Upgrade(new("0.9.4", null, true));
+            Assert.Null(problem);
+            Assert.Contains("an export of this machine's local state for this clone, which holds no live store, since this machine keeps none for the clone; release 0.9.3 builds it again from the repository's records, in a new directory under", check!.Return!.Steps[0], StringComparison.Ordinal);
+            Assert.DoesNotContain("its live store included", check.Return.Steps[0], StringComparison.Ordinal);
+        }
+
+        PopulateLiveStore(f);
+        using (EstateService api = EstateService.OpenForUpgrade(f.Estate.Root))
+        {
+            (UpgradeResponse? check, Problem? problem) = api.Upgrade(new("0.9.4", null, true));
+            Assert.Null(problem);
+            Assert.Contains("an export of this machine's local state for this clone, its live store included, in a new directory under", check!.Return!.Steps[0], StringComparison.Ordinal);
+            Assert.DoesNotContain("holds no live store", check.Return.Steps[0], StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WithUncommittedChangesTheWayBackSaysWhetherTheRestorePointHoldsThem(bool liveStore)
+    {
+        TestPrerequisites.RequireGit();
+        using var f = new EstateLineFixture();
+        f.Follow(version: "0.9.3");
+        Git(f.Estate.Root, "init", "-q", "-b", "main");
+        Git(f.Estate.Root, "add", "-A");
+        Git(f.Estate.Root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "The estate before the upgrade");
+        string commit = Git(f.Estate.Root, "rev-parse", "HEAD");
+        // The release record is written after the commit, so the working tree has uncommitted changes beside it.
+        f.Publish("0.9.4");
+        if (liveStore) PopulateLiveStore(f);
+
+        using EstateService api = EstateService.OpenForUpgrade(f.Estate.Root);
+        api.Providers = new Providers.ProviderRegistry();
+        api.Providers.Register(new GitCommandAdapter());
+        (UpgradeResponse? applied, Problem? problem) = api.Upgrade(new("0.9.4", f.Estate.OperatorId, false));
+        Assert.Null(problem);
+        UpgradeRestorePoint point = applied!.Return!.RestorePoint!;
+        Assert.Equal((commit, false, liveStore), (point.Commit, point.Clean, point.Files.Contains("live.db")));
+        string back = applied.Return.Steps[1], putBack = applied.Return.Steps[2];
+        if (liveStore)
+        {
+            Assert.EndsWith("The working tree had uncommitted changes beside that commit; the export holds the live store with them, but the commit does not.", back, StringComparison.Ordinal);
+            Assert.DoesNotContain("kept no live store", putBack, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.EndsWith("The working tree had uncommitted changes beside that commit, and neither the commit nor the restore point holds them, since this machine kept no live store for the clone: keep a copy of them before you return.", back, StringComparison.Ordinal);
+            Assert.DoesNotContain("the export holds the live store", back, StringComparison.Ordinal);
+            Assert.Contains("This machine kept no live store for the clone before the upgrade", putBack, StringComparison.Ordinal);
+        }
+    }
+
+    // The clone's state, leaving out shared-memory files, which a reader of a database held open may rewrite.
+    private static string[] StateSnapshot(string clone) => [.. Snapshot(clone).Where(entry => !entry.Split(':')[0].EndsWith("-shm", StringComparison.Ordinal))];
 
     private static void CreateDatabase(string path, string sql)
     {

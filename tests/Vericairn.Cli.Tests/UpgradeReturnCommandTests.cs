@@ -96,6 +96,32 @@ public sealed class UpgradeReturnCommandTests
         Assert.Empty(model.OfType("migration"));
     }
 
+    [Fact]
+    public void WithNoDaemonTheUpgradeIsRefusedWhileAnotherRuntimeHasTheEstateOpenAndNothingChanges()
+    {
+        // FIX-174: the restore point is recorded under the clone's writer lock held alone; another runtime with the estate open for
+        // writing, here a session as a run's MCP server or a command in flight holds it, holds the lock shared.
+        using var f = new EstateLineFixture();
+        string clone = OneWayEstate(f);
+        string[] estate = Snapshot(f.Estate.Root);
+        CliHarness.Outcome refused;
+        using (EstateService.Open(f.Estate.Root))
+        {
+            refused = CliHarness.Run("--estate", f.Estate.Root, "estate", "upgrade", "--to", "0.9.4", "--by", f.Estate.OperatorId, "--one-way");
+        }
+
+        Assert.NotEqual(0, refused.Code);
+        string error = CliHarness.Unfold(refused.Err);
+        Assert.Contains("The upgrade's restore point could not be recorded on this machine: a runtime is serving this estate on this machine", error, StringComparison.Ordinal);
+        Assert.Contains("Run the upgrade through the daemon serving the estate, or after stopping that runtime ('vericairn runtime stop') and letting other commands finish.", error, StringComparison.Ordinal);
+        Assert.Contains("Nothing was applied, and nothing changed.", error, StringComparison.Ordinal);
+        Assert.Equal(estate, Snapshot(f.Estate.Root));
+        Assert.False(Directory.Exists(Path.Combine(clone, UpgradeReturns.RestorePointsDirectory)));
+        EstateModel model = f.Estate.Load();
+        Assert.Equal("release 0.9.1", model.Manifest!.Describe());
+        Assert.Empty(model.OfType("migration"));
+    }
+
     // An estate pinned to 0.9.1 whose upgrade to 0.9.4 is one-way, as in issue 440: the first device's admission names the first authority,
     // which 0.9.1 predates. A writable command before the upgrade left the clone's live store populated, with an observer beside it, and
     // closed; no daemon serves the estate. Returns the clone's directory.

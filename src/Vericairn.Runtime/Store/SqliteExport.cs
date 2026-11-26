@@ -190,7 +190,10 @@ internal static class SqliteExport
     private static string Bounded(string text) => text.Length > 300 ? text[..300] + "..." : text;
 }
 
-/// <summary>From 0.9.5 (FIX-174): a database that could not be exported, or whose copy failed its check; the message says which and why.</summary>
+/// <summary>
+/// From 0.9.5 (FIX-174): a database that could not be exported, or whose copy failed its check, or a restore point whose databases were
+/// not exported because another runtime held the clone's writer lock; the message says which and why.
+/// </summary>
 internal sealed class SqliteExportException : IOException
 {
     internal SqliteExportException(string message) : base(message.ReplaceLineEndings(" ")) { }
