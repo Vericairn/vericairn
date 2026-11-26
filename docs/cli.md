@@ -13,7 +13,11 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 45, November 24, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
+Revision 47, November 26, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
+
+Revision 46, November 24, 2026. An agent's `operator done` or `operator dismiss` citing the operator's words writes `--said-at`, which needs `Z` or an explicit offset, in whole seconds UTC, and the time of the recording without it, and `docs pass --before` without `--previous` and `--by` reads the estate's releases read-only, in the development build.
+
+Revision 45, November 24, 2026. `doctor` reports the `vericairn-enclave` helper's version beside the command line's and flags a mismatch, `doctor --json` adds the `helper` probe, and a command line refuses to sign through a helper older than itself, or to make a key beside one that cannot be started, in the development build.
 
 Revision 44, November 22, 2026. Describe 0.9.4's command additions as released commands rather than development builds.
 
@@ -1073,12 +1077,30 @@ such as the version, the tool's version line, the estate's path, the default cus
 | `search` | `present`, or `unavailable` with the reason |
 | `daemon` | `present` with its process, `missing` when commands run the embedded runtime, `not-applicable` outside an estate |
 | `presence` | From 0.9.4: on macOS, `present` with `sessions` when this release build's signed helper may open presence sessions on this macOS version, or `unavailable` with `per-signature` and the reason in `detail`; `not-applicable` elsewhere |
+| `helper` | From 0.9.5: on macOS, `present` with the helper's version when the command line signs through it, `unavailable` when it refuses the helper (its version, or `null` for a helper that reports none), `missing` without a helper; `detail` names the helper's version beside the command line's and the helper version it expects, flagged `mismatch`; `not-applicable` elsewhere |
 
 From 0.9.4 (ID-16) the report adds a `presence` line on macOS, after `enclave`: whether a presence check may cover an operator
 action's announced list here and, when not, why (a development build, a macOS version this release has not qualified, or a helper
 that does not meet the release requirement), then the estate charter's `policies.presence`, whether device owners' settings are kept
 on this machine, and, in a release build, whether this process's .NET diagnostics channel is on. Every signature with a presence key
 asks its own check wherever sessions are off.
+
+From 0.9.5 (FIX-169) the report adds a `helper` line on macOS, after `enclave`: the `vericairn-enclave` helper's version beside the
+command line's and the helper version this command line expects, as the helper answers `vericairn-enclave version`. A helper from
+before 0.9.5 answers with its usage line instead, so the line says it reports no version, and that it comes from a release before 0.9.4
+when it serves no `sign-record` either. The line is flagged `mismatch` when the helper is older than the version expected, newer, or
+lacks a command the command line calls. Before its first signature through the helper, and before it makes a Secure Enclave key, every
+command asks the same question and refuses an older helper, or one without `sign-record`, before anything is signed: the refusal names
+the helper's version, the command line's and the helper version it needs, says that the helper and the command line come from the same
+release archive, and ends "Nothing was signed." A helper that is beside the command line but cannot be started, such as one without
+execute permission, is refused the same way, as one that did not answer: the `helper` line says so, the `enclave` line reads `Secure
+Enclave custody unavailable (the vericairn-enclave helper beside the command line could not be started)`, and `devices create` refuses
+before it makes a key rather than taking another custody; neither names the helper's path. Up to 0.9.4 both commands ended with the
+start failure and a stack trace.
+
+```text
+helper    vericairn-enclave reports no version and serves no sign-record, so it comes from a release before 0.9.4; vericairn 0.9.5+<commit> expects vericairn-enclave 0.9.5: mismatch, so Secure Enclave signatures are refused until the vericairn-enclave from this command line's release archive is beside it
+```
 
 ```sh
 vericairn --json doctor

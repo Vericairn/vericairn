@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Threading.Channels;
 using Vericairn.Records.Tests;
 
 namespace Vericairn.Runtime.Tests;
@@ -44,6 +45,51 @@ public sealed class TestTimingTests
         File.Move(path + ".next", path, overwrite: true);
         await replaced.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         Assert.Equal("after", File.ReadAllText(path));
+    }
+
+    // FIX-170: a watcher whose buffer overflows, as Windows' does under heavy file activity, has lost which changes it saw, not that
+    // something changed. The wait checks its condition again and goes on waiting, where it failed with InternalBufferOverflowException;
+    // any other failure of the watcher still ends the wait with that failure.
+    [Fact]
+    public async Task AWatcherOverflowMakesAFileBarrierCheckAgainAndGoOnWaiting()
+    {
+        CancellationToken cancel = TestContext.Current.CancellationToken;
+        DirectoryInfo quiet = Directory.CreateTempSubdirectory("vericairn-file-signal-");
+        try
+        {
+            int ready = 0, checks = 0;
+            TaskCompletionSource checkedAgain = TestTiming.Signal();
+            using (var changed = new FileSignal(quiet.FullName))
+            {
+                Task waiting = changed.UntilAsync(() =>
+                {
+                    if (Interlocked.Increment(ref checks) == 2) checkedAgain.TrySetResult();
+                    return Volatile.Read(ref ready) == 1;
+                }, "a condition only an overflow reports", cancel);
+                Assert.False(waiting.IsCompleted);
+
+                // An overflow while the condition does not hold: it is checked again, and the wait goes on.
+                changed.Failed(new InternalBufferOverflowException());
+                await Task.WhenAny(checkedAgain.Task, waiting).WaitAsync(TestTiming.HangTimeout, cancel);
+                Assert.True(checkedAgain.Task.IsCompleted, waiting.Exception?.ToString());
+                Assert.False(waiting.IsCompleted);
+
+                // The condition comes to hold with nothing reported but an overflow: the wait sees it.
+                Volatile.Write(ref ready, 1);
+                changed.Failed(new InternalBufferOverflowException());
+                await waiting.WaitAsync(TestTiming.HangTimeout, cancel);
+            }
+
+            using var failing = new FileSignal(quiet.FullName);
+            Task failed = failing.UntilAsync(() => false, "a condition that never holds", cancel);
+            failing.Failed(new IOException("The watcher failed."));
+            ChannelClosedException closed = await Assert.ThrowsAsync<ChannelClosedException>(() => failed.WaitAsync(TestTiming.HangTimeout, cancel));
+            Assert.IsType<IOException>(closed.InnerException);
+        }
+        finally
+        {
+            quiet.Delete(recursive: true);
+        }
     }
 
     [Fact]

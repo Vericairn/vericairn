@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
@@ -19,6 +20,28 @@ public static class SecureEnclaveCustody
 
     /// <summary>Overrides where the helper is, for development builds and tests; from 0.9.4 a release build ignores it (ID-16).</summary>
     public const string HelperVariable = "VERICAIRN_ENCLAVE_HELPER";
+
+    /// <summary>
+    /// From 0.9.5 (FIX-169): the helper version this command line was built with, the helper's own <c>helperVersion</c> in
+    /// src/Vericairn.Enclave/vericairn-enclave.swift, which a test holds equal. It names the release whose helper this is and changes with
+    /// the helper's in a release that changes the helper. Before its first signature through the helper the command line asks the helper
+    /// its version, and refuses one that is older (<see cref="EnclaveHelperReport"/>).
+    /// </summary>
+    internal const string HelperVersion = "0.9.5";
+
+    /// <summary>
+    /// From 0.9.5: the SHA-256, in lowercase hex, of src/Vericairn.Enclave/vericairn-enclave.swift as it stands at
+    /// <see cref="HelperVersion"/>; the repository keeps that file with LF line endings on every platform, so <c>shasum -a 256</c> of a
+    /// checkout gives it. The version check above holds only if the helper's version changes whenever the helper does: a release that
+    /// changed an existing command without a new version would pass it and fail every signature as an older helper did. Nothing else
+    /// links the two, so a test holds the source to this hash. A change to the source fails it until <see cref="HelperVersion"/> and the
+    /// source's <c>helperVersion</c> both name the release in preparation, bumped together if they still name a released helper, and
+    /// this hash is updated.
+    /// </summary>
+    internal const string HelperSourceSha256 = "d2236b5a4197fedca147238b9c4337213fae8c934e3ab563f2b994777f802edd";
+
+    /// <summary>From 0.9.5 (FIX-169): the helper commands this command line calls, each of which a helper it signs through must serve.</summary>
+    internal static readonly ImmutableArray<string> HelperCommands = ["available", "create", "public", "sign", "sign-record", "session"];
 
     /// <summary>
     /// The helper's path: in a development build the override, else beside the running executable; from 0.9.4 a release build always
@@ -67,17 +90,42 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
     /// <inheritdoc />
     public string Kind => SecureEnclaveCustody.Kind;
 
-    /// <summary>True when the helper is present and this Mac has a Secure Enclave the process can use.</summary>
-    public static bool Available()
+    /// <summary>
+    /// True when the helper is present and this Mac has a Secure Enclave the process can use. From 0.9.5 false, never a thrown start
+    /// failure, beside a helper that cannot be started (<see cref="Probe()"/> tells that case apart).
+    /// </summary>
+    public static bool Available() => Probe() == true;
+
+    /// <summary>
+    /// From 0.9.5: what the helper beside the command line says when asked whether this process can use a Secure Enclave: true when it
+    /// can, false when it cannot or no helper is beside the command line, and null for a helper that is there but cannot be started,
+    /// such as one without execute permission. Up to 0.9.4 that start failure escaped unhandled, with a stack trace naming the helper's
+    /// path, so doctor and devices create ended before the helper's version check (FIX-169) could refuse the helper. The key store
+    /// choice now takes the Secure Enclave beside such a helper, so that check refuses it before any key is made, rather than taking a
+    /// weaker custody in its place.
+    /// </summary>
+    internal static bool? Probe()
     {
-        string? path = SecureEnclaveCustody.HelperPath();
-        return path is not null && Run(path, Quick, "available").Code == 0;
+        if (SecureEnclaveCustody.HelperPath() is not string helper)
+        {
+            return false;
+        }
+
+        try
+        {
+            return Run(helper, Quick, "available").Code == 0;
+        }
+        catch (Exception exception) when (EnclaveHelperCheck.CouldNotStart(exception))
+        {
+            return null;
+        }
     }
 
     /// <inheritdoc />
     public bool Has(string deviceId) => File.Exists(Blob(deviceId));
 
     /// <inheritdoc />
+    /// <remarks>From 0.9.5 (FIX-169) a helper this command line does not sign through is refused before the key is made (<see cref="RequireHelper"/>).</remarks>
     public byte[] Create(string deviceId)
     {
         string blob = Blob(deviceId);
@@ -85,6 +133,8 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
         {
             throw new IOException($"A key for device {deviceId} already exists; keys are never overwritten.");
         }
+
+        RequireHelper();
 
         Directory.CreateDirectory(directory);
         File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -119,6 +169,7 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
             throw new ArgumentException("The digest is 32 bytes.", nameof(digest));
         }
 
+        RequireHelper();
         string hex = Convert.ToHexString(digest).ToLowerInvariant();
         (int code, string output) = Run(helper, WithPerson, "sign", Blob(deviceId), hex, PresenceReason.Text(reason));
         byte[] signature = code == 0 ? Convert.FromBase64String(output) : throw new InvalidOperationException(output);
@@ -138,6 +189,7 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
             throw new ArgumentException("The digest is the SHA-256 of the record's canonical bytes.", nameof(digest));
         }
 
+        RequireHelper();
         // The helper's own label begins the dialog's text, so the runtime's sentence follows it without its own "sign Vericairn".
         string sentence = PresenceReason.Text(reason);
         const string Repeated = "sign Vericairn ";
@@ -149,6 +201,18 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
 
     /// <summary>From 0.9.4: the helper this store runs.</summary>
     internal string Helper => helper;
+
+    /// <summary>
+    /// From 0.9.5 (FIX-169): asks the helper its version and the commands it serves, before anything is signed through it, and throws an
+    /// <see cref="EnclaveHelperMismatchException"/> naming the helper's version, this command line's and where the right helper comes from
+    /// when the helper does not serve a command this command line calls or is older than <see cref="SecureEnclaveCustody.HelperVersion"/>.
+    /// A 0.9.4 command line beside an older helper failed every signature with the helper's usage line instead.
+    /// </summary>
+    internal void RequireHelper()
+    {
+        if (EnclaveHelperCheck.Ask(helper).Refusal(EnclaveHelperCheck.CommandLineVersion) is string refusal)
+            throw new EnclaveHelperMismatchException(refusal);
+    }
 
     /// <summary>From 0.9.4: where the key held under an id is kept, the blob a presence session's helper is started with.</summary>
     internal string BlobPath(string keyId) => Blob(keyId);
@@ -185,7 +249,8 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
         return Path.Combine(directory, deviceId + ".se");
     }
 
-    private static (int Code, string Output) Run(string helper, TimeSpan timeout, params string[] arguments) => Run(helper, timeout, null, arguments);
+    /// <summary>Runs the helper: its exit code, and its standard output when it succeeded, else its standard error.</summary>
+    internal static (int Code, string Output) Run(string helper, TimeSpan timeout, params string[] arguments) => Run(helper, timeout, null, arguments);
 
     private static (int Code, string Output) Run(string helper, TimeSpan timeout, byte[]? input, params string[] arguments)
     {

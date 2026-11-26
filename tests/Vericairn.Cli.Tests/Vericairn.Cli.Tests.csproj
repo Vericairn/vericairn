@@ -24,6 +24,7 @@
     <None Include="../TestSupport/NuGetFixtures/*.json" Link="NuGetFixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../TestSupport/CompanionWriteFixture.cs" Link="TestSupport/CompanionWriteFixture.cs" />
     <Compile Include="../TestSupport/PresenceHelperStandIn.cs" Link="TestSupport/PresenceHelperStandIn.cs" />
+    <Compile Include="../TestSupport/EnclaveHelperStandIn.cs" Link="TestSupport/EnclaveHelperStandIn.cs" />
   </ItemGroup>
 
   <ItemGroup>

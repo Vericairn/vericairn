@@ -305,6 +305,9 @@ public sealed partial class EstateService
             bool counted = false;
             try
             {
+                // From 0.9.5 (FIX-169) a Secure Enclave helper this command line does not sign through is refused before any prompt is
+                // named or session opened, with both versions and where the right helper comes from.
+                if (OperatingSystem.IsMacOS() && inner is StoreSigner { Store: SecureEnclaveKeyStore enclave }) enclave.RequireHelper();
                 if (inner is StoreSigner held && owner.NeedsPresence(held, draft, model))
                 {
                     if (content is not null && owner.SessionSignature(held, draft, model, content) is RecordSignature underSession) return underSession;

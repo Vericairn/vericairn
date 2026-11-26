@@ -100,9 +100,12 @@ public sealed partial class SecretScanConfigurationTests : IDisposable
     public void ACredentialInAnyPositionButTheHashIsFound(string position, bool alone)
     {
         // Assembled at run time, so that this file holds no credential-shaped text of its own: a lower-case GitLab token, which the old
-        // type position's shape admitted, and an AWS key id where the record id stands.
-        string gitlab = "glpat" + "-" + RandomNumberGenerator.GetString("abcdefghijkmnopqrstuvwxyz", 20);
-        string aws = "AKIA" + RandomNumberGenerator.GetString("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", 16);
+        // type position's shape admitted, and an AWS key id where the record id stands. Both are fixed, so that exactly one rule finds each
+        // in every position here, gitlab-pat and aws-access-token (FIX-170): they spell no word the generic-api-key rule keys on, and their
+        // distinct characters keep them well above each rule's entropy of 3. Random characters sometimes spelled one, such as key or API,
+        // and the generic rule found the line too, or repeated enough to take an AWS key id below its rule's entropy, and no rule found it.
+        string gitlab = "glpat" + "-" + "hwqmvrdkzbtnyjcpxsgf";
+        string aws = "AKIA" + "QZ7RBX4MTN2WHD6P";
         string[] lines = InventoryLines();
         string line = lines[0];
         string changed = position switch
