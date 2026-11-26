@@ -128,6 +128,8 @@ public sealed class PresenceSessionTests
         Assert.Equal(3, sessions.Custody.Reasons.Count);
     }
 
+    // Development and unqualified builds keep one prompt per signature.
+    [Trait("Journey", "J135")]
     [Theory]
     [InlineData("charter")]
     [InlineData("owner")]
@@ -286,7 +288,8 @@ public sealed class PresenceSessionTests
         Assert.Null(host.MachineOff("helper"));
         Assert.Equal("this is a development build, which carries no release identity; only a release build's signed helper opens a session",
             host.With(build: PresenceSessionBuild.Parse(null, null, "26")).MachineOff("helper"));
-        Assert.Equal("this release has not qualified macOS 26 for presence sessions", host.With(build: PresenceSessionBuild.Parse("ABCDE12345", null, "15")).MachineOff("helper"));
+        PresenceSessionHost unlisted = host.With(build: PresenceSessionBuild.Parse("ABCDE12345", null, "15"));
+        Assert.Equal("this release has not qualified macOS 26 for presence sessions", EstateService.PresenceSessionsOff(unlisted));
         Assert.Equal("this release lists no macOS version qualified for presence sessions", host.With(build: PresenceSessionBuild.Parse("ABCDE12345", null, null)).MachineOff("helper"));
         Assert.Equal("the release helper is not beside the command line", host.MachineOff(null));
         Assert.StartsWith("the release helper does not meet the release requirement: ", host.With(requirement: "unsigned").MachineOff("helper"), StringComparison.Ordinal);
@@ -906,12 +909,13 @@ internal static class PresenceSessionHostVariation
 internal static class StandInSessions
 {
     internal static PresenceSessionHost Host(List<PresenceHelperStandIn> helpers, string check = "passed", TimeProvider? clock = null,
-        Func<int, string>? checkForSession = null, Func<PresenceHelperStandIn, IPresenceHelperChannel>? channel = null) => new()
+        Func<int, string>? checkForSession = null, Func<PresenceHelperStandIn, IPresenceHelperChannel>? channel = null,
+        Func<bool>? agentRun = null) => new()
     {
         Clock = clock ?? TimeProvider.System,
         Build = PresenceSessionBuild.Parse("ABCDE12345", "vericairn-enclave", "26"),
         MacOS = () => true, MacOSMajor = () => 26, Requirement = new Accepting(), HelperOf = _ => "helper", Setting = _ => PresenceSetting.Default,
-        SameUserAgentRun = () => false, CheckWait = TimeSpan.Zero,
+        SameUserAgentRun = agentRun ?? (() => false), CheckWait = TimeSpan.Zero,
         Start = signer =>
         {
             var key = new FileKeyStore(VericairnHome.Path());
