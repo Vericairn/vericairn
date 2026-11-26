@@ -5,9 +5,14 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Adapters.Git;
 
@@ -16,7 +21,9 @@ public sealed partial class GitleaksScanner : ISecretScanner
 {
     /// <summary>
     /// gitleaks' default rules with every built-in allowlist removed, then Vericairn's own allowances, none of which exempts a
-    /// path or admits a sample credential. Each scan records this configuration's hash beside the scanner's version.
+    /// path or admits a sample credential. Each scan records the hash of the configuration it applies beside the scanner's version:
+    /// this one or the one without its inventory allowance, and from 0.9.5 either with the allowance for the release bases the range
+    /// carries appended when it carries one (FIX-168).
     /// </summary>
     internal static readonly byte[] Configuration = ReadConfiguration();
 
@@ -51,6 +58,30 @@ public sealed partial class GitleaksScanner : ISecretScanner
     /// </summary>
     internal const string InventoryLine = "(" + InventoryTypes + @")/[0-9]{4}-(0[1-9]|1[0-2])/[0-7][0-9A-HJKMNP-TV-Z]{25}\.json sha256:[0-9a-f]{64}";
 
+    /// <summary>
+    /// The rule that reads a release basis's git revisions as tokens (FIX-168): wherever a fragment names Sourcegraph, as a basis does that
+    /// lists a file such as DocumentSourceGraph.cs, it finds any 40 hexadecimal digits standing alone, which is what a commit id is.
+    /// </summary>
+    internal const string ReleaseBasisRule = "sourcegraph-access-token";
+
+    /// <summary>How a release basis held as one object begins: its canonical JSON, whose first member is its basis. Read as POSIX extended.</summary>
+    internal const string ReleaseBasisStart = "^\\{\"basis\":\\{";
+
+    /// <summary>
+    /// How a split object's root begins (FIX-163, SplitObject): its canonical JSON, naming its length, its digest and its format before its
+    /// parts. Read as POSIX extended.
+    /// </summary>
+    internal const string SplitRootStart = "^\\{\"bytes\":[1-9][0-9]*,\"digest\":\"sha256:[0-9a-f]{64}\",\"format\":\"vericairn\\.split-object/1\",\"parts\":\\[";
+
+    /// <summary>
+    /// The most characters the scan keeps of one process's standard output: an object of the estate's object limit, the most a release
+    /// basis's object or part holds, read whole (FIX-168).
+    /// </summary>
+    internal const int OutputLimit = (int)EstateLayout.MaxObjectBytes;
+
+    // The release basis formats the product writes and reads (EstateService.ReleasePolicies).
+    private static readonly string[] ReleaseBasisFormats = ["vericairn.release-basis/1", "vericairn.release-basis/2", "vericairn.release-basis/3"];
+
     // The options of gitleaks' history read, git log -p -U0 over the range, which the scanner's own patch read repeats exactly; -m reads
     // each merge as its patch against its first parent, whatever the clone's log.diffMerges says (ReadSettings). --submodule=short shows a
     // submodule's change as its two commit ids, whatever the clone's diff.submodule says, so neither read starts a git process of its own
@@ -70,8 +101,8 @@ public sealed partial class GitleaksScanner : ISecretScanner
 
     private readonly Func<ProcessStartInfo, ProcessResult> run;
 
-    /// <summary>Each scanner invocation is bounded to five minutes.</summary>
-    public GitleaksScanner() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(5))) { }
+    /// <summary>Each scanner invocation is bounded to five minutes, and its output to an object of the estate's object limit.</summary>
+    public GitleaksScanner() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(5), OutputLimit)) { }
 
     internal GitleaksScanner(Func<ProcessStartInfo, ProcessResult> run) => this.run = run;
 
@@ -99,9 +130,13 @@ public sealed partial class GitleaksScanner : ISecretScanner
                     int.Parse(parsed.Groups["patch"].Value, CultureInfo.InvariantCulture)) < Minimum)
                 return new("gitleaks", number, plan.Range, "unavailable", null);
             folder = folder with { GitDirectory = GitDirectory(folder, directory) };
-            bool inventories = folder.GitDirectory is not null && OnlyInventoriesHoldInventoryLines(folder, plan.Range);
+            SortedDictionary<string, SortedSet<string>>? objects = folder.GitDirectory is null ? null : ObjectFiles(folder, plan.Range);
+            bool inventories = objects is not null && OnlyInventoriesHoldInventoryLines(folder, objects);
             byte[] rules = inventories ? Configuration : ConfigurationWithoutInventories;
-            number += "; rules " + (inventories ? ConfigurationHash : ConfigurationWithoutInventoriesHash);
+            // FIX-168: the git revisions each release basis the range carries records, in the objects that hold that basis's bytes.
+            if (objects is not null && ReleaseBasisEvidence(folder, objects) is { } evidence)
+                rules = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(rules) + "\n" + ReleaseBasisAllowance(evidence.Paths, evidence.Revisions));
+            number += "; rules sha256:" + Convert.ToHexStringLower(SHA256.HashData(rules));
             int? commits = folder.GitDirectory is null ? null : Count(folder, plan.Range);
             if (commits is null) return new("gitleaks", number, plan.Range, "incomplete", null);
             // Gitleaks reports no finding when git log -p stops early, at an unreadable or corrupt object, and still exits 0. Before it runs,
@@ -222,17 +257,16 @@ public sealed partial class GitleaksScanner : ISecretScanner
     }
 
     /// <summary>
-    /// Whether the inventory allowance may apply to this range (FIX-150): true when every file the range's commits add or change at a path
-    /// the allowance names, and that holds a line of an inventory's shape, holds only such lines, as a history checkpoint's inventory
-    /// does. The scanner cannot tell from the commits which objects a checkpoint names, so a file that mixes inventory lines with any
-    /// other line, or a range whose files cannot be read, is scanned without the allowance. Only file names are read back, never contents.
+    /// The files the range's commits add or change at the path the inventory allowance names, a file named by its SHA-256 in the objects
+    /// folder at the repository's root, by commit: the same commits and parent diffs gitleaks reads. Null when git cannot list them. Only
+    /// file names are read back.
     /// </summary>
-    private bool OnlyInventoriesHoldInventoryLines(ScanFolder folder, string range)
+    private SortedDictionary<string, SortedSet<string>>? ObjectFiles(ScanFolder folder, string range)
     {
         // The same commits and parent diffs gitleaks reads: --full-history, -m and --no-renames, every change but a deletion.
         ProcessResult changed = InventoryGit(folder, "log", "--no-show-signature", "--format=commit %H", "--name-only", "--root", "--no-renames", "--full-history", "-m",
             "--diff-filter=d", "--no-relative", "--no-ext-diff", "--no-textconv", range, "--", ":(top)objects");
-        if (changed.Outcome != ProcessOutcome.Exited || changed.ExitCode != 0) return false;
+        if (changed.Outcome != ProcessOutcome.Exited || changed.ExitCode != 0) return null;
         var files = new SortedDictionary<string, SortedSet<string>>(StringComparer.Ordinal);
         string? commit = null;
         foreach (string entry in changed.StandardOutput.Split('\n'))
@@ -241,23 +275,34 @@ public sealed partial class GitleaksScanner : ISecretScanner
             if (line.StartsWith("commit ", StringComparison.Ordinal))
             {
                 commit = line["commit ".Length..];
-                if (!Patterns.Commit.IsMatch(commit)) return false;
+                if (!Patterns.Commit.IsMatch(commit)) return null;
             }
             else if (InventoryPathPattern().IsMatch(line))
             {
-                if (commit is null) return false;
+                if (commit is null) return null;
                 if (!files.TryGetValue(commit, out SortedSet<string>? paths)) files[commit] = paths = new(StringComparer.Ordinal);
                 paths.Add(line);
             }
         }
 
+        return files;
+    }
+
+    /// <summary>
+    /// Whether the inventory allowance may apply to this range (FIX-150): true when every file the range's commits add or change at a path
+    /// the allowance names, and that holds a line of an inventory's shape, holds only such lines, as a history checkpoint's inventory
+    /// does. The scanner cannot tell from the commits which objects a checkpoint names, so a file that mixes inventory lines with any
+    /// other line, or a range whose files cannot be read, is scanned without the allowance. Only file names are read back, never contents.
+    /// </summary>
+    private bool OnlyInventoriesHoldInventoryLines(ScanFolder folder, SortedDictionary<string, SortedSet<string>> files)
+    {
         foreach ((string at, SortedSet<string> paths) in files)
         {
             foreach (string[] chunk in paths.Chunk(PathsPerGrep))
             {
                 // A file can hold an inventory's lines and another line only if it is listed by both searches.
-                if (FilesWithLines(folder, at, chunk, matching: true) is not { } shaped
-                    || FilesWithLines(folder, at, chunk, matching: false) is not { } other) return false;
+                if (FilesWithLines(folder, at, chunk, "^" + InventoryLine + "$", matching: true) is not { } shaped
+                    || FilesWithLines(folder, at, chunk, "^" + InventoryLine + "$", matching: false) is not { } other) return false;
                 if (shaped.Overlaps(other)) return false;
             }
         }
@@ -265,12 +310,176 @@ public sealed partial class GitleaksScanner : ISecretScanner
         return true;
     }
 
-    // The files of the commit's tree among the paths that hold a line of an inventory's shape, or a line of any other; null when unread.
-    private HashSet<string>? FilesWithLines(ScanFolder folder, string commit, string[] paths, bool matching)
+    /// <summary>
+    /// The git revisions the release bases the range carries record, and the objects that hold those bases' bytes (FIX-168): a basis held
+    /// as one object, named by its own SHA-256 in the objects folder at the repository's root, or every part of a split basis whose root
+    /// the range adds or changes there (FIX-163), joined and checked as the product's reader checks it. A basis is a release basis
+    /// serialization the product writes, of one of its formats; its revisions are the commit ids, 40 lower-case hexadecimal digits, of
+    /// its repositories and their tree comparisons and of its submission, in its own basis, in the basis its policy view holds and in its
+    /// repositories. Null when no basis of the range records one, or when the files cannot be listed. A file that is no such basis, or
+    /// that cannot be read whole and checked against its name, holds no evidence, and is scanned as before. The bases' bytes are read
+    /// back and parsed in memory to find the revisions, and nothing else of them is kept.
+    /// </summary>
+    private (SortedSet<string> Paths, SortedSet<string> Revisions)? ReleaseBasisEvidence(ScanFolder folder, SortedDictionary<string, SortedSet<string>> files)
+    {
+        var roots = new List<(string Commit, string Path)>();
+        var wholes = new List<(string Commit, string Path)>();
+        foreach ((string at, SortedSet<string> paths) in files)
+        {
+            foreach (string[] chunk in paths.Chunk(PathsPerGrep))
+            {
+                if (FilesWithLines(folder, at, chunk, SplitRootStart, matching: true) is not { } split
+                    || FilesWithLines(folder, at, chunk, ReleaseBasisStart, matching: true) is not { } whole) return null;
+                roots.AddRange(split.Order(StringComparer.Ordinal).Select(path => (at, path)));
+                wholes.AddRange(whole.Order(StringComparer.Ordinal).Select(path => (at, path)));
+            }
+        }
+
+        var held = new SortedSet<string>(StringComparer.Ordinal);
+        var revisions = new SortedSet<string>(StringComparer.Ordinal);
+        foreach ((string at, string path) in roots)
+        {
+            // A root is bounded before it is read, and its parts are measured before any is read and joined, each checked against its
+            // hash and the whole against the root's digest, as the product's basis reader does.
+            var source = new CommitObjects(this, folder, at);
+            if (source.Object(path, SplitObject.MaxRootBytes(ReleaseBasisRetention.MaximumBasisBytes)) is not { } root || !SplitObject.IsRoot(root)) continue;
+            if (SplitObject.Join(root, source, ReleaseBasisRetention.MaximumBasisBytes).Content is not { } content || Revisions(content) is not { } found) continue;
+            held.UnionWith(source.Parts);
+            revisions.UnionWith(found);
+        }
+
+        // The first part of a split basis begins as a whole basis does; it is evidence through its root alone.
+        foreach ((string at, string path) in wholes.Where(w => !held.Contains(w.Path)))
+        {
+            if (new CommitObjects(this, folder, at).Object(path, EstateLayout.MaxObjectBytes) is not { } content || SplitObject.IsRoot(content)
+                || Revisions(content) is not { } found) continue;
+            held.Add(path);
+            revisions.UnionWith(found);
+        }
+
+        return revisions.Count > 0 ? (held, revisions) : null;
+    }
+
+    /// <summary>
+    /// The commit ids a release basis records (FIX-168), or null when the content is no release basis: one JSON object of a release basis
+    /// format with a basis. Only values of 40 lower-case hexadecimal digits are taken, the commit ids gitleaks' rule can read; a revision
+    /// of a working tree or of 64 digits is not one.
+    /// </summary>
+    internal static SortedSet<string>? Revisions(byte[] content)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(content);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("format", out JsonElement format) || format.ValueKind != JsonValueKind.String
+                || !ReleaseBasisFormats.Contains(format.GetString(), StringComparer.Ordinal)
+                || !root.TryGetProperty("basis", out JsonElement basis) || basis.ValueKind != JsonValueKind.Object) return null;
+            var revisions = new SortedSet<string>(StringComparer.Ordinal);
+            void Take(JsonElement holder, string name)
+            {
+                if (holder.ValueKind == JsonValueKind.Object && holder.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+                    && CommitId().IsMatch(value.GetString()!)) revisions.Add(value.GetString()!);
+            }
+
+            void Repositories(JsonElement holder)
+            {
+                if (holder.ValueKind != JsonValueKind.Object || !holder.TryGetProperty("repositories", out JsonElement list) || list.ValueKind != JsonValueKind.Array) return;
+                foreach (JsonElement repository in list.EnumerateArray())
+                {
+                    Take(repository, "revision");
+                    if (repository.ValueKind != JsonValueKind.Object || !repository.TryGetProperty("treeComparisons", out JsonElement comparisons)
+                        || comparisons.ValueKind != JsonValueKind.Array) continue;
+                    foreach (JsonElement comparison in comparisons.EnumerateArray())
+                    {
+                        Take(comparison, "sourceCommit");
+                        Take(comparison, "selectedCommit");
+                    }
+                }
+            }
+
+            JsonElement view = root.TryGetProperty("policies", out JsonElement policies) && policies.ValueKind == JsonValueKind.Object
+                && policies.TryGetProperty("basis", out JsonElement viewed) ? viewed : default;
+            foreach (JsonElement held in new[] { basis, view })
+            {
+                if (held.ValueKind != JsonValueKind.Object) continue;
+                if (held.TryGetProperty("submission", out JsonElement submission)) Take(submission, "commit");
+                Repositories(held);
+            }
+
+            Repositories(root);
+            return revisions;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The allowance for the release bases a range carries (FIX-168), appended to the configuration a scan applies: for the rule that reads
+    /// revisions as tokens alone, a value that is exactly one of the revisions those bases record, and only in the objects that hold their
+    /// bytes. Every other value, rule and path is scanned as before.
+    /// </summary>
+    internal static string ReleaseBasisAllowance(IEnumerable<string> paths, IEnumerable<string> revisions) =>
+        "[[allowlists]]\n"
+        + "description = \"Release basis evidence: the git revisions a release basis records, in the objects that hold the basis\"\n"
+        + "targetRules = [\"" + ReleaseBasisRule + "\"]\n"
+        + "condition = \"AND\"\n"
+        + "paths = [\n    '''^objects/(?:" + string.Join('|', paths.Select(p => p["objects/".Length..])) + ")$''',\n]\n"
+        + "regexes = [\n    '''^(?:" + string.Join('|', revisions) + ")$''',\n]\n";
+
+    // The objects of one commit's tree, by content hash, for reading a release basis and the parts of a split one; every part read is
+    // remembered. An object is read whole, after it is measured, and only when it is no longer than the bound the caller gives.
+    private sealed class CommitObjects(GitleaksScanner scanner, ScanFolder folder, string commit) : ISplitObjectSource
+    {
+        internal SortedSet<string> Parts { get; } = new(StringComparer.Ordinal);
+
+        public long? Length(string hash, CancellationToken cancellationToken) => ContentHash.IsValid(hash) ? scanner.ObjectLength(folder, commit, ObjectPath(hash)) : null;
+
+        public bool Read(string hash, Span<byte> destination, CancellationToken cancellationToken)
+        {
+            if (!ContentHash.IsValid(hash) || scanner.ObjectBytes(folder, commit, ObjectPath(hash)) is not { } bytes || bytes.Length != destination.Length) return false;
+            bytes.CopyTo(destination);
+            Parts.Add(ObjectPath(hash));
+            return true;
+        }
+
+        // The object at a path the inventory allowance names, when it is at most the bound and its bytes are those its name hashes.
+        internal byte[]? Object(string path, long bound)
+        {
+            if (scanner.ObjectLength(folder, commit, path) is not { } length || length > bound || scanner.ObjectBytes(folder, commit, path) is not { } bytes
+                || bytes.LongLength != length || ContentHash.Sha256(bytes) != ContentHash.Prefix + path["objects/".Length..]) return null;
+            return bytes;
+        }
+
+        private static string ObjectPath(string hash) => "objects/" + hash[ContentHash.Prefix.Length..];
+    }
+
+    // The size of a blob at a path of a commit's tree; null when git cannot name one.
+    private long? ObjectLength(ScanFolder folder, string commit, string path)
+    {
+        ProcessResult result = InventoryGit(folder, "cat-file", "-s", commit + ":" + path);
+        return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0
+            && long.TryParse(result.StandardOutput.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out long length) ? length : null;
+    }
+
+    // A blob's bytes, read as UTF-8 text, which a release basis is, and encoded again; a blob that is not UTF-8 comes back as other bytes,
+    // which its hash check refuses. Null when git cannot read it.
+    private byte[]? ObjectBytes(ScanFolder folder, string commit, string path)
+    {
+        ProcessStartInfo info = Start("git", folder, ["--no-replace-objects", "cat-file", "blob", commit + ":" + path]);
+        info.Environment["LC_ALL"] = "C";
+        info.StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        ProcessResult result = run(info);
+        return result.Outcome == ProcessOutcome.Exited && result.ExitCode == 0 ? Encoding.UTF8.GetBytes(result.StandardOutput) : null;
+    }
+
+    // The files of the commit's tree among the paths that hold a line of the pattern, or a line of any other; null when unread.
+    private HashSet<string>? FilesWithLines(ScanFolder folder, string commit, string[] paths, string pattern, bool matching)
     {
         var arguments = new List<string> { "grep", "--no-textconv", "--full-name", "--text", "--files-with-matches", "--extended-regexp" };
         if (!matching) arguments.Add("--invert-match");
-        arguments.AddRange(["-e", "^" + InventoryLine + "$", commit, "--"]);
+        arguments.AddRange(["-e", pattern, commit, "--"]);
         arguments.AddRange(paths.Select(p => ":(top)" + p));
         ProcessResult result = InventoryGit(folder, [.. arguments]);
         if (result.Outcome != ProcessOutcome.Exited || result.ExitCode is not (0 or 1)) return null;
@@ -343,6 +552,9 @@ public sealed partial class GitleaksScanner : ISecretScanner
     // Bounded so that the version with the configuration's hash fits the recorded scan's version field.
     [GeneratedRegex(InventoryPath, RegexOptions.CultureInvariant)]
     private static partial Regex InventoryPathPattern();
+
+    [GeneratedRegex(@"\A[0-9a-f]{40}\z", RegexOptions.CultureInvariant)]
+    private static partial Regex CommitId();
 
     [GeneratedRegex(@"^v?(?<major>[0-9]{1,3})\.(?<minor>[0-9]{1,3})\.(?<patch>[0-9]{1,3})(?:-[a-zA-Z0-9.]{1,8})?$", RegexOptions.CultureInvariant)]
     private static partial Regex VersionPattern();

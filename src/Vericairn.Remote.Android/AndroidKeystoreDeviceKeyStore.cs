@@ -77,7 +77,9 @@ public sealed class AndroidKeystoreDeviceKeyStore : IDeviceKeyStore
     public byte[] Sign(string deviceId, ReadOnlySpan<byte> digest)
     {
         if (digest.Length != 32) throw new ArgumentException("A device signs a 32-byte digest.", nameof(digest));
-        if (Store().GetKey(Alias(deviceId), null) is not IPrivateKey key) throw new InvalidOperationException($"This device holds no key for device {deviceId}.");
+        // From 0.9.5 (FIX-164) the key is read from its entry: the key GetKey returns is wrapped as Java's Key interface alone, which
+        // C# never sees as a PrivateKey, so every signature was refused as if the device held no key.
+        if (Store().GetEntry(Alias(deviceId), null) is not KeyStore.PrivateKeyEntry { PrivateKey: IPrivateKey key }) throw new InvalidOperationException($"This device holds no key for device {deviceId}.");
         try
         {
             Signature signature = Signature.GetInstance("NONEwithECDSA") ?? throw new InvalidOperationException("Android Keystore offers no ECDSA signature.");

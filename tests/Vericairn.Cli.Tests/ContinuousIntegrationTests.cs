@@ -872,32 +872,98 @@ public class ContinuousIntegrationTests
         Assert.DoesNotContain("branches", Block(ci, "on:", 0).Split("  pull_request:")[1], StringComparison.Ordinal);
 
         // The rulesets the builder applies (README.md beside the workflows): the default branch's and release/*'s require the
-        // gate and the secret scan from GitHub Actions and the same merge queue.
-        using var main = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(github, "rulesets", "default-branch-merge-queue.json")));
-        using var release = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(github, "rulesets", "release-branches.json")));
-        Assert.Equal("~DEFAULT_BRANCH", main.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("include")[0].GetString());
-        Assert.Equal("refs/heads/release/*", release.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("include")[0].GetString());
+        // gate and the secret scan from GitHub Actions. GitHub refuses a merge queue on a wildcard ref (CI-14), so release/*'s
+        // ruleset, applied as 28004737, holds the default branch's rules but its queue, and each release branch's own ruleset
+        // from the template requires the same queue on its exact ref.
+        using var main = Ruleset("default-branch-merge-queue.json");
+        using var release = Ruleset("release-branches.json");
+        Assert.Equal(["~DEFAULT_BRANCH"], Refs(main, "include"));
+        Assert.Equal(["refs/heads/release/*"], Refs(release, "include"));
         // release/0.3 predates ci-gate and the secret scan, so the rules would leave it unmergeable; it stays outside them.
-        Assert.Equal(["refs/heads/release/0.3"], release.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("exclude").EnumerateArray().Select(item => item.GetString()));
-        Assert.Empty(main.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty("exclude").EnumerateArray());
-        Assert.Equal(Rules(main), Rules(release));
-        string checks = Rules(main).Single(rule => rule.StartsWith("{\"type\":\"required_status_checks\"", StringComparison.Ordinal));
+        Assert.Equal(["refs/heads/release/0.3"], Refs(release, "exclude"));
+        Assert.Empty(Refs(main, "exclude"));
+        Assert.Equal(["deletion", "non_fast_forward", "pull_request", "required_status_checks", "merge_queue"], RuleTypes(main));
+        Assert.Equal(["deletion", "non_fast_forward", "pull_request", "required_status_checks"], RuleTypes(release));
+        Assert.Equal(RuleTexts(main).Take(4), RuleTexts(release));
+        string checks = RuleTexts(release).Single(rule => rule.StartsWith("{\"type\":\"required_status_checks\"", StringComparison.Ordinal));
         Assert.Contains("\"required_status_checks\":[{\"context\":\"ci-gate\",\"integration_id\":15368},{\"context\":\"secret-scan\",\"integration_id\":15368}]", checks, StringComparison.Ordinal);
         Assert.Contains("\n  ci-gate:\n", ci, StringComparison.Ordinal);
         Assert.Contains("\n  secret-scan:\n", Read(Path.Combine(github, "workflows", "secret-scan.yml")), StringComparison.Ordinal);
-        foreach (string type in new[] { "deletion", "non_fast_forward", "pull_request", "merge_queue" })
-            Assert.Contains(Rules(main), rule => rule.StartsWith("{\"type\":\"" + type + "\"", StringComparison.Ordinal));
-
-        static string[] Rules(System.Text.Json.JsonDocument ruleset) => ruleset.RootElement.GetProperty("rules").EnumerateArray().Select(rule => rule.GetRawText()
-            .Replace(" ", "", StringComparison.Ordinal).Replace("\n", "", StringComparison.Ordinal).Replace("\r", "", StringComparison.Ordinal)).ToArray();
+        foreach (string field in new[] { "target", "enforcement", "bypass_actors" })
+            Assert.Equal(main.RootElement.GetProperty(field).GetRawText(), release.RootElement.GetProperty(field).GetRawText());
     }
+
+    [Fact]
+    public void NoRulesetPairsAMergeQueueWithAWildcardRef()
+    {
+        // CI-14: GitHub refused CI-12's release-branches ruleset, a merge queue on refs/heads/release/*, with "Wildcard ref names
+        // are not supported when merge queue is enabled". Every ruleset here, the template included, that requires a queue names
+        // only exact refs: no fnmatch pattern character and not ~ALL. ~DEFAULT_BRANCH is the one default branch.
+        string[] queued = Directory.GetFiles(Path.Combine(RepositoryRoot(), ".github", "rulesets"), "*.json")
+            .Where(file =>
+            {
+                using var ruleset = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file));
+                if (!RuleTypes(ruleset).Contains("merge_queue"))
+                    return false;
+                foreach (string pattern in Refs(ruleset, "include").Concat(Refs(ruleset, "exclude")))
+                    Assert.False(Wildcard(pattern), $"{Path.GetFileName(file)}: {pattern}");
+                return true;
+            })
+            .Select(file => Path.GetFileName(file)).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(["default-branch-merge-queue.json", "release-branch-merge-queue.template.json"], queued);
+        Assert.True(Wildcard("refs/heads/release/*"));
+        Assert.False(Wildcard("refs/heads/release/0.9.4"));
+    }
+
+    [Fact]
+    public void TheReleaseBranchMergeQueueTemplateHasOneExactRefThePlaceholder()
+    {
+        // CI-14: each release branch's merge-queue ruleset is the template with @VERSION@ filled in by the apply step. Its one
+        // ref is the placeholder's exact branch, and its one rule is the default branch's merge queue, parameters and all.
+        const string placeholder = "@VERSION@";
+        string template = Read(Path.Combine(RepositoryRoot(), ".github", "rulesets", "release-branch-merge-queue.template.json"));
+        using var main = Ruleset("default-branch-merge-queue.json");
+        using (var ruleset = System.Text.Json.JsonDocument.Parse(template))
+        {
+            Assert.Equal(["refs/heads/release/" + placeholder], Refs(ruleset, "include"));
+            Assert.Empty(Refs(ruleset, "exclude"));
+            Assert.False(Wildcard(Refs(ruleset, "include")[0]));
+            Assert.Equal("release-" + placeholder + "-merge-queue", ruleset.RootElement.GetProperty("name").GetString());
+            Assert.Equal(["merge_queue"], RuleTypes(ruleset));
+            Assert.Equal(RuleTexts(main).Where(rule => rule.StartsWith("{\"type\":\"merge_queue\"", StringComparison.Ordinal)), RuleTexts(ruleset));
+            foreach (string field in new[] { "target", "enforcement", "bypass_actors" })
+                Assert.Equal(main.RootElement.GetProperty(field).GetRawText(), ruleset.RootElement.GetProperty(field).GetRawText());
+        }
+        // The placeholder stands in the name and the ref and nowhere else, so filling it in for release/0.9.4 gives the ruleset
+        // the operator applied as 28004740.
+        Assert.Equal(2, template.Split(placeholder).Length - 1);
+        using var filled = System.Text.Json.JsonDocument.Parse(template.Replace(placeholder, "0.9.4", StringComparison.Ordinal));
+        Assert.Equal("release-0.9.4-merge-queue", filled.RootElement.GetProperty("name").GetString());
+        Assert.Equal(["refs/heads/release/0.9.4"], Refs(filled, "include"));
+    }
+
+    private static System.Text.Json.JsonDocument Ruleset(string file)
+        => System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(RepositoryRoot(), ".github", "rulesets", file)));
+
+    private static string[] Refs(System.Text.Json.JsonDocument ruleset, string list)
+        => ruleset.RootElement.GetProperty("conditions").GetProperty("ref_name").GetProperty(list).EnumerateArray().Select(item => item.GetString()!).ToArray();
+
+    private static string[] RuleTypes(System.Text.Json.JsonDocument ruleset)
+        => ruleset.RootElement.GetProperty("rules").EnumerateArray().Select(rule => rule.GetProperty("type").GetString()!).ToArray();
+
+    private static string[] RuleTexts(System.Text.Json.JsonDocument ruleset) => ruleset.RootElement.GetProperty("rules").EnumerateArray().Select(rule => rule.GetRawText()
+        .Replace(" ", "", StringComparison.Ordinal).Replace("\n", "", StringComparison.Ordinal).Replace("\r", "", StringComparison.Ordinal)).ToArray();
+
+    // A ruleset ref condition is an fnmatch pattern; ~ALL matches every branch.
+    private static bool Wildcard(string pattern) => pattern.IndexOfAny(['*', '?', '[']) >= 0 || pattern == "~ALL";
 
     [Fact]
     public void TheRulesetRollbackSendsOnlyTheFieldsTheRulesetEndpointsTake()
     {
         // The apply procedure beside the workflows saves the default branch's live ruleset through a filter, so the rollback's
         // PUT sends the six fields the committed rulesets send and none of the read-only ones GitHub's answer adds. The
-        // release branches' ruleset is added last, once the change has merged and every covered branch carries its workflows.
+        // release branches' ruleset is created next, once the change has merged and every covered branch carries its
+        // workflows, and then each release branch's merge-queue ruleset from the template, with its version filled in (CI-14).
         string github = Path.Combine(RepositoryRoot(), ".github");
         string procedure = Read(Path.Combine(github, "workflows/README.md"));
         const string fields = "{name, target, enforcement, conditions, bypass_actors, rules}";
@@ -907,9 +973,12 @@ public class ContinuousIntegrationTests
         int replace = procedure.IndexOf($"\ngh api --method PUT {ruleset}/27077099 --input .github/rulesets/default-branch-merge-queue.json\n", StringComparison.Ordinal);
         int restore = procedure.IndexOf($"\ngh api --method PUT {ruleset}/27077099 --input {saved}\n", StringComparison.Ordinal);
         int add = procedure.IndexOf($"\ngh api --method POST {ruleset} --input .github/rulesets/release-branches.json\n", StringComparison.Ordinal);
-        Assert.True(save >= 0 && save < replace && replace < restore && restore < add, $"{save} {replace} {restore} {add}");
+        int queue = procedure.IndexOf($"\nsed 's/@VERSION@/<version>/g' .github/rulesets/release-branch-merge-queue.template.json | gh api --method POST {ruleset} --input -\n", StringComparison.Ordinal);
+        Assert.True(save >= 0 && save < replace && replace < restore && restore < add && add < queue, $"{save} {replace} {restore} {add} {queue}");
         string[] writable = fields.Trim('{', '}').Split(", ").Order(StringComparer.Ordinal).ToArray();
-        foreach (string file in new[] { "default-branch-merge-queue.json", "release-branches.json" })
+        string[] files = Directory.GetFiles(Path.Combine(github, "rulesets")).Select(file => Path.GetFileName(file)).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(["default-branch-merge-queue.json", "release-branch-merge-queue.template.json", "release-branches.json"], files);
+        foreach (string file in files)
         {
             using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(github, "rulesets", file)));
             Assert.Equal(writable, document.RootElement.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));

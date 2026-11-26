@@ -124,24 +124,24 @@ public sealed partial class RemoteViewModel
 
     private void InitializeDecisionCommands()
     {
-        RefreshDecisionCommand = new(() => OpenDecisionAsync(decision!.Review.Subject.Id), () => !Busy && Selected?.Current == true && decision is not null);
-        SubmitDecisionCommand = new(SubmitDecisionAsync, CanSubmitDecision);
-        ReconcileDecisionCommand = new(ReconcileDecisionAsync, () => !Busy && Selected?.Current == true && decision?.Attempted == true);
-        OpenDraftCommand = new(() =>
+        RefreshDecisionCommand = Command(() => OpenDecisionAsync(decision!.Review.Subject.Id), () => !Busy && Selected?.Current == true && decision is not null);
+        SubmitDecisionCommand = Command(SubmitDecisionAsync, CanSubmitDecision);
+        ReconcileDecisionCommand = Command(ReconcileDecisionAsync, () => !Busy && Selected?.Current == true && decision?.Attempted == true);
+        OpenDraftCommand = Command(() =>
         {
             SetDecision(SelectedDraft); decisionCurrent = false; NotifyDecision();
             DecisionMessage = decision?.Message ?? "";
             return Task.CompletedTask;
         }, () => !Busy && SelectedDraft is not null && DecisionStorageProblem.Length == 0);
-        CloseDecisionCommand = new(() => { SetDecision(null); return Task.CompletedTask; }, () => !Busy && decision is not null);
-        DeferDecisionCommand = new(AcknowledgeAsync, () => !Busy && Selected?.Current == true && SelectedAttention?.Notice is { AcknowledgedAt: null } notice &&
+        CloseDecisionCommand = Command(() => { SetDecision(null); return Task.CompletedTask; }, () => !Busy && decision is not null);
+        DeferDecisionCommand = Command(AcknowledgeAsync, () => !Busy && Selected?.Current == true && SelectedAttention?.Notice is { AcknowledgedAt: null } notice &&
             decision is not null && notice.SubjectId == decision.Review.Subject.Id);
-        RequestDecisionChangesCommand = new(() =>
+        RequestDecisionChangesCommand = Command(() =>
         {
             DecisionMessage = "Request changes on the desktop in Workbench. This phone flow has no suitable change-request record; your words remain a draft and nothing was sent.";
             return Task.CompletedTask;
         }, () => !Busy && decision is { Attempted: false });
-        AddPresenceKeyCommand = new(AddPresenceKeyAsync, () => !Busy && Selected?.Current == true && !HasPresenceKey && PresenceCode.Trim().Length > 0);
+        AddPresenceKeyCommand = Command(AddPresenceKeyAsync, () => !Busy && Selected?.Current == true && !HasPresenceKey && PresenceCode.Trim().Length > 0);
     }
 
     private bool CanSubmitDecision() => !Busy && Selected?.Current == true && decisionCurrent && MaterialReviewed && DecisionStorageProblem.Length == 0 && HasPresenceKey &&

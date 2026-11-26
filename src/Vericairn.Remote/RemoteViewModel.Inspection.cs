@@ -69,11 +69,11 @@ public sealed partial class RemoteViewModel
 
     private void InitializeInspectionCommands()
     {
-        OpenAttentionCommand = new(OpenAttentionAsync, () => !Busy && SelectedAttention is not null);
-        AcknowledgeCommand = new(AcknowledgeAsync, () => !Busy && Selected?.Current == true && SelectedAttention?.Notice is { AcknowledgedAt: null });
-        OpenWorkCommand = new(() => OpenDetailAsync(SelectedWork!.Id, "work-order"), () => !Busy && SelectedWork is not null);
-        OpenAssignmentCommand = new(() => OpenDetailAsync(SelectedAssignment!.Id, "assignment"), () => !Busy && SelectedAssignment is not null);
-        BackToWorkCommand = new(() =>
+        OpenAttentionCommand = Command(OpenAttentionAsync, () => !Busy && SelectedAttention is not null);
+        AcknowledgeCommand = Command(AcknowledgeAsync, () => !Busy && Selected?.Current == true && SelectedAttention?.Notice is { AcknowledgedAt: null });
+        OpenWorkCommand = Command(() => OpenDetailAsync(SelectedWork!.Id, "work-order"), () => !Busy && SelectedWork is not null);
+        OpenAssignmentCommand = Command(() => OpenDetailAsync(SelectedAssignment!.Id, "assignment"), () => !Busy && SelectedAssignment is not null);
+        BackToWorkCommand = Command(() =>
         {
             if (Selected is { } estate) estate.DetailKey = null;
             WorkDetail = null;
