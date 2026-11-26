@@ -20,6 +20,9 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class StandingAgentRoutingTests
 {
+    // One assignment per occurrence, and one sponsor ask at the period cap.
+    [Trait("Journey", "D07-A")]
+    [Trait("Journey", "D07-E")]
     [Fact]
     public void AStandingAgentCarriesEachOccurrenceOnceAsOneAssignmentWithinItsPeriodCaps()
     {
@@ -117,6 +120,8 @@ public class StandingAgentRoutingTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    // Three failures pause dispatch and ask the sponsor.
+    [Trait("Journey", "D07-E")]
     [Fact]
     public void ThreeFailedRunsInARowPauseTheAgentWithAnAskAndTheSponsorsAnswerLetsItGoOn()
     {
@@ -644,6 +649,9 @@ public class StandingAgentRoutingTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    // Pause stops dispatch, and an unanswered term lapses at its until time.
+    [Trait("Journey", "D07-E")]
+    [Trait("Journey", "D07-F")]
     [Fact]
     public void ALapsedOrPausedAgentDispatchesNothingAndATimeAheadOfTheClockIsRefused()
     {
@@ -773,6 +781,8 @@ public class StandingAgentRoutingTests
         Assert.DoesNotContain(run.Estate.Load().OfType("assignment"), a => StandingAgents.KeyOf(a) is not null);
     }
 
+    // Pause requests run stops when asked, and stop retires the work order.
+    [Trait("Journey", "D07-E")]
     [Fact]
     public void PausingWithStopRunsAndStoppingAStandingAgentAskItsRunsToStopAndStoppingRetiresItsWork()
     {
@@ -802,6 +812,8 @@ public class StandingAgentRoutingTests
         Assert.Equal("retired", Assert.Single(run.Service.Status().Json.GetProperty("workOrders").EnumerateArray(), w => w.GetProperty("key").GetString() == "RES-1").GetProperty("status").GetString());
     }
 
+    // One renewal ask summarizes the period and the evaluation state before the term ends.
+    [Trait("Journey", "D07-F")]
     [Fact]
     public void TheRenewalAskComesOnceBeforeTheUntilTimeAndDispatchesNothing()
     {
@@ -815,10 +827,47 @@ public class StandingAgentRoutingTests
         Assert.True(renewal.Ok, renewal.Message);
         Assert.Equal(("ask", "attention"), (renewal.Outcome, renewal.Route));
         Assert.Null(renewal.Run);
-        Assert.StartsWith(StandingAgents.RenewalAsk + " Research the widget before its until time", EstateModel.BodyString(run.Estate.Load().ById[renewal.Ask!.Id], "question"), StringComparison.Ordinal);
+        string? question = EstateModel.BodyString(run.Estate.Load().ById[renewal.Ask!.Id], "question");
+        Assert.StartsWith(StandingAgents.RenewalAsk + " Research the widget before its until time", question, StringComparison.Ordinal);
+        Assert.Contains("this period it has had", question, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("it has no evaluation of this revision", question, StringComparison.Ordinal);
         GoalStepResponse next = Step(run, goal, "after-renewal");
         Assert.True(next.Outcome == "run", next.Message);
         run.Settled(next.Run!.Run);
+    }
+
+    [Fact]
+    [Trait("Journey", "D07-F")]
+    public void TheSponsorsAnswerIsFollowedByARevisedTermThatCanBeActivated()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        DateTimeOffset until = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddHours(6).ToUnixTimeSeconds());
+        string goal = Standing(run, until: RecordParser.FormatTimestamp(until), holder: op);
+        run.Service.FlowClock = new FixedClock(until.AddHours(-1));
+        GoalStepResponse renewal = Step(run, goal, "renewal");
+        Assert.Equal("ask", renewal.Outcome);
+        string ask = renewal.Ask!.Id;
+        var answer = new JsonObject
+        {
+            ["title"] = "Renew the researcher", ["statement"] = "Renew for another month.", ["summary"] = "The research should continue.",
+            ["synthesis"] = "Extend the term by a new goal revision.", ["effects"] = new JsonArray("extend the term"), ["affects"] = new JsonArray(),
+            ["decidedBy"] = op, ["decidedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow),
+            ["stake"] = "low", ["notAuthorized"] = new JsonArray(), ["answers"] = new JsonArray(ask),
+        };
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, JsonSerializer.SerializeToElement(answer))));
+        EstateModel model = run.Estate.Load();
+        Assert.Equal("answered", Asks.State(model, model.ById[ask]).State);
+
+        var revised = JsonNode.Parse(model.ById[goal].Body.GetRawText())!.AsObject();
+        string renewedUntil = RecordParser.FormatTimestamp(until.AddMonths(1));
+        revised["plan"]!["standing"]!["until"] = renewedUntil;
+        string revision = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(revised), goal))).Id;
+        Assert.Equal(goal, run.Estate.Load().ById[revision].Supersedes);
+        RunEstate.Ok(run.Service.GoalActivate(revision, new GoalActionRequest(op)));
+        run.Service.FlowClock = new FixedClock(until.AddMinutes(1));
+        JsonElement due = run.Service.GoalDue(goal)!.Json;
+        Assert.Equal(("active", renewedUntil), (due.GetProperty("state").GetString(), due.GetProperty("until").GetString()));
     }
 
     [Fact]

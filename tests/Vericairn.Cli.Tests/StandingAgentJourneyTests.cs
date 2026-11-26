@@ -21,8 +21,11 @@ public class StandingAgentJourneyTests
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
-    [Fact]
-    public void AStandingAgentIsProposedAndCarriesOneOccurrencePerGoalStep()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Journey", "D07-A")]
+    public void AStandingAgentIsProposedAndCarriesOneOccurrencePerGoalStep(bool monthly)
     {
         string root = CliHarness.TempDirectory("standing");
         string scratch = CliHarness.TempDirectory("standing-scratch");
@@ -34,34 +37,46 @@ public class StandingAgentJourneyTests
             CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json", $$"""{"roles":[{"role":"researcher","principals":["{{op}}"]}]}"""));
             string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json",
                 """{"key":"RES-1","kind":"ordinary","title":"Research the widget","intent":"Keep researching the widget.","scope":["path:research/"],"exitQuestion":"Is each occurrence researched?","inputs":[],"deliverables":["findings"]}""")).Id;
-            string firstAt = RecordParser.FormatTimestamp(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddDays(-3).ToUnixTimeSeconds()));
-            string daily = $$"""{"key":"daily","kind":"schedule","unit":"days","every":1,"firstAt":"{{firstAt}}"}""";
+            DateTimeOffset anchor = DateTimeOffset.UtcNow.AddMinutes(-5);
+            DateTimeOffset firstTick = monthly ? anchor.AddMonths(-3) : anchor.AddDays(-3);
+            string firstAt = RecordParser.FormatTimestamp(firstTick);
+            string trigger = monthly ? "monthly" : "daily";
+            string unit = monthly ? "months" : "days";
+            string schedule = $$"""{"key":"{{trigger}}","kind":"schedule","unit":"{{unit}}","every":1,"firstAt":"{{firstAt}}"}""";
             string[] propose = ["goal", "propose", "--by", op, "--title", "Research the widget", "--objective", "Keep researching the widget.", "--done", """{"type":"work-order","fields":{"key":"RESEARCHED"}}""",
                 "--work-order", order, "--budget", "wallMinutes=30", "--budget", "attemptsPerStep=2"];
 
             // Standing options go with --standing, a standing agent is a stewardship goal, and its caps state every unit the budget caps.
-            Refused(root, "configure a standing agent, and go with --standing", [.. propose, "--trigger", daily]);
-            Refused(root, "give --kind stewardship with --standing", [.. propose, "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget", "--trigger", daily]);
+            Refused(root, "configure a standing agent, and go with --standing", [.. propose, "--trigger", schedule]);
+            Refused(root, "give --kind stewardship with --standing", [.. propose, "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget", "--trigger", schedule]);
             Refused(root, "at least one --trigger", [.. propose, "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget"]);
-            Refused(root, "wallMinutes", [.. propose, "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget", "--trigger", daily, "--period", "runs=4"]);
+            Refused(root, "wallMinutes", [.. propose, "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget", "--trigger", schedule, "--period", "runs=4"]);
 
-            CliHarness.Outcome proposed = CliHarness.Ok(["--estate", root, .. propose, "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget", "--trigger", daily,
+            CliHarness.Outcome proposed = CliHarness.Ok(["--estate", root, .. propose, "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget", "--trigger", schedule,
                 "--trigger", """{"key":"asked","kind":"request"}""", "--period", "runs=4", "--period", "wallMinutes=120"]);
             Assert.Contains("Standing agent Research the widget", proposed.Out, StringComparison.Ordinal);
             Assert.Contains("State: proposed", proposed.Out, StringComparison.Ordinal);
+            // D07-A checks the planned triggers, due occurrence and caps before activation.
+            Assert.Contains(trigger + " (schedule)", proposed.Out, StringComparison.Ordinal);
+            Assert.Contains("asked (request)", proposed.Out, StringComparison.Ordinal);
+            Assert.Contains("/interval-3", proposed.Out, StringComparison.Ordinal);
+            Assert.Contains("runs 0 of 4", proposed.Out, StringComparison.Ordinal);
+            Assert.Contains("wallMinutes 0 of 120", proposed.Out, StringComparison.Ordinal);
             string goal = proposed.Out.Split('\n')[0].Split("  ")[1];
             CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
 
-            // goal due: the latest daily tick is due; before the first tick nothing is.
+            // goal due: the latest tick is due; before the first tick nothing is.
             JsonElement due = CliHarness.Ok("--estate", root, "--json", "goal", "due", goal).Json;
             Assert.Equal(("vericairn.due/1", "active"), (due.GetProperty("format").GetString(), due.GetProperty("state").GetString()));
             string key = Assert.Single(due.GetProperty("occurrences").EnumerateArray()).GetProperty("key").GetString()!;
             Assert.EndsWith("/interval-3", key, StringComparison.Ordinal);
             Assert.Contains("Occurrences", CliHarness.Ok("--estate", root, "goal", "due", goal).Out, StringComparison.Ordinal);
-            Assert.Empty(CliHarness.Ok("--estate", root, "--json", "goal", "due", goal, "--as-of", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddDays(-4))).Json.GetProperty("occurrences").EnumerateArray());
+            string before = RecordParser.FormatTimestamp(firstTick.AddDays(-1));
+            Assert.Empty(CliHarness.Ok("--estate", root, "--json", "goal", "due", goal, "--as-of", before).Json.GetProperty("occurrences").EnumerateArray());
 
             // goal step: the researcher is a person here, so the occurrence is assigned and asked; its assignment names the key.
-            JsonElement first = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op, "--occurrence", key).Json.GetProperty("step");
+            JsonElement first = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op, "--occurrence", key,
+                "--now", due.GetProperty("asOf").GetString()!).Json.GetProperty("step");
             Assert.Equal(("ask", key, "person"), (first.GetProperty("outcome").GetString(), first.GetProperty("step").GetString(), first.GetProperty("route").GetString()));
             string assignment = first.GetProperty("assignment").GetProperty("id").GetString()!;
             Assert.Equal(key, CliHarness.Ok("--estate", root, "--json", "records", "show", assignment).Json.GetProperty("body").GetProperty("occurrence").GetProperty("key").GetString());

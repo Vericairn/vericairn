@@ -26,6 +26,8 @@ public class RetrievalRunTests
 {
     private static readonly string PermittingBrief = RunEstate.Brief.Replace("\"recovery\":\"Record a result.\"}", "\"recovery\":\"Record a result.\",\"retrieval\":\"public\"}", StringComparison.Ordinal);
 
+    // The research brief bounds retrieval and the run retains each source.
+    [Trait("Journey", "D07-A")]
     [Fact]
     public void AResearchRunPermittedRetrievalGetsItsWebToolsAndEverySourceIsRetainedAsAnUntrustedOriginal()
     {

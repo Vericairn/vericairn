@@ -97,6 +97,8 @@ public class StandingRoleTests
         IEnumerable<string> Kinds(string id) => FlowDefinition.Resolve(model, new TemplatePin(id, StandingRoleFlows.Version, Flow(id).Hash)).Triggers.Select(t => TJson.Text(t, "kind")!);
     }
 
+    // Monthly research, cited possibilities, independent adoption and the declined-output rule.
+    [Trait("Journey", "D07-A")]
     [Fact]
     public void AResearcherRecordsCitedPossibilitiesOneAdoptedAndOneDeclinedAndNotRaisedAgain()
     {
@@ -171,6 +173,8 @@ public class StandingRoleTests
         Assert.Equal(4, fixture.Agent(fixture.Estate.Clock).OpenOutputs);
     }
 
+    // Duty identity, refusal of a second carrier, and the reserved publication request.
+    [Trait("Journey", "D07-B")]
     [Fact]
     public void ADutyCarrierCarriesTheDutyOccurrencesOwnKeyAndLeavesReservedActionsToTheOperator()
     {

@@ -21,6 +21,8 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class StandingOutputJourneyTests
 {
+    // Possibilities identify their run and occurrence, and disposition belongs to another principal.
+    [Trait("Journey", "D07-A")]
     [Fact]
     public void AResearchersOutputsAreDisposedOfByAnotherPrincipalAndNeverByTheAgent()
     {
