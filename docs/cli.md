@@ -1108,7 +1108,7 @@ signatures it adds, with why, before they are asked for; and when it ends, how m
 command's answer, so `--json` output stays one JSON document. A command that signs nothing with presence prints none of this,
 and neither does a daemon of an older release. The [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
 lists how many prompts the release and acceptance steps ask for. From 0.9.4 each prompt's line ends with the signed record's short
-hash, the first twelve hexadecimal digits of its content hash, which the release build's helper also shows in its dialog's label, and
+hash, the first twelve hexadecimal digits of its content hash, which the helper also shows in its dialog's label, and
 every one of these lines begins with `runtime:`: its words are the runtime's, and the mark keeps them from passing for a line the
 command line derived itself. Control characters and escape sequences in them are shown escaped, never passed to the terminal, each run
 of spaces is one space, and a line longer than the terminal (80 columns when standard error goes to a file or a pipe, or its width
