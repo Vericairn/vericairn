@@ -201,7 +201,7 @@ public class RelayTests
     }
 
     [Fact]
-    public async Task JoinsWithoutAValidTicketFromManyClientsCloseAnAddressForOneWindowAtMost()
+    public async Task OnceAnAddressHasRefusedManyClientsAClientThatHasNotFailedIsStillVerified()
     {
         var clock = new ManualTime(DateTimeOffset.UtcNow);
         await using var relay = new InProcessRelay(clock);
@@ -210,14 +210,22 @@ public class RelayTests
         using WebSocket control = await relay.RegisterAsync(address, key);
         for (int client = 0; client < 8; client++)
         {
-            await SendBadJoinsAsync(relay, address, $"203.0.113.{client}", 32);
+            await SendBadJoinsAsync(relay, address, $"2001:db8:0:{client}::/64", 32);
         }
 
-        await WaitForUnverifiedAsync(relay, address, 256);
-        await relay.RefusesAsync(RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1), "198.51.100.4");
-        clock.Advance(TimeSpan.FromSeconds(10));
+        await SendBadJoinsAsync(relay, address, "2001:db8:0:ff::/64", 1);
+        await WaitForUnverifiedAsync(relay, address, 257);
+        long now = clock.GetUtcNow().ToUnixTimeSeconds();
+        // Past the address's total, a client that has failed this window is refused before verifying, a valid ticket too;
+        // one that has not is verified as before, so flooding from many clients never closes the address to it.
+        await relay.RefusesAsync(RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, now, 1), "2001:db8:0:ff::/64");
         (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control,
-            RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 2), "198.51.100.4");
+            RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, now, 2), "198.51.100.4");
+        phone.Dispose();
+        runtime.Dispose();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        (phone, runtime) = await relay.JoinAsync(address, control,
+            RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 3), "2001:db8:0:ff::/64");
         phone.Dispose();
         runtime.Dispose();
     }
@@ -269,48 +277,119 @@ public class RelayTests
             relay: new Uri("https://relay.invalid"), connectRelay: (_, _) => Task.FromResult(relay.Connect()));
         RuntimeConnection a = harness.Pair(harness.Estate.BuilderId, "A");
         RuntimeConnection b = harness.Pair(harness.Estate.BuilderId, "B");
-        using var directA = VericairnClient.LocalNetwork(a, harness.Signer(a));
-        RelayRoute? route = a.Relay;
+        RelayRoute route = await RouteAsync(harness, a);
+
+        Assert.Equal("HTTP 200", await RelayedAttemptAsync(harness, relay, route, a));
+        // Another paired device's certificate is aborted once the handshake ends, before any request is read: no response at all,
+        // where the request-level check alone would answer 401.
+        Assert.Equal("no response", await RelayedAttemptAsync(harness, relay, route, b));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ARelayThatRewritesOneHandshakeByteBreaksTheDevicesConnection(bool fromDevice)
+    {
+        await using var relay = new InProcessRelay(TimeProvider.System);
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(systemClock: true,
+            relay: new Uri("https://relay.invalid"), connectRelay: (_, _) => Task.FromResult(relay.Connect()));
+        RuntimeConnection a = harness.Pair(harness.Estate.BuilderId, "A");
+        RelayRoute route = await RouteAsync(harness, a);
+
+        Assert.Equal("HTTP 200", await RelayedAttemptAsync(harness, relay, route, a));
+        // One byte of the hello's random, rewritten in flight in either direction, leaves the two ends with different
+        // transcripts: the handshake fails and no request is answered.
+        Assert.Equal("no response", await RelayedAttemptAsync(harness, relay, route, a, inner => new FlipOneByte(inner, 20, fromDevice)));
+    }
+
+    private static async Task<RelayRoute> RouteAsync(LocalNetworkHarness harness, RuntimeConnection device)
+    {
+        using var direct = VericairnClient.LocalNetwork(device, harness.Signer(device));
+        RelayRoute? route = device.Relay;
         for (int i = 0; route is null && i < 20; i++)
         {
             await Task.Delay(100, TestStop);
-            route = await directA.RefreshRelayAsync(TestStop);
+            route = await direct.RefreshRelayAsync(TestStop);
         }
 
-        Assert.NotNull(route);
+        return Assert.IsType<RelayRoute>(route);
+    }
 
-        // TLS straight over the relayed stream, presenting whichever device's certificate the test chooses with A's ticket.
-        async Task<string> Attempt(RuntimeConnection who)
+    // TLS straight over the relayed stream, presenting whichever device's certificate the test chooses with the route's ticket.
+    private static async Task<string> RelayedAttemptAsync(LocalNetworkHarness harness, InProcessRelay relay, RelayRoute route, RuntimeConnection who,
+        Func<Stream, Stream>? tamper = null)
+    {
+        DeviceRequestSigner signer = harness.Signer(who);
+        using var credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(who.DevicePublicKey));
+        WebSocket ws = relay.Connect();
+        await RelayProtocol.SendAsync(ws, new("join", Ticket: route.Ticket), TestStop);
+        Assert.Equal("joined", (await RelayProtocol.ReceiveAsync(ws, TestStop))?.Kind);
+        Stream relayed = new RelayStream(ws);
+        using var tls = new SslStream(tamper is null ? relayed : tamper(relayed), false);
+        var options = LocalNetworkTls.ClientOptions(LocalNetworkTls.Current, (_, c, _, _) => c is not null, credential.Current());
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+        deadline.CancelAfter(TimeSpan.FromSeconds(8));
+        try
         {
-            DeviceRequestSigner signer = harness.Signer(who);
-            using var credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(who.DevicePublicKey));
-            WebSocket ws = relay.Connect();
-            await RelayProtocol.SendAsync(ws, new("join", Ticket: route!.Ticket), TestStop);
-            Assert.Equal("joined", (await RelayProtocol.ReceiveAsync(ws, TestStop))?.Kind);
-            using var tls = new SslStream(new RelayStream(ws), false);
-            var options = LocalNetworkTls.ClientOptions(LocalNetworkTls.Current, (_, c, _, _) => c is not null, credential.Current());
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
-            deadline.CancelAfter(TimeSpan.FromSeconds(8));
-            try
-            {
-                await tls.AuthenticateAsClientAsync(options, deadline.Token);
-                const string path = "/v1/health";
-                string signed = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
-                string signature = Base64Url.EncodeToString(signer.Sign(harness.Digest("GET", path, signed, [])));
-                byte[] request = Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: {who.Address}\r\n{RequestSigning.DeviceHeader}: {who.Device}\r\n{RequestSigning.SignedAtHeader}: {signed}\r\n{RequestSigning.SignatureHeader}: {signature}\r\n\r\n");
-                await tls.WriteAsync(request, deadline.Token);
-                return "HTTP " + (await RawHttp.ReadResponseAsync(tls, deadline.Token)).Status;
-            }
-            catch (Exception error) when (error is IOException or AuthenticationException or WebSocketException or OperationCanceledException or InvalidOperationException)
-            {
-                return "no response";
-            }
+            await tls.AuthenticateAsClientAsync(options, deadline.Token);
+            const string path = "/v1/health";
+            string signed = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
+            string signature = Base64Url.EncodeToString(signer.Sign(harness.Digest("GET", path, signed, [])));
+            byte[] request = Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: {who.Address}\r\n{RequestSigning.DeviceHeader}: {who.Device}\r\n{RequestSigning.SignedAtHeader}: {signed}\r\n{RequestSigning.SignatureHeader}: {signature}\r\n\r\n");
+            await tls.WriteAsync(request, deadline.Token);
+            return "HTTP " + (await RawHttp.ReadResponseAsync(tls, deadline.Token)).Status;
+        }
+        catch (Exception error) when (error is IOException or AuthenticationException or WebSocketException or OperationCanceledException or InvalidOperationException)
+        {
+            return "no response";
+        }
+    }
+
+    // A relay that rewrites the byte at one offset of the stream, in the bytes the device sends or in those it receives.
+    private sealed class FlipOneByte(Stream inner, long offset, bool sent) : Stream
+    {
+        private long written;
+        private long read;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        public override void Write(byte[] buffer, int offset, int count) => WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            int count = await inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (!sent && read <= offset && offset < read + count) buffer.Span[(int)(offset - read)] ^= 0x01;
+            read += count;
+            return count;
         }
 
-        Assert.Equal("HTTP 200", await Attempt(a));
-        // Another paired device's certificate is aborted once the handshake ends, before any request is read: no response at all,
-        // where the request-level check alone would answer 401.
-        Assert.Equal("no response", await Attempt(b));
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (sent && written <= offset && offset < written + buffer.Length)
+            {
+                byte[] copy = buffer.ToArray();
+                copy[offset - written] ^= 0x01;
+                buffer = copy;
+            }
+
+            written += buffer.Length;
+            await inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
     }
 
     [Theory]
@@ -322,30 +401,6 @@ public class RelayTests
         Assert.Equal(peer, RelayServer.PeerOf(System.Net.IPAddress.Parse(address)));
 
     private static string AddressOf(ECDsa key) => RelayProtocol.AddressForKey(Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo()));
-
-    [Fact]
-    public async Task ACorruptedTlsHandshakeDoesNotMakeItThroughTheRelay()
-    {
-        var clock = new ManualTime(DateTimeOffset.UtcNow);
-        await using var relay = new InProcessRelay(clock);
-        using ECDsa registration = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        string address = AddressOf(registration);
-        RelayTicket ticket = RelayProtocol.Issue(registration, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1);
-        using WebSocket control = await relay.RegisterAsync(address, registration);
-        (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control, ticket);
-        using (phone)
-        using (runtime)
-        using (var tls = new SslStream(phone, leaveInnerStreamOpen: true))
-        {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
-            deadline.CancelAfter(TimeSpan.FromSeconds(5));
-            Task accepting = tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = "runtime.invalid" }, deadline.Token);
-            await runtime.WriteAsync(new byte[] { 21, 3, 3, 0, 2, 2, 40 }, deadline.Token);
-            Exception? refused = await Record.ExceptionAsync(() => accepting);
-            Assert.True(refused is AuthenticationException or IOException, refused?.ToString());
-            Assert.False(tls.IsAuthenticated);
-        }
-    }
 
     [Fact]
     public async Task RuntimeRegistrationAndItsRevocationsSurviveRestart()

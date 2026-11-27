@@ -10,7 +10,7 @@ namespace Vericairn.Relay;
 
 /// <summary>
 /// How many runtimes one relay holds registered, in total and per client. Each registration keeps up to 16,384 revocations,
-/// about 2 MB at most, so the total bounds the relay's memory. A host serving many estates from one address raises the
+/// about 4 MB at most with its connections, so the total bounds the relay's memory. A host serving many estates from one address raises the
 /// per-client limit.
 /// </summary>
 internal sealed record RelayLimits(int Registrations = 256, int RegistrationsPerClient = 32);
@@ -324,13 +324,15 @@ internal sealed class RelayServer(TimeProvider clock, RelayLimits? limits = null
             return unverified;
         }
 
-        // Whether this window's joins without a valid ticket have reached their limit, from this client or in total; past it
-        // joins are refused before verifying, at no signature's cost, until the window ends. One client's joins use only its own
-        // share, so closing an address for a window takes at least UnverifiedLimit / UnverifiedPerClient clients.
+        // Whether this client's joins are refused before verifying, at no signature's cost, until the window ends: once its own
+        // joins without a valid ticket reach its share, or once the address's total is reached and the client has failed at
+        // least once this window. A client that has not failed is always verified, so no flood from other clients closes the
+        // address to it, and past the total each further flooding client costs one verification a window.
         internal bool Saturated(string peer, long now)
         {
             Roll(now);
-            return unverified >= UnverifiedLimit || unverifiedFrom.GetValueOrDefault(peer) >= UnverifiedPerClient;
+            int mine = unverifiedFrom.GetValueOrDefault(peer);
+            return mine >= UnverifiedPerClient || unverified >= UnverifiedLimit && mine > 0;
         }
 
         internal bool CanJoin(RelayTicket ticket, string peer, long now)
@@ -343,6 +345,7 @@ internal sealed class RelayServer(TimeProvider clock, RelayLimits? limits = null
                 || revoked.TryGetValue(ticket.Device, out var floor) && ticket.Counter <= floor.Counter)
             {
                 unverified++;
+                // Past the total, the map keeps growing only by clients that each failed once; it is cleared every window.
                 unverifiedFrom[peer] = unverifiedFrom.GetValueOrDefault(peer) + 1;
                 return false;
             }
