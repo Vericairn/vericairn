@@ -3,10 +3,14 @@
 
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Vericairn.Cli;
+using Vericairn.Daemon;
+using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using TestEstate = Vericairn.Records.Tests.TestEstate;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Tests;
 
@@ -255,6 +259,234 @@ public sealed class EnclaveHelperCommandTests
             Assert.Equal(("present", "file-owner-only"), (custody.GetProperty("state").GetString(), custody.GetProperty("value").GetString()));
         }
         finally { CliHarness.Delete(root, home); }
+    }
+
+    [Theory]
+    [InlineData("missing-helper", "Put the vericairn-enclave from this command line's release archive beside it")]
+    [InlineData("availability-exit-3", "Secure Enclave is unavailable to this process (helper exit 3)")]
+    [InlineData("public-exit-3", "Secure Enclave is unavailable to this process (helper exit 3)")]
+    [InlineData("public-exit-4", "could not open the runtime identity key on this Mac (helper exit 4)")]
+    [InlineData("missing-blob", "could not find the runtime identity's key blob")]
+    [InlineData("bad-base64", "did not return a valid P-256 public key")]
+    [InlineData("empty", "did not return a valid P-256 public key")]
+    [InlineData("truncated", "did not return a valid P-256 public key")]
+    [InlineData("different-curve", "did not return a valid P-256 public key")]
+    [InlineData("trailing-bytes", "did not return a valid P-256 public key")]
+    [InlineData("wrong-key", "does not match the saved runtime identity")]
+    [InlineData("malformed-record", "The saved runtime identity record could not be read")]
+    [SupportedOSPlatform("macos")]
+    public async Task StartupRefusesAnUnreadableRuntimeIdentityAndPreservesIt(string failure, string remedy)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        using var fixture = await RuntimeIdentityFixture.Create(failure);
+        // Reach the startup identity read directly even on a host that cannot set up the TLS listener.
+        Exception? readFailure = fixture.ReadFailure();
+        fixture.AssertPreserved();
+        Assert.Contains(remedy, Assert.IsAssignableFrom<InvalidOperationException>(readFailure).Message, StringComparison.Ordinal);
+
+        (int code, string output, string error) = await fixture.Run("serve");
+        fixture.AssertPreserved();
+        Assert.Equal(2, code);
+        Assert.Contains(remedy, CliHarness.Unfold(error), StringComparison.Ordinal);
+        Assert.DoesNotContain("no longer held", output + error, StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.Home, output + error, StringComparison.Ordinal);
+        if (failure is "public-exit-4" or "missing-blob")
+        {
+            Assert.Contains("vericairn runtime rotate --identity --replace-unreadable", CliHarness.Unfold(error), StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("public-exit-4")]
+    [InlineData("missing-blob")]
+    [SupportedOSPlatform("macos")]
+    public async Task AnUnreadableIdentityIsReplacedOnlyByAnExplicitOfflineRotation(string failure)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        using var fixture = await RuntimeIdentityFixture.Create(failure);
+
+        (int normal, _, string error) = await fixture.Run("rotate", "--identity");
+        fixture.AssertPreserved();
+        Assert.Equal(2, normal);
+        Assert.Contains("--replace-unreadable", CliHarness.Unfold(error), StringComparison.Ordinal);
+
+        (int noIdentity, _, _) = await fixture.Run("rotate", "--replace-unreadable");
+        fixture.AssertPreserved();
+        Assert.Equal(2, noIdentity);
+
+        (int code, string output, string explicitError) = await fixture.Run("rotate", "--identity", "--replace-unreadable");
+        Assert.True(code == 0, explicitError);
+        Assert.Contains("every paired device pairs again", output, StringComparison.Ordinal);
+        using JsonDocument replacement = JsonDocument.Parse(File.ReadAllBytes(fixture.Identity));
+        Assert.Equal(SecureEnclaveCustody.Kind, replacement.RootElement.GetProperty("custody").GetString());
+        Assert.Equal(fixture.ReplacementPublicKey, replacement.RootElement.GetProperty("publicKey").GetString());
+        Assert.True(File.Exists(Path.Combine(fixture.Home, "keys", replacement.RootElement.GetProperty("key").GetString() + ".se")));
+        fixture.AssertOriginalBlob();
+        Assert.Null(fixture.ReadFailure());
+    }
+
+    [Fact]
+    [SupportedOSPlatform("macos")]
+    public async Task AnUnusableReplacementLeavesTheSavedIdentityInPlace()
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        using var fixture = await RuntimeIdentityFixture.Create("public-exit-4-no-create-blob");
+        (int code, _, string error) = await fixture.Run("rotate", "--identity", "--replace-unreadable");
+
+        fixture.AssertPreserved();
+        Assert.Equal(2, code);
+        Assert.Contains("The new Secure Enclave key could not be read back", CliHarness.Unfold(error), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("missing-helper")]
+    [InlineData("availability-exit-3")]
+    [InlineData("public-exit-3")]
+    [InlineData("bad-base64")]
+    [InlineData("different-curve")]
+    [InlineData("wrong-key")]
+    [InlineData("public-timeout")]
+    [InlineData("healthy")]
+    [SupportedOSPlatform("macos")]
+    public async Task TheRecoveryOptionRefusesAHelperFailureOrAnIdentityThatCanBeRead(string failure)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        using var fixture = await RuntimeIdentityFixture.Create(failure);
+        (int code, _, string error) = await fixture.Run("rotate", "--identity", "--replace-unreadable");
+
+        fixture.AssertPreserved();
+        Assert.Equal(2, code);
+        Assert.DoesNotContain("Unrecognized command or argument", error, StringComparison.Ordinal);
+        if (failure == "healthy") Assert.Contains("already readable", CliHarness.Unfold(error), StringComparison.Ordinal);
+    }
+
+    [SupportedOSPlatform("macos")]
+    private sealed class RuntimeIdentityFixture : IDisposable
+    {
+        private static readonly byte[] FakeBlob = [1, 2, 3];
+        private readonly TestEstate estate = new(recordFormat: 2);
+        private readonly string helper;
+        private string blob = "";
+        private byte[] before = [];
+        private bool hasBlob;
+
+        private RuntimeIdentityFixture()
+        {
+            Home = CliHarness.TempDirectory("runtime-identity-home");
+            helper = Path.Combine(Home, SecureEnclaveCustody.HelperName);
+        }
+
+        internal string Home { get; }
+        internal string Identity { get; private set; } = "";
+        internal string ReplacementPublicKey { get; private set; } = "";
+
+        internal static async Task<RuntimeIdentityFixture> Create(string failure)
+        {
+            var fixture = new RuntimeIdentityFixture();
+            try
+            {
+                new ReleaseUpdateStore(fixture.Home).Configure(false);
+                (int code, _, string error) = await fixture.Run("configure", "--local-network", "127.0.0.1:7443");
+                Assert.True(code == 0, error);
+                string settings = Assert.Single(Directory.EnumerateFiles(fixture.Home, RuntimeSettings.FileName, SearchOption.AllDirectories));
+                fixture.Identity = Path.Combine(Path.GetDirectoryName(settings)!, RuntimeIdentity.FileName);
+                string id = Ulid.NewUlid().Value;
+                string keys = Path.Combine(fixture.Home, "keys");
+                Directory.CreateDirectory(keys);
+                fixture.blob = Path.Combine(keys, id + ".se");
+                fixture.hasBlob = failure != "missing-blob";
+                if (fixture.hasBlob) File.WriteAllBytes(fixture.blob, FakeBlob);
+
+                using ECDsa saved = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+                using ECDsa replacement = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+                using ECDsa otherCurve = ECDsa.Create(ECCurve.NamedCurves.nistP384);
+                byte[] spki = saved.ExportSubjectPublicKeyInfo();
+                byte[] next = replacement.ExportSubjectPublicKeyInfo();
+                fixture.ReplacementPublicKey = RecordSigning.EncodePublicKey(next);
+                fixture.before = JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    format = "vericairn.runtime-identity/1", key = id, custody = SecureEnclaveCustody.Kind, publicKey = RecordSigning.EncodePublicKey(spki),
+                });
+                if (failure == "malformed-record") fixture.before = fixture.before[..^1];
+                File.WriteAllBytes(fixture.Identity, fixture.before);
+
+                if (failure != "missing-helper")
+                {
+                    string publicKeyAnswer = failure switch
+                    {
+                        "public-exit-3" => "exit 3",
+                        "public-exit-4" or "public-exit-4-no-create-blob" => "exit 4",
+                        "public-timeout" => "exec /bin/sleep 90",
+                        "bad-base64" => "echo 'not base64'",
+                        "empty" => "exit 0",
+                        "truncated" => "echo " + Convert.ToBase64String(spki.AsSpan(0, 30)),
+                        "different-curve" => "echo " + Convert.ToBase64String(otherCurve.ExportSubjectPublicKeyInfo()),
+                        "trailing-bytes" => "echo " + Convert.ToBase64String([.. spki, 0]),
+                        "wrong-key" => "echo " + Convert.ToBase64String(next),
+                        _ => "echo " + Convert.ToBase64String(spki),
+                    };
+                    string available = failure == "availability-exit-3" ? "3" : "0";
+                    string writeBlob = failure == "public-exit-4-no-create-blob" ? ":" : """printf 'fixture blob' > "$2" """;
+                    File.WriteAllText(fixture.helper, $$"""
+                        #!/bin/sh
+                        case "$1" in
+                          available) exit {{available}} ;;
+                          version) echo '{"commands":["available","create","public","session","sign","sign-record","version"],"version":"{{SecureEnclaveCustody.HelperVersion}}"}' ;;
+                          public) if [ "$2" = '{{fixture.blob}}' ]; then {{publicKeyAnswer}}; else echo {{Convert.ToBase64String(next)}}; fi ;;
+                          create) {{writeBlob}}; echo {{Convert.ToBase64String(next)}} ;;
+                          *) exit 2 ;;
+                        esac
+                        """ + "\n");
+                    File.SetUnixFileMode(fixture.helper, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+
+                return fixture;
+            }
+            catch
+            {
+                fixture.Dispose();
+                throw;
+            }
+        }
+
+        internal Task<(int Code, string Output, string Error)> Run(params string[] args) =>
+            Built(Home, helper, ["--estate", estate.Root, "runtime", .. args]);
+
+        internal Exception? ReadFailure()
+        {
+            string? previousHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
+            string? previousHelper = Environment.GetEnvironmentVariable(SecureEnclaveCustody.HelperVariable);
+            try
+            {
+                Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Home);
+                Environment.SetEnvironmentVariable(SecureEnclaveCustody.HelperVariable, helper);
+                return Record.Exception(() => RuntimeIdentity.LoadOrCreate(Path.GetDirectoryName(Identity)!));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, previousHome);
+                Environment.SetEnvironmentVariable(SecureEnclaveCustody.HelperVariable, previousHelper);
+            }
+        }
+
+        internal void AssertPreserved()
+        {
+            Assert.Equal(before, File.ReadAllBytes(Identity));
+            AssertOriginalBlob();
+            Assert.Equal(hasBlob ? 1 : 0, Directory.EnumerateFiles(Path.Combine(Home, "keys")).Count());
+        }
+
+        internal void AssertOriginalBlob()
+        {
+            if (hasBlob) Assert.Equal(FakeBlob, File.ReadAllBytes(blob));
+            else Assert.False(File.Exists(blob));
+        }
+
+        public void Dispose()
+        {
+            estate.Dispose();
+            CliHarness.Delete(Home);
+        }
     }
 
     private static async Task<string> Init(string home, string helper, string root)

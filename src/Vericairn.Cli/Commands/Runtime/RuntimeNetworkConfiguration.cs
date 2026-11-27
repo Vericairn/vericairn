@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Vericairn.Daemon;
 using Vericairn.Protocol;
+using Vericairn.Runtime.Store;
 using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
 
@@ -149,7 +150,7 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
         }
     }
 
-    public int RuntimeRotate(string root, bool compromised, bool identity, string? reason, bool json)
+    public int RuntimeRotate(string root, bool compromised, bool identity, bool replaceUnreadable, string? reason, bool json)
     {
         try
         {
@@ -158,9 +159,16 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                 return context.Fail(NotAnEstate(root));
             }
 
+            if (replaceUnreadable && (!identity || compromised))
+            {
+                return context.Fail("--replace-unreadable requires --identity and cannot be combined with --compromised.");
+            }
+
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
             if (endpoint is not null && context.IsAlive(endpoint))
             {
+                if (replaceUnreadable) return context.Fail("Stop the runtime with 'vericairn runtime stop' before replacing an unreadable identity.");
+
                 using var client = new VericairnClient(endpoint);
                 (CertificateRotated? rotated, Problem? problem) = client.RotateCertificateAsync(new CertificateRotateRequest(compromised, reason, identity), context.CancellationToken).GetAwaiter().GetResult();
                 if (rotated is null)
@@ -194,6 +202,21 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                 if (!File.Exists(Path.Combine(directory, RuntimeIdentity.FileName)))
                 {
                     return context.Fail("This runtime has no identity to replace: it is made when the local-network profile is first served.");
+                }
+
+                if (replaceUnreadable)
+                {
+                    using FileStream? held = LiveStoreRecovery.ExclusiveWriterLock(Path.Combine(directory, "live.db"));
+                    if (held is null)
+                    {
+                        return context.Fail("Stop the runtime and let other commands finish before replacing an unreadable identity.");
+                    }
+
+                    string replacement = RuntimeIdentity.ReplaceUnreadable(directory).Fingerprint;
+                    context.Output.WriteLine(json
+                        ? JsonSerializer.Serialize(new { identity = replacement, served = false }, ProtocolJson.Options)
+                        : $"runtime identity replaced by {replacement}: every paired device pairs again");
+                    return Clean;
                 }
 
                 replacedIdentity = RuntimeIdentity.LoadOrCreate(directory).Replace(directory).Fingerprint;
