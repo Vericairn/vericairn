@@ -265,6 +265,9 @@ public sealed class DeviceReachCommandTests
         ledger.Append(new(signed.At, session, "announced") { Device = device });
         ledger.Append(new(cutoff, session, "signed") { Record = signed.Id, Type = signed.Type, Hash = signed.ComputedHash });
         ledger.Append(new(cutoff, session, "signed") { Record = unrelated.Id, Type = unrelated.Type, Hash = wrongHash });
+        // A signing logged before the cutoff supplies no row and never stops the report.
+        RecordEnvelope before = estate.Add("resource", estate.BuilderId, ClaimBody, signer: signer);
+        ledger.Append(new(signed.At, session, "signed") { Record = before.Id, Type = before.Type, Hash = before.ComputedHash });
 
         string[] args = ["--estate", estate.Root, "devices", "reach", device, "--since", cutoff];
         JsonElement[] records = CliHarness.Ok([.. args, "--json"]).Json.GetProperty("records").EnumerateArray().ToArray();

@@ -95,7 +95,10 @@ public sealed partial class EstateService
 
         foreach (var entries in signedBySession)
         {
-            var local = entries.Where(e => AtOrAfter(e.Signature.At, since)).MinBy(e => e.Signature.At, StringComparer.Ordinal);
+            // Only signings at or after the cutoff supply a row; a record whose ledger lines are all earlier supplies none.
+            var after = entries.Where(e => AtOrAfter(e.Signature.At, since)).ToList();
+            if (after.Count == 0) continue;
+            var local = after.MinBy(e => e.Signature.At, StringComparer.Ordinal);
             if (local.Signature is not { Hash: string hash } signature) continue;
             var key = (signature.Record, hash);
             RecordEnvelope? witness = FirstWitness(history, witnesses, key);
