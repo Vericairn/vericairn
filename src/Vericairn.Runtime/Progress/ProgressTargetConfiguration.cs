@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -95,16 +98,58 @@ internal sealed record ProgressTargetConfiguration(string Name, string Adapter, 
 /// </summary>
 internal sealed record ProgressTargetState(string? PlaceId = null, string? PlaceUrl = null, string? Cursor = null, ImmutableArray<string>? Waiting = null)
 {
+    internal ImmutableSortedDictionary<string, ProgressTargetComment> Comments { get; init; } =
+        ImmutableSortedDictionary.Create<string, ProgressTargetComment>(StringComparer.Ordinal);
+
+    internal JsonObject ToJson()
+    {
+        var node = new JsonObject
+        {
+            ["place"] = PlaceId is null ? null : new JsonObject { ["id"] = PlaceId, ["url"] = PlaceUrl },
+            ["cursor"] = Cursor,
+            ["waiting"] = Waiting is { } waiting ? new JsonArray([.. waiting.Select(w => (JsonNode)JsonValue.Create(w))]) : null,
+        };
+        if (Comments.Count != 0)
+            node["comments"] = new JsonObject(Comments.Select(entry => KeyValuePair.Create<string, JsonNode?>(entry.Key, entry.Value.ToJson())));
+        return node;
+    }
+
+    internal static ProgressTargetState FromJson(JsonNode? node)
+    {
+        if (node is null) return new();
+        var state = new ProgressTargetState(node["place"]?["id"]?.GetValue<string>(), node["place"]?["url"]?.GetValue<string>(),
+            node["cursor"]?.GetValue<string>(), node["waiting"] is JsonArray waiting ? [.. waiting.Select(w => w!.GetValue<string>())] : null);
+        return node["comments"] is JsonNode comments ? state with
+        {
+            Comments = comments.AsObject().ToImmutableSortedDictionary(e => e.Key, e => ProgressTargetComment.FromJson(e.Value), StringComparer.Ordinal),
+        } : state;
+    }
+}
+
+/// <summary>A local comment attempt, keyed by its event or wait. A missing outcome means the follower has no confirmation.</summary>
+internal sealed record ProgressTargetComment(string Adapter, string PayloadHash, string Form, string PlaceId, string PlaceUrl, string? Outcome = null, string? Url = null)
+{
+    internal bool Uncertain => Outcome is null or "uncertain";
+
     internal JsonObject ToJson() => new()
     {
-        ["place"] = PlaceId is null ? null : new JsonObject { ["id"] = PlaceId, ["url"] = PlaceUrl },
-        ["cursor"] = Cursor,
-        ["waiting"] = Waiting is { } waiting ? new JsonArray([.. waiting.Select(w => (JsonNode)JsonValue.Create(w))]) : null,
+        ["adapter"] = Adapter,
+        ["payloadHash"] = PayloadHash,
+        ["form"] = Form,
+        ["place"] = new JsonObject { ["id"] = PlaceId, ["url"] = PlaceUrl },
+        ["outcome"] = Outcome,
+        ["url"] = Url,
     };
 
-    internal static ProgressTargetState FromJson(JsonNode? node) => node is null ? new() : new(
-        node["place"]?["id"]?.GetValue<string>(), node["place"]?["url"]?.GetValue<string>(), node["cursor"]?.GetValue<string>(),
-        node["waiting"] is JsonArray waiting ? [.. waiting.Select(w => w!.GetValue<string>())] : null);
+    internal static ProgressTargetComment FromJson(JsonNode? node)
+    {
+        static string Required(JsonNode? value) => value?.GetValue<string>() ?? throw new InvalidOperationException("A progress target comment entry is incomplete.");
+        string? outcome = node?["outcome"]?.GetValue<string>();
+        if (outcome is not (null or "commented" or "refused" or "uncertain"))
+            throw new InvalidOperationException("A progress target comment entry has an unknown outcome.");
+        return new(Required(node?["adapter"]), Required(node?["payloadHash"]), Required(node?["form"]), Required(node?["place"]?["id"]),
+            Required(node?["place"]?["url"]), outcome, outcome == "commented" ? Required(node?["url"]) : null);
+    }
 }
 
 /// <summary>
@@ -145,6 +190,7 @@ internal sealed class ProgressTargetStore(string directory)
     /// <summary>Adds or replaces a target.</summary>
     internal void Save(ProgressTargetConfiguration target)
     {
+        using FileStream writeLock = Lock();
         List<ProgressTargetConfiguration> targets = [.. Load().Where(t => t.Name != target.Name), target];
         Write(FileName, new JsonObject { ["format"] = Format, ["targets"] = new JsonArray([.. targets.OrderBy(t => t.Name, StringComparer.Ordinal).Select(t => (JsonNode)t.ToJson())]) });
     }
@@ -152,10 +198,11 @@ internal sealed class ProgressTargetStore(string directory)
     /// <summary>Removes a target and what this machine kept of it; false when none has the name.</summary>
     internal bool Remove(string name)
     {
+        using FileStream writeLock = Lock();
         IReadOnlyList<ProgressTargetConfiguration> targets = Load();
         if (targets.All(t => t.Name != name)) return false;
-        Write(FileName, new JsonObject { ["format"] = Format, ["targets"] = new JsonArray([.. targets.Where(t => t.Name != name).Select(t => (JsonNode)t.ToJson())]) });
         JsonObject states = States();
+        Write(FileName, new JsonObject { ["format"] = Format, ["targets"] = new JsonArray([.. targets.Where(t => t.Name != name).Select(t => (JsonNode)t.ToJson())]) });
         states.Remove(name);
         Write(StateFileName, new JsonObject { ["format"] = StateFormat, ["targets"] = states });
         return true;
@@ -164,35 +211,63 @@ internal sealed class ProgressTargetStore(string directory)
     /// <summary>What this machine kept of a target.</summary>
     internal ProgressTargetState State(string name) => ProgressTargetState.FromJson(States()[name]);
 
-    /// <summary>Keeps what this machine knows of a target.</summary>
-    internal void Save(string name, ProgressTargetState state)
+    /// <summary>Changes one target's current state without discarding concurrent updates from another target or a refresh.</summary>
+    internal ProgressTargetState Update(string name, Func<ProgressTargetState, ProgressTargetState> change)
     {
+        using FileStream writeLock = Lock();
         JsonObject states = States();
-        states[name] = state.ToJson();
+        ProgressTargetState state = ProgressTargetState.FromJson(states[name]);
+        ProgressTargetState next = change(state);
+        if (ReferenceEquals(state, next)) return state;
+        states[name] = next.ToJson();
         Write(StateFileName, new JsonObject { ["format"] = StateFormat, ["targets"] = states });
+        return next;
     }
 
     private JsonObject States()
     {
-        try
+        JsonNode? node = Read(StateFileName, StateFormat);
+        if (node is null) return [];
+        return node["targets"] is JsonObject targets ? (JsonObject)targets.DeepClone()
+            : throw new InvalidOperationException("The progress target state has no targets object.");
+    }
+
+    private FileStream Lock()
+    {
+        OwnerOnlyState.CreateDirectory(directory);
+        string path = Path.Combine(directory, "progress-targets.lock");
+        var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = OwnerOnlyState.FileMode;
+
+        long start = Stopwatch.GetTimestamp();
+        while (true)
         {
-            return Read(StateFileName, StateFormat)?["targets"] is JsonObject targets ? (JsonObject)targets.DeepClone() : [];
-        }
-        catch (InvalidOperationException)
-        {
-            // What a follower kept is a convenience: an unreadable copy is started again, and the next refresh locates the place.
-            return [];
+            try
+            {
+                return new FileStream(path, options);
+            }
+            catch (IOException) when (Stopwatch.GetElapsedTime(start) < TimeSpan.FromSeconds(5))
+            {
+                Thread.Sleep(25);
+            }
         }
     }
 
     private JsonNode? Read(string name, string format)
     {
         string path = Path.Combine(directory, name);
-        if (!File.Exists(path)) return null;
         try
         {
             JsonNode? node = JsonNode.Parse(File.ReadAllText(path));
             return node?["format"]?.GetValue<string>() == format ? node : throw new InvalidOperationException($"{path} is not of format {format}.");
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
         }
         catch (JsonException exception)
         {
@@ -200,12 +275,74 @@ internal sealed class ProgressTargetStore(string directory)
         }
     }
 
+    // The new text reaches the disk before it replaces the old, so a machine that stops loses at most this write, never a comment entry an
+    // earlier write kept.
     private void Write(string name, JsonObject node)
     {
         OwnerOnlyState.CreateDirectory(directory);
         string path = Path.Combine(directory, name);
         string temporary = path + ".tmp";
-        OwnerOnlyState.WriteAllBytes(temporary, Encoding.UTF8.GetBytes(node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n"));
+        File.Delete(temporary);
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = OwnerOnlyState.FileMode;
+        using (var stream = new FileStream(temporary, options))
+        {
+            stream.Write(Encoding.UTF8.GetBytes(node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n"));
+            stream.Flush(flushToDisk: true);
+        }
+
         File.Move(temporary, path, overwrite: true);
+        SyncDirectory(directory);
+    }
+
+    // The rename reaches the disk too, where the system lets a directory be synchronized; on Windows the move is left to the system.
+    private static void SyncDirectory(string directory)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        int handle = open(directory, 0);
+        if (handle < 0) return;
+        try
+        {
+            _ = fsync(handle);
+        }
+        finally
+        {
+            _ = close(handle);
+        }
+    }
+
+#pragma warning disable SYSLIB1054
+#pragma warning disable CA2101
+    [DllImport("libc", SetLastError = true)] private static extern int open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+    [DllImport("libc", SetLastError = true)] private static extern int fsync(int handle);
+    [DllImport("libc", SetLastError = true)] private static extern int close(int handle);
+#pragma warning restore CA2101
+#pragma warning restore SYSLIB1054
+
+    /// <summary>
+    /// Holds a target for one follower on this machine until the stream is disposed, or null when another follower holds it. The hold is
+    /// released when its process ends, however it ends.
+    /// </summary>
+    internal FileStream? Follow(string name)
+    {
+        OwnerOnlyState.CreateDirectory(directory);
+        string hashed = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(name)))[..16];
+        var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = OwnerOnlyState.FileMode;
+        try
+        {
+            return new FileStream(Path.Combine(directory, $"progress-target-{hashed}.follow"), options);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>True when a follower on this machine holds the target now.</summary>
+    internal bool Followed(string name)
+    {
+        using FileStream? held = Follow(name);
+        return held is null;
     }
 }
