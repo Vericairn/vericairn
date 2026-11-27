@@ -18,7 +18,7 @@ namespace Vericairn.Runtime.Tests;
 /// holds for the requesting principal, and no record is written unsigned. A write prepares its one record for the device and
 /// writes nothing, and then writes only that record, re-authored from the same request, with the device's signature.
 /// </summary>
-public sealed class DeviceSigningTests
+public sealed partial class DeviceSigningTests
 {
     private const string Brief = """{"outcome":"A validated widget.","sources":[],"permittedChanges":["the widget sources"],"prohibitedEffects":["no publication"],"workspace":["example repository, main branch"],"limits":[],"expectedOutputs":["widget.txt"],"reviewCriteria":["output hash verified"],"recovery":"Resume from the last recorded result."}""";
 

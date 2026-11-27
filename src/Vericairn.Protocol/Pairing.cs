@@ -39,9 +39,13 @@ public sealed record PairingHello(string Nonce, string Mac)
 {
     /// <summary>
     /// From 0.9.0 (REMOTE-11): true when the device will also present its presence device, a second key of the same phone whose every
-    /// signature needs its owner's presence. A runtime that offers one names its record in the challenge; an earlier runtime ignores it.
+    /// signature needs its owner's presence. From 0.9.5 the runtime offers a second record only when the hello also announces
+    /// <see cref="PresenceAttestation"/>. Older clients can still pair their request key.
     /// </summary>
     public bool? Presence { get; init; }
+
+    /// <summary>Whether this client can pair presence keys under the runtime's attestation rules.</summary>
+    public bool? PresenceAttestation { get; init; }
 }
 
 /// <summary>
@@ -71,15 +75,22 @@ public sealed record PairingChallenge(string DeviceNonce, string RuntimeNonce, s
     /// asked for one and the runtime offers it: a person's device, from record format 2. Null otherwise; the MAC covers it when present.
     /// </summary>
     public string? PresenceRecord { get; init; }
+
+    /// <summary>True when the runtime accepts attestation and distinguishes declared from verified presence.</summary>
+    public bool? PresenceAttestation { get; init; }
 }
 
-/// <summary>The new device as it presents itself: its descriptive identity and its public key. The runtime cannot verify the custody, presence, platform or name a device states, and records them as the device's own statement.</summary>
+/// <summary>The new device as it presents itself, including any Android evidence of its presence key.</summary>
 /// <param name="Name">Descriptive name, never a machine path.</param>
 /// <param name="Platform">Operating system family.</param>
 /// <param name="Custody">How its key is held.</param>
 /// <param name="PublicKey">Base64url SubjectPublicKeyInfo of its P-256 key.</param>
-/// <param name="Presence">required or none from record format 2; null for format 1.</param>
-public sealed record PairingDevice(string Name, string Platform, string Custody, string PublicKey, string? Presence = null);
+/// <param name="Presence">required, declared or none from record format 2; null for format 1.</param>
+public sealed record PairingDevice(string Name, string Platform, string Custody, string PublicKey, string? Presence = null)
+{
+    /// <summary>The Android Keystore certificate chain, leaf first in base64url DER, for an attested presence key.</summary>
+    public IReadOnlyList<string>? AndroidAttestation { get; init; }
+}
 
 /// <summary>The device's confirmation: its key and descriptive identity, its signature of the device record, and a MAC with the key the code gives the device.</summary>
 /// <param name="RuntimeNonce">The runtime's nonce, which names the exchange.</param>
@@ -315,6 +326,10 @@ public static class PairingProtocol
             transcript.Add("presence");
             transcript.Add(challenge.PresenceRecord);
         }
+        if (challenge.PresenceAttestation == true)
+        {
+            transcript.Add("presence-attestation");
+        }
 
         return transcript.ToArray();
     }
@@ -343,6 +358,12 @@ public static class PairingProtocol
             transcript.Add(confirm.PresenceDevice?.PublicKey);
             transcript.AddOptional(confirm.PresenceDevice?.Presence);
             transcript.Add(confirm.PresenceSignature);
+        }
+        if (confirm.Device.AndroidAttestation is not null || confirm.PresenceDevice?.AndroidAttestation is not null)
+        {
+            transcript.Add("android-attestation");
+            transcript.Add(confirm.Device.AndroidAttestation ?? []);
+            transcript.Add(confirm.PresenceDevice?.AndroidAttestation ?? []);
         }
 
         return transcript.ToArray();
