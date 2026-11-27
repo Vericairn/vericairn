@@ -8,7 +8,8 @@
 > on the runtime that received them. Open a task on that runtime's machine to inspect its exact subject, reason, draft and
 > evidence. Workbench shows the source material it could read and identifies missing originals. Remote can refresh its list to
 > observe the desktop opening separately from the subject's progress. Tasks expire after 30 days. The runtime keeps up to
-> 32 tasks per person. **Remove selected handoff** in Workbench removes the task and its opening information.
+> 32 tasks per person. **Remove selected handoff** in Workbench removes the task and its opening information. If a
+> preparation response is lost, Remote keeps the task, draft and request identity across Back and restart.
 >
 > [Remote](remote.md#interventions-and-nodes) can request a pause of an active goal, a graceful cancellation of one run or a
 > containment request with no additional grace before escalation. Review identifies the exact operation and target. The

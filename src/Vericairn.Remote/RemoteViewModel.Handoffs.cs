@@ -13,6 +13,7 @@ public sealed partial class RemoteViewModel
     private IReadOnlyList<RemoteHandoffRow> handoffs = [];
     private string handoffMessage = "";
     private bool handoffAttempted;
+    private bool handoffRetry;
     private bool handoffsCurrent;
 
     /// <summary>Desktop tasks in the last read for the selected runtime and person.</summary>
@@ -74,6 +75,9 @@ public sealed partial class RemoteViewModel
     /// <summary>Editable until a submission is attempted.</summary>
     public bool HandoffEditable => !Busy && !handoffAttempted;
 
+    /// <summary>The action available for the displayed request.</summary>
+    public string PrepareHandoffLabel => handoffAttempted ? "Check original preparation" : "Prepare for Workbench";
+
     /// <summary>Start a handoff for the exact work detail.</summary>
     public AsyncCommand ComposeWorkHandoffCommand { get; private set; } = null!;
     /// <summary>Start a handoff preserving the decision's exact original draft and evidence references.</summary>
@@ -95,9 +99,9 @@ public sealed partial class RemoteViewModel
         ComposeDecisionHandoffCommand = Command(ComposeDecisionHandoffAsync, () => !Busy && Decision is not null);
         ComposePolicyHandoffCommand = Command(ComposePolicyHandoffAsync, () => !Busy && PolicyDetail is not null);
         ComposeProductHandoffCommand = Command(ComposeProductHandoffAsync, () => !Busy && SelectedProduct?.Hash is not null);
-        PrepareHandoffCommand = Command(PrepareHandoffAsync, () => HandoffEditable && Selected?.Current == true &&
+        PrepareHandoffCommand = Command(PrepareHandoffAsync, () => !Busy && (!handoffAttempted || handoffRetry) && Selected?.Current == true &&
             !string.IsNullOrWhiteSpace(HandoffTask) && !string.IsNullOrWhiteSpace(HandoffReason));
-        CloseHandoffCommand = Command(() => { SetHandoff(null); return Task.CompletedTask; }, () => !Busy && HasHandoffForm);
+        CloseHandoffCommand = Command(() => { SetHandoff(null); RestorePendingHandoffMessage(); return Task.CompletedTask; }, () => !Busy && HasHandoffForm);
         RefreshHandoffsCommand = Command(RefreshHandoffsAsync, () => !Busy && Selected?.Current == true);
     }
 
@@ -111,12 +115,14 @@ public sealed partial class RemoteViewModel
         CloseHandoffCommand?.NotifyCanExecuteChanged();
         RefreshHandoffsCommand?.NotifyCanExecuteChanged();
         Raise(nameof(HandoffEditable));
+        Raise(nameof(PrepareHandoffLabel));
     }
 
-    private void SetHandoff(DesktopHandoffRequest? request)
+    private void SetHandoff(DesktopHandoffRequest? request, bool retained = false)
     {
         handoffForm = request;
-        handoffAttempted = false;
+        handoffAttempted = retained;
+        handoffRetry = retained;
         Raise(nameof(HasHandoffForm));
         Raise(nameof(HasDecisionReview));
         Raise(nameof(HasPolicyDetail));
@@ -131,8 +137,24 @@ public sealed partial class RemoteViewModel
     private void ComposeHandoff(AttentionReference subject, string defaultTask, string reason, string? draft = null, IReadOnlyList<AttentionReference>? evidence = null)
     {
         if (Selected is not { } estate || string.IsNullOrWhiteSpace(subject.Hash) || subject.Hash == "unknown") return;
-        HandoffMessage = estate.Current ? "" : "Cached subject. Reconnect and refresh before preparing the task.";
-        SetHandoff(new(estate.Connection.Principal, Guid.NewGuid().ToString("N"), subject, defaultTask, reason, draft, evidence));
+        try
+        {
+            DesktopHandoffRequest? original = connections.LoadPendingHandoffs(estate.Connection)
+                .FirstOrDefault(item => item.Subject.Type == subject.Type && item.Subject.Id == subject.Id);
+            if (original is not null)
+            {
+                SetHandoff(original, retained: true);
+                HandoffMessage = "The original preparation is still uncertain. Refresh Handoffs or check this exact request again.";
+                return;
+            }
+            HandoffMessage = estate.Current ? "" : "Cached subject. Reconnect and refresh before preparing the task.";
+            SetHandoff(new(estate.Connection.Principal, Guid.NewGuid().ToString("N"), subject, defaultTask, reason, draft, evidence));
+        }
+        catch (Exception exception) when (InterventionReadFailure(exception))
+        {
+            SetHandoff(null);
+            HandoffMessage = "The original handoff preparations could not be read from this phone.";
+        }
     }
 
     private Task ComposeWorkHandoffAsync()
@@ -187,9 +209,24 @@ public sealed partial class RemoteViewModel
         return Task.CompletedTask;
     }
 
+    private void RestorePendingHandoffMessage()
+    {
+        try
+        {
+            HandoffMessage = Selected is { } estate && connections.LoadPendingHandoffs(estate.Connection).Count > 0
+                ? "A preparation is still uncertain. Refresh Handoffs to check for the original task."
+                : "";
+        }
+        catch (Exception exception) when (InterventionReadFailure(exception))
+        {
+            HandoffMessage = "The original handoff preparations could not be read from this phone.";
+        }
+    }
+
     private async Task PrepareHandoffAsync()
     {
-        if (Selected is not { Current: true } estate || handoffForm is not { } request || handoffAttempted) return;
+        if (Selected is not { Current: true } estate || handoffForm is not { } request || (handoffAttempted && !handoffRetry)) return;
+        bool wasRetained = handoffAttempted;
         Busy = true;
         try
         {
@@ -205,28 +242,38 @@ public sealed partial class RemoteViewModel
                 if (Selected == estate) HandoffMessage = "The exact subject could not be confirmed. Nothing was sent.";
                 return;
             }
+            try
+            {
+                connections.KeepPendingHandoff(estate.Connection, request);
+            }
+            catch (Exception exception) when (InterventionReadFailure(exception))
+            {
+                HandoffMessage = "This phone could not retain the original handoff preparation. Nothing was sent. " + exception.Message;
+                return;
+            }
             handoffAttempted = true;
+            handoffRetry = false;
             DesktopHandoffResponse response = await api.PrepareDesktopHandoffAsync(request).ConfigureAwait(true);
             if (Selected != estate || handoffForm != request) return;
-            if (response.Handoff is not { } handoff || handoff.Id != request.RequestId || handoff.By != request.By ||
-                handoff.Subject != request.Subject || handoff.Task != request.Task || handoff.Reason != request.Reason || handoff.Draft != request.Draft ||
-                !handoff.Evidence.SequenceEqual(request.Evidence ?? []))
+            if (response.Handoff is not { } handoff || !MatchesPreparation(handoff, request))
             {
                 HandoffMessage = response.Problem?.Message ?? "Preparation was not confirmed. Refresh Handoffs to see whether the task was kept.";
-                handoffAttempted = response.Problem is null or { Code: "unavailable" };
+                if (!wasRetained && response.Problem is { Code: not "unavailable" } &&
+                    ForgetPendingHandoff(estate, request.RequestId)) handoffAttempted = false;
                 return;
             }
 
+            if (!ForgetPendingHandoff(estate, request.RequestId)) return;
             ReplaceHandoff(estate, handoff);
             ShowPreparedHandoff(handoff);
         }
         catch (Exception exception) when (InterventionReadFailure(exception))
         {
             if (Selected != estate) return;
-            if (ClientFailure.FromException(exception)?.Code == "refused")
+            if (ClientFailure.FromException(exception) is { Code: "refused" } failure)
             {
-                handoffAttempted = false;
-                HandoffMessage = "The runtime refused the handoff. " + ClientFailure.FromException(exception)!.Message;
+                HandoffMessage = "The runtime refused the handoff. " + failure.Message;
+                if (!wasRetained && ForgetPendingHandoff(estate, request.RequestId)) handoffAttempted = false;
             }
             else
                 HandoffMessage = handoffAttempted ? "Preparation is uncertain. Refresh Handoffs and look for the original task." :
@@ -258,13 +305,20 @@ public sealed partial class RemoteViewModel
             if (Selected != estate) return;
             HandoffMessage = response.Handoffs.Count == 0 ? "No desktop tasks were found." : "";
             handoffsCurrent = true;
-            if (handoffAttempted && handoffForm is { } original)
+            DesktopHandoff? openedForm = null;
+            bool unobserved = false;
+            foreach (DesktopHandoffRequest original in connections.LoadPendingHandoffs(estate.Connection))
             {
-                if (response.Handoffs.FirstOrDefault(h => h.Id == original.RequestId && h.By == original.By) is { } kept)
-                    ShowPreparedHandoff(kept);
-                else
-                    HandoffMessage = "The original preparation was not observed. Its outcome is still uncertain.";
+                if (response.Handoffs.FirstOrDefault(handoff => MatchesPreparation(handoff, original)) is not { } kept)
+                {
+                    unobserved = true;
+                    continue;
+                }
+                if (!ForgetPendingHandoff(estate, original.RequestId)) return;
+                if (handoffForm?.RequestId == original.RequestId) openedForm = kept;
             }
+            if (openedForm is not null) ShowPreparedHandoff(openedForm);
+            if (unobserved) HandoffMessage = "An original preparation was not observed. Its outcome is still uncertain.";
         }
         catch (Exception exception) when (InterventionReadFailure(exception))
         {
@@ -276,6 +330,25 @@ public sealed partial class RemoteViewModel
             Busy = false;
         }
     }
+
+    private bool ForgetPendingHandoff(RemoteEstate estate, string id)
+    {
+        try
+        {
+            connections.ForgetPendingHandoff(estate.Connection, id);
+            return true;
+        }
+        catch (Exception exception) when (InterventionReadFailure(exception))
+        {
+            HandoffMessage = "The outcome was observed. This phone could not clear its retained preparation. Refresh Handoffs to check it again.";
+            return false;
+        }
+    }
+
+    private static bool MatchesPreparation(DesktopHandoff handoff, DesktopHandoffRequest request) =>
+        handoff.Id == request.RequestId && handoff.By == request.By && handoff.Subject == request.Subject &&
+        handoff.Task == request.Task && handoff.Reason == request.Reason && handoff.Draft == request.Draft &&
+        handoff.Evidence.SequenceEqual(request.Evidence ?? []);
 
     private void ShowPreparedHandoff(DesktopHandoff handoff)
     {

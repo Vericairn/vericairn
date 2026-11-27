@@ -92,9 +92,10 @@ connection and an unavailable worker observation can appear together. Cached wor
 ## Desktop tasks
 
 From a work detail, decision or product choose **Continue in Workbench**. From a policy condition choose **Send task to
-Workbench**. Review the exact subject and edit the next task, reason and optional draft. **Prepare in the estate** retains that
-context and its evidence references for your principal on the paired runtime. An offline draft is never queued. If the
-preparation response is lost, **Refresh handoffs** checks for the original task.
+Workbench**. Review the exact subject and edit the next task, reason and optional draft. **Prepare for Workbench** retains
+that context and its evidence references for your principal on the paired runtime. An offline draft is never queued. If the
+response is lost, **Refresh handoffs** checks for the original task. After going Back or restarting Remote, composing for
+the same subject restores the original task, draft and request identity. **Check original preparation** uses that identity.
 
 In Workbench on the serving runtime's machine, use **Hand-over and resume** as the same principal and open the task from
 **From Remote**. Check the pinned revision and evidence, plus any missing originals or newer subject state, before

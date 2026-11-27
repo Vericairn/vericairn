@@ -63,6 +63,16 @@ public interface IRemoteConnections
     /// <summary>Keep an original intervention before sending, and its subsequent observations without replacing its identity.</summary>
     void SaveIntervention(RuntimeConnection connection, RemoteInterventionReceipt receipt) =>
         throw new NotSupportedException("This connection cannot retain original interventions.");
+
+    /// <summary>Read unresolved handoff preparations bound to the exact connection.</summary>
+    IReadOnlyList<DesktopHandoffRequest> LoadPendingHandoffs(RuntimeConnection connection) => [];
+
+    /// <summary>Keep the handoff's exact request and draft before sending.</summary>
+    void KeepPendingHandoff(RuntimeConnection connection, DesktopHandoffRequest request) =>
+        throw new NotSupportedException("This connection cannot retain original handoff preparations.");
+
+    /// <summary>Forget a preparation whose outcome was established.</summary>
+    void ForgetPendingHandoff(RuntimeConnection connection, string requestId) { }
 }
 
 /// <summary>

@@ -173,7 +173,7 @@
         <TextBox Text="{Binding HandoffReason}" IsEnabled="{Binding HandoffEditable}" AutomationProperties.Name="Reason for this handoff" TextWrapping="Wrap" />
         <TextBlock Text="Draft to carry to Workbench" />
         <TextBox Text="{Binding HandoffDraft}" AcceptsReturn="True" TextWrapping="Wrap" IsEnabled="{Binding HandoffEditable}" AutomationProperties.Name="Optional draft for the desktop" />
-        <Button Content="Prepare in the estate" Command="{Binding PrepareHandoffCommand}" AutomationProperties.Name="Keep this task for opening in Workbench" />
+        <Button Content="{Binding PrepareHandoffLabel}" Command="{Binding PrepareHandoffCommand}" AutomationProperties.Name="Keep this task for opening in Workbench" />
         <Button Content="Refresh handoffs" Command="{Binding RefreshHandoffsCommand}" AutomationProperties.Name="Check the handoff list for this original request" />
         <TextBlock Text="{Binding HandoffMessage}" />
       </StackPanel>

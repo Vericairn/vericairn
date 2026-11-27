@@ -189,6 +189,15 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     public void SaveIntervention(RuntimeConnection connection, RemoteInterventionReceipt request) =>
         new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).SaveIntervention(connection, request);
 
+    public IReadOnlyList<DesktopHandoffRequest> LoadPendingHandoffs(RuntimeConnection connection) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).LoadPendingHandoffs(connection);
+
+    public void KeepPendingHandoff(RuntimeConnection connection, DesktopHandoffRequest request) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).KeepPendingHandoff(connection, request);
+
+    public void ForgetPendingHandoff(RuntimeConnection connection, string requestId) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).ForgetPendingHandoff(connection, requestId);
+
     private readonly Dictionary<string, RemoteObservation> observations = [];
     public RemoteObservation? LoadObservation(RuntimeConnection connection) => observations.GetValueOrDefault(connection.Id);
     public void SaveObservation(RuntimeConnection connection, RemoteObservation observation)

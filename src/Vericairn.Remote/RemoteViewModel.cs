@@ -107,6 +107,7 @@ public sealed partial class RemoteViewModel : Observable
         selected = Estates.FirstOrDefault();
         RestoreDecisions();
         RestoreInterventions();
+        RestorePendingHandoffMessage();
         Show(selected);
     }
 
@@ -130,7 +131,7 @@ public sealed partial class RemoteViewModel : Observable
         {
             if (!Set(ref selected, value)) return;
             SetHandoff(null);
-            HandoffMessage = "";
+            RestorePendingHandoffMessage();
             handoffsCurrent = false;
             nodesCurrent = false;
             SelectedProduct = null;
