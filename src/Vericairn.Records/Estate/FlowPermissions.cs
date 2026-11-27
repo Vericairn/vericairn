@@ -29,7 +29,8 @@ internal static class FlowPermissions
     /// <summary>
     /// The patterns a routed step may change: those every typed source permits. The work order's <c>path:</c> entries are read from the
     /// revision the goal's plan names and from every later revision of it, each a source of its own, so a revision written after the
-    /// run was proposed can narrow them and never widen them; to widen them, the goal names the new revision.
+    /// run was proposed can narrow them and never widen them. When the named revision has none, a later revision's grant nothing. To
+    /// widen them, or to give them first, the goal names the new revision.
     /// </summary>
     internal static IReadOnlyList<string> For(EstateModel model, RecordEnvelope goal, RecordEnvelope order, FlowStep step)
     {
@@ -37,12 +38,18 @@ internal static class FlowPermissions
         AddDeclared(step.Element);
         AddDeclared(FlowRuns.Plan(goal));
 
-        foreach (RecordEnvelope revision in Revisions(model, goal, order))
+        // The named revision's path: entries are the work order's grant; a later revision only narrows a grant the named one gives, so
+        // entries first added after it grant nothing until the goal names that revision.
+        IReadOnlyList<RecordEnvelope> revisions = Revisions(model, goal, order);
+        if (revisions.Count > 0 && Scoped(revisions[0]) is { Count: > 0 })
         {
-            List<string> scoped = TJson.Strings(revision.Body, "scope").Where(entry => entry.StartsWith(Prefix, StringComparison.Ordinal)).ToList();
-            if (scoped.Count > 0)
+            foreach (RecordEnvelope revision in revisions)
             {
-                sources.Add(Patterns(scoped.Select(entry => entry[Prefix.Length..])));
+                List<string> scoped = Scoped(revision);
+                if (scoped.Count > 0)
+                {
+                    sources.Add(Patterns(scoped.Select(entry => entry[Prefix.Length..])));
+                }
             }
         }
 
@@ -70,15 +77,18 @@ internal static class FlowPermissions
         }
     }
 
-    // The work order's revisions from the one the goal's plan names to the latest, earliest first; the latest alone when the plan names
-    // none of its chain.
+    // The work order's revisions from the one the goal's plan names to the latest, earliest first; none when the plan names none of its
+    // chain, so the work order then grants nothing.
     private static IReadOnlyList<RecordEnvelope> Revisions(EstateModel model, RecordEnvelope goal, RecordEnvelope order)
     {
         string? named = TJson.Strings(TJson.Object(goal.Body, "plan"), "workOrders").FirstOrDefault();
         List<string> chain = [.. model.Chain(order)];
         int from = named is null ? -1 : chain.IndexOf(named);
-        return from < 0 ? [order] : [.. chain.Skip(from).Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>()];
+        return from < 0 ? [] : [.. chain.Skip(from).Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>()];
     }
+
+    private static List<string> Scoped(RecordEnvelope revision) =>
+        [.. TJson.Strings(revision.Body, "scope").Where(entry => entry.StartsWith(Prefix, StringComparison.Ordinal))];
 
     /// <summary>
     /// What a step's brief carries where no typed source gives it a pattern, which only a step no agent carries reaches: the work order's
@@ -137,7 +147,7 @@ internal static class FlowPermissions
     }
 
     internal static string Message(string step) =>
-        $"Flow step {step} would receive no interpretable permitted path. Give it a repository-relative pattern in the step, the goal's flow paths, or a path: entry in the work order. The supplied sources must permit a common pattern.";
+        $"Flow step {step} would receive no interpretable permitted path. Give it a repository-relative pattern in the step, the goal's flow paths, or a path: entry in the work order revision the goal names. The supplied sources must permit a common pattern.";
 
     private static string? Pattern(string entry)
     {

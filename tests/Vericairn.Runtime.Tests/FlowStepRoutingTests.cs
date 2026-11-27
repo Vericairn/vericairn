@@ -258,6 +258,25 @@ public class FlowStepRoutingTests
     }
 
     [Fact]
+    public void PathEntriesFirstAddedAfterTheNamedRevisionGrantNothing()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        TemplateDefinition installed = FlowFixture.Install(run.Estate, FlowFixture.Song());
+        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":["produce the song"],"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}""")))).Id;
+        JsonObject body = Body(run, (order, installed), op);
+        body["roles"]!.AsArray()[0] = FlowFixture.Role("writer", op);
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
+
+        // The named revision is prose only, and neither the step nor the goal declares paths: a later revision's path:** grants nothing.
+        string widened = Revise(run, """["path:**"]""", order);
+        EstateModel model = run.Estate.Load();
+        FlowStep draft = FlowRuns.Resolve(model, model.ById[goal]).Flow!.Step("draft")!;
+        Assert.Empty(FlowPermissions.For(model, model.ById[goal], model.ById[widened], draft));
+    }
+
+    [Fact]
     public void AHeldAssignmentStartedDirectlyAfterItsPathsNarrowIsRefused()
     {
         using var run = new RunEstate(recordFormat: 3);
