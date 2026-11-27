@@ -478,6 +478,10 @@ every template.
   `outputs`, `review`, `each` and `when`, and a work step may add `failure`
   (0.9.2). From 0.9.4 (PROC-19) a step may end in a `transition`, a decision
   among named paths (see [Decision transitions](#decision-transitions-094)).
+- From 0.9.5 (FIX-166), a routed step can declare `paths`, an array of repository-relative worker patterns such as
+  `["src/docs/**"]`. A flow run's `plan.flow.paths` and `path:` entries in the run's work-order scope also constrain the
+  step. Its assignment brief carries patterns allowed by every supplied list. Put explanations in the step's action or
+  the work-order scope. Scope text supplies a path only when it has the `path:` prefix and a valid pattern.
 - A step waits on the step declared before it, or on the steps its `after`
   names (an empty list for none), and on the producers of its inputs; steps
   whose waits are done may run in parallel. References name earlier steps only.

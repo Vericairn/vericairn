@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 51, November 27, 2026. Add `--flow-path` to `goal propose --flow` and `--check` to `goal step` for runs of a flow. An agent work step without a permitted path is refused at proposal or activation in the development build.
+
 Revision 50, November 27, 2026. A progress target keeps each comment attempt before it is sent and never sends a comment whose outcome is uncertain again; `progress target resolve` removes an entry once a person has checked it, and one follower follows a target on a machine at a time, in the development build.
 
 Revision 49, November 27, 2026. The runtime preserves an unreadable Secure Enclave identity and names the recovery for each failure. `runtime rotate --identity --replace-unreadable` explicitly replaces an identity that cannot be read here, keeping the replaced record, in the development build.
@@ -540,6 +542,24 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
 per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused.
+
+From 0.9.5 (FIX-166), give `--flow-path 'src/docs/**'` with `goal propose --flow` to set a repository-relative pattern for
+the run. Repeat `--flow-path` for each pattern. Routing derives each step's assignment brief from that step's declared
+`paths`, the goal's `--flow-path` patterns and the run's work-order `scope` entries prefixed `path:`. Each supplied list
+constrains the result. If an agent work step has no interpretable pattern covered by all its supplied lists, `goal propose`
+and `goal activate` refuse with `flow.permitted-paths`. Choose compatible lists and declare a narrower pattern where they overlap.
+
+The work order's `path:` entries are read from the revision the goal's plan names and from every later revision of it, each a list
+of its own, so a revision written after proposal can narrow a run's paths and never widen them. When the named revision has no
+`path:` entry, a later revision's entries grant nothing. To widen them, or to give them first, revise the goal to name the new
+revision. A later revision that drops every `path:` entry withdraws nothing: the run keeps the named revision's paths until the
+goal names another. A step a person carries, or a reserved one, needs no pattern: its brief carries the work order's prose
+entries that cannot be read as a pattern, never a pattern. `worker run` on a step's held assignment refuses with
+`flow.permitted-paths` unless the assignment's brief is within the step's current paths, as `goal step` does; a standing agent's
+steps keep their own briefs.
+
+`goal step <goal> --by <principal> --check` previews a flow run's next eligible step and its permitted changes without
+signing, recording or dispatching. With `--json`, the preview includes `step.permittedChanges` for the routed assignment.
 
 From PROC-10 (0.9.2), `goal next` also routes each review before hand-off as `<step> review`, and each step's required
 attention as route state `attention`. For a review, `goal step` records an assignment whose `step.review` names the items and

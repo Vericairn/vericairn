@@ -503,6 +503,28 @@ public static class EstateStatus
             status["runs"] = FlowStops.RunsJson(model, runs);
         }
 
+        var paths = new JsonArray();
+        IEnumerable<FlowPosition.Position> proposedRuns = model.Current("goal").Where(goal => FlowRuns.IsRun(goal) && GoalRules.Status(model, goal) == "proposed")
+            .Select(goal => FlowPosition.Derive(model, goal, recorded));
+        foreach (FlowPosition.Position position in runs.Concat(proposedRuns).OrderBy(position => position.Goal.Id, StringComparer.Ordinal))
+        {
+            JsonArray refusals = FlowPosition.PathRefusalsJson(model, position);
+            if (refusals.Count > 0)
+            {
+                paths.Add(new JsonObject
+                {
+                    ["goal"] = position.Goal.Id,
+                    ["title"] = EstateModel.BodyString(position.Goal, "title"),
+                    ["refusals"] = refusals,
+                });
+            }
+        }
+
+        if (paths.Count > 0)
+        {
+            status["flowPathRefusals"] = paths;
+        }
+
         // From 0.9.4 (GOAL-07): each standing agent as of the estate's newest record, so canonical status never depends on when it is read;
         // absent when there is none. A duty trigger's occurrences are the runtime's to evaluate, in goal due.
         IReadOnlyList<StandingAgents.Agent> standing = Standing(model, recorded);
