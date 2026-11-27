@@ -38,7 +38,7 @@
       "guideRegion": "docs/templates.md",
       "repositories": [],
       "release": "0.9.5",
-      "guidedSteps": null,
+      "guidedSteps": "sha256:b67e5b547ed0a94fb9ca1b82fdea07aee7ca050093e68f9de5752de30169c860",
       "expectedReadFindings": [],
       "legs": ["tier1", "tier2"],
       "platforms": ["linux", "macos", "windows"],

@@ -919,89 +919,99 @@ nothing. In this build only an operator records a review of another's work as a
 person, so the approver is a person with the operator role.
 
 The flow ships with Vericairn and appears in `templates list` on a fresh estate.
-This example uses a fictional pool service business and one service request,
-SR-0001. The operator records the request's scope as a sentence. In the commands
-below, replace `${operator}` with your principal ID and `${workOrder}` with the
-ID printed by `work new`. The last command shows the scope as recorded.
+This worked example uses a fictional pool service business and one request,
+SR-0001. Start with an operator and a scheduler agent, each with an admitted
+device, and a separate Git repository named `vericairn-example-services-workspace`.
+Adopt the workspace and register its clone so the draft step has a repository.
+
+The roster names the agent as scheduler and the operator as approver. In
+`roster.json`, set the corresponding `principals` entries to the scheduler's
+and operator's principal IDs. The service request's scope is the sentence
+shown in `work new`. Vericairn 0.9.5 refuses the first proposal and a legacy
+run's activation with `flow.permitted-paths`. The legacy goal has the same prose
+scope and no typed pattern. Propose the new run with `--flow-path
+'appointments/**'` and activate it. The preview and the routed assignment's
+brief each give the scheduler exactly `path:appointments/**`.
+
+The command block uses placeholders. Substitute the IDs and hashes given by
+the preceding commands. For `${untypedGoal}`, use an already recorded legacy
+goal or skip that activation probe on an estate without one. Use a scratch
+directory for the JSON files and export. The journey fixture gives the legacy
+goal body and the other JSON inputs. [E3 journey fixture](../tests/examples/e3-services.json)
+
+After routing the draft, the scheduler records an attempt through MCP's
+`work_attempt`, stores `appointment.json` as an object, and records
+a completed result with `work_result`. The result names the object by hash as
+its `appointment` output with media type `application/json`. Use the attempt
+and result IDs and hashes for the following commands.
+
+The operator's first review passes the Tuesday morning draft. Each review body
+uses `independence` set to `operator`, `outcome` set to `pass`, a summary of
+the visit inspected, and an empty `findings` list. The scheduler's revised
+result supersedes the first one, keeps the same attempt as its subject, and
+names the Wednesday morning object. When the result changes, the first approval
+becomes stale. The next step asks the operator again, and the new assignment
+pins the revised draft. The second review passes the revised result by its
+ID and hash.
+
+For `estate restore` and the commands after it, use a second, fresh Vericairn
+home and an empty destination directory, shown as `${estate}` in the restore
+command. Run those inspection commands from the restored estate.
 
 <!-- example:E3 -->
 ```sh
+vericairn sources adopt '${scratch}/vericairn-example-services-workspace' --by '${operator}' --name 'Example services workspace' --role 'Holds proposed appointments.'
+vericairn sources clone '${scratch}/vericairn-example-services-workspace' --resource '${workspaceResource}'
 vericairn templates show vericairn.starter/service-appointment --version 1.0.0
+vericairn records new roster --by '${operator}' --body '${scratch}/roster.json'
 vericairn work new --by '${operator}' --key SR-0001 --title 'Pool cleaning visit' --intent 'Turn the sample request into an approved appointment.' --scope 'Draft an appointment for a pool cleaning visit at 1 Sample Lane.' --deliverable 'An approved appointment' --exit-question 'Is the appointment for SR-0001 approved?'
 vericairn records show '${workOrder}'
+vericairn goal propose --by '${operator}' --title 'Appointment for SR-0001' --objective 'Turn the sample request into an approved appointment.' --done '{"type":"work-order","fields":{"key":"SR-0001"}}' --work-order '${workOrder}' --budget wallMinutes=30 --budget attemptsPerStep=2 --flow 'vericairn.starter/service-appointment@1.0.0' --subject 'request=SR-0001: sample pool cleaning visit at 1 Sample Lane, any weekday morning.'
+vericairn goal activate '${untypedGoal}' --by '${operator}'
+vericairn goal propose --by '${operator}' --title 'Appointment for SR-0001' --objective 'Turn the sample request into an approved appointment.' --done '{"type":"work-order","fields":{"key":"SR-0001"}}' --work-order '${workOrder}' --budget wallMinutes=30 --budget attemptsPerStep=2 --flow 'vericairn.starter/service-appointment@1.0.0' --subject 'request=SR-0001: sample pool cleaning visit at 1 Sample Lane, any weekday morning.' --flow-path 'appointments/**'
+vericairn goal activate '${goal}' --by '${operator}'
+vericairn goal step '${goal}' --by '${operator}' --repository '${workspaceResource}' --check
+vericairn goal step '${goal}' --by '${operator}' --repository '${workspaceResource}'
+vericairn records show '${draftAssignment}'
+vericairn objects put '${scratch}/appointment.json'
+vericairn goal step '${goal}' --by '${operator}'
+vericairn work observe SR-0001
+vericairn records new review --by '${operator}' --subject 'result:${draftResult}:${draftResultHash}' --body '${scratch}/approve-draft.json'
+vericairn goal show '${goal}'
+vericairn objects put '${scratch}/appointment-revised.json'
+vericairn records new result --by '${scheduler}' --supersedes '${draftResult}' --subject 'attempt:${attempt}:${attemptHash}' --body '${scratch}/result-revised.json'
+vericairn goal show '${goal}'
+vericairn estate check
+vericairn goal step '${goal}' --by '${operator}'
+vericairn records show '${secondApprovalAssignment}'
+vericairn records new review --by '${operator}' --subject 'result:${revision}:${revisionHash}' --body '${scratch}/approve-revision.json'
+vericairn goal show '${goal}'
+vericairn records show '${reapproval}'
+vericairn estate export --by '${operator}' --out '${scratch}/services.zip'
+vericairn estate restore --from '${scratch}/services.zip' --to '${estate}'
+vericairn recover inspect
+vericairn goal show '${goal}'
 ```
 <!-- /example:E3 -->
 
-Use a separate workspace repository for the business's appointment drafts. Adopt
-that repository with `sources adopt` and register its clone with `sources clone`.
-Use the resulting repository resource ID when running the scheduler's step.
-Review its baseline with the [worker's repository review](software.md#coding-agents-the-worker-and-its-launchers) before dispatch.
+`goal show` gives the exact starter flow revision, the steps that passed, and
+the review that approved the latest draft. `records show` on that review
+identifies the approver and the result revision. A headless Workbench Goals workspace test checks the pending approval and
+the person who holds it.
+The scheduler stand-in reads the same history through MCP's `goal_get` and
+`work_observe` tools. After restore, `recover inspect` lists both devices with
+their keys absent. The run position and exact approval survive the restore.
+See [export and restore](operator-guide.md#10-export-restore-recovery-and-divergence).
 
-Name the agent that drafts and the person who approves in the roster. From
-0.9.5 (FIX-166), set `--flow-path 'appointments/**'` when proposing the run.
-This typed pattern gives the draft its permitted paths. The request and its
-work-order scope explain the job in prose. A run whose agent step receives no
-typed pattern is refused with `flow.permitted-paths`.
-
-```sh
-vericairn records new roster --by <you> --body roster.json
-vericairn goal propose --by <you> --title "Appointment for SR-0001" \
-  --objective "Turn the service request into an approved appointment." \
-  --done '{"type":"work-order","fields":{"key":"SR-0001"}}' --work-order <work order id> \
-  --budget wallMinutes=30 --budget attemptsPerStep=2 \
-  --flow vericairn.starter/service-appointment@1.0.0 --flow-path 'appointments/**' \
-  --subject request="SR-0001: a pool cleaning visit at 1 Sample Lane, any weekday morning."
-vericairn goal activate <goal> --by <you>
-vericairn goal step <goal> --by <you> --repository <resource> --check
-vericairn goal step <goal> --by <you> --repository <resource>
-```
-
-Here `roster.json` is
-`{"roles":[{"role":"scheduler","principals":["<agent>"]},{"role":"approver","principals":["<you>"]}]}`.
-`goal step --check` previews the draft's route, brief and exposure. Check that
-its permitted changes contain only `path:appointments/**` and that the exposure
-verdict allows the run. When you take the step, the worker starts the scheduler
-in its registered workspace using your own coding-agent harness. The scheduler
-signs its attempt and result with its admitted device. The next `goal step` assigns
-the approval to you and asks you. Read the proposed appointment, which
-`vericairn work observe SR-0001` names by hash, and approve that exact result.
-
-```sh
-vericairn goal step <goal> --by <you>
-vericairn work observe SR-0001
-vericairn records new review --by <you> --subject result:<result id>:<result hash> --body approval.json
-```
-
-Here `approval.json` is
-`{"independence":"operator","outcome":"pass","summary":"The visit matches the request.","findings":[]}`.
-`goal show` then reads `2 of 2 steps done; the run is complete`, and the goal's
-evaluation and acceptance remain, as for any goal. A review with outcome
-`findings` sends the draft back to the agent for another attempt instead.
-
-The approval names the result by its hash. When the draft changes, by another
-attempt or a revision of the result, the earlier approval covers nothing:
-`approve` reads `stale`, naming the result its brief pinned and the one there is
-now, and after a revision `estate check` reports the earlier review as
-`record.subject-stale`. The flow asks again only through `goal step`, never
-unattended. Run `goal step` again to get the new approval ask, then review the
-revised result by its new ID and hash. `goal show` names the exact flow that ran,
-`Flow: vericairn.starter/service-appointment 1.0.0 (sha256:...)`, with each
-step's result and the review that passed it, and `records show <review>` gives
-who approved which result revision. Workbench's [Goals workspace](workbench.md#what-exists)
-shows the run's position and who it waits on. Over MCP, `goal_get` returns the
-flow position and `work_observe` traces the request's results and reviews.
-
-Export the completed estate and restore it in an empty directory under a fresh
-Vericairn home on the second machine. `recover inspect` lists the devices whose
-keys stayed behind, and `goal show` gives the same position. See
-[export and restore](operator-guide.md#10-export-restore-recovery-and-divergence).
-
-```sh
-vericairn estate export --by <you> --out services.zip
-vericairn estate restore --from services.zip --to restored-services
-vericairn --estate restored-services recover inspect
-vericairn --estate restored-services goal show <goal>
-```
+The journey routes the draft through the worker with a stand-in launcher and a
+custody exception scoped to its scratch file keys. The package smoke runs the
+typed-path preview and operator commands on the candidate binary. It uses the
+fixture's runtime for the stand-in dispatch and MCP calls.
+The starter flow's live worker qualification is planned with RUN-06. It
+covers an isolated account, the operator's presence key and workspace baseline,
+and a worker-launched scheduler. GOAL-15 supplies the planned exposure verdict
+and recorded check basis for the shipped command. The restore in this journey
+uses two homes on one machine. The public repeat restores on a second machine.
 
 ## Client and extension contract
 
