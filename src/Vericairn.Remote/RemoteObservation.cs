@@ -16,6 +16,18 @@ public sealed record RemoteObservation(StatusResponse Status, string AsOf, IRead
 {
     /// <summary>Independently dated policy inspections and desktop packages; restoring them grants no authority.</summary>
     public IReadOnlyDictionary<string, RemotePolicyDetail> PolicyDetails { get; init; } = new Dictionary<string, RemotePolicyDetail>();
+
+    /// <summary>This runtime's separately read worker view, never evidence of another node's current worker.</summary>
+    public IReadOnlyList<RunRow>? WorkerRuns { get; init; }
+
+    /// <summary>The worker read's own timestamp.</summary>
+    public string? WorkersAsOf { get; init; }
+
+    /// <summary>Observed desktop tasks for this exact connection.</summary>
+    public IReadOnlyList<DesktopHandoff>? DesktopHandoffs { get; init; }
+
+    /// <summary>The complete desktop task list's observation timestamp.</summary>
+    public string? HandoffsAsOf { get; init; }
 }
 
 /// <summary>A complete observed work detail. The worker's observations remain separate from the contributor's claims.</summary>

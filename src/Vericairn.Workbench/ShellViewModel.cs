@@ -134,7 +134,18 @@ public sealed partial class ShellViewModel : Observable
     /// An explicit acting principal id (the --as argument). The selector then shows the admitted device of that principal held
     /// here, the one the runtime signs with; choosing another device in the selector replaces it.
     /// </summary>
-    public string? ActingOverride { get; set; }
+    public string? ActingOverride
+    {
+        get => actingOverride;
+        set
+        {
+            if (actingOverride == value) return;
+            actingOverride = value;
+            ClearRemoteHandoffViews();
+        }
+    }
+
+    private string? actingOverride;
 
     /// <summary>The chosen device, and so the acting principal.</summary>
     public DeviceRow? SelectedActing
@@ -151,9 +162,15 @@ public sealed partial class ShellViewModel : Observable
                     ActingOverride = null;
                 }
 
+                ClearRemoteHandoffViews();
                 _ = RefreshActingAsync();
             }
         }
+    }
+
+    private void ClearRemoteHandoffViews()
+    {
+        foreach (HandoffDocument page in Documents.OfType<HandoffDocument>()) page.ClearRemoteHandoffs();
     }
 
     /// <summary>The principal id writes are authored by, or null.</summary>
@@ -349,6 +366,7 @@ public sealed partial class ShellViewModel : Observable
             Replace(Attention, estate.Attention);
             foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
             {
+                await page.ReadRemoteHandoffsAsync(cancellationToken).ConfigureAwait(true);
                 if (page.HasPackage)
                 {
                     await page.CompareAsync(cancellationToken).ConfigureAwait(true);
@@ -680,9 +698,11 @@ public sealed partial class ShellViewModel : Observable
         HandoffDocument? page = Documents.OfType<HandoffDocument>().FirstOrDefault();
         if (page is null)
         {
-            page = new HandoffDocument(() => connection?.Api, () => communication);
+            page = new HandoffDocument(() => connection?.Api, () => communication, () => ActingPrincipalId);
             await page.PrepareAsync(cancellationToken).ConfigureAwait(true);
         }
+
+        await page.ReadRemoteHandoffsAsync(cancellationToken).ConfigureAwait(true);
 
         // The work page uses the full document area; Home's summary remains available through navigation.
         if (HomeSelected)
@@ -691,7 +711,7 @@ public sealed partial class ShellViewModel : Observable
         }
 
         Open(page);
-        Inspector = "A hand-over keeps its exact originals. Save it for another surface, or open a saved package to see every change since it. Refresh compares with the retained basis. Remote does not open hand-overs yet.";
+        Inspector = "A hand-over keeps its exact originals. Save it for another surface, or open a saved package to see every change since it. Refresh compares with the retained basis. Open handoffs prepared on the phone in From Remote.";
         return page;
     }
 

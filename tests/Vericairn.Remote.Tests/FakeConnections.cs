@@ -107,6 +107,8 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     public int ConnectionsMade { get; private set; }
     public int ApiCalls { get; private set; }
     public bool LoseAcknowledgmentResponse { get; set; }
+    public bool LoseRunStopResponse { get; set; }
+    public bool LoseDesktopHandoffResponse { get; set; }
     public bool CannotKeepObservation { get; set; }
     public bool EnableSignedWrites { get; set; }
     public bool CannotKeepDecision { get; set; }
@@ -132,6 +134,8 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         ((CountingApi)client).Called = () => ApiCalls++;
         ((CountingApi)client).BeforeCall = name => BeforeApiCall?.Invoke(name);
         ((CountingApi)client).LoseAcknowledgmentResponse = () => LoseAcknowledgmentResponse;
+        ((CountingApi)client).LoseRunStopResponse = () => LoseRunStopResponse;
+        ((CountingApi)client).LoseDesktopHandoffResponse = () => LoseDesktopHandoffResponse;
         ((CountingApi)client).Basis = () => { BasisReads++; return Basis; };
         ((CountingApi)client).RecordRead = record =>
         {
@@ -148,6 +152,8 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         public Action Called { get; set; } = null!;
         public Action<string> BeforeCall { get; set; } = null!;
         public Func<bool> LoseAcknowledgmentResponse { get; set; } = null!;
+        public Func<bool> LoseRunStopResponse { get; set; } = null!;
+        public Func<bool> LoseDesktopHandoffResponse { get; set; } = null!;
         public Func<RecordResponse?, RecordResponse?> RecordRead { get; set; } = null!;
         public Func<DecisionBasisResponse?> Basis { get; set; } = null!;
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
@@ -159,19 +165,30 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
             {
                 object? result = targetMethod!.Invoke(Inner, args);
                 if (targetMethod.Name == nameof(IEstateApi.RecordAsync) && result is Task<RecordResponse?> record) return ReadRecord(record);
-                return result is Task<AttentionAcknowledgeResponse> acknowledgment && LoseAcknowledgmentResponse()
-                    ? LostResponse(acknowledgment) : result;
+                return result switch
+                {
+                    Task<AttentionAcknowledgeResponse> acknowledgment when LoseAcknowledgmentResponse() => LostResponse(acknowledgment),
+                    Task<RunStopResponse> requested when LoseRunStopResponse() => LostResponse(requested),
+                    Task<DesktopHandoffResponse> prepared when LoseDesktopHandoffResponse() => LostResponse(prepared),
+                    _ => result,
+                };
             }
             catch (TargetInvocationException exception) when (exception.InnerException is not null)
             { ExceptionDispatchInfo.Capture(exception.InnerException).Throw(); throw; }
         }
         private async Task<RecordResponse?> ReadRecord(Task<RecordResponse?> response) => RecordRead(await response.ConfigureAwait(false));
-        private static async Task<AttentionAcknowledgeResponse> LostResponse(Task<AttentionAcknowledgeResponse> response)
+        private static async Task<T> LostResponse<T>(Task<T> response)
         {
             _ = await response.ConfigureAwait(false);
             throw new HttpRequestException("The response was lost.");
         }
     }
+    public IReadOnlyList<RemoteInterventionReceipt> LoadInterventions(RuntimeConnection connection) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).LoadInterventions(connection);
+
+    public void SaveIntervention(RuntimeConnection connection, RemoteInterventionReceipt request) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).SaveIntervention(connection, request);
+
     private readonly Dictionary<string, RemoteObservation> observations = [];
     public RemoteObservation? LoadObservation(RuntimeConnection connection) => observations.GetValueOrDefault(connection.Id);
     public void SaveObservation(RuntimeConnection connection, RemoteObservation observation)

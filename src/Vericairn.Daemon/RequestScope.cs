@@ -43,9 +43,12 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         {
             return Denied(context.HttpContext, device, machine);
         }
-        if (operation.Equals("GET /v1/attention", StringComparison.OrdinalIgnoreCase) &&
+        if ((operation.Equals("GET /v1/attention", StringComparison.OrdinalIgnoreCase) ||
+            operation.Equals("GET /v1/handoff/desktop", StringComparison.OrdinalIgnoreCase)) &&
             context.Arguments.OfType<string>().FirstOrDefault() is string principal && principal != device.Principal)
-            return Denied(context.HttpContext, device, "Attention belongs to the requesting device's principal.");
+            return Denied(context.HttpContext, device, operation.Equals("GET /v1/attention", StringComparison.OrdinalIgnoreCase)
+                ? "Attention belongs to the requesting device's principal."
+                : "Desktop handoffs belong to the requesting device's principal.");
 
         foreach (object? argument in context.Arguments)
         {
@@ -97,6 +100,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         // Neither exception asks a signer on this machine, and both still enter the local-network ledger below.
         // A network MCP write (MCP-03) is signed by its own device, never here, so it asks no signer on this machine either.
         if (signing is null && !operation.Equals("POST /v1/records/signed", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/handoff/desktop", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/attention/acknowledge", StringComparison.OrdinalIgnoreCase) && service.PresenceRefusal(device.Principal) is string presence)
         {
             return Denied(context.HttpContext, device, presence);
@@ -168,6 +172,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
         bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false } and not SecurityReportsResponse { Ok: false } and not ObserversResponse { Ok: false } and not StopDrillResponse { Ok: false };
+        if (value is DesktopHandoffResponse { Problem: not null }) done = false;
         if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or OperatorAnswerResponse { Ok: false } or OperatorActResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
@@ -222,6 +227,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/attention"] = null,
         ["POST /v1/attention/acknowledge"] = typeof(AttentionAcknowledgeRequest),
         ["GET /v1/handoff"] = null,
+        ["GET /v1/handoff/desktop"] = null,
+        ["POST /v1/handoff/desktop"] = typeof(DesktopHandoffRequest),
+        ["POST /v1/handoff/desktop/open"] = typeof(DesktopHandoffOpenRequest),
         ["POST /v1/resume"] = typeof(HandoffPackage),
         ["GET /v1/context/work/{key}"] = null,
         ["GET /v1/context/work/{key}/brief"] = null,
@@ -375,6 +383,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     private string? Refusal(string operation, AuthenticatedDevice device) =>
         !Covers(operation)
             ? $"{operation} has no request scope rule and is refused."
+            : operation == "POST /v1/handoff/desktop/open"
+            ? "Open the handoff from Workbench on the runtime's machine."
             : operation is "POST /v1/shutdown" or "POST /v1/runtime/certificate" && !service.Administers(device.Principal)
             ? $"{operation} is an administrator's: device {device.Identity} acts for {device.Principal}, which is neither an operator nor holds the 'administer' scope. On the runtime's machine its operating-system user reaches it over the local socket."
             : null;
@@ -393,6 +403,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(WritingExceptionRemoveRequest)] = (_, r, d) => Acting(((WritingExceptionRemoveRequest)r).By, d),
         [typeof(WorkPlaceRequest)] = (_, r, d) => Acting(((WorkPlaceRequest)r).By, d),
         [typeof(HandoffPackage)] = (_, _, _) => null,
+        [typeof(DesktopHandoffRequest)] = (_, r, d) => Acting(((DesktopHandoffRequest)r).By, d),
+        [typeof(DesktopHandoffOpenRequest)] = (_, r, d) => Acting(((DesktopHandoffOpenRequest)r).By, d),
         [typeof(CommunicationSetRequest)] = (_, r, d) => Acting(((CommunicationSetRequest)r).By, d),
         [typeof(AttentionAcknowledgeRequest)] = (_, r, d) => Acting(((AttentionAcknowledgeRequest)r).By, d),
         [typeof(PromptSaveRequest)] = (_, r, d) => Acting(((PromptSaveRequest)r).By, d),

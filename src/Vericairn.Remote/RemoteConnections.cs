@@ -56,6 +56,13 @@ public interface IRemoteConnections
 
     /// <summary>Durably retains input or reserves a prepared identity before signing. An attempted identity cannot be replaced or cleared.</summary>
     void SaveDecision(RuntimeConnection connection, RemoteDecisionDraft draft) => throw new NotSupportedException("This connection cannot retain decision drafts and submission identities.");
+
+    /// <summary>Read the original interventions bound to this phone's exact connection.</summary>
+    IReadOnlyList<RemoteInterventionReceipt> LoadInterventions(RuntimeConnection connection) => [];
+
+    /// <summary>Keep an original intervention before sending, and its subsequent observations without replacing its identity.</summary>
+    void SaveIntervention(RuntimeConnection connection, RemoteInterventionReceipt receipt) =>
+        throw new NotSupportedException("This connection cannot retain original interventions.");
 }
 
 /// <summary>

@@ -81,6 +81,36 @@ public class HandoffTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task OpensThePhoneHandoffWithItsPinnedEvidenceAndClearsItOnPersonSwitch()
+    {
+        string root = Seed.Temp("wb-remote-handoff");
+        string person = Seed.Init(root);
+        string other = Seed.Admit(root, person, Seed.Temp("wb-remote-person"), "Other person", "human", "contributor");
+        using var connection = new ServiceConnection(root);
+        IEstateApi api = connection.Api!;
+        RecordResponse subject = Assert.IsType<RecordResponse>(api.Record(person));
+        var request = new DesktopHandoffRequest(person, Guid.NewGuid().ToString("N"), new(subject.Type, subject.Id, subject.Hash),
+            "Review on the desktop", "A desktop review is needed", "A private draft");
+        Assert.NotNull(api.PrepareDesktopHandoff(request).Handoff);
+        string acting = person;
+        var page = new HandoffDocument(() => api, acting: () => acting);
+
+        await page.ReadRemoteHandoffsAsync(TestContext.Current.CancellationToken);
+        page.SelectedRemoteHandoff = Assert.Single(page.RemoteHandoffs);
+        Assert.Null(page.SelectedRemoteHandoff.OpenedAt);
+        await page.OpenRemoteHandoffAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("A private draft", page.RemoteText, StringComparison.Ordinal);
+        Assert.Contains(subject.Hash, page.RemoteText, StringComparison.Ordinal);
+        Assert.NotNull(Assert.Single(api.DesktopHandoffs(person).Handoffs).OpenedAt);
+
+        acting = other;
+        await page.ReadRemoteHandoffsAsync(TestContext.Current.CancellationToken);
+        Assert.Empty(page.RemoteHandoffs);
+        Assert.Empty(page.RemoteText);
+        Assert.Null(page.SelectedRemoteHandoff);
+    }
+
+    [Fact]
     public async Task TheSamePackageCanBeSavedLoadedAndResumedAndAnInvalidImportKeepsTheBasis()
     {
         string root = Seed.Temp("wb-retained");
@@ -117,7 +147,7 @@ public class HandoffTests(HeadlessFixture fixture)
         await fixture.UiAsync(() => next.CompareAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Contains("cached", next.Note, StringComparison.Ordinal);
         Assert.Equal(basis, next.PackageJson);
-        Assert.Contains("Remote does not open hand-overs yet", next.Text, StringComparison.Ordinal);
+        Assert.Contains("From Remote", next.Text, StringComparison.Ordinal);
     }
 
     [Fact]

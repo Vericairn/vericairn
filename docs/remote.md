@@ -6,7 +6,8 @@ of one and never a separate estate. It uses the same presentation, state languag
 This guide describes Remote's pairing, attention, work, decision and policy views, added in 0.9.0 with REMOTE-01 to REMOTE-03
 and POLICY-05, with the estate's history line and the stops of its runs from 0.9.2, the presence key that alone signs a
 decision on the phone (REMOTE-11), from 0.9.4 answering asks with their recommendations in one act (OPS-16), and signing every ready item in one reviewed act (OPS-24). It is a **developer build**: it is not in an app
-store, and no real-device qualification is recorded for it.
+store, and no real-device qualification is recorded for it. From 0.9.5 (REMOTE-04), Remote can request interventions, inspect
+worker observations and prepare desktop tasks for Workbench.
 
 ## What this build does
 
@@ -38,11 +39,11 @@ store, and no real-device qualification is recorded for it.
     ([goals](operator-guide.md#17-goals-predicates-and-evaluation)).
   - **Work:** work orders that are not accepted or retired, and assignments that are not accepted. Open either to inspect
     the goal, admitted scope, attempts, results, runs and requested progress; **Back to work** returns to the list.
-  - **Products:** the estate's products.
-  - **Nodes:** the runtime this phone reaches: its identity, address, who the phone acts as, the phone's device and the last
-    time a check was current. A healthy connection here says nothing about workers running on other machines.
-  - **Handoffs:** policy and duty context can be prepared from their Attention detail. Desktop task delivery and opening remain
-    in Workbench; preparing a package does not establish that a desktop opened it.
+  - **Products:** the estate's products, with the option to prepare a desktop task for the selected revision.
+  - **Nodes:** the runtime's direct connection, identity, address, current access and last successful check. **Check workers**
+    reads how that runtime sees each in-flight run and shows the last heartbeat when available.
+  - **Handoffs:** desktop tasks prepared for the acting person, with separate observations of preparation, Workbench opening
+    and subject state.
 
 Every area, input and command has a screen-reader name; states are words, never colour alone; long text wraps rather
 than truncating; and text follows the phone's text-size setting (Dynamic Type on iOS, font size on Android) as Remote
@@ -69,6 +70,36 @@ historical context is labeled, including when the current work view does not est
 **Communication**, reachable from the shell, shows the person's effective settings, inheritance, source revisions, conflicts,
 freshness and a preview using the same presentation as Workbench. These settings remain read-only in this step;
 clarifications to running attempts arrive with PROMPT-02, planned for 0.9.5.
+
+## Interventions and nodes
+
+In **Work**, open an order or assignment with a run, expand **Intervene on a run** and select the run. Review the precise target,
+operation and expected effect. **Pause** stops new dispatch for the run's active goal. In-flight work continues and an
+authorized person can resume the goal. **Cancel** asks the run's worker to terminate it with the runtime's configured grace
+period. **Containment** requests the same run's launch boundary with no added grace before escalation. The runtime applies
+its existing authorization and device checks to each operation.
+
+**Request reviewed action** reads the target again before sending. The runtime checks the reviewed active goal status or run
+operation revision as it accepts the write. The original request stays on this phone, including after restart. The result shows
+the pause record or each observed stop fact: request, transmission, harness acknowledgment, escalation and containment.
+An interrupted response leaves an uncertain request. Under **Intervention requests**, select the original and choose
+**Reconcile request** to observe it again. This reads the runtime and sends no new intervention.
+
+In **Nodes**, **Reconnect** checks the pinned runtime identity and this phone's current access. **Check workers** reads a
+separately dated view of the work in flight, with every heartbeat and stop observation that runtime can supply. A current
+connection and an unavailable worker observation can appear together. Cached worker facts keep the time they were read.
+
+## Desktop tasks
+
+From a work detail, decision or product choose **Continue in Workbench**. From a policy condition choose **Send task to
+Workbench**. Review the exact subject and edit the next task, reason and optional draft. **Prepare in the estate** retains that
+context and its evidence references for your principal on the paired runtime. An offline draft is never queued. If the
+preparation response is lost, **Refresh handoffs** checks for the original task.
+
+In Workbench on the serving runtime's machine, use **Hand-over and resume** as the same principal and open the task from
+**Desktop handoffs**. Check the pinned revision and evidence, plus any missing originals or newer subject state, before
+continuing. On the phone, **Refresh handoffs** reads the opening time and the independently observed subject state. The
+prepared context grants no authority. Opening records a view of that context.
 
 ## Decisions and acceptances
 
@@ -194,7 +225,7 @@ with their original finding, owner and basis. Acknowledgment neither completes t
 It lasts while the condition is unchanged: a newer basis from unrelated records keeps it, while a changed verdict,
 disposition, evidence, exception, completion or linked ask returns the notice as unacknowledged.
 
-Policy inspection offers **Refresh policy** and **Prepare desktop handoff**. Both recheck the connection and read current policy
+Policy inspection offers **Refresh policy** and **Read context package**. Both recheck the connection and read current policy
 authority and basis. The handoff reads the existing complete context package, then checks the policy basis and authority again;
 if either changed during preparation, that package is discarded and another refresh is needed. The original subject, hash,
 rule and occurrence stay explicit beside any newer history. The desktop route identifies the estate and runtime, exact policy

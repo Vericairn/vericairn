@@ -236,7 +236,8 @@ internal sealed partial class RunDispatchService(
                 run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
                 signals,
                 run.Intent.Body.TryGetProperty("execution", out JsonElement execution) ? execution.Clone() : null,
-                run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : observed?.Execution));
+                run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : observed?.Execution)
+            { OperationHash = includeLocalObservations ? run.Latest.ComputedHash : null });
         }
 
         var ledgers = new List<LedgerRow>();
@@ -305,9 +306,22 @@ internal sealed partial class RunDispatchService(
         StopRequest asked;
         lock (gate)
         {
-            if (recordAccess.RequestDeviceRefusal(session.Load()) is Problem denied)
+            EstateModel model = session.Load();
+            if (recordAccess.RequestDeviceRefusal(model) is Problem denied)
             {
                 return StopProblem(run, denied.Code, denied.Message);
+            }
+            if (request.ExpectedOperationHash is string expected)
+            {
+                if (found.Id != run || AgentRuns.Find(model, run) is not { InFlight: true } current || current.Latest.ComputedHash != expected)
+                {
+                    return StopProblem(run, "refused", "The reviewed run operation changed. Read it again before requesting a stop.");
+                }
+
+                if (StopRefusal(model, current, request.By) is string refused)
+                {
+                    return StopProblem(run, "refused", refused);
+                }
             }
 
             try

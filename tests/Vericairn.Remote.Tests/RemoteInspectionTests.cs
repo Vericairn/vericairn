@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
@@ -262,14 +263,16 @@ internal static class RemoteInspectionSeed
         {"contributor":"{{{{{estate.BuilderId}}}}}","brief":{"outcome":"Inspect phone work.","sources":[],"permittedChanges":["path:src/**"],"prohibitedEffects":["no publication"],"workspace":["widget branch work/phone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["Keep the complete evidence."],"recovery":"Read the result.","progressRequest":{"types":["accurate"],"statusText":true,"cadence":{"minutes":10}}}}
         """, estate.Load().Current("work-order").Single().Reference);
 
-    internal static RecordEnvelope Run(TestEstate estate, RecordEnvelope assignment)
+    internal static RecordEnvelope Goal(TestEstate estate) => estate.Add("goal", estate.OperatorId, JsonSerializer.Serialize(new
     {
-        var goal = estate.Add("goal", estate.OperatorId, JsonSerializer.Serialize(new
-        {
-            title = "Inspect phone work", objective = "Read the work from a phone.", completion = new[] { new { evidence = "Tests", check = "Run them." } },
-            constraints = Array.Empty<string>(), kind = "finite", sponsor = estate.OperatorId, budget = new { wallMinutes = 60, attemptsPerStep = 3 },
-            plan = new { policy = "proposed-by-planner", approval = "sponsor-approves" }, inputs = Array.Empty<string>(),
-        }));
+        title = "Inspect phone work", objective = "Read the work from a phone.", completion = new[] { new { evidence = "Tests", check = "Run them." } },
+        constraints = Array.Empty<string>(), kind = "finite", sponsor = estate.OperatorId, budget = new { wallMinutes = 60, attemptsPerStep = 3 },
+        plan = new { policy = "proposed-by-planner", approval = "sponsor-approves" }, inputs = Array.Empty<string>(),
+    }));
+
+    internal static RecordEnvelope Run(TestEstate estate, RecordEnvelope assignment, RecordEnvelope? goal = null)
+    {
+        goal ??= Goal(estate);
         var body = new
         {
             provider = "generic", action = "agent-run", identity = "phone-observation", intent = "Inspect the phone view.",
@@ -277,7 +280,10 @@ internal static class RemoteInspectionSeed
             status = "not-started", cap = new { wallMinutes = 5, attemptsPerStep = 3 }, evidence = Array.Empty<string>(),
         };
         RecordEnvelope intent = estate.Add("operation", estate.OperatorId, JsonSerializer.Serialize(body));
-        estate.Add("operation", estate.OperatorId, JsonSerializer.Serialize(body).Replace("not-started", "dispatched", StringComparison.Ordinal), supersedes: intent.Id);
+        JsonObject dispatched = JsonSerializer.SerializeToNode(body)!.AsObject();
+        dispatched["status"] = "dispatched";
+        dispatched["dispatchedAt"] = RecordParser.FormatTimestamp(estate.Clock.AddSeconds(1));
+        estate.Add("operation", estate.OperatorId, dispatched.ToJsonString(), supersedes: intent.Id);
         return intent;
     }
 

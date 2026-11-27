@@ -266,6 +266,7 @@ public sealed class DaemonHost : IAsyncDisposable
             throw;
         }
 
+        service.DesktopHandoffNode = identity?.Fingerprint;
         var host = new DaemonHost(service, file, directory, options, certificates, identity);
         host.Mcp = new McpEndpoint(host, options.Mcp ?? settings.Mcp, options.McpAllowedOrigins ?? settings.AllowedOrigins);
         try
