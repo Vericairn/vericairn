@@ -262,6 +262,11 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             }
             return null;
         }
+        catch (ProviderRefusedException refusal) when (refusal.Message.Contains("from an interrupted retention", StringComparison.Ordinal))
+        {
+            // Names only a pack file's own name, never a path.
+            return "The workspace branch was not retained: " + refusal.Message + " Preserve the workspace for review.";
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
         {
             // Git diagnostics may contain local paths or configuration. This message is safe for the existing run signal.
@@ -381,23 +386,25 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             using var heldIndex = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, Path.Combine(packs, stem + ".idx"));
             return heldPack is not null && heldIndex is not null;
         })];
+        // Every half already there is compared before anything is written, so a refusal leaves the clone as it was.
+        HashSet<string> present = [];
+        foreach (string file in staged.Where(f => !held.Contains(Path.GetFileNameWithoutExtension(f))))
+        {
+            string member = Path.Combine(packs, Path.GetFileName(file));
+            using var half = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, member);
+            if (half is null) continue;
+            using var there = new FileStream(half, FileAccess.Read);
+            using var mine = File.OpenRead(file);
+            if (!SHA256.HashData(there).AsSpan().SequenceEqual(SHA256.HashData(mine)))
+                throw new ProviderRefusedException($"The registered clone holds {Path.GetFileName(file)} with different bytes from an interrupted retention; remove that file from the clone's objects/pack and retry.");
+            present.Add(file);
+        }
+
         foreach (string file in staged.OrderByDescending(Path.GetExtension, StringComparer.Ordinal))
         {
-            if (held.Contains(Path.GetFileNameWithoutExtension(file))) continue;
+            if (held.Contains(Path.GetFileNameWithoutExtension(file)) || present.Contains(file)) continue;
             string member = Path.Combine(packs, Path.GetFileName(file));
             using var bytes = File.OpenRead(file);
-            using (var half = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, member))
-            {
-                if (half is not null)
-                {
-                    using var present = new FileStream(half, FileAccess.Read);
-                    if (!SHA256.HashData(present).AsSpan().SequenceEqual(SHA256.HashData(bytes)))
-                        throw new IOException("The registered clone holds half of a pack under this name with different bytes; remove the stray pack file and retry.");
-                    continue;
-                }
-            }
-
-            bytes.Position = 0;
 
             string temporary = Path.Combine(packs, ".vericairn-" + Guid.NewGuid().ToString("N"));
             AcquisitionWorkingTree.WriteNew(destination.Boundary, temporary, bytes);
