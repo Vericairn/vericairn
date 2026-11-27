@@ -42,9 +42,9 @@ public partial class FlowCliJourneyTests
     [Trait("Journey", "J88")]
     public async Task ACommunityScriptWatchesStepsAndUsesOnlyItsOwnGoalAuthority()
     {
-        CliHarness.RequireDaemonTransport(tls: false);
         string? python = McpTests.Python();
-        Assert.True(python is not null, "Missing prerequisite: Python 3 is needed for the Community step script.");
+        Assert.SkipWhen(python is null, "The Community step script needs Python 3 installed as python3 or python.");
+        CliHarness.RequireDaemonTransport(tls: false);
         string root = CliHarness.TempDirectory("flow-events");
         string scratch = CliHarness.TempDirectory("flow-events-bodies");
         CancellationToken cancellation = TestContext.Current.CancellationToken;
