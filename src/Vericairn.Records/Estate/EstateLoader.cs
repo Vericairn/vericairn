@@ -719,7 +719,10 @@ public static class EstateLoader
                     return $"attempt {later.Id} continues the work on successor assignment {later.Subject!.Id}";
                 break;
             case "goal-status" when latest.Type == "goal":
-                if (GoalRules.Achievement(model, latest) is { } achievement)
+                // Only a current acceptance settles it, as for a work order: a superseded one names nothing that stands.
+                if (model.About(latest.Id, "acceptance").Where(a => model.IsCurrent(a) && a.Subject?.Hash == latest.ComputedHash)
+                    .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
+                    .FirstOrDefault(a => GoalRules.AcceptanceRefusals(model, latest, a.By, GoalRules.Basis(a), a).Count == 0) is { } achievement)
                     return $"acceptance {achievement.Id} achieves the goal's current revision";
                 break;
             case "assignment" when latest.Type == "work-order":

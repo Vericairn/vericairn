@@ -121,6 +121,24 @@ public sealed class SettledSubjectTests
         AssertSubject(estate, status, revised, settlement);
     }
 
+    [Fact]
+    public void AGoalStatusIsSettledByTheCurrentAcceptanceNeverASupersededOne()
+    {
+        using var estate = new TestEstate(3);
+        Work work = Work.Write(estate);
+        const string active = """{"status":"active","note":"Activated."}""";
+        RecordEnvelope status = estate.Add("goal-status", estate.OperatorId, active, work.Goal.Reference);
+        RecordEnvelope revised = estate.Add("goal", estate.OperatorId, work.Goal.Body.GetRawText()
+            .Replace("Ship the widget.", "Ship the revised widget.", StringComparison.Ordinal), supersedes: work.Goal.Id);
+        estate.Add("goal-status", estate.OperatorId, active, revised.Reference);
+        RecordEnvelope evaluation = estate.Add("review", work.Reviewer.Id, Evaluation("pass", Met(work.Result), Met(work.Result)), revised.Reference);
+        string accepted = $$"""{"statement":"Accepted.","basis":["{{evaluation.Id}}"],"self":true}""";
+        RecordEnvelope superseded = estate.Add("acceptance", estate.OperatorId, accepted, revised.Reference);
+        RecordEnvelope current = estate.Add("acceptance", estate.OperatorId, accepted.Replace("Accepted.", "Accepted again.", StringComparison.Ordinal), revised.Reference, superseded.Id);
+        AssertSubject(estate, status, revised, current);
+        Assert.DoesNotContain(superseded.Id, Assert.Single(estate.Load().Findings, f => f.Location == status.ExpectedPath).Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

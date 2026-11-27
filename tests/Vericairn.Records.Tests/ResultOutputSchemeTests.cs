@@ -149,7 +149,25 @@ public sealed class ResultOutputSchemeTests
         Assert.Contains(upgrade.Id, historical.Message, StringComparison.Ordinal);
         Assert.Contains(migration.Id, historical.Message, StringComparison.Ordinal);
         Assert.Contains((earlier ?? upgrade).Id, historical.Message, StringComparison.Ordinal);
+        Assert.Contains("The times are claimed; the checkpoints are signed.", historical.Message, StringComparison.Ordinal);
         Assert.Equal(Severity.Warning, unproved.Severity);
+    }
+
+    [Fact]
+    public void AResultWrittenAfterTheMigrationIsNotHistoricalThoughTheFirstCheckpointWitnessesIt()
+    {
+        using var history = new HistoryFixture();
+        TestEstate estate = history.Estate;
+        RecordEnvelope attempt = StartAttempt(estate);
+        RecordEnvelope migration = estate.Add("migration", estate.OperatorId,
+            """{"fromPin":"release 0.9.1","toPin":"release 0.9.2","fromFormat":3,"toFormat":3,"migrations":[],"changes":[]}""", signer: history.OperatorSigner);
+        // Written a month after the migration, under the rule, and first witnessed by the adoption that lists the migration.
+        estate.SetClock(migration.AtTime.AddDays(30));
+        RecordEnvelope late = estate.Add("result", estate.BuilderId, Body(GitHubLocation), attempt.Reference, signer: history.BuilderSigner);
+        history.Adopt();
+
+        Finding finding = Assert.Single(estate.Load().Findings, f => f.Code == Code && f.Location.StartsWith(late.ExpectedPath + "#", StringComparison.Ordinal));
+        Assert.Equal(Severity.Warning, finding.Severity);
     }
 
     /// <summary>An ordinary work order assigned to the builder and the builder's attempt at it.</summary>
