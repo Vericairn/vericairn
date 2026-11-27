@@ -16,20 +16,20 @@ public sealed class RemoteSupervisionTests(HeadlessFixture fixture)
     public async Task CancelShowsEachObservedFactAndReconcilesTheRestoredOriginal()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
         RecordEnvelope run = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
         await fixture.UiAsync(async () =>
         {
             var clock = new InspectionClock();
             RemoteViewModel model = await OpenRun(connections, clock);
             int writes = 0;
-            connections.BeforeApiCall = name => { if (name == nameof(IEstateApi.RunStopAsync)) writes++; };
+            connections.BeforeApiCall = name => { if (name == nameof(IEstateApi.NewSignedRecordAsync)) writes++; };
             await model.ReviewCancelCommand.ExecuteAsync();
             Assert.Contains("configured grace period", model.Intervention!.Review, StringComparison.Ordinal);
             Assert.Equal(0, writes);
             await model.SubmitInterventionCommand.ExecuteAsync();
             RemoteInterventionReceipt original = Assert.Single(model.Interventions);
-            Assert.Equal("requested", original.State);
+            Assert.True(original.State == "requested", original.Observation);
             Assert.Contains("Containment not observed", original.Observation, StringComparison.Ordinal);
             Assert.Equal(1, writes);
             Assert.False(model.SubmitInterventionCommand.CanExecute(null));
@@ -62,7 +62,7 @@ public sealed class RemoteSupervisionTests(HeadlessFixture fixture)
     public async Task LostContainmentResponseStaysUncertainUntilTheOriginalIsObserved()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root) { LoseRunStopResponse = true };
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true, LoseRunStopResponse = true };
         RecordEnvelope run = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
         await fixture.UiAsync(async () =>
         {
@@ -90,7 +90,7 @@ public sealed class RemoteSupervisionTests(HeadlessFixture fixture)
     public async Task PausePinsTheActiveStatusEvenIfTheGoalChangesAtTheWriteBoundary()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
         RecordEnvelope goal = RemoteInspectionSeed.Goal(estate);
         RecordEnvelope active = estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Started for the phone check."}""", goal.Reference);
         _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate), goal);
@@ -103,7 +103,7 @@ public sealed class RemoteSupervisionTests(HeadlessFixture fixture)
 
             connections.BeforeApiCall = name =>
             {
-                if (name != nameof(IEstateApi.GoalPauseAsync)) return;
+                if (name != nameof(IEstateApi.NewSignedRecordAsync)) return;
                 _ = estate.Add("goal-status", estate.OperatorId, """{"status":"paused","note":"Changed during the pause request."}""", goal.Reference);
                 _ = estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Resumed during the pause request."}""", goal.Reference);
             };

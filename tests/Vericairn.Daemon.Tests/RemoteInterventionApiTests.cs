@@ -167,7 +167,7 @@ internal sealed partial class RemoteApiFixture(TestEstate estate, EstateService 
             { BaseAddress = new Uri("http://fixture.invalid") });
     }
 
-    private string AdmitFixtureDevice(string by, string name, FileKeyStore keys, string[] profiles, string? presence = null)
+    private string AdmitFixtureDevice(string by, string name, IDeviceKeyStore keys, string[] profiles, string? presence = null)
     {
         string id = Ulid.NewUlid(Estate.Clock.AddSeconds(1)).Value;
         byte[] spki = keys.Create(id);

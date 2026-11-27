@@ -272,7 +272,11 @@ internal static class RemoteInspectionSeed
 
     internal static RecordEnvelope Run(TestEstate estate, RecordEnvelope assignment, RecordEnvelope? goal = null)
     {
-        goal ??= Goal(estate);
+        if (goal is null)
+        {
+            goal = Goal(estate);
+            estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Activated before the fixture run."}""", goal.Reference);
+        }
         var body = new
         {
             provider = "generic", action = "agent-run", identity = "phone-observation", intent = "Inspect the phone view.",

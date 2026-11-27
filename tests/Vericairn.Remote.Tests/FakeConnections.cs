@@ -19,7 +19,7 @@ namespace Vericairn.Remote.Tests;
 /// Stands in for the phone's connections: pairing either keeps a connection or fails as told, each check reports the next state
 /// queued (current by default), and the client is the estate's in-process service. The real path is covered by the Daemon tests.
 /// </summary>
-internal sealed class FakeConnections(string root) : IRemoteConnections, IDisposable
+internal sealed partial class FakeConnections(string root) : IRemoteConnections, IDisposable
 {
     private readonly EstateService service = EstateService.Open(root);
     private readonly DirectoryInfo phoneHome = Directory.CreateTempSubdirectory("vericairn-test-phone-");
@@ -258,6 +258,10 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     public async Task<WriteOutcome> WriteSignedAsync(RuntimeConnection connection, NewRecordRequest request, Func<RecordPrepared, bool> review, Func<RecordPrepared, bool> beforeSend,
         CancellationToken cancellationToken = default)
     {
+        if (request.Type == "run-stop-request" ||
+            request.Type == "goal-status" && request.Body.TryGetProperty("activeStatusHash", out _))
+            return WriteSignedIntervention(connection, request, review, beforeSend);
+
         // As on the phone: without the presence key nothing is prepared, signed or sent; the request key never signs a decision.
         if (!HasPresenceKey(connection)) return WriteOutcome.Fail(new("presence-required", "This phone holds no presence key for this connection.", []));
         PreparedCalls++;

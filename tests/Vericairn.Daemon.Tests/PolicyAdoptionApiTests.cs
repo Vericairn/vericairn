@@ -52,7 +52,6 @@ public sealed class PolicyAdoptionApiTests
             RouteGroupBuilder group = routes.MapGroup("");
             if (scope is not null) group.AddEndpointFilter(scope);
             ApiRoutes.Map(group, api, () => throw new InvalidOperationException("The fixture cannot shut down a host."));
-            SignedRecordRoutes.Map(group, api);
             endpoints = routes.DataSources.SelectMany(s => s.Endpoints).OfType<RouteEndpoint>().ToArray();
             Assert.NotEmpty(endpoints);
         }

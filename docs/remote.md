@@ -76,14 +76,18 @@ clarifications to running attempts arrive with PROMPT-02, planned for 0.9.5.
 In **Work**, open an order or assignment with a run, expand **Intervene on a run** and select the run. Review the precise target,
 operation and expected effect. **Pause** stops new dispatch for the run's active goal. In-flight work continues and an
 authorized person can resume the goal. **Cancel** asks the run's worker to terminate it with the runtime's configured grace
-period. **Containment** requests the same run's launch boundary with no added grace before escalation. The runtime applies
-its existing authorization and device checks to each operation.
+period. **Containment** requests the same run's launch boundary with no added grace before escalation. You can review
+containment of a run whose earlier Remote cancel is still in progress. The review pins that earlier cancel.
 
-**Request reviewed action** reads the target again before sending. The runtime checks the reviewed active goal status or run
-operation revision as it accepts the write. The original request stays on this phone, including after restart. The result shows
-the pause record or each observed stop fact: request, transmission, harness acknowledgment, escalation and containment.
-An interrupted response leaves an uncertain request. Under **Intervention requests**, select the original and choose
-**Reconcile request** to observe it again. This reads the runtime and sends no new intervention.
+**Request reviewed action** reads the target again. The runtime prepares the exact record and checks the reviewed active
+goal status or run operation revision when the phone submits its signature. The phone signs with your admitted presence
+key. If signing or submission is refused, the app explains why. Inspect the current state and use **Continue in Workbench**
+to prepare a desktop handoff if the intervention is still needed.
+
+The original request stays on this phone, including after restart. The result shows the pause record or the observed request,
+transmission, harness acknowledgment, escalation and containment facts. If a request is refused, failed or superseded,
+read the current state and review a new request. If its outcome is pending or uncertain, select the original under
+**Intervention requests** and choose **Reconcile request** to read what the runtime has observed.
 
 In **Nodes**, **Reconnect** checks the pinned runtime identity and this phone's current access. **Check workers** reads a
 separately dated view of the work in flight, with every heartbeat and stop observation that runtime can supply. A current

@@ -959,6 +959,10 @@ public sealed record RunRow(string Run, string Identity, string Launcher, string
     /// <summary>The exact operation revision at this run read, for a reviewed intervention.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? OperationHash { get; init; }
+
+    /// <summary>The id of the operation revision with this hash.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OperationRevision { get; init; }
 }
 
 /// <summary>One unit of a goal's ledger.</summary>

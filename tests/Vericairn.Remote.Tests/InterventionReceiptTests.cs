@@ -18,7 +18,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
     public async Task RefusedCancelCanBeReviewedAgainAgainstTheCurrentOperation()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
         RecordEnvelope run = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
         await fixture.UiAsync(async () =>
         {
@@ -27,10 +27,10 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
             Assert.NotNull(model.Intervention);
             connections.BeforeApiCall = name =>
             {
-                if (name != nameof(IEstateApi.RunStopAsync)) return;
+                if (name != nameof(IEstateApi.NewSignedRecordAsync)) return;
                 RecordEnvelope latest = estate.Load().Latest(run);
                 JsonObject body = JsonNode.Parse(latest.Body.GetRawText())!.AsObject();
-                body["dispatchedAt"] = RecordParser.FormatTimestamp(estate.Clock.AddSeconds(2));
+                body["status"] = "uncertain";
                 estate.Add("operation", estate.OperatorId, body.ToJsonString(), supersedes: latest.Id);
             };
 
@@ -44,7 +44,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
             Assert.Equal(estate.Load().Latest(run).ComputedHash, model.Intervention?.Revision);
             await model.SubmitInterventionCommand.ExecuteAsync();
             RemoteInterventionReceipt next = Assert.IsType<RemoteInterventionReceipt>(model.SelectedIntervention);
-            Assert.Equal("requested", next.State);
+            Assert.True(next.State == "requested", next.Observation);
             Assert.NotEqual(refused.Id, next.Id);
             Assert.Contains(refused, model.Interventions);
             Assert.Equal(next.Marker, new RunDirectory(connections.Service.Session.Manifest.Estate, run.Id).ReadStop()!.Reason);
@@ -56,7 +56,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
     public async Task RefusedPauseCanBeReviewedAgainWithTheSameActiveStatus()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
         RecordEnvelope goal = RemoteInspectionSeed.Goal(estate);
         RecordEnvelope active = estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Started for the phone check."}""", goal.Reference);
         _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate), goal);
@@ -67,7 +67,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
             Assert.Equal(active.ComputedHash, model.Intervention?.Revision);
             connections.BeforeApiCall = name =>
             {
-                if (name == nameof(IEstateApi.GoalPauseAsync))
+                if (name == nameof(IEstateApi.NewSignedRecordAsync))
                     throw new HttpRequestException("The runtime refused this pause.", null, HttpStatusCode.Unauthorized);
             };
             await model.SubmitInterventionCommand.ExecuteAsync();
@@ -92,7 +92,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
     public async Task AnUncertainCancelBlocksOnlyAnotherCancelAcrossRestart()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
         RecordEnvelope run = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
         await fixture.UiAsync(async () =>
         {
@@ -100,7 +100,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
             int writes = 0;
             connections.BeforeApiCall = name =>
             {
-                if (name != nameof(IEstateApi.RunStopAsync)) return;
+                if (name != nameof(IEstateApi.NewSignedRecordAsync)) return;
                 writes++;
                 throw new HttpRequestException("The stop response was not received.");
             };
@@ -124,7 +124,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
             Assert.NotNull(restarted.Intervention);
             await restarted.SubmitInterventionCommand.ExecuteAsync();
             RemoteInterventionReceipt containment = Assert.IsType<RemoteInterventionReceipt>(restarted.SelectedIntervention);
-            Assert.Equal("requested", containment.State);
+            Assert.True(containment.State == "requested", containment.Observation);
             Assert.NotEqual(original.Id, containment.Id);
             Assert.Equal(0, new RunDirectory(connections.Service.Session.Manifest.Estate, run.Id).ReadStop()!.GraceSeconds);
             return true;
@@ -135,7 +135,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
     public async Task ContainmentAfterAPendingCancelKeepsBothRequests()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
         RecordEnvelope run = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
         await fixture.UiAsync(async () =>
         {
@@ -153,7 +153,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
             await model.SubmitInterventionCommand.ExecuteAsync();
 
             RemoteInterventionReceipt containment = Assert.IsType<RemoteInterventionReceipt>(model.SelectedIntervention);
-            Assert.Equal("requested", containment.State);
+            Assert.True(containment.State == "requested", containment.Observation);
             Assert.NotEqual(cancel.Id, containment.Id);
             StopRequest effective = Assert.IsType<StopRequest>(directory.ReadStop());
             Assert.Equal(0, effective.GraceSeconds);
@@ -174,7 +174,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
     public async Task AResolvedReceiptNeverBlocksAFreshReview(string state)
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
         _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
         await fixture.UiAsync(async () =>
         {
@@ -200,7 +200,7 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
     public async Task ARefusedStopOfAnEndedRunReportsTheRefusalEvenWithEarlierStopFacts()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
-        using var connections = new FakeConnections(estate.Root);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
         RecordEnvelope run = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
         await fixture.UiAsync(async () =>
         {
@@ -208,11 +208,13 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
             await model.ReviewCancelCommand.ExecuteAsync();
             connections.BeforeApiCall = name =>
             {
-                if (name != nameof(IEstateApi.RunStopAsync)) return;
+                if (name != nameof(IEstateApi.NewSignedRecordAsync)) return;
                 RecordEnvelope latest = estate.Load().Latest(run);
                 JsonObject body = JsonNode.Parse(latest.Body.GetRawText())!.AsObject();
                 string time = RecordParser.FormatTimestamp(estate.Clock.AddSeconds(2));
-                body["status"] = "canceled";
+                body["status"] = "known-failure";
+                body["observed"] = JsonSerializer.SerializeToNode(new { summary = "The worker exited after the desktop stop.", at = time });
+                body["usage"] = JsonSerializer.SerializeToNode(new { wallMinutes = 1, unreported = Array.Empty<string>() });
                 body["stop"] = JsonSerializer.SerializeToNode(new { requestedAt = time, requestedBy = estate.OperatorId, reason = "Earlier desktop stop" });
                 estate.Add("operation", estate.OperatorId, body.ToJsonString(), supersedes: latest.Id);
             };

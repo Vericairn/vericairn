@@ -405,6 +405,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse($"Unknown record type '{request.Type}'.");
         }
 
+        if (request.Type == RunStopRecord)
+        {
+            return Refuse("A reviewed run stop request must be prepared and signed by the person's device.");
+        }
+
         if (!Ulid.IsValid(request.By))
         {
             return Refuse("The authoring principal must be a ULID.");

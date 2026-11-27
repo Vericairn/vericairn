@@ -244,7 +244,7 @@ internal sealed partial class RunDispatchService(
                 signals,
                 run.Intent.Body.TryGetProperty("execution", out JsonElement execution) ? execution.Clone() : null,
                 run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : observed?.Execution)
-            { OperationHash = includeLocalObservations ? run.Latest.ComputedHash : null });
+            { OperationHash = includeLocalObservations ? run.Latest.ComputedHash : null, OperationRevision = includeLocalObservations ? run.Latest.Id : null });
         }
 
         var ledgers = new List<LedgerRow>();
