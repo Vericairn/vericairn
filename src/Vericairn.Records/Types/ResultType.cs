@@ -5,6 +5,7 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.History;
 using Vericairn.Records.Model;
 using Vericairn.Records.Templates;
 
@@ -21,7 +22,7 @@ public sealed class ResultType : IRecordType
 
     /// <summary>
     /// An output's location carries a URL scheme. From 0.9.2 the write boundary refuses a new result with this finding; a result
-    /// already in the estate keeps its reading, and validation reports it as a warning.
+    /// already in the estate remains readable. Signed history can place it at or before the rule began.
     /// </summary>
     internal const string OutputSchemeCode = "result.output-scheme";
 
@@ -80,8 +81,17 @@ public sealed class ResultType : IRecordType
 
         if (schemes.Count > 0)
         {
-            // Existing results keep their reading. The write boundary promotes this finding only for proposed records.
-            context.Findings.Warning(OutputSchemeCode, context.Location + "#body.outputs", SchemeMessage(schemes));
+            string location = context.Location + "#body.outputs";
+            string message = SchemeMessage(schemes);
+            if (OutputRuleWitness(context.Model, context.Record) is { } witness)
+            {
+                context.Findings.Info(OutputSchemeCode, location, message +
+                    $" Historical: checkpoint {witness.Result} witnessed these exact bytes no later than checkpoint {witness.Start}, the first to list migration {witness.Migration} to 0.9.2. A result written between that migration and that checkpoint reads the same, since no claimed time decides it.");
+            }
+            else
+            {
+                context.Findings.Warning(OutputSchemeCode, location, message);
+            }
         }
 
         foreach (BodyReader evidence in body.NestedArray("evidence", true, allowEmpty: true) ?? [])
@@ -227,6 +237,45 @@ public sealed class ResultType : IRecordType
         }
 
         return schemes.Count == 0 ? null : new(Severity.Warning, OutputSchemeCode, location + "#body.outputs", SchemeMessage(schemes));
+    }
+
+    /// <summary>
+    /// The exact result, and the migration that began the rule, must both be witnessed by the signed checkpoint graph, the result no
+    /// later than the first checkpoint that lists the migration. No claimed record time decides it (decision 01M7NC0F35X707YE133WTPQ74M),
+    /// so a result written between the migration and that checkpoint reads the same, and the finding says so.
+    /// </summary>
+    private static (string Result, string Migration, string Start)? OutputRuleWitness(EstateModel model, RecordEnvelope result)
+    {
+        const string pin = "release 0.9.2";
+        HistoryState history = SignedHistory.Of(model);
+        if (!history.InventoriesRead || !history.Listings.TryGetValue(result.Id, out IReadOnlyList<string>? resultListings))
+            return null;
+
+        // In an estate without checkpoints at upgrade, the adoption at this pin is the first signed inventory.
+        RecordEnvelope[] migrations = [.. model.OfType("migration").Where(model.Counts)];
+        foreach (RecordEnvelope migration in migrations.Where(m => EstateModel.BodyString(m, "toPin") == pin))
+        {
+            if (!history.Listings.TryGetValue(migration.Id, out IReadOnlyList<string>? migrationListings)) continue;
+            foreach (string start in migrationListings)
+            {
+                if (EstateModel.BodyString(model.ById[start], "trigger") is not ("upgrade" or "adoption")) continue;
+                var ancestors = new HashSet<string>(StringComparer.Ordinal);
+                var pending = new Stack<string>(history.Predecessors.GetValueOrDefault(start) ?? []);
+                while (pending.TryPop(out string? previous))
+                    if (ancestors.Add(previous))
+                        foreach (string id in history.Predecessors.GetValueOrDefault(previous) ?? []) pending.Push(id);
+
+                if (migrationListings.Any(ancestors.Contains)) continue;
+                ancestors.Add(start);
+                if (migrations.Any(m => EstateModel.BodyString(m, "fromPin") == pin && EstateModel.BodyString(m, "toPin") != pin
+                    && (history.Listings.GetValueOrDefault(m.Id) ?? []).Any(ancestors.Contains)))
+                    continue;
+                if (resultListings.FirstOrDefault(ancestors.Contains) is { } witnessed)
+                    return (witnessed, migration.Id, start);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The URL scheme a location begins with, colon included, such as https:; null for a path.</summary>

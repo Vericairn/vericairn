@@ -717,10 +717,60 @@ public static class EstateLoader
             {
                 findings.Info("ask.run-settled", record.ExpectedPath, $"The run settled in operation {latest.Id}; this ask is already {Asks.State(model, record).State} and needs no reconsideration because of that settlement.");
             }
+            else if (target.Type == record.Subject.Type && record.Subject.Hash == target.ComputedHash && model.Counts(target)
+                && SubjectSettlement(model, record, target, latest) is { } settled)
+            {
+                findings.Info("record.subject-settled", record.ExpectedPath,
+                    $"The subject has been superseded by {latest.Id}; {settled}.");
+            }
             else
             {
                 findings.Warning("record.subject-stale", record.ExpectedPath, $"The subject has been superseded by {latest.Id}; this record refers to an earlier revision and needs reconsideration.");
             }
         }
+    }
+
+    private static string? SubjectSettlement(EstateModel model, RecordEnvelope record, RecordEnvelope target, RecordEnvelope latest)
+    {
+        switch (record.Type)
+        {
+            case "ask":
+                (string state, IReadOnlyList<RecordEnvelope> answers) = Asks.State(model, record);
+                if (state == "answered" && answers.Count > 0)
+                    return $"decision {answers[^1].Id} answers this ask";
+                if (state == "withdrawn")
+                    return $"ask {record.Id} records its withdrawal";
+                break;
+            case "operator-request":
+                if (OperatorRequests.Closures(model, record).Where(r => SignatureChecks.IsAuthentic(model, r))
+                    .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault() is { } closure)
+                    return $"{closure.Type} {closure.Id} closes this operator request";
+                break;
+            case "operation" when EstateModel.BodyString(record, "action") == Types.OperationType.AgentRun:
+                if (EstateModel.BodyString(record, "status") is "observed-success" or "known-failure" or "canceled")
+                    return $"operation {record.Id} records the run's settlement";
+                break;
+            case "attempt" when target.Type == "assignment":
+                IEnumerable<string> successors = model.Chain(latest).SkipWhile(id => id != target.Id).Skip(1);
+                RecordEnvelope? later = successors.SelectMany(id => model.About(id, "attempt").Where(a => a.Subject == model.ById[id].Reference))
+                    .Where(a => model.IsCurrent(a) && GoalRules.Before(record, a))
+                    .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+                if (later is not null)
+                    return $"attempt {later.Id} continues the work on successor assignment {later.Subject!.Id}";
+                break;
+            case "goal-status" when latest.Type == "goal":
+                // Only a current acceptance settles it, as for a work order: a superseded one names nothing that stands.
+                if (model.About(latest.Id, "acceptance").Where(a => model.IsCurrent(a) && a.Subject?.Hash == latest.ComputedHash)
+                    .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
+                    .FirstOrDefault(a => GoalRules.AcceptanceRefusals(model, latest, a.By, GoalRules.Basis(a), a).Count == 0) is { } achievement)
+                    return $"acceptance {achievement.Id} achieves the goal's current revision";
+                break;
+            case "assignment" when latest.Type == "work-order":
+                if (EstateStatus.CurrentAcceptance(model, latest) is { } acceptance)
+                    return $"acceptance {acceptance.Id} accepts the work order";
+                break;
+        }
+
+        return null;
     }
 }

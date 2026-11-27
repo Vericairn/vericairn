@@ -21,6 +21,7 @@ internal sealed class GoalStepCommand : Command
         var occurrenceOption = new Option<string?>("--occurrence") { Description = "From 0.9.4, for a standing agent: the occurrence to carry, by its key as vericairn goal due lists it, or request for an occurrence of its request trigger made now; the oldest due occurrence when omitted." };
         var nowOption = new Option<string?>("--now") { Description = "From 0.9.4, for a standing agent: the UTC time its triggers are evaluated at, never later than the runtime's clock; the runtime's clock when omitted." };
         var detachOption = new Option<bool>("--detach") { Description = "Return once an agent's run is launched, leaving it to the daemon that serves the estate; without it the command waits until the run settles, and Ctrl+C asks it to stop." };
+        var checkOption = new Option<bool>("--check") { Description = "Preview the next step and its permitted change patterns. Signs, records and dispatches nothing." };
         Arguments.Add(shownArgument);
         Options.Add(byOption);
         Options.Add(repositoryOption);
@@ -29,6 +30,7 @@ internal sealed class GoalStepCommand : Command
         Options.Add(branchOption);
         Options.Add(baseOption);
         Options.Add(detachOption);
+        Options.Add(checkOption);
         Options.Add(occurrenceOption);
         Options.Add(nowOption);
         var executionOptions = new ExecutionOptions(this);
@@ -42,7 +44,7 @@ internal sealed class GoalStepCommand : Command
                 parseResult.GetValue(wallMinutesOption),
                 parseResult.GetValue(branchOption),
                 parseResult.GetValue(baseOption),
-                parseResult.GetValue(detachOption), executionOptions.Read(parseResult), parseResult.GetValue(occurrenceOption), parseResult.GetValue(nowOption)),
+                parseResult.GetValue(detachOption), executionOptions.Read(parseResult), parseResult.GetValue(occurrenceOption), parseResult.GetValue(nowOption), parseResult.GetValue(checkOption)),
             parseResult.GetValue(context.JsonOption)));
     }
 }

@@ -328,6 +328,7 @@ public sealed partial class ToolRegistry
                         string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
                     };
                 }),
+            .. GoalControlTools(by),
             Write("goal_decide", "From 0.9.4: records the decision of a run's decision step by the acting principal, which holds the step's current assignment: the path or paths its transition takes, the reasons and the evidence by hash, as the result of that assignment, signed by its own device. The first decision of a round is final. Choosing a path performs nothing reserved and dispatches nothing; goal step takes the steps it makes eligible. A decision the flow requires of a person is refused for an agent, and a rule's decision is recorded by goal step, never here.",
                 DecideArguments(), ["goal", "step", "paths", "reasons"],
                 async (api, a, token) =>

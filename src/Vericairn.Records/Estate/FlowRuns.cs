@@ -531,6 +531,7 @@ public static class FlowRuns
             }
         }
 
+        FlowPermissions.Validate(flow);
         string? until = flow.Text("until", false, 100, Patterns.Slug, "a step key");
         flow.NoOtherKeys();
         if (policy != "given" || orders is not { Count: 1 })
