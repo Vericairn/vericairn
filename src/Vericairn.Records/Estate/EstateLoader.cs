@@ -80,11 +80,24 @@ public static class EstateLoader
         return Load(root, files, null, manifestBytes);
     }
 
-    /// <summary>Checks the proposed record's body using the same type validator as the full estate judgment.</summary>
-    internal static FindingList CheckRecordBody(EstateModel model, RecordEnvelope record)
+    /// <summary>
+    /// Checks the proposed record before any signer is asked: its body with the same type validator as the full estate judgment, the
+    /// subject rules the record alone decides, and (FIX-158) its own bytes with the content scan the estate check runs on every file.
+    /// </summary>
+    internal static FindingList CheckRecordBody(EstateModel model, RecordEnvelope record, string? relativePath = null, byte[]? bytes = null)
     {
         var bodyFindings = new FindingList();
-        FindType(record, bodyFindings)?.Validate(new ValidationContext(model, record, new FindingList(), bodyFindings));
+        if (FindType(record, bodyFindings) is IRecordType type)
+        {
+            type.Validate(new ValidationContext(model, record, new FindingList(), bodyFindings));
+            ValidateSubjectShape(record, type, bodyFindings);
+        }
+
+        if (relativePath is not null && bytes is not null)
+        {
+            foreach (Finding finding in EstateChecks.Content(relativePath, bytes)) bodyFindings.Add(finding);
+        }
+
         return bodyFindings;
     }
 
@@ -628,7 +641,9 @@ public static class EstateLoader
         return type;
     }
 
-    private static void ValidateSubject(EstateModel model, RecordEnvelope record, IRecordType type, FindingList findings)
+    // The subject rules the record alone decides: whether it has one, its type and whether it pins a hash. From 0.9.5 (FIX-158) they
+    // also run before any signer is asked; false when the record has no subject to look up.
+    private static bool ValidateSubjectShape(RecordEnvelope record, IRecordType type, FindingList findings)
     {
         if (record.Subject is null)
         {
@@ -637,7 +652,7 @@ public static class EstateLoader
                 findings.Error("record.subject", record.ExpectedPath, $"A {record.Type} record needs a subject.");
             }
 
-            return;
+            return false;
         }
 
         if (type.SubjectType is not null && record.Subject.Type != type.SubjectType)
@@ -648,6 +663,16 @@ public static class EstateLoader
         if (type.SubjectHashRequired && record.Subject.Hash is null)
         {
             findings.Error("record.subject", record.ExpectedPath, $"A {record.Type} record pins its subject to an exact hash.");
+        }
+
+        return true;
+    }
+
+    private static void ValidateSubject(EstateModel model, RecordEnvelope record, IRecordType type, FindingList findings)
+    {
+        if (!ValidateSubjectShape(record, type, findings) || record.Subject is null)
+        {
+            return;
         }
 
         if (!model.ById.TryGetValue(record.Subject.Id, out RecordEnvelope? target))

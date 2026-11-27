@@ -28,7 +28,8 @@ public class RecordPublicationTests
         using var estate = new TestEstate();
         using EstateService service = Open(estate, localOnly);
         JsonObject body = JsonNode.Parse(Order)!.AsObject();
-        // Both drafts pass the body check so the rejection still exercises the full publication judgment.
+        // The reference failure passes the early check, so its rejection exercises the full publication judgment. From 0.9.5 (FIX-158) a
+        // credential in the record's own bytes is refused by the early check, before any signer and before the judgment.
         if (contentFailure) body["intent"] = "A synthetic credential-shaped value: sk-" + new string('x', 36);
         else body["inputs"] = JsonSerializer.SerializeToNode(new[] { new { type = "resource", id = Ulid.NewUlid().Value } });
 
@@ -41,13 +42,21 @@ public class RecordPublicationTests
         };
         WriteOutcome outcome = service.NewRecord(new NewRecordRequest("work-order", estate.OperatorId, JsonSerializer.SerializeToElement(body)));
         Assert.False(publishedDuringJudgment, "A reader saw the proposed record before judgment.");
-        Assert.NotNull(proposed);
         Assert.False(outcome.Ok);
         Assert.Equal("rejected", outcome.Problem!.Code);
         Assert.Contains(outcome.Problem.Findings, finding => finding.Code == (contentFailure ? "secrets.pattern" : "body.reference"));
-        Assert.False(Published(service, proposed));
         using EstateService reopened = EstateService.Open(estate.Root);
-        Assert.Null(reopened.Record(proposed.Envelope.Id));
+        if (contentFailure)
+        {
+            Assert.Null(proposed);
+        }
+        else
+        {
+            Assert.NotNull(proposed);
+            Assert.False(Published(service, proposed));
+            Assert.Null(reopened.Record(proposed.Envelope.Id));
+        }
+
         AssertClean(reopened);
     }
 

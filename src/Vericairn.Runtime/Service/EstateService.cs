@@ -2980,7 +2980,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     private static Problem? CheckRecordBody(EstateModel model, AuthoredRecord record)
     {
         var errors = new FindingList();
-        foreach (Finding finding in EstateLoader.CheckRecordBody(model, record.Envelope).Where(f => f.Severity == Severity.Error))
+        foreach (Finding finding in EstateLoader.CheckRecordBody(model, record.Envelope, record.RelativePath, record.Bytes).Where(f => f.Severity == Severity.Error))
         {
             errors.Add(finding);
         }

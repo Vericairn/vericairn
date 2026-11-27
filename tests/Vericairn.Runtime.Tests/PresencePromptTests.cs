@@ -156,6 +156,49 @@ public sealed class PresencePromptTests
         Assert.Empty(Since(f.Api, start));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ASubjectTheRecordAloneGetsWrongDoesNotAskForASignature(bool wrongType)
+    {
+        using var f = new OperatorCloseFixture();
+        var step = f.Add("STEP-1");
+        RecordingCustody custody = Presence(f);
+        custody.BeforeSigning = _ => Assert.Fail("A record without its subject must never reach the signing device.");
+        long start = f.Api.PresencePrompts(new()).Cursor;
+        using JsonDocument body = JsonDocument.Parse("""{"status":"active","note":"Started."}""");
+
+        WriteOutcome refused = f.Api.NewRecord(new("work-status", f.Estate.OperatorId, body.RootElement, Subject: wrongType ? "assignment:" + step.Assignment.Id : null));
+
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "record.subject" && finding.Severity == "error");
+        Assert.Empty(custody.Reasons);
+        Assert.Empty(Since(f.Api, start));
+    }
+
+    [Fact]
+    public void ACredentialInTheRecordsOwnBytesDoesNotAskForASignature()
+    {
+        using var f = new OperatorCloseFixture();
+        f.Add("STEP-1");
+        RecordingCustody custody = Presence(f);
+        custody.BeforeSigning = _ => Assert.Fail("A record carrying a credential must never reach the signing device.");
+        long start = f.Api.PresencePrompts(new()).Cursor;
+        // Built at run time, so this file carries no credential-shaped text of its own.
+        var body = new JsonObject
+        {
+            ["kind"] = "service", ["name"] = "Site " + "sk" + "-" + new string('A', 40), ["role"] = "Documentation",
+            ["location"] = new JsonObject { ["url"] = "https://example.invalid" }, ["visibility"] = "public",
+        };
+
+        WriteOutcome refused = f.Api.NewRecord(new("resource", f.Estate.OperatorId, JsonSerializer.SerializeToElement(body)));
+
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "secrets.pattern" && finding.Severity == "error");
+        Assert.Empty(custody.Reasons);
+        Assert.Empty(Since(f.Api, start));
+    }
+
     [Fact]
     public void ASignedSingleWriteStillChecksBodyReferencesUnderTheWriteLock()
     {
