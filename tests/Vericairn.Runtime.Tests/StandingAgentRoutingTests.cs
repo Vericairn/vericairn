@@ -219,11 +219,15 @@ public class StandingAgentRoutingTests
         run.WaitUntil(() => run.Row(running).Observed && File.Exists(run.Report("hold-first-event")));
         AssertHeld("its concurrency of 1");
 
-        string ask = RunEstate.Ok(run.Service.StandingOutput(new StandingOutputRequest(run.Estate.BuilderId, first.Assignment!.Id, "ask",
-            RunEstate.Json("""
-                {"question":"Which bug should be investigated first?","recommendation":"Start with the first report.",
-                 "consequence":"The remaining reports wait."}
-                """)))).Id;
+        // The event clock can be ahead of wall time. Date the fixture ask on the run's record clock.
+        RecordEnvelope dispatched = AgentRuns.Find(run.Estate.Load(), running)!.Latest;
+        string ask = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("ask", run.Estate.BuilderId, JsonSerializer.SerializeToElement(new
+        {
+            to = op, goal, state = "open",
+            question = "Which bug should be investigated first?", recommendation = "Start with the first report.",
+            consequence = "The remaining reports wait.",
+            raisedBy = new { goal, occurrence = firstKey, assignment = first.Assignment!.Id, run = running },
+        }), At: dispatched.At))).Id;
         Assert.True(run.Service.RunStop(running, new RunStopRequest(op, "Stop the first stand-in.", 5)).Ok);
         run.Settled(running);
         AssertHeld("1 of its outputs are open, its cap of 1");

@@ -4,6 +4,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
@@ -124,9 +125,10 @@ public class StandingDutyJourneyTests
                 },
             },
         }.ToJsonString());
+        string mcpReport = run.Report("duty-mcp");
         run.Service.WorkerOptions = run.Service.WorkerOptions with
         {
-            Vericairn = FakeHarness.Command("mcp-server", run.Report("duty-mcp")),
+            Vericairn = FakeHarness.Command("mcp-relay", mcpReport),
         };
         Assert.Empty(run.Estate.Load().OfType("operator-request"));
 
@@ -136,7 +138,12 @@ public class StandingDutyJourneyTests
         Assert.Equal("run", step.Outcome);
         string assignment = step.Assignment!.Id;
         string running = step.Run!.Run;
+        // Keep the wire calls from the worker, but author the request with the same clock and ULID generator as the run.
+        var server = new McpServer(new ToolRegistry(run.Service, run.Estate.BuilderId), "test");
+        FakeHarness.ServeMcp(mcpReport, server, requests: 2); // Initialize and call the tool.
         Assert.Equal("observed-success", run.Settled(running).Status);
+        Assert.Equal(["--estate", run.Estate.Root, "mcp", "serve", "--as", run.Estate.BuilderId, "--run", running],
+            Assert.Single(FakeHarness.Reports(mcpReport))["arguments"]!.AsArray().Select(argument => argument!.GetValue<string>()));
 
         EstateModel model = run.Estate.Load();
         RecordEnvelope request = Assert.Single(model.OfType("operator-request"));

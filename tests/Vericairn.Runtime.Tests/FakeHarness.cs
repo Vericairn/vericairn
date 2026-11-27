@@ -9,7 +9,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
 using Vericairn.Runtime.Providers;
-using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -710,11 +709,13 @@ internal static class FakeHarness
                 return Mcp(null, arguments);
             case "mcp-tool":
                 return Mcp(null, arguments, JsonNode.Parse(File.ReadAllText(report + ".call"))!.AsObject());
-            case "mcp-server":
-                using (var service = EstateService.Open(arguments[Array.IndexOf(arguments, "--estate") + 1]))
+            case "mcp-relay":
+                for (int sequence = 0; Console.ReadLine() is string request; sequence++)
                 {
-                    var tools = new ToolRegistry(service, arguments[Array.IndexOf(arguments, "--as") + 1]);
-                    new McpServer(tools, "test").Run(Console.In, Console.Out);
+                    string exchange = McpExchange(report, sequence);
+                    PublishMcpMessage(exchange + ".request", request);
+                    WaitForFile(exchange + ".reply");
+                    Emit(File.ReadAllText(exchange + ".reply").TrimEnd('\r', '\n'));
                 }
 
                 return 0;
@@ -722,6 +723,30 @@ internal static class FakeHarness
                 Console.Error.WriteLine($"stand-in harness: no scenario {scenario} for {string.Join(' ', arguments)}");
                 return 64;
         }
+    }
+
+    /// <summary>Serves the stand-in's stdio requests in the fixture process so its records share the runtime's ID generator.</summary>
+    internal static void ServeMcp(string report, McpServer server, int requests)
+    {
+        using var changed = new FileSignal(Path.GetDirectoryName(report)!);
+        for (int sequence = 0; sequence < requests; sequence++)
+        {
+            string exchange = McpExchange(report, sequence);
+            string request = exchange + ".request";
+            changed.Until(() => File.Exists(request), "the stand-in MCP request", TestContext.Current.CancellationToken);
+            using var input = new StringReader(File.ReadAllText(request));
+            using var output = new StringWriter(CultureInfo.InvariantCulture);
+            server.Run(input, output);
+            PublishMcpMessage(exchange + ".reply", output.ToString());
+        }
+    }
+
+    private static string McpExchange(string report, int sequence) => report + ".mcp-" + sequence.ToString(CultureInfo.InvariantCulture);
+
+    private static void PublishMcpMessage(string path, string message)
+    {
+        File.WriteAllText(path + ".new", message);
+        File.Move(path + ".new", path);
     }
 
     /// <summary>
