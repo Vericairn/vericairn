@@ -263,6 +263,7 @@ public sealed class EnclaveHelperCommandTests
 
     [Theory]
     [InlineData("missing-helper", "Put the vericairn-enclave from this command line's release archive beside it")]
+    [InlineData("availability-exit-1", "could not complete its availability check")]
     [InlineData("availability-exit-3", "Secure Enclave is unavailable to this process (helper exit 3)")]
     [InlineData("public-exit-3", "Secure Enclave is unavailable to this process (helper exit 3)")]
     [InlineData("public-exit-4", "could not use the runtime identity key on this Mac (helper exit 4): the key was made on another Mac, or its blob is damaged")]
@@ -290,10 +291,14 @@ public sealed class EnclaveHelperCommandTests
         Assert.Contains(remedy, CliHarness.Unfold(error), StringComparison.Ordinal);
         Assert.DoesNotContain("no longer held", output + error, StringComparison.Ordinal);
         Assert.DoesNotContain(fixture.Home, output + error, StringComparison.Ordinal);
-        // Every refusal that is not the helper's own failure names the explicit way to a new identity.
+        // Every refusal that is not the helper's own failure names the explicit way to a new identity; a failing helper is settled first.
         if (failure is "missing-helper" or "availability-exit-3" or "public-exit-4" or "missing-blob" or "wrong-key" or "malformed-record")
         {
             Assert.Contains("vericairn runtime rotate --identity --replace-unreadable", CliHarness.Unfold(error), StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.DoesNotContain("--replace-unreadable", CliHarness.Unfold(error), StringComparison.Ordinal);
         }
     }
 
