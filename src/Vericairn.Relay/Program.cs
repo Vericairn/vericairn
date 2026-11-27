@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
 using Vericairn.Relay;
 
 WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(args);
@@ -22,6 +26,6 @@ app.Map("/v1/relay", async context =>
     }
 
     using System.Net.WebSockets.WebSocket socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
-    await relay.HandleAsync(socket, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.RequestAborted).ConfigureAwait(false);
+    await relay.HandleAsync(socket, RelayServer.PeerOf(context.Connection.RemoteIpAddress), context.RequestAborted).ConfigureAwait(false);
 });
 await app.RunAsync().ConfigureAwait(false);

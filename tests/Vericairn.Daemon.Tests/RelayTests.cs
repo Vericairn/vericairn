@@ -180,6 +180,90 @@ public class RelayTests
         runtime.Dispose();
     }
 
+    [Fact]
+    public async Task JoinsWithoutAValidTicketCloseAnAddressForOneWindowAtMost()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        await using var relay = new InProcessRelay(clock);
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string address = AddressOf(key);
+        using WebSocket control = await relay.RegisterAsync(address, key);
+        for (int i = 0; i < 300; i++)
+        {
+            using WebSocket stranger = relay.Connect();
+            await RelayProtocol.SendAsync(stranger, new("join", Ticket: new RelayTicket(address, "0", 0, 0, 0, "")), TestStop);
+        }
+
+        await Task.Delay(300, TestStop);
+        // Past the limit, this window refuses before verifying, a valid ticket too; the next window starts with an empty budget.
+        await relay.RefusesAsync(RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1));
+        clock.Advance(TimeSpan.FromSeconds(10));
+        (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control,
+            RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 2));
+        phone.Dispose();
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public async Task AnotherDevicesCertificateWithATicketGetsNoResponse()
+    {
+        await using var relay = new InProcessRelay(TimeProvider.System);
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(systemClock: true,
+            relay: new Uri("https://relay.invalid"), connectRelay: (_, _) => Task.FromResult(relay.Connect()));
+        RuntimeConnection a = harness.Pair(harness.Estate.BuilderId, "A");
+        RuntimeConnection b = harness.Pair(harness.Estate.BuilderId, "B");
+        using var directA = VericairnClient.LocalNetwork(a, harness.Signer(a));
+        RelayRoute? route = a.Relay;
+        for (int i = 0; route is null && i < 20; i++)
+        {
+            await Task.Delay(100, TestStop);
+            route = await directA.RefreshRelayAsync(TestStop);
+        }
+
+        Assert.NotNull(route);
+
+        // TLS straight over the relayed stream, presenting whichever device's certificate the test chooses with A's ticket.
+        async Task<string> Attempt(RuntimeConnection who)
+        {
+            DeviceRequestSigner signer = harness.Signer(who);
+            using var credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(who.DevicePublicKey));
+            WebSocket ws = relay.Connect();
+            await RelayProtocol.SendAsync(ws, new("join", Ticket: route!.Ticket), TestStop);
+            Assert.Equal("joined", (await RelayProtocol.ReceiveAsync(ws, TestStop))?.Kind);
+            using var tls = new SslStream(new RelayStream(ws), false);
+            var options = LocalNetworkTls.ClientOptions(LocalNetworkTls.Current, (_, c, _, _) => c is not null, credential.Current());
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+            deadline.CancelAfter(TimeSpan.FromSeconds(8));
+            try
+            {
+                await tls.AuthenticateAsClientAsync(options, deadline.Token);
+                const string path = "/v1/health";
+                string signed = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
+                string signature = Base64Url.EncodeToString(signer.Sign(harness.Digest("GET", path, signed, [])));
+                byte[] request = Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: {who.Address}\r\n{RequestSigning.DeviceHeader}: {who.Device}\r\n{RequestSigning.SignedAtHeader}: {signed}\r\n{RequestSigning.SignatureHeader}: {signature}\r\n\r\n");
+                await tls.WriteAsync(request, deadline.Token);
+                return "HTTP " + (await RawHttp.ReadResponseAsync(tls, deadline.Token)).Status;
+            }
+            catch (Exception error) when (error is IOException or AuthenticationException or WebSocketException or OperationCanceledException or InvalidOperationException)
+            {
+                return "no response";
+            }
+        }
+
+        Assert.Equal("HTTP 200", await Attempt(a));
+        // Another paired device's certificate is aborted once the handshake ends, before any request is read: no response at all,
+        // where the request-level check alone would answer 401.
+        Assert.Equal("no response", await Attempt(b));
+    }
+
+    [Theory]
+    [InlineData("192.0.2.7", "192.0.2.7")]
+    [InlineData("::ffff:192.0.2.7", "192.0.2.7")]
+    [InlineData("2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::/64")]
+    [InlineData("2001:db8:1:2:1::1", "2001:db8:1:2::/64")]
+    public void LimitsCountAnIPv6ClientByItsSlash64(string address, string peer) =>
+        Assert.Equal(peer, RelayServer.PeerOf(System.Net.IPAddress.Parse(address)));
+
     private static string AddressOf(ECDsa key) => RelayProtocol.AddressForKey(Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo()));
 
     [Fact]

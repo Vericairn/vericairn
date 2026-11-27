@@ -20,11 +20,25 @@ internal sealed class RelayServer(TimeProvider clock)
     private const int WindowSeconds = 10;
     private const int SocketLimit = 4096;
     private const int PeerSocketLimit = 256;
-    private const int RegistrationLimit = 1024;
-    private const int PeerRegistrationLimit = 16;
+    private const int RegistrationLimit = 256;
+    private const int PeerRegistrationLimit = 8;
     private readonly Dictionary<string, int> peerSockets = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> peerRegistrations = new(StringComparer.Ordinal);
     private int sockets;
+
+    /// <summary>
+    /// The client a connection's limits are counted against: an IPv4 address, or an IPv6 address's /64, since one IPv6 client
+    /// commonly holds a whole /64. Clients behind one NAT address share its budget.
+    /// </summary>
+    internal static string PeerOf(System.Net.IPAddress? address)
+    {
+        if (address is null) return "unknown";
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6) return address.ToString();
+        byte[] bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new System.Net.IPAddress(bytes) + "/64";
+    }
 
     /// <summary>
     /// Serves one upgraded WebSocket from the client at <paramref name="peer"/>. Upgraded sockets fall outside Kestrel's connection
@@ -189,7 +203,7 @@ internal sealed class RelayServer(TimeProvider clock)
         string nonce;
         lock (gate)
         {
-            if (!registrations.TryGetValue(ticket.Address, out registration) || registration.Saturated || !registration.CanJoin(ticket, now))
+            if (!registrations.TryGetValue(ticket.Address, out registration) || registration.Saturated(now) || !registration.CanJoin(ticket, now))
             {
                 return;
             }
@@ -265,27 +279,37 @@ internal sealed class RelayServer(TimeProvider clock)
         private int calls;
         private int unverified;
 
-        // Joins whose ticket did not verify in this window; past the limit they are refused before verifying, at no signature's cost.
-        internal bool Saturated => unverified >= UnverifiedLimit;
 
         internal Channel<RelayMessage> Requests { get; } = Channel.CreateBounded<RelayMessage>(AddressLimit);
 
         internal Dictionary<string, Join> Joins { get; } = new(StringComparer.Ordinal);
 
-        internal bool CanJoin(RelayTicket ticket, long now)
+        // Starts a new window when the clock has moved past the current one, resetting every per-window budget.
+        private void Roll(long now)
         {
             long current = now / WindowSeconds;
-            if (current != window)
+            if (current == window) return;
+            window = current;
+            calls = 0;
+            unverified = 0;
+            ticketUses.Clear();
+            foreach (string device in revoked.Where(item => item.Value.Expires <= now).Select(item => item.Key).ToArray())
             {
-                window = current;
-                calls = 0;
-                unverified = 0;
-                ticketUses.Clear();
-                foreach (string device in revoked.Where(item => item.Value.Expires <= now).Select(item => item.Key).ToArray())
-                {
-                    revoked.Remove(device);
-                }
+                revoked.Remove(device);
             }
+        }
+
+        // Whether this window's joins without a valid ticket have reached their limit; past it they are refused before verifying,
+        // at no signature's cost, until the window ends.
+        internal bool Saturated(long now)
+        {
+            Roll(now);
+            return unverified >= UnverifiedLimit;
+        }
+
+        internal bool CanJoin(RelayTicket ticket, long now)
+        {
+            Roll(now);
 
             // A join that presents no valid ticket draws on a budget of its own, so joins without the key cannot use up the budget
             // a valid ticket draws on.

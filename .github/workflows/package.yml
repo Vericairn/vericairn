@@ -269,7 +269,8 @@ jobs:
               *) tar -C "out-relay/$rid" -czf "dist/vericairn-relay-$VERSION-$rid.tar.gz" . ;;
             esac
           done
-          out-relay/linux-x64/bin/vericairn-relay --help >/dev/null 2>&1 || test -x out-relay/linux-x64/bin/vericairn-relay
+          # The relay is a server with no command of its own to exit on: check the published binary is there and executable.
+          test -x out-relay/linux-x64/bin/vericairn-relay && test -s "dist/vericairn-relay-$VERSION-linux-x64.tar.gz"
           # Locked restores leave every committed lock file as it is.
           git diff --exit-code -- '*.lock.json'
       - name: Compare every platform's library assemblies
