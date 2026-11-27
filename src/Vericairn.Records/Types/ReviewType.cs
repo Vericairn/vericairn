@@ -111,7 +111,7 @@ public sealed class ReviewType : IRecordType
                 RecordReference? parsed = RecordParser.ParseReference(reference.Element, reference.Location, context.BodyFindings);
                 if (parsed is not null && context.RequireReference("conditions.read", parsed.Id, parsed.Type) is RecordEnvelope target && parsed.Hash is not null && parsed.Hash != target.ComputedHash)
                 {
-                    reference.Error("review.read", "hash", $"Record {parsed.Id} does not have the pinned hash; an evaluation names the exact records it read.");
+                    reference.RelationshipError("review.read", "hash", $"Record {parsed.Id} does not have the pinned hash; an evaluation names the exact records it read.");
                 }
             }
 

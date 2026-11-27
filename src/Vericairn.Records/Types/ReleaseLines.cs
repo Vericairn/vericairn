@@ -82,7 +82,7 @@ public static partial class ReleaseLines
                     .Where(r => r.AtTime <= context.Record.AtTime && PolicyRecords.ReleaseMatchesProduct(context.Model, r, context.Record.Id) && Line(r.Body) == name)
                     .Select(r => Channel(r.Body));
                 if (earlier.Any(c => c != channel) || released.Any(c => c != channel && !(c == "prerelease" && channel is "stable" or "lts")))
-                    declaration.Error("product.line-channel", "channel", "A declared or released line keeps its channel.");
+                    declaration.RelationshipError("product.line-channel", "channel", "A declared or released line keeps its channel.");
             }
         }
         if (body.Since(3, "cadence") && body.Nested("cadence", false) is { } cadence)
@@ -90,7 +90,7 @@ public static partial class ReleaseLines
             RecordEnvelope? policy = PolicyRecords.Reference(context, cadence.Nested("policy", true), true, "estate-policy");
             string? rule = PolicyRecords.Key(cadence, "rule");
             if (policy is not null && !DutyRecords.IsDuty(DutyRecords.Rule(policy, rule)))
-                cadence.Error("product.cadence", "rule", "Cadence must name a recurring-duty rule in the exact policy revision.");
+                cadence.RelationshipError("product.cadence", "rule", "Cadence must name a recurring-duty rule in the exact policy revision.");
             cadence.NoOtherKeys();
         }
     }
@@ -114,14 +114,14 @@ public static partial class ReleaseLines
         reference.NoOtherKeys();
         RecordEnvelope? release = context.RequireReference("backportOf", id, "release");
         if (release is null) return;
-        if (hash != release.ComputedHash) reference.Error("release.backport-hash", "hash", "The backport pins the exact release hash.");
+        if (hash != release.ComputedHash) reference.RelationshipError("release.backport-hash", "hash", "The backport pins the exact release hash.");
         if (!context.Model.IsCurrent(release) || EstateModel.BodyString(release, "status") != "published")
-            reference.Error("release.backport-published", "id", "A backport names a current published release, never a candidate or withdrawn release.");
+            reference.RelationshipError("release.backport-published", "id", "A backport names a current published release, never a candidate or withdrawn release.");
         if (!PolicyRecords.ReleaseMatchesProduct(context.Model, release, context.Record.Subject?.Id))
-            reference.Error("release.backport-product", "id", "A backport names a release of the same product.");
-        if (Line(release.Body) == line) reference.Error("release.backport-line", "id", "A backport carries a release from another line.");
+            reference.RelationshipError("release.backport-product", "id", "A backport names a release of the same product.");
+        if (Line(release.Body) == line) reference.RelationshipError("release.backport-line", "id", "A backport carries a release from another line.");
         if (release.Id == context.Record.Id || release.AtTime > context.Record.AtTime)
-            reference.Error("release.backport-time", "id", "A backport names an already recorded publication.");
+            reference.RelationshipError("release.backport-time", "id", "A backport names an already recorded publication.");
     }
 
     private static IEnumerable<JsonElement> Declarations(RecordEnvelope product) => PolicyRecords.Items(PolicyRecords.Property(product.Body, "lines"));

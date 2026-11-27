@@ -39,7 +39,7 @@ internal static class ProducedBy
 
             if (type is not null && context.RequireReference("provenance.inputs", id, type) is RecordEnvelope pinned && pinned.ComputedHash != hash)
             {
-                input.Error("provenance.inputs", "hash", "The input does not have the recorded content hash.");
+                input.RelationshipError("provenance.inputs", "hash", "The input does not have the recorded content hash.");
             }
         }
 

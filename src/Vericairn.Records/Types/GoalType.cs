@@ -215,7 +215,7 @@ public sealed class GoalType : IRecordType
         string? subject = predicate.Ulid("subject", false);
         if (subject is not null && context.Find(subject) is null)
         {
-            predicate.Error("body.reference", "subject", $"'subject' references {subject}, which does not exist in this estate.");
+            predicate.RelationshipError("body.reference", "subject", $"'subject' references {subject}, which does not exist in this estate.");
         }
 
         string? product = predicate.Ulid("product", false);
@@ -225,7 +225,7 @@ public sealed class GoalType : IRecordType
         }
         else if (product is not null && context.Find(product) is not { Type: "product" })
         {
-            predicate.Error("body.reference", "product", $"'product' references {product}, which is not a product record of this estate.");
+            predicate.RelationshipError("body.reference", "product", $"'product' references {product}, which is not a product record of this estate.");
         }
 
         BodyReader? fields = predicate.Nested("fields", false);

@@ -103,8 +103,11 @@ public sealed class PolicyExceptionType : IRecordType
                 case "pair":
                     IReadOnlyList<RecordEnvelope> assignments = PolicyRecords.References(context, target, "assignments", true, false, "assignment");
                     int named = PolicyRecords.Items(PolicyRecords.Property(target.Element, "assignments")).Count();
-                    if (named != 2 || assignments.Count == 2 && PolicyRecords.Identity(context.Model, assignments[0]) == PolicyRecords.Identity(context.Model, assignments[1]))
-                        target.Error("exception.pair", "assignments", "A pair names exactly two revisions of two different assignments.");
+                    const string pair = "A pair names exactly two revisions of two different assignments.";
+                    if (named != 2)
+                        target.Error("exception.pair", "assignments", pair);
+                    else if (assignments.Count == 2 && PolicyRecords.Identity(context.Model, assignments[0]) == PolicyRecords.Identity(context.Model, assignments[1]))
+                        target.RelationshipError("exception.pair", "assignments", pair);
                     if (PolicyRecords.Property(target.Element, "submission").ValueKind != JsonValueKind.Undefined) target.Error("exception.pair", "submission", "A pair is excepted at assignment start, never for a release submission.");
                     break;
                 case "occurrence":

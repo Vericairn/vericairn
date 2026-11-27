@@ -49,7 +49,7 @@ public sealed partial class EstateService
             JsonObject body = JsonNode.Parse(draft.Body.GetRawText())!.AsObject();
             byte[] authored = RevisionLines.AuthoredContent(after);
             body["hash"] = ContentHash.Sha256(authored); body["bytes"] = authored.LongLength;
-            (AuthoredRecord? pin, string? refusal) = AuthorLocked(draft with { Body = JsonSerializer.SerializeToElement(body) }, model);
+            (AuthoredRecord? pin, string? refusal) = AuthorLocked(draft with { Body = JsonSerializer.SerializeToElement(body) }, model, scanContent: true);
             if (pin is null) return new(null, null, new("refused", refusal!, []));
             EstateModel projected = LoadWith([pin]);
             if (!after.AsSpan().SequenceEqual(Render(projected, after)))

@@ -2853,16 +2853,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
-    private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
+    private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null, bool scanContent = false)
     {
-        (AuthoredRecord? record, Problem? problem) = AuthorCheckedLocked(draft, current, signers);
+        (AuthoredRecord? record, Problem? problem) = AuthorCheckedLocked(draft, current, signers, scanContent);
         string? refusal = problem is { Findings.Count: > 0 }
             ? $"{problem.Message} {string.Join(" ", problem.Findings.Select(f => f.Message))}"
             : problem?.Message;
         return (record, refusal);
     }
 
-    private (AuthoredRecord? Record, Problem? Problem) AuthorCheckedLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers)
+    private (AuthoredRecord? Record, Problem? Problem) AuthorCheckedLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers, bool scanContent = true)
     {
         // From 0.9.4 (FIX-159): every signature made on this machine, and every record prepared unsigned, passes here; none is made while
         // the estate leaves records unread.
@@ -2930,8 +2930,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refused(exception.Message);
         }
 
-        // FIX-158: refuse deterministic body errors before the signing boundary. The full estate is still judged under the write lock.
-        if (CheckRecordBody(current, unsigned) is Problem rejected)
+        // FIX-158: a single-record write checks its own bytes before signing. Batch writes scan the signed bytes under the
+        // write lock, where the refusal includes findings for every affected record.
+        if (CheckRecordBody(current, unsigned, scanContent) is Problem rejected)
         {
             return (null, rejected);
         }
@@ -2977,10 +2978,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         static (AuthoredRecord?, Problem?) Refused(string message) => (null, new Problem("refused", message, []));
     }
 
-    private static Problem? CheckRecordBody(EstateModel model, AuthoredRecord record)
+    private static Problem? CheckRecordBody(EstateModel model, AuthoredRecord record, bool scanContent)
     {
         var errors = new FindingList();
-        foreach (Finding finding in EstateLoader.CheckRecordBody(model, record.Envelope, record.RelativePath, record.Bytes).Where(f => f.Severity == Severity.Error))
+        FindingList findings = EstateLoader.CheckRecordBody(model, record.Envelope,
+            scanContent ? record.RelativePath : null, scanContent ? record.Bytes : null);
+        foreach (Finding finding in findings.Where(f => f.Severity == Severity.Error))
         {
             errors.Add(finding);
         }

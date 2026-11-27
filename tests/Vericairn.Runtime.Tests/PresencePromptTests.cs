@@ -221,6 +221,32 @@ public sealed class PresencePromptTests
     }
 
     [Fact]
+    public void AProductChecksItsRepositoryResourceUnderTheWriteLock()
+    {
+        using var f = new OperatorCloseFixture();
+        var service = f.Estate.Add("resource", f.Estate.OperatorId,
+            """{"kind":"service","name":"Site","role":"Documentation","location":{"url":"https://example.invalid"},"visibility":"public"}""");
+        RecordingCustody custody = Presence(f);
+        var body = new JsonObject
+        {
+            ["name"] = "Sample product", ["slug"] = "sample", ["summary"] = "The product under test.",
+            ["editions"] = new JsonArray(new JsonObject { ["name"] = "Sample", ["slug"] = "sample", ["summary"] = "The base edition." }),
+            ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "The command line." }),
+            ["changes"] = new JsonObject { ["provider"] = "github", ["repository"] = service.Id, ["target"] = "main", ["requiredChecks"] = new JsonArray() },
+        };
+        bool judged = false;
+        f.Api.BeforeValidatingRecords = _ => judged = f.Api.Session.WriteLock?.Entered == true;
+
+        WriteOutcome refused = f.Api.NewRecord(new("product", f.Estate.OperatorId, JsonSerializer.SerializeToElement(body)));
+
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "product.changes" && finding.Severity == "error");
+        Assert.Single(custody.Reasons);
+        Assert.True(judged);
+        Assert.Empty(f.Estate.Load().OfType("product"));
+    }
+
+    [Fact]
     public async Task ASignatureBeyondThePlanIsAnnouncedBeforeItsPromptAndARevisedPathIsAnnouncedBeforeTheNext()
     {
         var counter = new PresenceCounter();

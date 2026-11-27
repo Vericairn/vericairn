@@ -30,10 +30,16 @@ internal static class ReleaseReviewRules
             if (value is null) return;
             RecordReference? reference = RecordParser.ParseReference(value.Element, value.Location, context.BodyFindings);
             RecordEnvelope? target = reference is null ? null : context.RequireReference("releaseReview." + field, reference.Id, type);
-            if (reference is not null && (reference.Type != type || reference.Hash is null || target?.ComputedHash != reference.Hash))
-                value.Error("decision.release-review", "hash", "A release review pins the exact " + type + " revision and hash.");
+            if (reference is not null)
+            {
+                string message = "A release review pins the exact " + type + " revision and hash.";
+                if (reference.Type != type || reference.Hash is null)
+                    value.Error("decision.release-review", "hash", message);
+                else if (target?.ComputedHash != reference.Hash)
+                    value.RelationshipError("decision.release-review", "hash", message);
+            }
             if (field == "candidate" && target is not null && EstateModel.BodyString(target, "status") != "candidate")
-                value.Error("decision.release-review", "id", "The review names a release candidate.");
+                value.RelationshipError("decision.release-review", "id", "The review names a release candidate.");
         }
     }
 }

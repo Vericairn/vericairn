@@ -245,7 +245,7 @@ public sealed partial class EstateService
             return (null, $"No history checkpoint with trigger {trigger} was written: its inventory could not be stored in the estate's objects ({(exception is UnauthorizedAccessException ? "access was denied" : "the store refused it")}).");
         }
 
-        (AuthoredRecord? checkpoint, string? refusal) = AuthorLocked(new RecordDraft("history-checkpoint", by, draft.Body, At: at), model, [signer]);
+        (AuthoredRecord? checkpoint, string? refusal) = AuthorLocked(new RecordDraft("history-checkpoint", by, draft.Body, At: at), model, [signer], scanContent: true);
         if (checkpoint is null || checkpoint.Envelope.Signatures.Count == 0)
         {
             RemoveObjects(stored);
@@ -651,8 +651,8 @@ public sealed partial class EstateService
         EstateModel current = LoadWith([]);
         if (!SignedHistory.Adopted(current) || signers is not null)
         {
-            (AuthoredRecord? alone, string? refusal) = AuthorLocked(draft, current, signers);
-            if (alone is null) return EstateServiceValues.Refuse(refusal!);
+            (AuthoredRecord? alone, Problem? refusal) = AuthorCheckedLocked(draft, current, signers);
+            if (alone is null) return WriteOutcome.Fail(refusal!);
             if (!SignedHistory.Adopted(current) && RemovalRefusal(current, alone) is { } refused) return WriteOutcome.Fail(refused);
             return StoreAuthoredLocked(alone, current);
         }
