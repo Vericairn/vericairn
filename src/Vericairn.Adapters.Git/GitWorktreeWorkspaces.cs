@@ -329,7 +329,9 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         if (cloned.Count > 0 && WorkspaceGitCommand.RunWithInput(sender, out string present, TimeSpan.FromMinutes(2),
             string.Concat(cloned.Select(commit => commit + "^{commit}\n")), "cat-file", "--batch-check=%(objectname)") == 0)
             held = [.. present.Split('\n').Where(line => line.Length is 40 or 64 && line.All(char.IsAsciiHexDigitLower))];
-        string revisions = head + "\n" + string.Concat(held.Where(commit => commit != head).Select(commit => "^" + commit + "\n"));
+        // A head the clone already names, as for a run that made no commit, adds nothing.
+        if (held.Contains(head)) return false;
+        string revisions = head + "\n" + string.Concat(held.Select(commit => "^" + commit + "\n"));
 
         if (WorkspaceGitCommand.RunWithInput(sender, out string reachable, TimeSpan.FromMinutes(10), revisions, "rev-list", "--objects", "--stdin") != 0)
             throw new IOException("The workspace's new objects could not be listed for the registered clone.");
@@ -371,17 +373,31 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         // A pack's name is the hash of the objects it holds, so a pack of that name already in the clone holds these objects, though
         // its bytes may differ: such a pack is left whole, its pack and index never replaced or mixed with this one's. Decided before
         // anything is published.
+        // A pack and its index are held together. Where only one of them is there, as after an interrupted retention, it must be
+        // byte for byte the one staged here, and the other is published beside it; any other half is refused.
         HashSet<string> held = [.. staged.Select(Path.GetFileNameWithoutExtension).OfType<string>().Distinct(StringComparer.Ordinal).Where(stem =>
         {
             using var heldPack = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, Path.Combine(packs, stem + ".pack"));
             using var heldIndex = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, Path.Combine(packs, stem + ".idx"));
-            return heldPack is not null || heldIndex is not null;
+            return heldPack is not null && heldIndex is not null;
         })];
         foreach (string file in staged.OrderByDescending(Path.GetExtension, StringComparer.Ordinal))
         {
             if (held.Contains(Path.GetFileNameWithoutExtension(file))) continue;
             string member = Path.Combine(packs, Path.GetFileName(file));
             using var bytes = File.OpenRead(file);
+            using (var half = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, member))
+            {
+                if (half is not null)
+                {
+                    using var present = new FileStream(half, FileAccess.Read);
+                    if (!SHA256.HashData(present).AsSpan().SequenceEqual(SHA256.HashData(bytes)))
+                        throw new IOException("The registered clone holds half of a pack under this name with different bytes; remove the stray pack file and retry.");
+                    continue;
+                }
+            }
+
+            bytes.Position = 0;
 
             string temporary = Path.Combine(packs, ".vericairn-" + Guid.NewGuid().ToString("N"));
             AcquisitionWorkingTree.WriteNew(destination.Boundary, temporary, bytes);

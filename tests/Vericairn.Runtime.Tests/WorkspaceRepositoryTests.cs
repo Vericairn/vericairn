@@ -163,6 +163,22 @@ public class WorkspaceRepositoryTests
     }
 
     [Fact]
+    public void ARunWithNoCommitOnANewBranchAddsNoPack()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/nothing", null, Path.Combine(run.Scratch, "workspace"));
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        Assert.Null(provider.CheckScope(workspace, baseline, ["widget/**"]).Problem);
+
+        string packs = Path.Combine(run.Clone, ".git", "objects", "pack");
+        int before = Directory.Exists(packs) ? Directory.GetFiles(packs, "*.pack").Length : 0;
+        Assert.Null(provider.RetainForReview(workspace));
+        Assert.Equal(workspace.Commit, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + workspace.Branch));
+        Assert.Equal(before, Directory.Exists(packs) ? Directory.GetFiles(packs, "*.pack").Length : 0);
+    }
+
+    [Fact]
     public void RetentionCarriesACommitAReusedWorkspaceNeverRetained()
     {
         using var run = new RunEstate();
