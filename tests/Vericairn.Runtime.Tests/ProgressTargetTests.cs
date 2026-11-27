@@ -456,7 +456,7 @@ public sealed class ProgressTargetTests : IDisposable
         RecordEnvelope reopened = estate.Add("ask", estate.OperatorId, AskBody("Publish the notes?", "open"), supersedes: withdrawn.Id);
         ProgressOutcome told = Assert.Single(Take(Runner(), Event("ask", reopened, change: "raised", to: estate.OperatorId)));
         Assert.Equal(("stopped", key), (told.Action, told.CommentKey));
-        Assert.Contains($"vericairn progress target resolve status {key}", told.Detail, StringComparison.Ordinal);
+        Assert.Contains($"vericairn progress target resolve \"status\" \"{key}\"", told.Detail, StringComparison.Ordinal);
         Assert.Single(adapter.Comments);
         Assert.Single(adapter.Calls, call => call == "comment");
 

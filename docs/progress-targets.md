@@ -84,13 +84,15 @@ run's step and stop kind), not one time it waits. A commented or refused entry o
 only while the wait is listed: a step's stop is listed while its delivery is due or delivered and its goal is active. Once a batch
 that reads the waits no longer lists it, the entry is dropped, and the next time the same thing is listed, as a second review round
 of the same step is, it is commented on again. A stop that leaves the list for a moment, queued behind three others for the same
-person or with its goal paused, is commented on again when listed again, as before this version. An uncertain entry is never
+person or with its goal no longer active, is commented on again when listed again, as before this version. An uncertain entry is never
 dropped: when its wait is listed again, nothing is sent, and the follower prints a stopped outcome naming the entry. A wait that ends
 and begins again while no follower is running is not commented on again, as before.
 
 After checking a comment's destination, remove its entry with `vericairn progress target resolve <name> <key>`, which sends
 nothing. The same event or wait seen again is then commented on. It refuses an entry with no outcome while a follower holds the
-target, since that follower is sending it. Entries are otherwise kept until resolved or until the target is removed.
+target, since that follower is sending it. Quote the key as the follower prints it: a step's key can hold spaces. Resolve only
+the entries `list` shows: removing a commented entry lets the same comment be sent again if its event or wait is seen again.
+Entries are otherwise kept until resolved or until the target is removed.
 
 Each write of `progress-targets-state.json` reaches the disk, and its replacement of the earlier file is synchronized where the
 system allows a directory to be (macOS and Linux), so a machine that stops loses at most the write in progress. On Windows the

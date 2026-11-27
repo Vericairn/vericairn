@@ -156,7 +156,7 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
                 if (entry.Outcome is not null) continue;
                 comments = comments.SetItem(key, entry with { Outcome = "uncertain" });
                 recovered.Add(new ProgressOutcome(name, "uncertain", entry.PlaceUrl, entry.Form, [],
-                    $"The follower stopped before saving the outcome for comment {key}. Check the original destination. The follower will keep the entry without retrying; resolve it with 'vericairn progress target resolve {name} {key}'.")
+                    $"The follower stopped before saving the outcome for comment {key}. Check the original destination. The follower will keep the entry without retrying; resolve it with 'vericairn progress target resolve \"{name}\" \"{key}\"'.")
                     { CommentKey = key });
             }
             return comments == state.Comments ? state : state with { Comments = comments };
@@ -220,7 +220,7 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
         // Waiting again under a key whose earlier comment is uncertain: nothing is sent while its entry is kept, and a person is told.
         foreach ((string key, ProgressTargetComment entry) in held)
             outcomes.Add(new ProgressOutcome(configuration.Name, "stopped", entry.PlaceUrl, entry.Form, [],
-                $"An earlier comment for {key} is uncertain, so nothing is sent for it while its entry is kept. Check {entry.PlaceUrl}, then resolve it with 'vericairn progress target resolve {configuration.Name} {key}'.")
+                $"An earlier comment for {key} is uncertain, so nothing is sent for it while its entry is kept. Check {entry.PlaceUrl}, then resolve it with 'vericairn progress target resolve \"{configuration.Name}\" \"{key}\"'.")
                 { CommentKey = key });
         foreach ((string key, Remark remark) in comments)
         {
