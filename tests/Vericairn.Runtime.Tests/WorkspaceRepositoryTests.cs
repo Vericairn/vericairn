@@ -77,6 +77,17 @@ public class WorkspaceRepositoryTests
         Assert.Contains("core.hookspath", refused.Message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(workspace));
         Assert.False(File.Exists(marker));
+
+        RepositoryObservation observed = new GitCommandAdapter().Inspect(run.Clone);
+        PreparedWorkspace prepared = provider.Prepare(run.Clone, "work/hook", null, workspace, run.Scratch,
+            [new RepositoryConfigurationReview(observed.ConfigurationHash!, observed.WorktreeConfigurationHash)]);
+        Assert.True(Directory.Exists(prepared.Path));
+        Assert.False(File.Exists(marker));
+        if (!OperatingSystem.IsWindows())
+        {
+            RunEstate.Git(run.Clone, "checkout", "--quiet", "--detach", "HEAD");
+            Assert.True(File.Exists(marker));
+        }
     }
 
     [Fact]
@@ -204,6 +215,24 @@ public class WorkspaceRepositoryTests
         Assert.Null(provider.CheckScope(workspace, baseline, ["**"]).Problem);
         Assert.Contains("moved unexpectedly", provider.RetainForReview(workspace), StringComparison.Ordinal);
         Assert.Equal(moved, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + branch));
+    }
+
+    [Fact]
+    public void RetentionRefusesAConflictingPackedReference()
+    {
+        using var run = new RunEstate();
+        const string branch = "work/packed";
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, branch, null, Path.Combine(run.Scratch, "workspace"));
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        RunEstate.Git(workspace.Path, "commit", "--allow-empty", "-q", "-m", "Agent change");
+        Assert.Null(provider.CheckScope(workspace, baseline, ["**"]).Problem);
+        RunEstate.Git(run.Clone, "branch", branch + "/child");
+        RunEstate.Git(run.Clone, "pack-refs", "--all");
+
+        Assert.Contains("a packed branch name conflicts", provider.RetainForReview(workspace), StringComparison.Ordinal);
+        Assert.Equal(branch + "/child", RunEstate.Git(run.Clone, "for-each-ref", "--format=%(refname:short)", "refs/heads/work"));
+        Assert.False(File.Exists(Path.Combine(run.Clone, ".git", "packed-refs.lock")));
     }
 
     [Fact]

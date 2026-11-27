@@ -129,11 +129,11 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         }
     }
 
-    internal (AcquisitionGitView View, AcquisitionConfiguration Settings) Acquire(GitHardening hardening, string path, string? boundary)
+    internal (AcquisitionGitView View, AcquisitionConfiguration Settings) Acquire(GitHardening hardening, string path, string? boundary, bool includeObjects = true)
     {
         try
         {
-            var view = new AcquisitionGitView(path, boundary, Path.Combine(hardening.Control, "repository"));
+            var view = new AcquisitionGitView(path, boundary, Path.Combine(hardening.Control, "repository"), includeObjects);
             var settings = new AcquisitionConfiguration(view, configuration =>
                 Git(hardening, view.Directory, out string entries, "config", "--file", configuration, "--no-includes", "--null", "--list") == 0
                     ? entries : throw new ProviderRefusedException("Git could not parse the repository's configuration as data."));
@@ -161,10 +161,14 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
             && !warnings.Contains("could not open directory", StringComparison.Ordinal) ? status : null;
     }
 
-    internal static GitWorkingTree WorkingTree(GitHardening hardening, AcquisitionGitView view, AcquisitionConfiguration settings)
+    internal GitWorkingTree WorkingTree(GitHardening hardening, AcquisitionGitView view, AcquisitionConfiguration settings)
     {
         string mirror = Path.Combine(hardening.Control, "working-tree");
         view.CopyIndex();
+        // List cached entries in the bare administration before Git gets a working directory to compare them against.
+        // --sparse keeps sparse-directory entries visible, even when their trees have no files.
+        (HashSet<string> submodules, bool sparse) = ReadIndexNames("--sparse");
+        if (sparse) submodules.UnionWith(ReadIndexNames().Gitlinks);
         Directory.CreateDirectory(mirror);
         List<string> options = ["--git-dir=" + view.Directory, "--work-tree=" + mirror, "-c", "core.bare=false"];
         if (File.Exists(Path.Combine(view.Directory, "info", "sparse-checkout")))
@@ -174,21 +178,36 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
             options.Add("-c");
             options.Add(setting);
         }
-        var tree = new GitWorkingTree(mirror, Path.Combine(view.Directory, "index"), options);
-        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        hardening.Apply(info, tree, ["ls-files", "--stage", "-z"]);
-        ProcessResult index = BoundedProcess.Run(info, TimeSpan.FromSeconds(30));
-        if (index.Outcome != ProcessOutcome.Exited || index.ExitCode != 0)
-            throw new ProviderRefusedException("Git could not read the working tree completely: its copied index is unavailable.");
-        bool insensitive = OperatingSystem.IsWindows() || settings.Comparison.Contains("core.ignorecase=true", StringComparer.OrdinalIgnoreCase);
-        var submodules = new HashSet<string>(insensitive ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        foreach (string entry in index.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
-        {
-            int tab = entry.IndexOf('\t', StringComparison.Ordinal);
-            if (tab >= 0 && entry.StartsWith("160000 ", StringComparison.Ordinal)) submodules.Add(entry[(tab + 1)..]);
-        }
         view.CopyWorkingTree(mirror, submodules);
-        return tree;
+        return new GitWorkingTree(mirror, Path.Combine(view.Directory, "index"), options);
+
+        (HashSet<string> Gitlinks, bool Sparse) ReadIndexNames(params string[] extra)
+        {
+            var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+                CreateNoWindow = true, WorkingDirectory = view.Directory };
+            hardening.Apply(info, ["--git-dir=" + view.Directory, "ls-files", "--cached", "--stage", "-z", .. extra]);
+            ProcessResult index = run(info);
+            if (index.Outcome != ProcessOutcome.Exited || index.ExitCode != 0
+                || index.StandardOutput.Length != 0 && index.StandardOutput[^1] != '\0')
+                throw new ProviderRefusedException("Git could not read the working tree completely: its copied index is unavailable.");
+
+            bool insensitive = OperatingSystem.IsWindows() || settings.Comparison.Contains("core.ignorecase=true", StringComparer.OrdinalIgnoreCase);
+            var gitlinks = new HashSet<string>(insensitive ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            bool sparseIndex = false;
+            foreach (string entry in index.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int tab = entry.IndexOf('\t', StringComparison.Ordinal);
+                if (tab < 0) throw new ProviderRefusedException("Git could not read the working tree completely: its copied index is malformed.");
+                string path = entry[(tab + 1)..];
+                bool directory = entry.StartsWith("040000 ", StringComparison.Ordinal) && path.EndsWith('/');
+                string name = directory ? path[..^1] : path;
+                if (!AcquisitionWorkingTree.IsIndexPath(name))
+                    throw new ProviderRefusedException("The copied Git index contains an unsafe path " + System.Text.Json.JsonSerializer.Serialize(path) + ".");
+                sparseIndex |= directory;
+                if (entry.StartsWith("160000 ", StringComparison.Ordinal)) gitlinks.Add(name);
+            }
+            return (gitlinks, sparseIndex);
+        }
     }
 
     private int Git(GitHardening hardening, string path, out string output, params string[] arguments) => Git(hardening, path, null, out output, out _, arguments);

@@ -22,17 +22,17 @@ internal sealed class GitBlobBatch : IDisposable
     // A single read was stopped after this long; each object now has the same allowance.
     private static readonly TimeSpan Allowance = TimeSpan.FromSeconds(30);
     private readonly Process process;
-    private readonly GitHardening hardening;
+    private readonly GitHardening? ownedView;
     private readonly StreamWriter input;
     private readonly Stream requests;
     private readonly BufferedStream responses;
     private readonly Task errors;
     private bool ended;
 
-    private GitBlobBatch(Process process, GitHardening hardening)
+    private GitBlobBatch(Process process, GitHardening? ownedView)
     {
         this.process = process;
-        this.hardening = hardening;
+        this.ownedView = ownedView;
         input = process.StandardInput;
         requests = input.BaseStream;
         responses = new BufferedStream(process.StandardOutput.BaseStream, 1 << 16);
@@ -41,20 +41,19 @@ internal sealed class GitBlobBatch : IDisposable
     }
 
     /// <summary>Starts the reader in the clone, or returns null when git cannot start there.</summary>
-    internal static GitBlobBatch? Start(string clone)
+    internal static GitBlobBatch? Start(string clone, GitHardening? view = null)
     {
-        GitHardening hardening;
-        try { hardening = GitHardening.Create(); }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
+        GitHardening? owned = null;
         try
         {
-            ProcessStartInfo info = GitFileSource.StartInfo(clone, hardening, ["cat-file", "--batch"]);
+            view ??= owned = GitHardening.Create();
+            ProcessStartInfo info = GitFileSource.StartInfo(clone, view, ["cat-file", "--batch"]);
             info.RedirectStandardInput = true;
-            return new(GitFileSource.Start(info), hardening);
+            return new(GitFileSource.Start(info), owned);
         }
         catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException or Vericairn.Runtime.Providers.ProviderRefusedException)
         {
-            hardening.Dispose();
+            owned?.Dispose();
             return null;
         }
     }
@@ -100,7 +99,7 @@ internal sealed class GitBlobBatch : IDisposable
         {
             responses.Dispose();
             process.Dispose();
-            hardening.Dispose();
+            ownedView?.Dispose();
         }
     }
 

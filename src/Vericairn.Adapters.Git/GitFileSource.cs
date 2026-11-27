@@ -46,13 +46,16 @@ public sealed partial class GitFileSource : IDocumentSource
     /// <inheritdoc />
     public DocumentSourceSelection ReadSelection(EstateModel model, RecordEnvelope declaration, string commit, DocumentGeneratorDescriptor generator)
     {
-        if (select is null || clone(model, declaration) is not { } directory || Tree(directory, commit) is not { } tree)
+        if (select is null || clone(model, declaration) is not { } directory)
             return new(DocumentGenerationStatus.Unavailable, [], commit, "The exact commit or installed source selector is unavailable.");
+        using GitHardening? hardening = OpenView(directory, out string? problem);
+        if (hardening is null || Tree(hardening, directory, commit) is not { } tree)
+            return new(DocumentGenerationStatus.Unavailable, [], commit, problem ?? "The exact commit or installed source selector is unavailable.");
         long total = 0;
         return select(declaration, generator, commit, path =>
         {
             if (!DocumentPatterns.IsSafeSourcePath(path) || !tree.TryGetValue(path, out string? mode) || mode is not ("100644" or "100755")
-                || RunIsolated(directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || (total += bytes.Length) > 64L * 1024 * 1024) return null;
+                || RunIsolated(hardening, directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || (total += bytes.Length) > 64L * 1024 * 1024) return null;
             return DocumentSourceSnapshot.Content("file", path, EstateModel.BodyString(declaration, "repository") ?? "repository", path, ContentHash.Sha256(bytes), bytes);
         });
     }
@@ -60,24 +63,27 @@ public sealed partial class GitFileSource : IDocumentSource
     /// <inheritdoc />
     public DocumentFileInventory ReadInventory(EstateModel model, RecordEnvelope declaration, string commit)
     {
-        if (clone(model, declaration) is not { } directory || Tree(directory, commit) is not { } tree)
+        if (clone(model, declaration) is not { } directory)
             return new(DocumentGenerationStatus.Unavailable, [], commit, "The complete candidate tree is unavailable.");
+        using GitHardening? hardening = OpenView(directory, out string? problem);
+        if (hardening is null || Tree(hardening, directory, commit) is not { } tree)
+            return new(DocumentGenerationStatus.Unavailable, [], commit, problem ?? "The complete candidate tree is unavailable.");
         var files = ImmutableArray.CreateBuilder<DocumentFile>();
         long total = 0;
         foreach ((string path, string mode) in tree.Where(p => GeneratedDocumentContract.Owns(declaration, p.Key)).OrderBy(p => p.Key, StringComparer.Ordinal))
         {
             if (mode is not ("100644" or "100755") || !DocumentPatterns.IsSafePath(path)
-                || RunIsolated(directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || bytes.Length > 1048576 || (total += bytes.Length) > 64L * 1024 * 1024)
+                || RunIsolated(hardening, directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || bytes.Length > 1048576 || (total += bytes.Length) > 64L * 1024 * 1024)
                 return new(DocumentGenerationStatus.Unavailable, [], commit, "A candidate member cannot be read as a bounded regular file.");
             files.Add(new(path, [.. bytes]));
         }
         return new(DocumentGenerationStatus.Success, files.ToImmutable(), commit, null);
     }
 
-    private static Dictionary<string, string>? Tree(string directory, string commit)
+    private static Dictionary<string, string>? Tree(GitHardening hardening, string directory, string commit)
     {
-        if (!Patterns.Commit.IsMatch(commit) || Text(directory, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != commit
-            || RunIsolated(directory, out byte[] bytes, "ls-tree", "-r", "-z", "--full-tree", commit) != 0) return null;
+        if (!Patterns.Commit.IsMatch(commit) || Text(hardening, directory, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != commit
+            || RunIsolated(hardening, directory, out byte[] bytes, "ls-tree", "-r", "-z", "--full-tree", commit) != 0) return null;
         var tree = new Dictionary<string, string>(StringComparer.Ordinal);
         var portable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string entry in new UTF8Encoding(false, true).GetString(bytes).Split('\0', StringSplitOptions.RemoveEmptyEntries))
@@ -116,7 +122,9 @@ public sealed partial class GitFileSource : IDocumentSource
     public string? Covered(EstateModel model, RecordEnvelope declaration, IReadOnlyList<string> paths, string commit)
     {
         ArgumentNullException.ThrowIfNull(paths);
-        if (this.clone(model, declaration) is not string clone || Text(clone, "rev-parse", "--verify", "--quiet", commit + "^{commit}") is null)
+        if (this.clone(model, declaration) is not string clone) return null;
+        using GitHardening? hardening = OpenView(clone, out _);
+        if (hardening is null || Text(hardening, clone, "rev-parse", "--verify", "--quiet", commit + "^{commit}") is null)
         {
             return null;
         }
@@ -125,7 +133,7 @@ public sealed partial class GitFileSource : IDocumentSource
         var lines = new StringBuilder();
         foreach (string path in paths.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
         {
-            lines.Append(path).Append('\t').Append(Text(clone, "rev-parse", "--verify", "--quiet", $"{commit}:{path}") ?? "absent").Append('\n');
+            lines.Append(path).Append('\t').Append(Text(hardening, clone, "rev-parse", "--verify", "--quiet", $"{commit}:{path}") ?? "absent").Append('\n');
         }
 
         return "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(lines.ToString())));
@@ -150,6 +158,27 @@ public sealed partial class GitFileSource : IDocumentSource
 
     private static string? Text(string clone, params string[] arguments) =>
         RunIsolated(clone, out byte[] output, arguments) == 0 && Encoding.UTF8.GetString(output).Trim() is { Length: > 0 } text ? text : null;
+
+    private static string? Text(GitHardening hardening, string clone, params string[] arguments) =>
+        RunIsolated(hardening, clone, out byte[] output, arguments) == 0 && Encoding.UTF8.GetString(output).Trim() is { Length: > 0 } text ? text : null;
+
+    internal static GitHardening? OpenView(string clone, out string? problem)
+    {
+        GitHardening? hardening = null;
+        try
+        {
+            hardening = GitHardening.Create();
+            _ = hardening.Acquire(clone);
+            problem = null;
+            return hardening;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ProviderRefusedException)
+        {
+            hardening?.Dispose();
+            problem = error is ProviderRefusedException ? error.Message : "The temporary Git view could not be opened.";
+            return null;
+        }
+    }
 
     /// <summary>Runs one hardened git process in the clone with its own <see cref="GitHardening"/>; -1 when git could not run.</summary>
     internal static int RunIsolated(string clone, out byte[] output, params string[] arguments)

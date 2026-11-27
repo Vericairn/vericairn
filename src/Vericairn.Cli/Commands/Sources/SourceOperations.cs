@@ -90,7 +90,17 @@ internal sealed class SourceOperations(CommandContext context)
         RepositoryObservation observation;
         try
         {
-            observation = (CommandProviders.Git(context, out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path, boundary);
+            ISourceAdapter adapter = CommandProviders.Git(context, out int failure)
+                ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.");
+            observation = adapter.Inspect(path, boundary);
+            if (boundary is not null && observation.GitRedirections.Count > 0)
+            {
+                try { _ = adapter.Inspect(path); }
+                catch (ProviderRefusedException exception)
+                {
+                    return context.Fail("The clone could not be registered: later reads use the repository root as their boundary. " + exception.Message);
+                }
+            }
         }
         catch (ProviderRefusedException exception)
         {

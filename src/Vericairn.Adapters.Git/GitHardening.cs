@@ -46,7 +46,7 @@ internal sealed class GitHardening : IDisposable
     internal GitWorkingTree AcquireWorkingTree(string source)
     {
         AcquisitionGitView view = Acquire(source);
-        return workingCopy ??= GitCommandAdapter.WorkingTree(this, view, acquisition.Settings);
+        return workingCopy ??= new GitCommandAdapter().WorkingTree(this, view, acquisition.Settings);
     }
 
     /// <summary>The directory Vericairn owns for this operation: an empty global configuration and a hooks path with no hooks.</summary>

@@ -42,9 +42,11 @@ internal sealed class AcquisitionConfiguration
                 int delimiter = entry.IndexOf('\n', StringComparison.Ordinal);
                 string name = delimiter < 0 ? entry : entry[..delimiter];
                 string value = delimiter < 0 ? "true" : entry[(delimiter + 1)..];
+                if (name == "extensions.refstorage" && value != "files")
+                    throw new Vericairn.Runtime.Providers.ProviderRefusedException("The repository uses an unsupported Git reference storage format.");
                 if (worktree)
                 {
-                    findings.Add("config.worktree: " + name);
+                    findings.Add("config.worktree: " + FindingName(name));
                     continue;
                 }
                 if (BooleanSettings.Contains(name) && BooleanValues.Contains(value)
@@ -71,10 +73,17 @@ internal sealed class AcquisitionConfiguration
                     && !(name is "core.bare" or "core.logallrefupdates" && BooleanValues.Contains(value))
                     && !(name == "core.repositoryformatversion" && value is "0" or "1"))
                 {
-                    findings.Add(name);
+                    findings.Add(FindingName(name));
                 }
             }
         }
+    }
+
+    private static string FindingName(string name)
+    {
+        int section = name.IndexOf('.', StringComparison.Ordinal);
+        int member = name.LastIndexOf('.');
+        return section >= 0 && member > section ? name[..section] + ".<subsection>" + name[member..] : name;
     }
 
     internal string ObjectFormat { get; private set; } = "sha1";

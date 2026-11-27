@@ -21,7 +21,7 @@ internal sealed class AcquisitionGitView
     private readonly string administration;
     private readonly string common;
 
-    internal AcquisitionGitView(string source, string? allowedRoot, string directory)
+    internal AcquisitionGitView(string source, string? allowedRoot, string directory, bool includeObjects)
     {
         Directory = directory;
         string full = Path.GetFullPath(source);
@@ -68,7 +68,9 @@ internal sealed class AcquisitionGitView
         if (TryAttributes(refs, out _))
             AcquisitionWorkingTree.CopyFrom(boundary, CheckedDirectory(refs, "refs"), Path.Combine(Directory, "refs"));
 
-        CopyObjects(Path.Combine(common, "objects"), Path.Combine(Directory, "objects"), 0);
+        string objects = Path.Combine(Directory, "objects");
+        if (!includeObjects) System.IO.Directory.CreateDirectory(objects);
+        CopyObjects(Path.Combine(common, "objects"), objects, 0, includeObjects);
         Config = ReadBytes(Path.Combine(common, "config"), MetadataLimit) ?? [];
         WorktreeConfig = ReadBytes(Path.Combine(administration, "config.worktree"), MetadataLimit);
         File.WriteAllText(Path.Combine(Directory, "config"), "[core]\nrepositoryformatversion = 0\nbare = true\n");
@@ -81,6 +83,21 @@ internal sealed class AcquisitionGitView
     internal string Common => common;
 
     internal string Boundary => boundary;
+
+    internal bool HasPackedReferenceConflict(string reference)
+    {
+        string packed = Path.Combine(Directory, "packed-refs");
+        if (!File.Exists(packed)) return false;
+        foreach (string line in File.ReadLines(packed))
+        {
+            int separator = line.IndexOf(' ');
+            if (separator < 0 || !WorkspaceGitScope.ObjectId(line[..separator])) continue;
+            string other = line[(separator + 1)..];
+            if (other.StartsWith(reference + "/", StringComparison.Ordinal) || reference.StartsWith(other + "/", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
 
     internal bool CheckedOut(string branch, out bool selected)
     {
@@ -143,13 +160,13 @@ internal sealed class AcquisitionGitView
         catch (ProviderRefusedException) { return null; }
     }
 
-    private void CopyObjects(string source, string target, int depth)
+    private void CopyObjects(string source, string target, int depth, bool includeObjects)
     {
         if (depth > 16 || stores.Count >= 64 || age.Elapsed > TimeSpan.FromSeconds(30))
             throw new ProviderRefusedException("The repository's object redirections exceed the acquisition limit.");
         string store = CheckedDirectory(source, "objects");
         if (!stores.Add(store)) return;
-        AcquisitionWorkingTree.CopyFrom(boundary, store, target, ObjectMember);
+        if (includeObjects) AcquisitionWorkingTree.CopyFrom(boundary, store, target, ObjectMember);
         string? alternates = ReadText(Path.Combine(store, "info", "alternates"), 32768);
         if (alternates is null) return;
         var copies = new List<string>();
@@ -159,8 +176,8 @@ internal sealed class AcquisitionGitView
             string resolved = Redirect(store, name, "objects/info/alternates");
             if (stores.Contains(resolved)) continue;
             string copy = Path.Combine(Directory, "object-store-" + stores.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            CopyObjects(resolved, copy, depth + 1);
-            copies.Add(copy.Replace('\\', '/'));
+            CopyObjects(resolved, copy, depth + 1, includeObjects);
+            if (includeObjects) copies.Add(copy.Replace('\\', '/'));
         }
 
         if (copies.Count == 0) return;

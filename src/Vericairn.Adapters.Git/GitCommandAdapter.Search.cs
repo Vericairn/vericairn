@@ -5,6 +5,7 @@ using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Adapters.Git;
 
@@ -24,12 +25,13 @@ public sealed partial class GitCommandAdapter
             return null;
 
         // The estate's own repository only: never a containing repository, and never a shallow clone whose history is incomplete.
-        if (Line(root, "rev-parse", "--is-inside-work-tree") != "true" || Line(root, "rev-parse", "--show-prefix") != string.Empty
-            || Line(root, "rev-parse", "--is-shallow-repository") != "false" || Line(root, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != commit)
+        using GitHardening? hardening = GitFileSource.OpenView(root, out _);
+        if (hardening is null || hardening.Acquire(root) is not { Bare: false } view || view.Root != WorkspacePaths.Canonical(root)
+            || Line(hardening, root, "rev-parse", "--is-shallow-repository") != "false" || Line(hardening, root, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != commit)
             return null;
 
         string[] arguments = ["ls-tree", "-r", "-z", "--full-tree", commit, "--", .. directories.Select(d => ":(literal)" + d)];
-        if (GitFileSource.RunIsolated(root, out byte[] listing, arguments) != 0) return null;
+        if (GitFileSource.RunIsolated(hardening, root, out byte[] listing, arguments) != 0) return null;
         var entries = new List<(string Path, string Id)>();
         var strict = new UTF8Encoding(false, true);
         foreach (Range part in listing.AsSpan().Split((byte)0))
@@ -49,7 +51,7 @@ public sealed partial class GitCommandAdapter
             entries.Add((path, metadata[2]));
         }
 
-        using GitBlobBatch? batch = GitBlobBatch.Start(root);
+        using GitBlobBatch? batch = GitBlobBatch.Start(root, hardening);
         if (batch is null) return null;
         var files = new List<SourceFile>(entries.Count);
         long total = 0;
@@ -63,6 +65,6 @@ public sealed partial class GitCommandAdapter
         return files;
     }
 
-    private static string? Line(string root, params string[] arguments) =>
-        GitFileSource.RunIsolated(root, out byte[] output, arguments) == 0 ? Encoding.UTF8.GetString(output).Trim() : null;
+    private static string? Line(GitHardening hardening, string root, params string[] arguments) =>
+        GitFileSource.RunIsolated(hardening, root, out byte[] output, arguments) == 0 ? Encoding.UTF8.GetString(output).Trim() : null;
 }

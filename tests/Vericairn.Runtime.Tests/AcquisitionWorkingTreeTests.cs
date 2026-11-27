@@ -54,6 +54,56 @@ public sealed class AcquisitionWorkingTreeTests : IDisposable
     }
 
     [Fact]
+    public void WorkingTreeCommandsOnlyReceiveAnIndexAfterItsCachedNamesAreChecked()
+    {
+        string repository = Repository();
+        bool readIndex = false;
+        var adapter = new GitCommandAdapter(info =>
+        {
+            if (info.ArgumentList.Contains("ls-files"))
+            {
+                readIndex = true;
+                Assert.DoesNotContain(info.ArgumentList, argument => argument.StartsWith("--work-tree", StringComparison.Ordinal));
+                return new ProcessResult(ProcessOutcome.Exited, true, 0, "100644 " + new string('a', 40) + " 0\tproject/.git/config\0", "");
+            }
+            Assert.DoesNotContain("status", info.ArgumentList);
+            return BoundedProcess.Run(info, TestTiming.HangTimeout);
+        });
+
+        ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(repository));
+
+        Assert.True(readIndex);
+        Assert.Contains("unsafe path \"project/.git/config\"", refusal.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnObjectStoreThatSharesFilesNamesAnIndependentCloneAsTheRemedy()
+    {
+        string repository = Repository();
+        string shared = Path.Combine(scratch, "shared");
+        string independent = Path.Combine(scratch, "independent");
+        RunEstate.Git(scratch, "clone", "--local", "--quiet", repository, shared);
+        RunEstate.Git(scratch, "clone", "--local", "--no-hardlinks", "--quiet", repository, independent);
+        var adapter = new GitCommandAdapter();
+
+        ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(shared));
+
+        Assert.Contains("git clone --no-hardlinks", refusal.Message, StringComparison.Ordinal);
+        Assert.True(adapter.Inspect(independent).Clean);
+    }
+
+    [Fact]
+    public void InspectionRefusesAnUnsupportedReferenceStore()
+    {
+        string repository = Repository();
+        RunEstate.Git(repository, "config", "extensions.refstorage", "future");
+
+        ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => new GitCommandAdapter().Inspect(repository));
+
+        Assert.Contains("unsupported Git reference storage format", refusal.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CopyPreservesRegularBytesAndExecutableModeWithoutCarryingGitAdministration()
     {
         string repository = Repository();

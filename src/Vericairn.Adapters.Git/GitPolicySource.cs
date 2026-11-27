@@ -34,18 +34,18 @@ internal sealed class GitPolicySource : IPolicyRepositorySource
         if (clone is null) return Missing();
         try
         {
+            using GitHardening hardening = GitHardening.Create();
             List<PolicyFile> files = [];
             if (commit is not null)
             {
                 // The commit must resolve in this clone at every read, so a removed clone or pruned commit stays unavailable.
                 if (commit.Length is not (40 or 64) || !commit.All(char.IsAsciiHexDigit) ||
-                    GitFileSource.RunIsolated(clone, out byte[] resolved, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != 0 || Encoding.UTF8.GetString(resolved).Trim() != commit ||
-                    Exact(clone, commit) is not { } exact) return Missing();
+                    GitFileSource.RunIsolated(hardening, clone, out byte[] resolved, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != 0 || Encoding.UTF8.GetString(resolved).Trim() != commit ||
+                    Exact(hardening, clone, commit) is not { } exact) return Missing();
                 files.AddRange(exact);
             }
             else
             {
-                using GitHardening hardening = GitHardening.Create();
                 var start = GitFileSource.WorkingStartInfo(clone, hardening, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
                 if (GitFileSource.Run(start, out byte[] names) != 0) return Missing();
                 string mirror = start.WorkingDirectory;
@@ -70,15 +70,16 @@ internal sealed class GitPolicySource : IPolicyRepositorySource
             request.Paths.Any(p => !PolicyInputs.Path(p)) || Clone(model, repository) is not { } clone) return missing;
         try
         {
+            using GitHardening hardening = GitHardening.Create();
             // Recursive tree entries include object ids, modes and directory trees; no diff driver or working bytes participate.
             byte[]? source = Tree(request.SourceCommit), selected = Tree(selectedCommit);
             return source is null || selected is null ? missing : new(request.SourceCommit, selectedCommit, request.Paths, true, ContentHash.Sha256(source), ContentHash.Sha256(selected));
 
             byte[]? Tree(string commit)
             {
-                if (GitFileSource.RunIsolated(clone, out byte[] resolved, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != 0 ||
+                if (GitFileSource.RunIsolated(hardening, clone, out byte[] resolved, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != 0 ||
                     Encoding.UTF8.GetString(resolved).Trim() != commit) return null;
-                return GitFileSource.RunIsolated(clone, out byte[] tree, ["ls-tree", "-r", "-t", "-z", "--full-tree", commit, "--", .. request.Paths]) == 0 ? tree : null;
+                return GitFileSource.RunIsolated(hardening, clone, out byte[] tree, ["ls-tree", "-r", "-t", "-z", "--full-tree", commit, "--", .. request.Paths]) == 0 ? tree : null;
             }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or ProviderRefusedException) { return missing; }
@@ -87,12 +88,12 @@ internal sealed class GitPolicySource : IPolicyRepositorySource
     // Every regular file of an exact commit, in tree order, or null when an entry is refused or a blob cannot be read. A
     // complete read is retained: the commit names its tree and each blob is named by its content, so the files cannot differ
     // when the commit is read again in the same clone. Blobs are read through one batch process, never one process per file.
-    private ImmutableArray<PolicyFile>? Exact(string clone, string commit)
+    private ImmutableArray<PolicyFile>? Exact(GitHardening hardening, string clone, string commit)
     {
         // Registered clones are recorded as full paths, so the path names the clone.
         string key = clone;
         if (retained.Files(key, commit) is { } known) return known;
-        if (GitFileSource.RunIsolated(clone, out byte[] tree, "ls-tree", "-r", "-z", "--full-tree", commit) != 0) return null;
+        if (GitFileSource.RunIsolated(hardening, clone, out byte[] tree, "ls-tree", "-r", "-z", "--full-tree", commit) != 0) return null;
         List<(string Path, string Id)> entries = [];
         foreach (string entry in Encoding.UTF8.GetString(tree).Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -115,7 +116,7 @@ internal sealed class GitPolicySource : IPolicyRepositorySource
                 {
                     if ((blob = retained.Held(key, id)) is null)
                     {
-                        batch ??= GitBlobBatch.Start(clone);
+                        batch ??= GitBlobBatch.Start(clone, hardening);
                         if (batch?.Read(id) is not { } bytes) return null;
                         blob = new(ContentHash.Sha256(bytes), ImmutableCollectionsMarshal.AsImmutableArray(bytes));
                     }

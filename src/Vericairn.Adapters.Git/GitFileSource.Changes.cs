@@ -14,13 +14,15 @@ public sealed partial class GitFileSource
     public DocumentSourceChanges Changes(EstateModel model, RecordEnvelope declaration, string? before, string commit)
     {
         if (!Patterns.Commit.IsMatch(commit) || (before is not null && !Patterns.Commit.IsMatch(before))
-            || clone(model, declaration) is not { } directory || !HasCommit(directory, commit)
-            || (before is not null && !HasCommit(directory, before)))
+            || clone(model, declaration) is not { } directory)
             return new([], "The registered clone does not contain both publication commits; no comparison was made.");
+        using GitHardening? hardening = OpenView(directory, out string? problem);
+        if (hardening is null || !HasCommit(hardening, directory, commit) || (before is not null && !HasCommit(hardening, directory, before)))
+            return new([], problem ?? "The registered clone does not contain both publication commits; no comparison was made.");
         string[] arguments = before is null
             ? ["ls-tree", "-r", "-z", "--name-only", "--full-tree", commit]
             : ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-status", "-z", before, commit, "--"];
-        if (RunIsolated(directory, out byte[] bytes, arguments) != 0)
+        if (RunIsolated(hardening, directory, out byte[] bytes, arguments) != 0)
             return new([], "The local publication comparison could not be read.");
         try
         {
@@ -44,7 +46,7 @@ public sealed partial class GitFileSource
         }
     }
 
-    private static bool HasCommit(string directory, string commit) =>
-        RunIsolated(directory, out byte[] bytes, "rev-parse", "--verify", "--quiet", commit + "^{commit}") == 0
+    private static bool HasCommit(GitHardening hardening, string directory, string commit) =>
+        RunIsolated(hardening, directory, out byte[] bytes, "rev-parse", "--verify", "--quiet", commit + "^{commit}") == 0
         && Encoding.UTF8.GetString(bytes).Trim() == commit;
 }

@@ -48,6 +48,8 @@ internal static partial class AcquisitionWorkingTree
         {
             string detail = error is UnauthorizedAccessException or FileNotFoundException or DirectoryNotFoundException
                 ? "the entry is unavailable." : error.Message;
+            if (!workingTree && error is HardLinkedFileException)
+                detail += " Make an independent clone with git clone --no-hardlinks and retry.";
             throw new ProviderRefusedException($"Could not read the {kind} at {Display(current)}: {detail}", error);
         }
 
@@ -173,6 +175,21 @@ internal static partial class AcquisitionWorkingTree
     private static bool SafeName(string name) => name.Length > 0 && name is not ("." or "..")
         && name.IndexOfAny(['/', '\\', ':', '\0', '\ufffd']) < 0
         && (!OperatingSystem.IsWindows() || name[^1] is not ('.' or ' '));
+
+    // Validate the index spelling before any Git command compares paths against a physical working tree.
+    internal static bool IsIndexPath(string path) => !Path.IsPathRooted(path) && path.Split('/').All(SafeIndexComponent);
+
+    private static bool SafeIndexComponent(string name)
+    {
+        if (!SafeName(name)) return false;
+        // HFS can treat invisible Unicode format controls as absent in a path component.
+        string significant = OperatingSystem.IsMacOS() ? string.Concat(name.Where(c => char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format)) : name;
+        if (significant is "" or "." or ".." || significant.Equals(".git", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!OperatingSystem.IsWindows()) return true;
+        string device = significant.Split('.')[0].TrimEnd(' ').ToUpperInvariant();
+        return device is not ("GIT~1" or "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$")
+            && !(device.Length == 4 && device[..3] is "COM" or "LPT" && "123456789¹²³".Contains(device[3]));
+    }
 
     private static string Display(string path) => System.Text.Json.JsonSerializer.Serialize(path);
 
@@ -323,8 +340,10 @@ internal static partial class AcquisitionWorkingTree
     private static void RequireRegular(Entry entry)
     {
         if (entry.Type != RegularMode) throw new IOException("the entry is a symbolic link or another kind of non-regular file.");
-        if (entry.Links != 1) throw new IOException("hard links are refused.");
+        if (entry.Links != 1) throw new HardLinkedFileException();
     }
+
+    private sealed class HardLinkedFileException() : IOException("hard links are refused.");
 
     // Native stat layout on supported 64-bit platforms. Only mode and link count are used.
     private static Entry Stat(byte[] stat)

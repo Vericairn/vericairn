@@ -184,8 +184,8 @@ public sealed class RepositoryProgramIsolationTests
 
         RepositoryObservation first = adapter.Inspect(scratch.Repository);
 
-        string[] expected = ["core.fsmonitor", "core.hookspath", "alias.example", "log.showsignature", "diff.example.textconv",
-            "filter.example.clean", "extensions.worktreeconfig", "extensions.futureformat", "future.setting", "config.worktree: core.filemode"];
+        string[] expected = ["core.fsmonitor", "core.hookspath", "alias.example", "log.showsignature", "diff.<subsection>.textconv",
+            "filter.<subsection>.clean", "extensions.worktreeconfig", "extensions.futureformat", "future.setting", "config.worktree: core.filemode"];
         Assert.All(expected, name => Assert.Contains(name, first.IgnoredConfiguration));
         Assert.DoesNotContain(first.IgnoredConfiguration, name => name.Contains("ignored-value", StringComparison.Ordinal));
         Assert.Equal(ContentHash.Sha256(File.ReadAllBytes(configuration)), first.ConfigurationHash);
@@ -194,6 +194,23 @@ public sealed class RepositoryProgramIsolationTests
         RepositoryObservation second = adapter.Inspect(scratch.Repository);
         Assert.Equal(first.IgnoredConfiguration, second.IgnoredConfiguration);
         Assert.NotEqual(first.ConfigurationHash, second.ConfigurationHash);
+    }
+
+    [Fact]
+    public void ConfigurationFindingsConcealSubsectionsThatCanCarryCredentials()
+    {
+        using var scratch = new ScratchRepository(false);
+        string privateName = string.Concat("private", "-configuration-name");
+        string file = Path.Combine(scratch.Repository, ".git", "config");
+        File.AppendAllText(file, $"\n[url \"https://{privateName}@example.invalid\"]\n\tinsteadOf = example:source\n");
+        File.WriteAllText(Path.Combine(scratch.Repository, ".git", "config.worktree"),
+            $"[http \"https://{privateName}@example.invalid\"]\n\textraHeader = sample\n");
+
+        RepositoryObservation observation = new GitCommandAdapter().Inspect(scratch.Repository);
+
+        Assert.Contains("url.<subsection>.insteadof", observation.IgnoredConfiguration);
+        Assert.Contains("config.worktree: http.<subsection>.extraheader", observation.IgnoredConfiguration);
+        Assert.DoesNotContain(observation.IgnoredConfiguration, key => key.Contains(privateName, StringComparison.Ordinal));
     }
 
     [Theory]

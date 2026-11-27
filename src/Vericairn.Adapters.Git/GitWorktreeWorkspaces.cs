@@ -204,7 +204,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
                 return "The workspace branch was not fetched: its head changed after the scope audit. Preserve the workspace for review.";
 
             using GitHardening target = GitHardening.Create();
-            (AcquisitionGitView destination, AcquisitionConfiguration settings) = new GitCommandAdapter().Acquire(target, review.Clone, null);
+            (AcquisitionGitView destination, AcquisitionConfiguration settings) = new GitCommandAdapter().Acquire(target, review.Clone, null, includeObjects: false);
             Reviewed(settings, review.ConfigurationReviews);
             if (CloneHead(destination.Directory, workspace.Branch) != review.Expected)
                 return "The workspace branch was not fetched: the branch in the registered clone moved unexpectedly after preparation. Preserve the workspace and reconcile the branch.";
@@ -218,19 +218,27 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
 
             beforeReferenceUpdate?.Invoke();
             // Use Git's ref lock convention, so concurrent Git writers cannot overwrite this comparison.
-            string reference = Path.Combine(destination.Common, "refs", "heads", workspace.Branch);
+            string refName = "refs/heads/" + workspace.Branch;
+            string reference = Path.Combine(destination.Common, refName);
             string locked = reference + ".lock";
+            string packedLock = Path.Combine(destination.Common, "packed-refs.lock");
             AcquisitionWorkingTree.CreateDirectories(destination.Boundary, Path.GetDirectoryName(reference)!);
             using var next = new MemoryStream(Encoding.ASCII.GetBytes(review.Head + "\n"));
             AcquisitionWorkingTree.WriteNew(destination.Boundary, locked, next);
             bool committed = false;
+            bool packedLocked = false;
             try
             {
+                AcquisitionWorkingTree.WriteNew(destination.Boundary, packedLock, Stream.Null);
+                packedLocked = true;
                 using GitHardening final = GitHardening.Create();
-                AcquisitionGitView latest = final.Acquire(review.Clone);
+                (AcquisitionGitView latest, AcquisitionConfiguration latestSettings) = new GitCommandAdapter().Acquire(final, review.Clone, null, includeObjects: false);
+                Reviewed(latestSettings, review.ConfigurationReviews);
                 if (!Same(latest.Common, destination.Common) || CloneHead(latest.Directory, workspace.Branch) != review.Expected
-                    || Git(latest.Directory, out _, "symbolic-ref", "--quiet", "refs/heads/" + workspace.Branch) == 0)
+                    || Git(latest.Directory, out _, "symbolic-ref", "--quiet", refName) == 0)
                     return "The workspace branch was not retained: the registered clone refused the guarded branch update, possibly because the branch moved during the fetch. Preserve the workspace and reconcile the branch.";
+                if (latest.HasPackedReferenceConflict(refName))
+                    return "The workspace branch was not retained: a packed branch name conflicts with the requested branch. Preserve the workspace and choose a different branch name.";
                 RefuseCheckedOut(latest, workspace.Branch);
                 PublishPacks(staging, destination);
                 AcquisitionWorkingTree.Move(destination.Boundary, locked, reference, overwrite: true);
@@ -238,7 +246,8 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             }
             finally
             {
-                if (!committed) AcquisitionWorkingTree.RemoveFile(destination.Boundary, locked);
+                try { if (packedLocked) AcquisitionWorkingTree.RemoveFile(destination.Boundary, packedLock); }
+                finally { if (!committed) AcquisitionWorkingTree.RemoveFile(destination.Boundary, locked); }
             }
             review.Expected = review.Head;
             try { Register(review.Registration, new Location(workspace.Path, review.Head, review.Preparation)); }

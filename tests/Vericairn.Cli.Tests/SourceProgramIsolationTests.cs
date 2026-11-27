@@ -35,7 +35,13 @@ public class SourceProgramIsolationTests
             Assert.False(probe.Ran, $"sources inspect ran the program the repository's {kind} configuration names.");
             CliHarness.Outcome adopt = CliHarness.Ok("--estate", root, "--json", "sources", "adopt", probe.Repository, "--by", op, "--name", "Probe repository", "--role", "source of the probe");
             Assert.False(probe.Ran, $"sources adopt ran the program the repository's {kind} configuration names.");
-
+            string resource = adopt.Json.GetProperty("resource").GetProperty("id").GetString()!;
+            CliHarness.Ok("--estate", root, "--json", "sources", "observe", probe.Repository, "--resource", resource, "--by", op);
+            Assert.False(probe.Ran, $"sources observe ran the program the repository's {kind} configuration names.");
+            CliHarness.Ok("--estate", root, "--json", "sources", "clone", probe.Repository, "--resource", resource);
+            Assert.False(probe.Ran, $"sources clone ran the program the repository's {kind} configuration names.");
+            if (kind is RepositoryProgramProbe.Fsmonitor or RepositoryProgramProbe.Filter or RepositoryProgramProbe.Signature)
+                Assert.True(probe.Control(), $"Plain git did not run the configured {kind} fixture program.");
             Assert.NotEmpty(after["ignoredConfiguration"]!.AsArray());
             Assert.NotEqual(before["configurationHash"]!.GetValue<string>(), after["configurationHash"]!.GetValue<string>());
             before.Remove("ignoredConfiguration");
@@ -107,6 +113,36 @@ public class SourceProgramIsolationTests
         finally
         {
             CliHarness.Delete(root, repository);
+        }
+    }
+
+    [Fact]
+    public void CloneRejectsARegistrationThatLaterReadsCouldNotOpen()
+    {
+        string root = CliHarness.TempDirectory("sources-linked-estate");
+        string boundary = CliHarness.TempDirectory("sources-linked-boundary");
+        string repository = Directory.CreateDirectory(Path.Combine(boundary, "repository")).FullName;
+        string linked = Path.Combine(boundary, "linked");
+        try
+        {
+            ContextJourneyTests.Git(repository, "init", "-q", "--initial-branch=main");
+            ContextJourneyTests.Git(repository, "config", "core.autocrlf", "false");
+            ContextJourneyTests.Git(repository, "commit", "-qm", "Initial fixture", "--allow-empty");
+            ContextJourneyTests.Git(repository, "worktree", "add", "--quiet", "--detach", linked);
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Isolation.",
+                "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string resource = CliHarness.Ok("--estate", root, "--json", "sources", "adopt", repository, "--by", op,
+                "--name", "Example source", "--role", "Source fixture").Json.GetProperty("resource").GetProperty("id").GetString()!;
+            CliHarness.Ok("--json", "sources", "inspect", linked, "--boundary", boundary);
+
+            CliHarness.Outcome result = CliHarness.Run("--estate", root, "--json", "sources", "clone", linked, "--resource", resource, "--boundary", boundary);
+
+            Assert.NotEqual(0, result.Code);
+            Assert.Contains("later reads use the repository root as their boundary", result.Err + result.Out, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, boundary);
         }
     }
 
