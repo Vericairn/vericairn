@@ -23,7 +23,7 @@ class RuntimePackTests(unittest.TestCase):
             (self.evidence / project).mkdir(parents=True)
             for rid in runtime["RIDS"]:
                 content = f"runtime|Microsoft.NETCore.App.Runtime.{rid}|10.0.11\napphost|Microsoft.NETCore.App.Host.{rid}|10.0.11\n"
-                if project == "Vericairn.Cli":
+                if project in {"Vericairn.Cli", "Vericairn.Relay"}:
                     content += f"runtime|Microsoft.AspNetCore.App.Runtime.{rid}|10.0.11\n"
                 (self.evidence / project / f"{rid}.txt").write_text(content, encoding="utf-8-sig")
         self.bom = self.root / "bom.json"
@@ -88,7 +88,8 @@ class RuntimePackTests(unittest.TestCase):
         for component in document["components"][1:]:
             rid = component["name"].rsplit(".", 1)[1]
             self.assertEqual("10.0.11", component["version"])
-            self.assertEqual({f"vericairn/{rid}", f"vericairn-workbench/{rid}"}, {p["value"] for p in component["properties"]})
+            self.assertEqual({f"vericairn/{rid}", f"vericairn-workbench/{rid}", f"vericairn-relay/{rid}"},
+                             {p["value"] for p in component["properties"]})
             self.assertTrue(component["purl"].startswith("pkg:nuget/"))
         self.assertNotIn(str(self.root), self.bom.read_text())
         self.assertEqual(document, self.completed())

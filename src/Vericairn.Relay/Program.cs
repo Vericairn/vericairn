@@ -22,6 +22,6 @@ app.Map("/v1/relay", async context =>
     }
 
     using System.Net.WebSockets.WebSocket socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
-    await relay.HandleAsync(socket, context.RequestAborted).ConfigureAwait(false);
+    await relay.HandleAsync(socket, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.RequestAborted).ConfigureAwait(false);
 });
 await app.RunAsync().ConfigureAwait(false);

@@ -382,15 +382,27 @@ public sealed class DaemonHost : IAsyncDisposable
                         tls.AllowRenegotiation = false;
                         tls.AllowTlsResume = false;
                         tls.CipherSuitesPolicy = TlsScreenStream.CipherSuites;
-                        if (marker == RelayMarker)
-                        {
-                            tls.RemoteCertificateValidationCallback = (_, certificate, _, _) => certificate is X509Certificate2 peer
-                                && connection.Items[RelayListener.TicketDevice] is string device && host.Relay!.PermitsCertificate(device, peer);
-                        }
-
                         tls.CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
                     },
                 });
+                if (marker == RelayMarker)
+                {
+                    // Kestrel owns the handshake's validation callback, so a relayed connection's certificate is judged as soon as the
+                    // handshake completes and before anything is read from it: only the certificate the ticketed device's key signed.
+                    listen.Use(next => async connection =>
+                    {
+                        X509Certificate2? peer = connection.Features.Get<ITlsConnectionFeature>()?.ClientCertificate;
+                        if (peer is null || !connection.Items.TryGetValue(RelayListener.TicketDevice, out object? named) || named is not string device
+                            || !host.Relay!.PermitsCertificate(device, peer))
+                        {
+                            connection.Abort(new ConnectionAbortedException("The relayed device did not present its paired certificate."));
+                            return;
+                        }
+
+                        await next(connection).ConfigureAwait(false);
+                    });
+                }
+
                 listen.Use(TlsEstablished);
             }
         });

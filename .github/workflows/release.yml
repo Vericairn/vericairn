@@ -133,6 +133,8 @@ jobs:
             "dist/vericairn-$VERSION-win-x64.zip" "dist/vericairn-$VERSION-win-arm64.zip" \
             "dist/vericairn-workbench-$VERSION-linux-x64.tar.gz" "dist/vericairn-workbench-$VERSION-linux-arm64.tar.gz" "dist/vericairn-workbench-$VERSION-osx-x64.tar.gz" "dist/vericairn-workbench-$VERSION-osx-arm64.tar.gz" \
             "dist/vericairn-workbench-$VERSION-win-x64.zip" "dist/vericairn-workbench-$VERSION-win-arm64.zip" \
+            "dist/vericairn-relay-$VERSION-linux-x64.tar.gz" "dist/vericairn-relay-$VERSION-linux-arm64.tar.gz" "dist/vericairn-relay-$VERSION-osx-x64.tar.gz" "dist/vericairn-relay-$VERSION-osx-arm64.tar.gz" \
+            "dist/vericairn-relay-$VERSION-win-x64.zip" "dist/vericairn-relay-$VERSION-win-arm64.zip" \
             "dist/vericairn-$VERSION-sbom.cdx.json" "dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md" "dist/vericairn-$VERSION-docs.zip" \
             "dist/vericairn-$VERSION-companions.zip" \
             dist/*.nupkg dist/*.snupkg dist/SHA256SUMS

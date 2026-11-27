@@ -31,7 +31,14 @@ public static class RelayProtocol
     /// <summary>Registration and ticket deadlines are expressed in whole seconds.</summary>
     public const int Lifetime = 24 * 60 * 60;
 
-    /// <summary>Generates a relay address or challenge, independent of an estate or a device.</summary>
+    /// <summary>Allows the runtime clock to be up to five seconds ahead, without weakening the expiry check.</summary>
+    public const int ClockSkew = 5;
+
+    /// <summary>Derives an opaque relay address from the canonical encoding of its random registration public key.</summary>
+    public static string AddressForKey(string publicKey) =>
+        Base64Url.EncodeToString(SHA256.HashData(Encoding.ASCII.GetBytes($"vericairn-relay/1 address\n{publicKey}")));
+
+    /// <summary>Generates a random relay challenge, independent of an estate or a device.</summary>
     public static string RandomId() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
 
     /// <summary>Checks the canonical encoding of a relay address or challenge.</summary>
@@ -84,8 +91,8 @@ public static class RelayProtocol
     public static bool Verify(RelayTicket? ticket, string address, string publicKey, long now)
     {
         return ticket is not null && IsId(ticket.Address) && ticket.Address == address && IsDevice(ticket.Device)
-            && ticket.Counter > 0 && ticket.Issued >= Math.Max(0, now - Lifetime) && ticket.Issued <= now
-            && ticket.Expires > now && ticket.Expires - ticket.Issued <= Lifetime
+            && ticket.Counter > 0 && ticket.Issued >= 0 && ticket.Issued - ClockSkew <= now
+            && ticket.Expires > now && ticket.Expires > ticket.Issued && ticket.Expires - ticket.Issued <= Lifetime
             && Verify(publicKey, TicketBytes(ticket), ticket.Signature);
     }
 

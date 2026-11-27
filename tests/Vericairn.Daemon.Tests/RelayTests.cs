@@ -35,7 +35,9 @@ public class RelayTests
         Assert.Equal(RelayProtocol.Lifetime, ticket.Expires - ticket.Issued);
         Assert.True(RelayProtocol.Verify(ticket, address, publicKey, now));
         Assert.False(RelayProtocol.Verify(ticket, address, publicKey, ticket.Expires));
-        Assert.False(RelayProtocol.Verify(ticket, address, publicKey, now - 1));
+        // A relay clock up to the stated skew behind the runtime still verifies a fresh ticket; one further behind does not.
+        Assert.True(RelayProtocol.Verify(ticket, address, publicKey, now - RelayProtocol.ClockSkew));
+        Assert.False(RelayProtocol.Verify(ticket, address, publicKey, now - RelayProtocol.ClockSkew - 1));
         Assert.False(RelayProtocol.Verify(ticket, RelayProtocol.RandomId(), publicKey, now));
         Assert.False(RelayProtocol.Verify(ticket, address, Base64Url.EncodeToString(other.ExportSubjectPublicKeyInfo()), now));
         Assert.False(RelayProtocol.Verify(ticket with { Device = Ulid.NewUlid().Value }, address, publicKey, now));
@@ -54,7 +56,7 @@ public class RelayTests
         var clock = new ManualTime(DateTimeOffset.UtcNow);
         await using var relay = new InProcessRelay(clock);
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        string address = RelayProtocol.RandomId();
+        string address = AddressOf(key);
         string device = Ulid.NewUlid().Value;
         long now = clock.GetUtcNow().ToUnixTimeSeconds();
         using WebSocket control = await relay.RegisterAsync(address, key);
@@ -76,7 +78,7 @@ public class RelayTests
         var clock = new ManualTime(DateTimeOffset.UtcNow);
         await using var relay = new InProcessRelay(clock);
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        string address = RelayProtocol.RandomId();
+        string address = AddressOf(key);
         string device = Ulid.NewUlid().Value;
         RelayTicket ticket = RelayProtocol.Issue(key, address, device, clock.GetUtcNow().ToUnixTimeSeconds(), 1);
         using WebSocket control = await relay.RegisterAsync(address, key);
@@ -102,8 +104,9 @@ public class RelayTests
         var clock = new ManualTime(DateTimeOffset.UtcNow);
         await using var relay = new InProcessRelay(clock);
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        string first = RelayProtocol.RandomId();
-        string second = RelayProtocol.RandomId();
+        using ECDsa otherKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string first = AddressOf(key);
+        string second = AddressOf(otherKey);
         string device = Ulid.NewUlid().Value;
         long now = clock.GetUtcNow().ToUnixTimeSeconds();
         using WebSocket firstControl = await relay.RegisterAsync(first, key);
@@ -116,9 +119,12 @@ public class RelayTests
         }
         await relay.RefusesAsync(ticket);
 
-        for (int i = 0; i < 32; i++)
+        // Valid tickets share the address's budget of 32 a window.
+        for (int i = 0; i < 27; i++)
         {
-            await relay.RefusesAsync(ticket with { Counter = i + 2 });
+            (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(first, firstControl, RelayProtocol.Issue(key, first, device, now, i + 2));
+            phone.Dispose();
+            runtime.Dispose();
         }
 
         await relay.RefusesAsync(RelayProtocol.Issue(key, first, device, now, 35));
@@ -128,12 +134,53 @@ public class RelayTests
         firstPhone.Dispose();
         firstRuntime.Dispose();
 
-        using WebSocket secondControl = await relay.RegisterAsync(second, key);
+        using WebSocket secondControl = await relay.RegisterAsync(second, otherKey);
         (RelayStream otherPhone, RelayStream otherRuntime) =
-            await relay.JoinAsync(second, secondControl, RelayProtocol.Issue(key, second, device, now, 1));
+            await relay.JoinAsync(second, secondControl, RelayProtocol.Issue(otherKey, second, device, now, 1));
         otherPhone.Dispose();
         otherRuntime.Dispose();
     }
+
+    [Fact]
+    public async Task JoinsWithoutAValidTicketNeverLockOutOneWithIt()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        await using var relay = new InProcessRelay(clock);
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string address = AddressOf(key);
+        string device = Ulid.NewUlid().Value;
+        long now = clock.GetUtcNow().ToUnixTimeSeconds();
+        using WebSocket control = await relay.RegisterAsync(address, key);
+        RelayTicket valid = RelayProtocol.Issue(key, address, device, now, 1);
+        // A revoked device or a stranger knows the address and floods it with tickets that do not verify.
+        for (int i = 0; i < 64; i++)
+        {
+            await relay.RefusesAsync(valid with { Counter = valid.Counter + i + 1 });
+        }
+
+        (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control, valid);
+        phone.Dispose();
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public async Task AnAddressCanOnlyBeRegisteredByTheKeyItIsDerivedFrom()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        await using var relay = new InProcessRelay(clock);
+        using ECDsa owner = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using ECDsa stranger = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string address = AddressOf(owner);
+        // A stranger proving its own key for the owner's address is never registered, so the owner's registration is never squatted.
+        Assert.False(await relay.TryRegisterAsync(address, stranger));
+        Assert.False(await relay.TryRegisterAsync(RelayProtocol.RandomId(), owner));
+        using WebSocket control = await relay.RegisterAsync(address, owner);
+        (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control, RelayProtocol.Issue(owner, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1));
+        phone.Dispose();
+        runtime.Dispose();
+    }
+
+    private static string AddressOf(ECDsa key) => RelayProtocol.AddressForKey(Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo()));
 
     [Fact]
     public async Task ACorruptedTlsHandshakeDoesNotMakeItThroughTheRelay()
@@ -141,7 +188,7 @@ public class RelayTests
         var clock = new ManualTime(DateTimeOffset.UtcNow);
         await using var relay = new InProcessRelay(clock);
         using ECDsa registration = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        string address = RelayProtocol.RandomId();
+        string address = AddressOf(registration);
         RelayTicket ticket = RelayProtocol.Issue(registration, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1);
         using WebSocket control = await relay.RegisterAsync(address, registration);
         (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control, ticket);
@@ -300,7 +347,29 @@ public class RelayTests
         private async Task RunAsync(Stream transport)
         {
             using WebSocket socket = WebSocket.CreateFromStream(transport, true, null, Timeout.InfiniteTimeSpan);
-            await server.HandleAsync(socket, stopped.Token);
+            await server.HandleAsync(socket, "in-process", stopped.Token);
+        }
+
+        // Whether a registration of the address with the key is accepted: the relay answers "registered" or closes without a word.
+        internal async Task<bool> TryRegisterAsync(string address, ECDsa key)
+        {
+            using WebSocket control = Connect();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+            deadline.CancelAfter(TimeSpan.FromSeconds(2));
+            try
+            {
+                await RelayProtocol.SendAsync(control, new("register", address, Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo())), deadline.Token);
+                RelayMessage? challenge = await RelayProtocol.ReceiveAsync(control, deadline.Token);
+                if (challenge?.Kind != "challenge") return false;
+                await RelayProtocol.SendAsync(control, new("prove", Signature: RelayProtocol.Prove(key, address, challenge.Nonce!)), deadline.Token);
+                await RelayProtocol.SendAsync(control, new("ready"), deadline.Token);
+                return (await RelayProtocol.ReceiveAsync(control, deadline.Token))?.Kind == "registered";
+            }
+            catch (WebSocketException)
+            {
+                // A refused registration is closed without a word.
+                return false;
+            }
         }
 
         internal async Task<WebSocket> RegisterAsync(string address, ECDsa key)

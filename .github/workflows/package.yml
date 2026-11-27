@@ -185,7 +185,7 @@ jobs:
         # A dependency change regenerates them with the same command without --locked-mode.
         run: |
           set -eu
-          for project in src/Vericairn.Cli/Vericairn.Cli.csproj src/Vericairn.Workbench/Vericairn.Workbench.csproj; do
+          for project in src/Vericairn.Cli/Vericairn.Cli.csproj src/Vericairn.Workbench/Vericairn.Workbench.csproj src/Vericairn.Relay/Vericairn.Relay.csproj; do
             dotnet restore "$project" --locked-mode -p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true
           done
       - name: Publish self-contained distributables
@@ -249,6 +249,27 @@ jobs:
               *) tar -C "out-workbench/$rid" -czf "dist/vericairn-workbench-$VERSION-$rid.tar.gz" . ;;
             esac
           done
+      - name: Publish the relay distributables
+        shell: bash
+        # vericairn-relay (REMOTE-06) joins a paired device's ticketed connection with its runtime's outbound registration and forwards
+        # bytes it cannot read. It ships per platform beside the command line, self-contained, holding no estate key.
+        run: |
+          set -eu
+          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+            dotnet publish src/Vericairn.Relay/Vericairn.Relay.csproj --no-restore --configuration Release --runtime "$rid" --self-contained \
+              -p:VericairnDistributable=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:VersionSuffix= -p:ContinuousIntegrationBuild=true \
+              --output "out-relay/$rid/bin" --nologo --verbosity quiet
+            rm -f "out-relay/$rid/bin/"*.pdb "out-relay/$rid/bin/"*.xml
+            cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "out-relay/$rid/"
+            mkdir -p "out-relay/$rid/licenses"
+            cp licenses/*.txt "out-relay/$rid/licenses/"
+            test -s "out-relay/$rid/licenses/dotnet-LICENSE.txt" && test -s "out-relay/$rid/licenses/Apache-2.0.txt"
+            case "$rid" in
+              win-*) (cd "out-relay/$rid" && zip -q -X -r "../../dist/vericairn-relay-$VERSION-$rid.zip" .) ;;
+              *) tar -C "out-relay/$rid" -czf "dist/vericairn-relay-$VERSION-$rid.tar.gz" . ;;
+            esac
+          done
+          out-relay/linux-x64/bin/vericairn-relay --help >/dev/null 2>&1 || test -x out-relay/linux-x64/bin/vericairn-relay
           # Locked restores leave every committed lock file as it is.
           git diff --exit-code -- '*.lock.json'
       - name: Compare every platform's library assemblies
@@ -272,7 +293,7 @@ jobs:
           dotnet tool install --global CycloneDX --version 6.3.1
           dotnet CycloneDX Vericairn.slnx --output sbom --json --exclude-test-projects --spec-version 1.6 --disable-package-restore
           python3 .github/scripts/runtime-packs.py sbom/bom.json artifacts/runtime-packs --version "$VERSION"
-          python3 .github/scripts/verify-sbom.py sbom/bom.json src/Vericairn.Cli/packages.distributable.lock.json src/Vericairn.Workbench/packages.distributable.lock.json --runtime-packs artifacts/runtime-packs --version "$VERSION"
+          python3 .github/scripts/verify-sbom.py sbom/bom.json src/Vericairn.Cli/packages.distributable.lock.json src/Vericairn.Workbench/packages.distributable.lock.json src/Vericairn.Relay/packages.distributable.lock.json --runtime-packs artifacts/runtime-packs --version "$VERSION"
           cp sbom/bom.json "dist/vericairn-$VERSION-sbom.cdx.json"
           cp THIRD-PARTY-NOTICES.md "dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md"
           # The build tooling below restores the portable graph again.

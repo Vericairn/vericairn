@@ -6,13 +6,13 @@
 
 > From 0.9.5, `vericairn runtime configure --relay <https-url>` sets the relay used at the runtime's next start. Use `--relay off` to stop registering at the next start. Pair on the local network. A paired device permitted the relay profile can refresh its ticket over an authenticated runtime connection.
 >
-> Publish the self-hosted relay with `dotnet publish src/Vericairn.Relay -c Release`. Run `vericairn-relay` with an HTTPS Kestrel endpoint and a certificate clients trust for the relay's host. The program forwards the bytes of a separate authenticated TLS connection between the device and its runtime.
+> Each release ships `vericairn-relay` per platform beside the command line (`vericairn-relay-<version>-<platform>.tar.gz`, or `.zip` on Windows), listed in `SHA256SUMS`. Run it with an HTTPS Kestrel endpoint and a certificate clients trust for the relay's host. The program forwards the bytes of a separate authenticated TLS connection between the device and its runtime. A relay address is the hash of the runtime's registration key, so only that key's holder can register it; a runtime whose key changes moves to the new address, and its next ticket carries it. The relay bounds open connections and registrations in total and per client address, keeps joins whose ticket does not verify on a budget of their own, and allows a runtime clock up to five seconds ahead of its own.
 
 ## docs/limitations-and-platforms.md
 
 ### With remote access from other networks
 
-> The relay sees random relay addresses, device identifiers from tickets, connection times and traffic volumes. Device and runtime authenticate each other inside the relayed stream. A relay outage leaves the runtime's configured local-network listener available.
+> The relay sees relay addresses derived from registration keys, device identifiers from tickets, connection times and traffic volumes. Device and runtime authenticate each other inside the relayed stream. A relay outage leaves the runtime's configured local-network listener available.
 
 ## docs/api-v1.md
 

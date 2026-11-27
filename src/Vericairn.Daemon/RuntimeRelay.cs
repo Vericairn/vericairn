@@ -48,8 +48,7 @@ internal sealed class RuntimeRelay : IDisposable
                 : null;
             if (kept?.Url == url.AbsoluteUri)
             {
-                state = kept;
-                byte[] secret = Base64Url.DecodeFromChars(state.Key);
+                byte[] secret = Base64Url.DecodeFromChars(kept.Key);
                 try
                 {
                     key.ImportPkcs8PrivateKey(secret, out int read);
@@ -62,17 +61,26 @@ internal sealed class RuntimeRelay : IDisposable
                 {
                     CryptographicOperations.ZeroMemory(secret);
                 }
-                if (!RelayProtocol.IsId(state.Address) || state.Counter < 0 || state.Devices is null)
+                if (!RelayProtocol.IsId(kept.Address) || kept.Counter < 0 || kept.Devices is null)
                 {
                     throw new InvalidOperationException("The runtime's relay registration is invalid.");
+                }
+
+                publicKey = Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo());
+                state = kept with { Address = RelayProtocol.AddressForKey(publicKey) };
+                if (state.Address != kept.Address)
+                {
+                    // Upgrade old random addresses or use the address of a replaced key. The next ticket carries the new route.
+                    Save();
                 }
             }
             else
             {
+                publicKey = Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo());
                 byte[] secret = key.ExportPkcs8PrivateKey();
                 try
                 {
-                    state = new State(url.AbsoluteUri, RelayProtocol.RandomId(), Base64Url.EncodeToString(secret), new(StringComparer.Ordinal));
+                    state = new State(url.AbsoluteUri, RelayProtocol.AddressForKey(publicKey), Base64Url.EncodeToString(secret), new(StringComparer.Ordinal));
                     Save();
                 }
                 finally
@@ -81,7 +89,6 @@ internal sealed class RuntimeRelay : IDisposable
                 }
             }
 
-            publicKey = Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo());
             service.DeviceAdmissionRevoked += RevokeAfterWrite;
         }
         catch
@@ -390,7 +397,8 @@ internal sealed class RuntimeRelay : IDisposable
 
     private void Prune(long now)
     {
-        foreach (string device in state.Devices.Where(item => item.Value.Expires <= now).Select(item => item.Key).ToArray())
+        // A relay whose clock is behind can still see an apparently unexpired ticket.
+        foreach (string device in state.Devices.Where(item => item.Value.Expires <= now - RelayProtocol.ClockSkew).Select(item => item.Key).ToArray())
         {
             state.Devices.Remove(device);
         }

@@ -16,9 +16,44 @@ internal sealed class RelayServer(TimeProvider clock)
     private static readonly TimeSpan SetupTimeout = TimeSpan.FromSeconds(10);
     private const int AddressLimit = 32;
     private const int TicketLimit = 4;
+    private const int UnverifiedLimit = 256;
     private const int WindowSeconds = 10;
+    private const int SocketLimit = 4096;
+    private const int PeerSocketLimit = 256;
+    private const int RegistrationLimit = 1024;
+    private const int PeerRegistrationLimit = 16;
+    private readonly Dictionary<string, int> peerSockets = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> peerRegistrations = new(StringComparer.Ordinal);
+    private int sockets;
 
-    internal async Task HandleAsync(WebSocket socket, CancellationToken cancellationToken)
+    /// <summary>
+    /// Serves one upgraded WebSocket from the client at <paramref name="peer"/>. Upgraded sockets fall outside Kestrel's connection
+    /// limit, so they are bounded here, in total and per client address, as registrations are.
+    /// </summary>
+    internal async Task HandleAsync(WebSocket socket, string peer, CancellationToken cancellationToken)
+    {
+        lock (gate)
+        {
+            if (sockets >= SocketLimit || peerSockets.GetValueOrDefault(peer) >= PeerSocketLimit) return;
+            sockets++;
+            peerSockets[peer] = peerSockets.GetValueOrDefault(peer) + 1;
+        }
+
+        try
+        {
+            await ServeAsync(socket, peer, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (gate)
+            {
+                sockets--;
+                if (--peerSockets[peer] == 0) peerSockets.Remove(peer);
+            }
+        }
+    }
+
+    private async Task ServeAsync(WebSocket socket, string peer, CancellationToken cancellationToken)
     {
         using var setup = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         setup.CancelAfter(SetupTimeout);
@@ -28,7 +63,7 @@ internal sealed class RelayServer(TimeProvider clock)
             switch (message?.Kind)
             {
                 case "register":
-                    await RegisterAsync(socket, message, setup.Token, cancellationToken).ConfigureAwait(false);
+                    await RegisterAsync(socket, message, peer, setup.Token, cancellationToken).ConfigureAwait(false);
                     break;
                 case "join":
                     await JoinAsync(socket, message.Ticket, setup.Token, cancellationToken).ConfigureAwait(false);
@@ -44,9 +79,11 @@ internal sealed class RelayServer(TimeProvider clock)
         }
     }
 
-    private async Task RegisterAsync(WebSocket socket, RelayMessage request, CancellationToken setup, CancellationToken cancellationToken)
+    private async Task RegisterAsync(WebSocket socket, RelayMessage request, string peer, CancellationToken setup, CancellationToken cancellationToken)
     {
-        if (request.Address is not string address || !RelayProtocol.IsId(address) || request.PublicKey is not string key || !RelayProtocol.IsKey(key))
+        // An address is the hash of its registration key, so only the holder of that key can take it: nobody squats another's.
+        if (request.Address is not string address || !RelayProtocol.IsId(address) || request.PublicKey is not string key || !RelayProtocol.IsKey(key)
+            || address != RelayProtocol.AddressForKey(key))
         {
             return;
         }
@@ -83,10 +120,13 @@ internal sealed class RelayServer(TimeProvider clock)
         setup.ThrowIfCancellationRequested();
         lock (gate)
         {
-            if (!registrations.TryAdd(address, registration))
+            if (registrations.Count >= RegistrationLimit || peerRegistrations.GetValueOrDefault(peer) >= PeerRegistrationLimit
+                || !registrations.TryAdd(address, registration))
             {
                 return;
             }
+
+            peerRegistrations[peer] = peerRegistrations.GetValueOrDefault(peer) + 1;
         }
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -105,6 +145,7 @@ internal sealed class RelayServer(TimeProvider clock)
             lock (gate)
             {
                 registrations.Remove(address);
+                if (--peerRegistrations[peer] == 0) peerRegistrations.Remove(peer);
                 foreach (Join pending in registration.Joins.Values)
                 {
                     pending.Stop.Cancel();
@@ -148,7 +189,7 @@ internal sealed class RelayServer(TimeProvider clock)
         string nonce;
         lock (gate)
         {
-            if (!registrations.TryGetValue(ticket.Address, out registration) || !registration.CanJoin(ticket, now))
+            if (!registrations.TryGetValue(ticket.Address, out registration) || registration.Saturated || !registration.CanJoin(ticket, now))
             {
                 return;
             }
@@ -222,6 +263,10 @@ internal sealed class RelayServer(TimeProvider clock)
         private readonly Dictionary<long, int> ticketUses = [];
         private long window = -1;
         private int calls;
+        private int unverified;
+
+        // Joins whose ticket did not verify in this window; past the limit they are refused before verifying, at no signature's cost.
+        internal bool Saturated => unverified >= UnverifiedLimit;
 
         internal Channel<RelayMessage> Requests { get; } = Channel.CreateBounded<RelayMessage>(AddressLimit);
 
@@ -234,11 +279,21 @@ internal sealed class RelayServer(TimeProvider clock)
             {
                 window = current;
                 calls = 0;
+                unverified = 0;
                 ticketUses.Clear();
                 foreach (string device in revoked.Where(item => item.Value.Expires <= now).Select(item => item.Key).ToArray())
                 {
                     revoked.Remove(device);
                 }
+            }
+
+            // A join that presents no valid ticket draws on a budget of its own, so joins without the key cannot use up the budget
+            // a valid ticket draws on.
+            if (!RelayProtocol.Verify(ticket, ticket.Address, key, now)
+                || revoked.TryGetValue(ticket.Device, out var floor) && ticket.Counter <= floor.Counter)
+            {
+                unverified++;
+                return false;
             }
 
             if (calls >= AddressLimit || Joins.Count >= AddressLimit)
@@ -247,11 +302,6 @@ internal sealed class RelayServer(TimeProvider clock)
             }
 
             calls++;
-            if (!RelayProtocol.Verify(ticket, ticket.Address, key, now)
-                || revoked.TryGetValue(ticket.Device, out var floor) && ticket.Counter <= floor.Counter)
-            {
-                return false;
-            }
 
             int uses = ticketUses.GetValueOrDefault(ticket.Counter);
             if (uses >= TicketLimit || Joins.Values.Count(item => item.Ticket.Counter == ticket.Counter) >= TicketLimit)
