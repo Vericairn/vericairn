@@ -976,7 +976,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(revokedAt) };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: revokedAt);
-            return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+            WriteOutcome outcome = request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+            return outcome.Written is null ? outcome : outcome with { RevocationReach = [ObserveRevocation("written")] };
         }
     }
 

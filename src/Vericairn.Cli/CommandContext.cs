@@ -4,6 +4,7 @@
 using System.CommandLine;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
@@ -246,11 +247,23 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
     {
         if (outcome.Written is RecordWritten written)
         {
-            if (json && outcome.Checkpoint is { } triggered)
+            if (json && outcome.RevocationReach is { } revocationReach)
+            {
+                var result = new JsonObject { ["path"] = written.Path, ["id"] = written.Id, ["hash"] = written.Hash };
+                if (outcome.Checkpoint is { } checkpoint) result["checkpoint"] = JsonSerializer.SerializeToNode(checkpoint, ProtocolJson.Options);
+                result["revocationReach"] = JsonSerializer.SerializeToNode(revocationReach, ProtocolJson.Options);
+                Output.WriteLine(result.ToJsonString(ProtocolJson.Options));
+            }
+            else if (json && outcome.Checkpoint is { } triggered)
                 Output.WriteLine(JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash, checkpoint = triggered }, ProtocolJson.Options));
             else
                 Output.WriteLine(json ? JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash }) : $"{written.Path}  {written.Id}  {written.Hash}");
-            if (!json) ReportCheckpoint(outcome.Checkpoint);
+            if (!json)
+            {
+                ReportCheckpoint(outcome.Checkpoint);
+                foreach (RevocationObserver observation in outcome.RevocationReach ?? [])
+                    Output.WriteLine($"  {observation.Kind} {observation.Identity}  {observation.Evidence}  {observation.At}");
+            }
             else if (outcome.Checkpoint?.Skipped is { } skipped) Error.WriteLine("warning: " + skipped);
             // From 0.9.4 (CODE-73): the overlaps a recorded assignment has and the write boundary's warnings, beside the record, never in its output.
             foreach (string notice in outcome.Notices ?? []) Error.WriteLine(notice);

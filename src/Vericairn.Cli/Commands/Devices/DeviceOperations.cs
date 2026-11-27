@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Vericairn.Daemon;
@@ -57,6 +58,59 @@ internal sealed class DeviceOperations(CommandContext context)
         }
 
         return context.WithApi(root, api => context.ReportOutcome(api.DeviceRevoke(new RevokeRequest(deviceId, by, reason, recovery is null ? null : Path.GetFullPath(recovery), passphrase)), json));
+    }
+
+    public int DevicesReach(string root, string device, string since, bool json)
+    {
+        if (!DateTimeOffset.TryParseExact(since, ["yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:sszzz"],
+            CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset start))
+            return context.Fail("--since requires an ISO 8601 timestamp with seconds and Z or an explicit offset.");
+        if (!IsEstate(root)) return context.Fail(NotAnEstate(root));
+
+        try
+        {
+            using EstateService service = EstateService.OpenReadOnly(root);
+            DeviceReachReport? report = service.DeviceReach(device, start);
+            if (report is null) return context.Fail($"Device {device} is not a device of this estate.");
+            if (json)
+            {
+                context.Output.WriteLine(JsonSerializer.Serialize(report, ProtocolJson.Options));
+                return Clean;
+            }
+
+            context.Output.WriteLine($"device {report.Device} since {Records.Model.RecordParser.FormatTimestamp(report.Since)}");
+            if (report.Records.Count == 0) context.Output.WriteLine("  no signatures in the available records or presence ledger");
+            foreach (DeviceSignatureReach record in report.Records)
+            {
+                string sessions = record.Sessions.Count > 0 ? $"  sessions {string.Join(", ", record.Sessions)}" : string.Empty;
+                string line = $"  {record.At}  {record.Type} {record.Id}  {record.Hash}  {record.Source}{sessions}";
+                if (record.Source == "presence-ledger") WriteRuntime(context.Output, line);
+                else context.Output.WriteLine(line);
+            }
+
+            foreach (PresenceSessionEntry session in report.Sessions)
+            {
+                WriteRuntime(context.Output, $"{session.AnnouncedAt} session {session.Session} {session.Named ?? session.Action}");
+                if (session.Terms is { } terms) WriteRuntime(context.Output, $"  announced list {terms}");
+            }
+
+            if (report.PresenceProblem is { } presenceProblem) context.Output.WriteLine($"  presence evidence unavailable: {presenceProblem}");
+            if (report.JournalProblem is { } journalProblem) context.Output.WriteLine($"  server evidence unavailable: {journalProblem}");
+            if (report.Revocations.Count == 0) context.Output.WriteLine("  no revocation records in this copy");
+            foreach (DeviceRevocationReach revocation in report.Revocations)
+            {
+                string current = revocation.Current ? "  current admission revision" : string.Empty;
+                context.Output.WriteLine($"  revocation {revocation.Id}  {revocation.Hash}  {revocation.At}  {(revocation.Counts ? "counts" : "does not count")}{current}");
+                foreach (RevocationObserver observation in revocation.Observations)
+                    context.Output.WriteLine($"    {observation.Kind} {observation.Identity}  {observation.Evidence}  {observation.At}");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return context.Fail(exception.Message);
+        }
     }
 
     public int DevicesRecovery(string root, string principal, string name, string output, bool passphraseStdin, bool json)

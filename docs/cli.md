@@ -1220,6 +1220,28 @@ type, id and hash, and each refusal with its code. `--json` writes each session 
 `signed` and `refused` lists, `ended` reason and the rest. The ledger is owner-only machine state, a diagnostic that a process of the
 same operating-system user could alter; it is never a record, and no export or support bundle carries it.
 
+## `vericairn devices reach` (0.9.5)
+
+```sh
+vericairn devices reach <device> --since 2026-11-16T10:00:00Z
+vericairn devices reach <device> --since 2026-11-16T10:00:00Z --json
+```
+
+The device may be named by its identity or a revision id. The report includes available records with signatures that verify
+under any key in the device's verified revision history, including superseded records and records that fail an admission or history check.
+A record qualifies when its stated timestamp or a matching local ledger's signing time is at or after `--since`. Use seconds
+and `Z` or an explicit UTC offset. `record-signature` means the available record verifies. `presence-ledger` means the local
+ledger logged a signature whose exact signed record could not be verified in this copy. This ledger is owner-only machine
+state. Its session links match the device, record id and hash, and each session carries its announced terms.
+
+The report includes this copy's revocation records, which count in its history and which is the current admission revision. Each observation names the observer,
+time and evidence. `record-read` means this runtime read the exact record. `journal-found` or `journal-written` means this
+machine's daemon journal retains a matching record event and shows its epoch. When `devices revoke` writes the record,
+it reports the runtime that wrote it and, when served by a daemon, the server that handled the write. With `--json`, the
+write includes `revocationReach` alongside the record id and hash. The read returns `records`, `sessions` and `revocations`
+with their `observations`. Observation coverage depends on the journals kept on each machine. An observation shows the
+record that was seen. Request refusals and the standing of devices on another machine require evidence from that machine.
+
 ## `vericairn work overlap` (0.9.4)
 
 From 0.9.4 (CODE-73), before two assignments run at once in one repository the runtime compares their effective permitted

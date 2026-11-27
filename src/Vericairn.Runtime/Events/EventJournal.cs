@@ -277,6 +277,31 @@ internal sealed class EventJournal : IDisposable
         }
     }
 
+    /// <summary>Reads retained admission events without opening the journal as a writer or resetting its epoch.</summary>
+    internal static (string? Epoch, IReadOnlyList<JournalEntry> Entries) ReadAdmissionObservations(string directory, IReadOnlyList<string> admissionIds)
+    {
+        string path = System.IO.Path.Combine(directory, FileName);
+        if (!File.Exists(path) && new FileInfo(path).LinkTarget is null) return (null, []);
+        if (Records.Signing.OwnerOnlyState.IsOwnRegularFile(path) == false)
+            throw new IOException("The event journal is not a regular file kept by this user.");
+
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM meta WHERE key = 'epoch';";
+        if (command.ExecuteScalar() is not string value || Decode(value, EpochBytes) is not byte[] epoch)
+            throw new IOException("The event journal has no readable epoch.");
+        command.CommandText = """
+            SELECT position, entry FROM events WHERE
+                json_extract(entry, '$.kind') = 'record' AND json_extract(entry, '$.subject.type') = 'admission'
+                AND json_extract(entry, '$.change') IN ('written', 'found')
+                AND json_extract(entry, '$.subject.id') IN (SELECT value FROM json_each($ids))
+            ORDER BY position;
+            """;
+        command.Parameters.AddWithValue("$ids", JsonSerializer.Serialize(admissionIds, ProtocolJson.Options));
+        return (Convert.ToHexStringLower(epoch), Read(command));
+    }
+
     /// <summary>Whether the derivation has observed a record before.</summary>
     public bool Observed(string id)
     {
