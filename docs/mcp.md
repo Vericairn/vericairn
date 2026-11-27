@@ -96,7 +96,15 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 
 ## Protocol subset
 
-`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+`initialize` (the server accepts 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05 and proposes 2025-06-18 when the client names none of these; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+
+From 0.9.5 (MCP-06), the stateless `2026-07-28` revision is available alongside the session-based revisions.
+A stateless client sends `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities`
+in each request's `params._meta`. It may start with `server/discover` to get the supported versions, capabilities
+and server identity. Both revisions use the same tools, resources, prompts and runtime authorization. A stateless
+client follows resource changes with `subscriptions/listen`. The first notification acknowledges its filter and the
+stream's notifications carry the subscription's request ID. Successful stateless results carry `resultType`.
+Discovery, lists and resource reads carry private cache metadata with a zero TTL.
 
 From 0.9.4 the `initialize` result's `_meta` also carries `vericairn/toolDefinitions`, the count and
 SHA-256 of the build's tool definitions ([Tool annotations and definitions](#tool-annotations-and-definitions-094)),
@@ -612,9 +620,9 @@ IP address and port (or `localhost` on loopback), and an `Origin` it names must 
 allowed with `--mcp-origin`; none is allowed by default. A name an attacker's DNS points at the
 runtime therefore reaches nothing.
 
-**The transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
+**Session-based transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
 request is answered with one JSON body; a notification or a response gets `202` and no body. Batches
-and the older HTTP transport are not served: `initialize` negotiates 2025-06-18 or 2025-03-26.
+and the older HTTP transport are not served: `initialize` negotiates 2025-11-25, 2025-06-18 or 2025-03-26.
 `initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits; every later request
 names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A request
 without a session gets `400`, and one naming a session its device does not hold, or one that ended,
@@ -626,6 +634,12 @@ requests at once and all devices eight (notifications, a cancellation above all,
 that count), so network MCP never takes the connections the API and the
 event streams need. A dropped connection cancels nothing: a write whose answer is lost is reconciled
 by reading. `notifications/cancelled` stops observing the named request and undoes no effect.
+
+**Stateless transport.** A modern POST names its version in `MCP-Protocol-Version`, its method in `Mcp-Method`
+and, for `tools/call`, `prompts/get` or `resources/read`, the name or URI in `Mcp-Name`. All match the JSON-RPC body.
+It opens no MCP session. The response to `subscriptions/listen` is an SSE stream. Closing it cancels observation and
+a client opens a new subscription after a drop. A lost write response still calls for a checked read to reconcile the outcome.
+The bridge forwards either revision under the signed device's identity.
 
 **One authorization model.** Each tool call runs as its API operation for the requesting device: the
 daemon runs the very route the API maps, in its own process, with that route's request scope, so a

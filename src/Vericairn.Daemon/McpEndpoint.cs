@@ -22,7 +22,7 @@ namespace Vericairn.Daemon;
 /// once the operator turned it on, never on the local socket, where the operating-system user acts for any principal. A request's
 /// Host must name the listener it reached, and an Origin it names must be one the operator allowed, before anything is
 /// authenticated. Each request is then authenticated as one device signing it, as the API's requests are, and that device must be
-/// admitted, permitted the profile it arrived on, and an agent's or a service's. A session binds to that device; each tool call
+/// admitted, permitted the profile it arrived on, and an agent's or a service's. A legacy session binds to that device; each tool call
 /// runs as its API operation for that device, judged by the operation's own request scope; and the device signs every record
 /// itself, in two calls. Requests are answered with one JSON body; a GET opens the session's server stream, which carries the
 /// session's own messages to its device alone: from 0.9.2 (MCP-05) the notifications of its resource subscriptions and of writes,
@@ -36,8 +36,8 @@ internal sealed class McpEndpoint
     /// <summary>The session header of the Streamable HTTP transport.</summary>
     internal const string SessionHeader = "Mcp-Session-Id";
 
-    /// <summary>The protocol-version header later requests carry.</summary>
-    internal const string VersionHeader = "MCP-Protocol-Version";
+    /// <summary>The protocol-version header carried by stateless and legacy post-initialization requests.</summary>
+    internal const string VersionHeader = Mcp20260728.ProtocolVersionHeader;
 
     /// <summary>
     /// The most a message to /mcp may hold: one JSON-RPC message, whose largest arguments are a result's or a review's body. Smaller
@@ -45,8 +45,11 @@ internal sealed class McpEndpoint
     /// </summary>
     internal const long BodyLimit = 1024 * 1024;
 
-    /// <summary>The revisions served over HTTP: Streamable HTTP begins at 2025-03-26, so the older HTTP transport is not served.</summary>
-    internal static readonly IReadOnlyList<string> Versions = [.. McpServer.SupportedProtocolVersions.Where(v => string.CompareOrdinal(v, "2025-03-26") >= 0)];
+    /// <summary>The legacy revisions served over Streamable HTTP, beginning with 2025-03-26.</summary>
+    internal static readonly IReadOnlyList<string> Versions = [.. McpServer.SupportedProtocolVersions.Where(v => v != Mcp20260728.Version && string.CompareOrdinal(v, "2025-03-26") >= 0)];
+
+    /// <summary>The revisions advertised by discovery and unsupported-version errors.</summary>
+    internal static readonly IReadOnlyList<string> DiscoveryVersions = [Mcp20260728.Version, .. Versions.OrderDescending(StringComparer.Ordinal)];
 
     /// <summary>How long a server stream lasts before the client opens another with a fresh signature, as the event stream does.</summary>
     internal static readonly TimeSpan StreamLimit = EventRoutes.SignedStreamLimit;
@@ -143,6 +146,11 @@ internal sealed class McpEndpoint
         {
             await PostAsync(context, device, profile).ConfigureAwait(false);
         }
+        else if (context.Request.Headers[VersionHeader].ToString() == Mcp20260728.Version)
+        {
+            context.Response.Headers.Allow = "POST";
+            await Problem(context, StatusCodes.Status405MethodNotAllowed, new Problem("refused", $"MCP {Mcp20260728.Version} answers POST at /mcp.", [])).ConfigureAwait(false);
+        }
         else if (HttpMethods.IsGet(method))
         {
             await GetAsync(context, device, profile).ConfigureAwait(false);
@@ -190,12 +198,6 @@ internal sealed class McpEndpoint
             return;
         }
 
-        if (!Accepts(context.Request, "application/json"))
-        {
-            await Problem(context, StatusCodes.Status406NotAcceptable, new Problem("refused", "/mcp answers a request with application/json; the Accept header must admit it.", [])).ConfigureAwait(false);
-            return;
-        }
-
         JsonNode? parsed;
         try
         {
@@ -226,6 +228,19 @@ internal sealed class McpEndpoint
 
         JsonNode? id = message["id"];
         string? method = message["method"] is JsonValue m && m.TryGetValue(out string? name) ? name : null;
+        JsonNode? parameters = message["params"];
+        if (McpStatelessHttp.Selected(context.Request, method, parameters))
+        {
+            await PostStatelessAsync(context, device, profile, message, id, method, parameters).ConfigureAwait(false);
+            return;
+        }
+
+        if (!Accepts(context.Request, "application/json"))
+        {
+            await Problem(context, StatusCodes.Status406NotAcceptable, new Problem("refused", "/mcp answers a request with application/json; the Accept header must admit it.", [])).ConfigureAwait(false);
+            return;
+        }
+
         bool request = method is not null && id is not null;
         if (method == "initialize" && request)
         {
@@ -303,7 +318,13 @@ internal sealed class McpEndpoint
             return;
         }
 
-        string requested = parameters?["protocolVersion"] is JsonValue v && v.TryGetValue(out string? text) ? text : Versions[0];
+        string requested = parameters is JsonObject options && options["protocolVersion"] is JsonValue v && v.TryGetValue(out string? text) ? text : Versions[0];
+        if (requested == Mcp20260728.Version)
+        {
+            await Rpc(context, StatusCodes.Status400BadRequest, Error(id.DeepClone(), -32602, $"MCP {Mcp20260728.Version} uses per-request metadata; use server/discover.")).ConfigureAwait(false);
+            return;
+        }
+
         string negotiated = Versions.Contains(requested, StringComparer.Ordinal) ? requested : Versions[0];
         McpSession? session = Sessions.Open(device, profile, negotiated);
         if (session is null)
@@ -323,17 +344,169 @@ internal sealed class McpEndpoint
     /// </summary>
     private async Task<JsonObject> RespondAsync(HttpContext context, AuthenticatedDevice device, McpSession mcp, JsonNode id, string method, JsonNode? parameters, CancellationToken observing)
     {
-        McpOperations routes = Operations;
         var session = new NetworkSession(device.Principal);
-        using var client = new VericairnClient(new HttpClient(routes.Handler(host, context, device, session.Current, observing), disposeHandler: true)
+        using VericairnClient client = OpenClient(context, device, session, presence: false, observing);
+        return await Server(client, session, mcp.Watch).RespondAsync(id, method, parameters, observing).ConfigureAwait(false);
+    }
+
+    private VericairnClient OpenClient(HttpContext context, AuthenticatedDevice device, NetworkSession session, bool presence, CancellationToken observing) =>
+        new(new HttpClient(presence ? Operations.PresenceHandler(host, context, device)
+            : Operations.Handler(host, context, device, session.Current, observing), disposeHandler: true)
             { BaseAddress = new Uri("http://vericairn-mcp/") });
-        var server = new McpServer(ToolRegistry.ForNetwork(client, session), EstateService.Version)
+
+    private static McpServer Server(VericairnClient client, NetworkSession session, McpResourceWatch? watch = null, Func<McpResourceWatch>? listen = null) =>
+        new(ToolRegistry.ForNetwork(client, session), EstateService.Version)
         {
             ProtocolVersions = Versions,
             Instructions = McpServer.NetworkDescription,
-            Subscriptions = mcp.Watch,
+            Subscriptions = watch,
+            ListenSubscriptions = listen,
         };
-        return await server.RespondAsync(id, method, parameters, observing).ConfigureAwait(false);
+
+    private async Task PostStatelessAsync(HttpContext context, AuthenticatedDevice device, string profile, JsonObject message, JsonNode? id, string? method, JsonNode? parameters)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        if (McpStatelessHttp.Validate(context.Request, message, id, method, parameters) is JsonObject invalid)
+        {
+            await Rpc(context, StatusCodes.Status400BadRequest, invalid).ConfigureAwait(false);
+            return;
+        }
+
+        if (!Accepts(context.Request, "application/json", wildcard: false, positiveQuality: true)
+            || !Accepts(context.Request, EventVocabulary.StreamMediaType, wildcard: false, positiveQuality: true))
+        {
+            await Problem(context, StatusCodes.Status406NotAcceptable, new Problem("refused", "The Accept header must list application/json and text/event-stream.", [])).ConfigureAwait(false);
+            return;
+        }
+
+        if (id is null)
+        {
+            context.Response.StatusCode = StatusCodes.Status202Accepted;
+            context.Response.ContentLength = 0;
+            return;
+        }
+
+        if (method == Mcp20260728.ListenMethod)
+        {
+            await ListenAsync(context, device, profile, id.DeepClone(), parameters).ConfigureAwait(false);
+            return;
+        }
+
+        using IDisposable? slot = Sessions.TryCall(device.Identity);
+        if (slot is null)
+        {
+            await Problem(context, StatusCodes.Status429TooManyRequests, new Problem("refused", $"A device runs at most {McpSessions.CallsPerDevice} MCP requests at once and all devices {McpSessions.CallsPerRuntime}; retry when one finishes.", [])).ConfigureAwait(false);
+            return;
+        }
+
+        using var end = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, host.Stopping);
+        var session = new NetworkSession(device.Principal);
+        using VericairnClient client = OpenClient(context, device, session, presence: false, end.Token);
+        JsonObject result = await Server(client, session, listen: () =>
+                new McpResourceWatch(new McpSessionEvents(host.Service, device.Identity, device.PublicKey, profile, device.Principal)))
+            .RespondStatelessAsync(id.DeepClone(), method!, parameters, end.Token).ConfigureAwait(false);
+        if (!end.IsCancellationRequested)
+        {
+            int status = result["error"]?["code"]?.GetValue<int>() == -32601 ? StatusCodes.Status404NotFound : StatusCodes.Status200OK;
+            await Rpc(context, status, result).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ListenAsync(HttpContext context, AuthenticatedDevice device, string profile, JsonNode id, JsonNode? parameters)
+    {
+        using var limit = new CancellationTokenSource(StreamLimit, host.Time);
+        using var end = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, host.Stopping, limit.Token);
+        var identity = new NetworkSession(device.Principal);
+        var events = new McpSessionEvents(host.Service, device.Identity, device.PublicKey, profile, device.Principal);
+        using VericairnClient client = OpenClient(context, device, identity, presence: false, end.Token);
+        McpServer server = Server(client, identity, listen: () => new McpResourceWatch(events));
+        if (server.ValidateListen(id, parameters) is JsonObject invalid)
+        {
+            await Rpc(context, StatusCodes.Status400BadRequest, invalid).ConfigureAwait(false);
+            return;
+        }
+
+        using IDisposable? slot = host.EventStreams.TryAcquire(device.Identity, device.Principal);
+        if (slot is null)
+        {
+            await Problem(context, StatusCodes.Status429TooManyRequests, new Problem("refused", $"A device holds at most {EventRoutes.StreamsPerDevice} streams at once, event streams and MCP streams together, one principal's devices {EventRoutes.StreamsPerPrincipal} and all devices {EventRoutes.StreamsPerRuntime}; close one first.", [])).ConfigureAwait(false);
+            return;
+        }
+
+        (EventSubscription? subscription, Problem? problem) = events.Open();
+        if (subscription is null)
+        {
+            Problem refusal = problem ?? new Problem("unavailable", "The subscription stream is unavailable.", []);
+            await Problem(context, refusal.Code == "unavailable" ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status401Unauthorized, refusal).ConfigureAwait(false);
+            return;
+        }
+
+        HttpResponse response = context.Response;
+        using IDisposable listening = subscription.Listen();
+        // The listener may keep a presence lease for its signed principal. The lease client reaches only the three presence routes,
+        // and stays available during disconnect cleanup so it can release its own lease.
+        using VericairnClient presenceClient = OpenClient(context, device, identity, presence: true, CancellationToken.None);
+        await using var presence = new PresenceKeeper(presenceClient, new PresenceRegisterRequest(device.Principal, "mcp subscriptions/listen"),
+            time: host.Time, log: host.Log);
+        try
+        {
+            try
+            {
+                await presence.StartAsync(end.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or HttpRequestException or InvalidOperationException or IClientOperationFailure)
+            {
+                host.Log($"network MCP: presence could not be registered for device {device.Identity}: {exception.Message}");
+            }
+
+            async Task Send(JsonObject notification)
+            {
+                // A throttled notification may have waited since the last journal read. Recheck standing at delivery.
+                if (Denied() is string refusal)
+                {
+                    host.Log($"closed an MCP subscription stream of device {device.Identity}: {refusal}");
+                    await end.CancelAsync().ConfigureAwait(false);
+                    end.Token.ThrowIfCancellationRequested();
+                }
+
+                if (!response.HasStarted)
+                {
+                    response.StatusCode = StatusCodes.Status200OK;
+                    response.ContentType = EventVocabulary.StreamMediaType + "; charset=utf-8";
+                    response.Headers.CacheControl = "no-cache, no-store";
+                    context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+                }
+
+                await WriteAsync(response, "event: message\ndata: " + notification.ToJsonString() + "\n\n", end.Token).ConfigureAwait(false);
+            }
+
+            string? Denied() => subscription.Refusal() ?? StandingRefusal(device.Identity, device.PublicKey, device.Principal, profile);
+
+            JsonObject answer = await server.ListenAsync(id, parameters, Send, followEmpty: true, stopping: end.Token).ConfigureAwait(false);
+            if (!context.RequestAborted.IsCancellationRequested && Denied() is null)
+            {
+                if (response.HasStarted)
+                {
+                    await WriteAsync(response, "event: message\ndata: " + answer.ToJsonString() + "\n\n", context.RequestAborted).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Rpc(context, StatusCodes.Status400BadRequest, answer).ConfigureAwait(false);
+                }
+            }
+            else if (!context.RequestAborted.IsCancellationRequested && !response.HasStarted)
+            {
+                await Problem(context, StatusCodes.Status401Unauthorized, new Problem("denied", "The device may no longer open this MCP subscription.", [])).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            // There is no subscription state to keep after the response stream closes.
+        }
+        finally
+        {
+            events.Close(subscription);
+        }
     }
 
     private async Task GetAsync(HttpContext context, AuthenticatedDevice device, string profile)
@@ -439,7 +612,7 @@ internal sealed class McpEndpoint
                 // key or a withdrawn profile ends the stream before any of them, including a notification that waited for its interval.
                 // Its standing is read afresh from the records as the runtime holds them now, not from what the last derivation pass
                 // published, so a revocation written since that pass already counts.
-                if (session.Outbox.Reader.Count > 0 && (subscription.Refusal() ?? StandingRefusal(session)) is string withdrawn)
+                if (session.Outbox.Reader.Count > 0 && (subscription.Refusal() ?? StandingRefusal(session.Device, session.PublicKey, session.Principal, session.Profile)) is string withdrawn)
                 {
                     host.Log($"closed an MCP server stream of device {session.Device}: {withdrawn}");
                     Sessions.End(session);
@@ -496,26 +669,26 @@ internal sealed class McpEndpoint
     }
 
     /// <summary>
-    /// Why a session's device no longer stands, read afresh from the runtime's current records: not admitted with the key that opened
-    /// the session, no longer permitted its profile, or acting for another principal; null while it stands. A reading that fails is a
+    /// Why a stream's device no longer stands, read afresh from the runtime's current records: not admitted with the key that opened
+    /// the stream, no longer permitted its profile, or acting for another principal; null while it stands. A reading that fails is a
     /// refusal too, so nothing is sent on a standing the runtime cannot confirm.
     /// </summary>
-    private string? StandingRefusal(McpSession session)
+    private string? StandingRefusal(string device, string publicKey, string principal, string profile)
     {
         DeviceStanding? standing;
         try
         {
-            standing = host.Service.ReadStandings([session.Device]).Devices.GetValueOrDefault(session.Device);
+            standing = host.Service.ReadStandings([device]).Devices.GetValueOrDefault(device);
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
         {
-            return $"the standing of device {session.Device} cannot be read now: {exception.Message}";
+            return $"the standing of device {device} cannot be read now: {exception.Message}";
         }
 
-        return standing is null || standing.Admission != "admitted" ? $"Device {session.Device} is not admitted now."
-            : !string.Equals(standing.PublicKey, session.PublicKey, StringComparison.Ordinal) ? $"Device {session.Device} no longer holds the key that opened its session."
-            : !string.Equals(standing.Principal, session.Principal, StringComparison.Ordinal) ? $"Device {session.Device} no longer acts for {session.Principal}."
-            : !standing.Profiles.Contains(session.Profile, StringComparer.Ordinal) ? $"Device {session.Device} is no longer permitted the {session.Profile} profile."
+        return standing is null || standing.Admission != "admitted" ? $"Device {device} is not admitted now."
+            : !string.Equals(standing.PublicKey, publicKey, StringComparison.Ordinal) ? $"Device {device} no longer holds the key that opened its stream."
+            : !string.Equals(standing.Principal, principal, StringComparison.Ordinal) ? $"Device {device} no longer acts for {principal}."
+            : !standing.Profiles.Contains(profile, StringComparer.Ordinal) ? $"Device {device} is no longer permitted the {profile} profile."
             : null;
     }
 
@@ -601,7 +774,7 @@ internal sealed class McpEndpoint
     }
 
     /// <summary>Whether a request's Accept header admits a media type; an absent header admits anything, as HTTP has it.</summary>
-    private static bool Accepts(HttpRequest request, string media, bool wildcard = true)
+    private static bool Accepts(HttpRequest request, string media, bool wildcard = true, bool positiveQuality = false)
     {
         if (!request.Headers.TryGetValue(HeaderNames.Accept, out StringValues accept) || StringValues.IsNullOrEmpty(accept))
         {
@@ -614,8 +787,8 @@ internal sealed class McpEndpoint
         }
 
         string family = media[..media.IndexOf('/', StringComparison.Ordinal)] + "/*";
-        return accepted.Any(a => string.Equals(a.MediaType.Value, media, StringComparison.OrdinalIgnoreCase)
-            || wildcard && (a.MediaType.Value == "*/*" || string.Equals(a.MediaType.Value, family, StringComparison.OrdinalIgnoreCase)));
+        return accepted.Any(a => (!positiveQuality || a.Quality != 0) && (string.Equals(a.MediaType.Value, media, StringComparison.OrdinalIgnoreCase)
+            || wildcard && (a.MediaType.Value == "*/*" || string.Equals(a.MediaType.Value, family, StringComparison.OrdinalIgnoreCase))));
     }
 
     private static JsonObject Error(JsonNode? id, int code, string message) => new() { ["jsonrpc"] = "2.0", ["id"] = id, ["error"] = new JsonObject { ["code"] = code, ["message"] = message } };
