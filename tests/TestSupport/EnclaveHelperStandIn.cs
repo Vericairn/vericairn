@@ -24,7 +24,7 @@ internal sealed class EnclaveHelperStandIn : IDisposable
     private readonly string log;
 
     [SupportedOSPlatform("macos")]
-    private EnclaveHelperStandIn(string usage, IReadOnlyList<string> serves, string? version)
+    private EnclaveHelperStandIn(string usage, IReadOnlyList<string> serves, string? version, string? failingCommand = null, string? failure = null)
     {
         directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vericairn-enclave-stand-in-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -35,6 +35,17 @@ internal sealed class EnclaveHelperStandIn : IDisposable
         script.Append("#!/bin/sh\n");
         script.Append("printf '%s\\n' \"$1\" >> '").Append(log).Append("'\n");
         script.Append("case \"$1\" in\n");
+        if (failingCommand is not null)
+        {
+            script.Append("  ").Append(failingCommand).Append(") ").Append(failure switch
+            {
+                "exit" => "echo 'fixture helper failed beside ' \"$0\" >&2; exit 1",
+                "signal" => "kill -KILL $$",
+                "timeout" => "exec /bin/sleep 90",
+                "no-enclave" => "exit 3",
+                _ => throw new ArgumentException("Unknown stand-in failure."),
+            }).Append(" ;;\n");
+        }
         script.Append("  available) echo available; exit 0 ;;\n");
         if (version is not null)
         {
@@ -70,6 +81,11 @@ internal sealed class EnclaveHelperStandIn : IDisposable
     [SupportedOSPlatform("macos")]
     internal static EnclaveHelperStandIn Reporting(string version, params string[] commands) =>
         new("usage: vericairn-enclave " + string.Join(" | ", commands), commands.Contains("version") ? commands : [.. commands, "version"], version);
+
+    /// <summary>A current helper that fails only at the selected command. The version check can still succeed.</summary>
+    [SupportedOSPlatform("macos")]
+    internal static EnclaveHelperStandIn Failing(string command, string failure) =>
+        new(Usage094, ["available", "create", "public", "session", "sign", "sign-record", "version"], "0.9.5", command, failure);
 
     public void Dispose()
     {

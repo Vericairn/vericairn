@@ -1074,11 +1074,14 @@ when it serves no `sign-record` either. The line is flagged `mismatch` when the 
 lacks a command the command line calls. Before its first signature through the helper, and before it makes a Secure Enclave key, every
 command asks the same question and refuses an older helper, or one without `sign-record`, before anything is signed: the refusal names
 the helper's version, the command line's and the helper version it needs, says that the helper and the command line come from the same
-release archive, and ends "Nothing was signed." A helper that is beside the command line but cannot be started, such as one without
-execute permission, is refused the same way, as one that did not answer: the `helper` line says so, the `enclave` line reads `Secure
-Enclave custody unavailable (the vericairn-enclave helper beside the command line could not be started)`, and `devices create` refuses
-before it makes a key rather than taking another custody; neither names the helper's path. Up to 0.9.4 both commands ended with the
-start failure and a stack trace.
+release archive, and ends "Nothing was signed."
+
+From 0.9.5 (FIX-175), a present helper must complete its availability check. If it cannot start, exits unexpectedly, is killed
+or times out, `devices create` refuses before making a key. Exit 3 still reports that the Secure Enclave is unavailable, and
+a Mac with no helper or with that result uses file custody by default. `doctor` reports the helper failure, and its `custody`
+line marks the Secure Enclave default unavailable until the helper from this command line's release archive is beside it.
+The diagnostics and refusal omit the helper's path. If a daemon cannot read its held Secure Enclave identity because the helper
+fails, it refuses to start with the same remedy and preserves the identity so paired devices keep their pin.
 
 ```text
 helper    vericairn-enclave reports no version and serves no sign-record, so it comes from a release before 0.9.4; vericairn 0.9.5+<commit> expects vericairn-enclave 0.9.5: mismatch, so Secure Enclave signatures are refused until the vericairn-enclave from this command line's release archive is beside it

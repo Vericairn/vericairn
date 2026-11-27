@@ -133,13 +133,14 @@ public sealed class EnclaveHelperCommandTests
             using EnclaveHelperStandIn stopped = EnclaveHelperStandIn.Reporting(SecureEnclaveCustody.HelperVersion, [.. SecureEnclaveCustody.HelperCommands]);
             File.SetUnixFileMode(stopped.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             string directory = Path.GetDirectoryName(stopped.Path)!;
-            string expected = "vericairn-enclave did not answer when asked for its version; vericairn " + version + " expects vericairn-enclave 0.9.5: mismatch, so Secure "
+            string expected = "vericairn-enclave could not complete its availability check; vericairn " + version + " expects vericairn-enclave 0.9.5: mismatch, so Secure "
                 + "Enclave signatures are refused until the vericairn-enclave from this command line's release archive is beside it";
 
             (int doctorCode, string report, string doctorError) = await Built(home, stopped.Path, "--estate", root, "doctor");
             Assert.True(doctorCode == 0, doctorError);
             Assert.Contains("\nhelper    " + expected + "\n", report, StringComparison.Ordinal);
-            Assert.Contains("\nenclave   Secure Enclave custody unavailable (the vericairn-enclave helper beside the command line could not be started)\n", report, StringComparison.Ordinal);
+            Assert.Contains("\nenclave   Secure Enclave custody unavailable (the vericairn-enclave helper beside the command line could not complete its availability check)\n", report, StringComparison.Ordinal);
+            Assert.Contains("custody   macos-secure-enclave (default custody unavailable until", report, StringComparison.Ordinal);
             Assert.DoesNotContain(directory, report + doctorError, StringComparison.Ordinal);
             JsonElement probe = await Doctor(home, stopped.Path, root);
             Assert.Equal("unavailable", probe.GetProperty("state").GetString());
@@ -151,7 +152,7 @@ public sealed class EnclaveHelperCommandTests
             Assert.True(initCode == 0, initError);
             string op = JsonDocument.Parse(init).RootElement.GetProperty("operator").GetString()!;
             int records = CommandContext.LoadCopy(root).Records.Count;
-            string refusal = "error: The vericairn-enclave helper beside this command line cannot sign for it: the helper did not answer when asked for its version, and this "
+            string refusal = "error: The vericairn-enclave helper beside this command line cannot sign for it: the helper could not complete its availability check, and this "
                 + "command line is version " + version + ", which needs vericairn-enclave 0.9.5 or later. The helper and the command line come from the same release archive: "
                 + "put the vericairn-enclave from this command line's archive beside it. Nothing was signed.";
             foreach (string[] custody in new[] { Array.Empty<string>(), ["--custody", "secure-enclave"] })
@@ -167,6 +168,109 @@ public sealed class EnclaveHelperCommandTests
             Assert.Empty(stopped.Asked);
         }
         finally { CliHarness.Delete(root, home); }
+    }
+
+    [Theory]
+    [InlineData("exit")]
+    [InlineData("signal")]
+    [InlineData("timeout")]
+    [SupportedOSPlatform("macos")]
+    public async Task DevicesCreateRefusesAFailedAvailabilityCheckBeforeMakingAnyKey(string failure)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        string home = CliHarness.TempDirectory("enclave-failed-home");
+        string root = CliHarness.TempDirectory("enclave-failed-estate");
+        using EnclaveHelperStandIn helper = EnclaveHelperStandIn.Failing("available", failure);
+        new ReleaseUpdateStore(home).Configure(false);
+        try
+        {
+            string op = await Init(home, helper.Path, root);
+            int before = CommandContext.LoadCopy(root).Records.Count;
+            (int code, string output, string error) = await Built(home, helper.Path, "--estate", root, "--json", "devices", "create",
+                "--principal", op, "--name", "Operator Mac");
+
+            Assert.True(code == 2, error + output);
+            Assert.Empty(output);
+            AssertHelperRefusal(error, helper.Path);
+            Assert.Equal(before, CommandContext.LoadCopy(root).Records.Count);
+            string keys = Path.Combine(home, "keys");
+            Assert.False(Directory.Exists(keys) && Directory.EnumerateFiles(keys).Any());
+            Assert.DoesNotContain("create", helper.Asked);
+        }
+        finally { CliHarness.Delete(root, home); }
+    }
+
+    [Theory]
+    [InlineData("exit")]
+    [InlineData("signal")]
+    [InlineData("timeout")]
+    [SupportedOSPlatform("macos")]
+    public async Task DoctorReportsDefaultCustodyUnavailableWhenTheAvailabilityCheckFails(string failure)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        string home = CliHarness.TempDirectory("enclave-doctor-home");
+        string root = CliHarness.TempDirectory("enclave-doctor-estate");
+        using EnclaveHelperStandIn helper = EnclaveHelperStandIn.Failing("available", failure);
+        new ReleaseUpdateStore(home).Configure(false);
+        try
+        {
+            (int code, string output, string error) = await Built(home, helper.Path, "--estate", root, "--json", "doctor");
+            Assert.True(code == 0, error);
+            using JsonDocument document = JsonDocument.Parse(output);
+            JsonElement probes = document.RootElement;
+            Assert.Equal("unavailable", probes.GetProperty("custody").GetProperty("state").GetString());
+            Assert.Equal("unavailable", probes.GetProperty("enclave").GetProperty("state").GetString());
+            Assert.Equal("unavailable", probes.GetProperty("helper").GetProperty("state").GetString());
+            Assert.Contains("release archive", probes.GetProperty("custody").GetProperty("detail").GetString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(Path.GetDirectoryName(helper.Path)!, output + error, StringComparison.Ordinal);
+        }
+        finally { CliHarness.Delete(root, home); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [SupportedOSPlatform("macos")]
+    public async Task DevicesCreateKeepsFileCustodyWhenTheHelperIsAbsentOrReportsNoEnclave(bool present)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        string home = CliHarness.TempDirectory("enclave-missing-home");
+        string root = CliHarness.TempDirectory("enclave-missing-estate");
+        using EnclaveHelperStandIn helper = EnclaveHelperStandIn.Failing("available", "no-enclave");
+        string path = present ? helper.Path : Path.Combine(root, "missing", SecureEnclaveCustody.HelperName);
+        new ReleaseUpdateStore(home).Configure(false);
+        try
+        {
+            string op = await Init(home, path, root);
+            (int code, string output, string error) = await Built(home, path, "--estate", root, "--json", "devices", "create",
+                "--principal", op, "--name", "Operator Mac");
+            Assert.True(code == 0, error + output);
+            RecordEnvelope device = Assert.Single(CommandContext.LoadCopy(root).OfType("device"));
+            Assert.Equal(("file-owner-only", "none"), (device.Body.GetProperty("custody").GetString(), device.Body.GetProperty("presence").GetString()));
+
+            (int doctorCode, string diagnosis, string doctorError) = await Built(home, path, "--estate", root, "--json", "doctor");
+            Assert.True(doctorCode == 0, doctorError);
+            using JsonDocument report = JsonDocument.Parse(diagnosis);
+            JsonElement custody = report.RootElement.GetProperty("custody");
+            Assert.Equal(("present", "file-owner-only"), (custody.GetProperty("state").GetString(), custody.GetProperty("value").GetString()));
+        }
+        finally { CliHarness.Delete(root, home); }
+    }
+
+    private static async Task<string> Init(string home, string helper, string root)
+    {
+        (int code, string output, string error) = await Built(home, helper, "--estate", root, "--json", "estate", "init",
+            "--name", "Example", "--slug", "example", "--purpose", "Check the default custody.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit);
+        Assert.True(code == 0, error);
+        using JsonDocument document = JsonDocument.Parse(output);
+        return document.RootElement.GetProperty("operator").GetString()!;
+    }
+
+    private static void AssertHelperRefusal(string error, string helper)
+    {
+        Assert.Contains("The vericairn-enclave helper beside this command line cannot sign for it", CliHarness.Unfold(error), StringComparison.Ordinal);
+        Assert.Contains("Nothing was signed.", CliHarness.Unfold(error), StringComparison.Ordinal);
+        Assert.DoesNotContain(Path.GetDirectoryName(helper)!, error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -194,6 +298,7 @@ public sealed class EnclaveHelperCommandTests
     {
         var info = new ProcessStartInfo(CliHarness.BuiltExecutable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (string argument in args) info.ArgumentList.Add(argument);
+        info.Environment["HOME"] = home;
         info.Environment[VericairnHome.EnvironmentVariable] = home;
         info.Environment[SecureEnclaveCustody.HelperVariable] = helper;
         using Process process = Process.Start(info)!;

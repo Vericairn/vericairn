@@ -755,7 +755,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 presence = request.Presence ?? (format >= 2 && DeviceKeyStores.PresenceByDefault(person, kind));
                 store = DeviceKeyStores.Named(kind, presence);
             }
-            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
+            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException or EnclaveHelperMismatchException)
             {
                 // The refusal is for a person: the message alone, without the parameter name an ArgumentException appends.
                 string message = exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message;
@@ -848,7 +848,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 presence = request.Presence ?? (EstateModel.BodyString(device!, "presence") == "required" && DeviceKeyStores.PresenceKinds.IndexOf(DeviceKeyStores.Named(custody).Kind) >= 0);
                 next = DeviceKeyStores.Named(custody, presence);
             }
-            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
+            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException or EnclaveHelperMismatchException)
             {
                 return Refuse(exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message);
             }
