@@ -1,5 +1,7 @@
 # Progress targets
 
+Revision 2, November 27, 2026. Describe how a follower records comment attempts and surfaces uncertain deliveries after an interruption (FIX-177).
+
 Revision 1, November 21, 2026. Describe progress targets, the GitHub Discussions adapter, their forms and triggers (WATCH-06).
 
 From 0.9.4 (`WATCH-06`), Vericairn keeps the estate's progress at a target, such as a pinned GitHub discussion, so you follow it
@@ -33,8 +35,8 @@ vericairn progress target remove status
 
 `set` again replaces the configuration and keeps what the follower kept. `remove` forgets the target on this machine; the place it
 kept, such as a discussion, stays where it is. The configuration is `progress-targets.json`, and what a follower keeps (the place
-it created, the event cursor it reached and what it last saw waiting) is `progress-targets-state.json`, both owner-only in the live
-store's directory.
+it created, the event cursor it reached, what it last saw waiting and its comment attempts) is `progress-targets-state.json`,
+both owner-only in the live store's directory.
 
 ## Refresh and follow
 
@@ -51,15 +53,51 @@ place's address, the form, how many records the text carries and, for the public
 `--dry-run` locates the place, composes the text and shows it, and sends nothing. `--json` writes
 `vericairn.progress-target-outcome/1`: `action`, `url`, `form`, `detail`, `carried` (each record the text carries, by type, id and
 hash), `leftOut` and, in a dry run, `text`. It exits 0 when the target is equal, 2 when it refused and sent nothing, and 1 when an
-effect was stopped for a person or sent and not confirmed (`uncertain`).
+effect was stopped for a person or its outcome is uncertain.
 
 `follow` is the one command that keeps the target equal. It follows the event journal of the daemon serving the estate, so the
 daemon must be running (`vericairn runtime start`): once the stream is open it refreshes the target, so no change made before is
 missed, then refreshes it for each event a refresh trigger names and adds a comment for each event a comment trigger names, until
 interrupted. Events read together refresh the target once. After a reset (a cursor the journal can no longer honor) it refreshes
 again. It keeps the cursor it reached after each batch and resumes there when started again. `--count <n>` stops after `n`
-outcomes. A refresh or comment that fails is printed and following goes on; a comment that may have been added is never added
-again, since a comment notifies. Run one follower per target.
+outcomes. A refresh or comment that an adapter refuses is printed and following goes on. One follower follows a target on a
+machine at a time: a second `follow` of the same target refuses until the first stops.
+
+From 0.9.5 (FIX-177), the follower saves a pending comment with its event or wait key, payload hash, form and destination before
+calling the adapter to send it. It records a confirmed comment's address, a refusal or an uncertain outcome. With that target's
+local state intact, the follower makes at most one adapter call to send a comment for each key, including after a restart or a
+change to the text, form or destination. This protection begins with attempts recorded by this version and ends if the target or
+its local state is removed.
+
+A restart treats a pending comment without a saved outcome as uncertain. `vericairn progress target list` shows these comments
+with the original destination and payload hash, and `--json` reports them in each target's `uncertainComments`. Comment outcomes
+from `follow --json` name their event or wait in `commentKey`. An adapter without
+comment receipt lookup, including GitHub Discussions, cannot establish whether the request reached the service, was accepted
+or notified anyone. Check the original destination before deciding how to handle the comment manually. Following keeps the
+uncertain entry and never retries it, even if the interruption happened before the request left the machine.
+
+A refused comment is final for its key too: nothing was sent, and following does not send it again. The saved hash, form and
+destination are kept for a person to check; the follower never compares them with anything.
+
+An event's key names one change, so its entry is kept. A wait's key names what waits (an ask, an open operator request, or a
+run's step and stop kind), not one time it waits. A commented or refused entry of a wait therefore guards against a second comment
+only while the wait is listed: a step's stop is listed while its delivery is due or delivered and its goal is active. Once a batch
+that reads the waits no longer lists it, the entry is dropped, and the next time the same thing is listed, as a second review round
+of the same step is, it is commented on again. A stop that leaves the list for a moment, queued behind three others for the same
+person or with its goal no longer active, is commented on again when listed again, as before this version. An uncertain entry is never
+dropped: when its wait is listed again, nothing is sent, and the follower prints a stopped outcome naming the entry. A wait that ends
+and begins again while no follower is running is not commented on again, as before.
+
+After checking a comment's destination, remove its entry with `vericairn progress target resolve <name> <key>`, which sends
+nothing. The same event or wait seen again is then commented on. It refuses an entry with no outcome while a follower holds the
+target, since that follower is sending it. Quote the key as the follower prints it: a step's key can hold spaces. Resolve only
+the entries `list` shows: removing a commented entry lets the same comment be sent again if its event or wait is seen again.
+Entries are otherwise kept until resolved or until the target is removed.
+
+Each write of `progress-targets-state.json` reaches the disk, and its replacement of the earlier file is synchronized where the
+system allows a directory to be (macOS and Linux), so a machine that stops loses at most the write in progress. On Windows the
+replacement is left to the system. If the file cannot be read, following refuses rather than forget the attempts it holds; move it aside to
+start every target's local state afresh, accepting that the attempts it held are forgotten.
 
 ## Forms
 

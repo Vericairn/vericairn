@@ -299,7 +299,7 @@ public partial interface IEstateApi
 
     /// <summary>The cancellable counterpart of <see cref="GoalStep"/>; a stopped observation does not undo an effect.</summary>
     Task<GoalStepResponse> GoalStepAsync(string goal, GoalStepRequest request, CancellationToken cancellationToken = default) =>
-        ClientOperation.RunSynchronousAsync(nameof(GoalStep), () => GoalStep(goal, request), true, this as IClientOperationLifetime, cancellationToken);
+        ClientOperation.RunSynchronousAsync(nameof(GoalStep), () => GoalStep(goal, request), request is not { Check: true }, this as IClientOperationLifetime, cancellationToken);
 
     /// <summary>The cancellable counterpart of <see cref="WorkTakeover"/>; a stopped observation does not undo an effect.</summary>
     Task<TakeoverResponse> WorkTakeoverAsync(TakeoverRequest request, CancellationToken cancellationToken = default) =>

@@ -75,6 +75,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/context/prepare", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/context/brief", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/overlaps/preview", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/goals/{id}/step/check", StringComparison.OrdinalIgnoreCase) &&
             // The index is derived machine-local state, never a record: updating it is part of reading.
             !operation.Equals("POST /v1/search", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/search/index", StringComparison.OrdinalIgnoreCase) &&
@@ -309,6 +310,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/overlaps"] = null,
         ["POST /v1/overlaps/preview"] = typeof(OverlapPreviewRequest),
         ["POST /v1/goals/{id}/step"] = typeof(GoalStepRequest),
+        ["POST /v1/goals/{id}/step/check"] = typeof(GoalStepRequest),
         ["POST /v1/goals/{id}/activate"] = typeof(GoalActionRequest),
         ["POST /v1/goals/{id}/pause"] = typeof(GoalActionRequest),
         ["POST /v1/goals/{id}/resume"] = typeof(GoalActionRequest),

@@ -5,6 +5,9 @@ namespace Vericairn.Cli;
 
 internal sealed record GoalProposal(string By, string Title, string Objective, string[] Done, string? Sponsor, string? Delegate, string[] Constraints, string[] Budget, string? Roster, string Kind, string[] WorkOrders, string[] Inputs, string? Deadline, string? Supersedes, string? Flow = null, string[]? Subject = null, string[]? FlowOptions = null, string? Until = null)
 {
+    /// <summary>The repository-relative path patterns the goal gives its routed flow steps.</summary>
+    public string[]? FlowPaths { get; init; }
+
     /// <summary>From 0.9.4, the standing flow a standing agent runs once per occurrence, as id@version.</summary>
     public string? Standing { get; init; }
 

@@ -256,8 +256,8 @@ public sealed class DaemonHost : IAsyncDisposable
         {
             settings = RuntimeSettings.Load(directory);
             localNetwork = options.LocalNetwork ?? settings.LocalNetworkEndPoint();
-            certificates = loopback || localNetwork is not null ? new RuntimeCertificates(directory) : null;
             identity = localNetwork is null ? null : RuntimeIdentity.LoadOrCreate(directory, options.IdentityStore, options.Log);
+            certificates = loopback || localNetwork is not null ? new RuntimeCertificates(directory) : null;
         }
         catch
         {

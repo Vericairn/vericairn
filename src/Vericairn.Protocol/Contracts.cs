@@ -456,6 +456,10 @@ public sealed record OverlapPreviewRequest(JsonElement Brief, string? Repository
 /// <param name="ContextPackage">Optional expected hash of the assembled run context; a mismatch refuses dispatch.</param>
 public sealed record GoalStepRequest(string By, string? Repository = null, IReadOnlyDictionary<string, string>? Settings = null, long? WallMinutes = null, string? Branch = null, string? Base = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null)
 {
+    /// <summary>Inspect the flow step's route and permitted paths without signing, recording, or starting work.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Check { get; init; }
+
     /// <summary>For an agent's step, up to five search queries whose top three new candidates each join the run's package as optional sources.</summary>
     public IReadOnlyList<string>? Search { get; init; }
 
@@ -488,6 +492,10 @@ public sealed record GoalStepRequest(string By, string? Repository = null, IRead
 /// <param name="Problem">Why nothing was dispatched.</param>
 public sealed record GoalStepResponse(string Goal, string Outcome, string Message, bool Ok, string? Step = null, string? Route = null, string? Principal = null, RecordWritten? Assignment = null, RecordWritten? Ask = null, RunResponse? Run = null, Problem? Problem = null)
 {
+    /// <summary>The flow assignment's permitted path patterns when the step is checked without recording it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? PermittedChanges { get; init; }
+
     /// <summary>For a run's reserved act, the operator request this call wrote, carrying the step's exact command; it grants nothing (0.9.2).</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public RecordWritten? Request { get; init; }

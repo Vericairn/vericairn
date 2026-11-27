@@ -70,6 +70,7 @@ public static class SecureEnclaveCustody
 [SupportedOSPlatform("macos")]
 public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
 {
+    private const int DeadlineExceeded = -1;
     private static readonly TimeSpan Quick = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan WithPerson = DeviceKeyStores.PresenceWait;
     private readonly string directory;
@@ -137,7 +138,7 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
         Directory.CreateDirectory(directory);
         File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         (int code, string output) = Presence ? Run(helper, Quick, "create", blob, "--presence") : Run(helper, Quick, "create", blob);
-        return code == 0 ? Convert.FromBase64String(output) : throw new InvalidOperationException(output);
+        return code == 0 ? ReadPublicKey(output) : throw new InvalidOperationException(output);
     }
 
     /// <inheritdoc />
@@ -149,20 +150,42 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
         }
 
         RequireHelper();
+        (int code, string output) answer;
         try
         {
-            (int code, string output) = Run(helper, Quick, "public", Blob(deviceId));
-            if (code == 0)
-            {
-                return Convert.FromBase64String(output);
-            }
+            answer = Run(helper, Quick, "public", Blob(deviceId));
         }
-        catch (Exception exception) when (EnclaveHelperCheck.CouldNotStart(exception) || exception is FormatException)
+        catch (Exception exception) when (EnclaveHelperCheck.CouldNotStart(exception))
         {
             // Helper output and launch exceptions can include machine paths.
+            throw EnclaveHelperCheck.Refuse("could not read the held key's public key");
         }
 
-        throw EnclaveHelperCheck.Refuse("could not read the held key's public key");
+        return answer.code switch
+        {
+            0 => ReadPublicKey(answer.output),
+            3 => throw EnclaveUnavailable(),
+            4 => throw new EnclaveKeyUnavailableException(),
+            _ => throw EnclaveHelperCheck.Refuse("could not read the held key's public key"),
+        };
+    }
+
+    internal static InvalidOperationException EnclaveUnavailable() =>
+        new("The Secure Enclave is unavailable to this process (helper exit 3). Start the runtime in a context with Secure Enclave access on the Mac holding this key.");
+
+    private static byte[] ReadPublicKey(string output)
+    {
+        byte[] spki;
+        try
+        {
+            spki = Convert.FromBase64String(output);
+        }
+        catch (FormatException)
+        {
+            throw EnclaveHelperCheck.Refuse("did not return a valid P-256 public key");
+        }
+
+        return RecordSigning.IsExactPublicKey(spki) ? spki : throw EnclaveHelperCheck.Refuse("did not return a valid P-256 public key");
     }
 
     /// <inheritdoc />
@@ -290,9 +313,15 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
         if (!process.WaitForExit(timeout))
         {
             process.Kill(entireProcessTree: true);
-            return (4, $"The {SecureEnclaveCustody.HelperName} helper did not answer within {timeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds.");
+            // A timeout gives no helper outcome. Exit 4 is an actual answer that a key could not be opened.
+            process.WaitForExit();
+            return (DeadlineExceeded, $"The {SecureEnclaveCustody.HelperName} helper did not answer within {timeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds.");
         }
 
         return process.ExitCode == 0 ? (0, output.Result.Trim()) : (process.ExitCode, error.Result.Trim());
     }
 }
+
+/// <summary>A working helper answered that the held key blob could not be opened on this Mac.</summary>
+internal sealed class EnclaveKeyUnavailableException()
+    : InvalidOperationException("The Secure Enclave helper could not open the held key on this Mac (helper exit 4).");
