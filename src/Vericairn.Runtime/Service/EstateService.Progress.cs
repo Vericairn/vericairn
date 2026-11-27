@@ -80,10 +80,12 @@ public sealed partial class EstateService
             if (request.StatusText is not null) body["statusText"] = request.StatusText;
             var draft = new RecordDraft("work-progress", request.By, Element(body), attempt.Reference, At: claimed);
             // Interim notes pass the same author, shape and portable-content checks, without storing the candidate record.
-            (AuthoredRecord? candidate, string? refusal) = AuthorLocked(draft, model, scanContent: true);
+            (AuthoredRecord? candidate, Problem? refusal) = AuthorLocked(draft, model, scanContent: true);
             if (candidate is null)
             {
-                return new WorkProgressResponse(null, Problem: Refuse(refusal!).Problem);
+                return new WorkProgressResponse(null, Problem: refusal is { Code: "rejected" }
+                    ? refusal with { Message = "The progress claim was not stored." }
+                    : refusal);
             }
 
             FindingList findings = Invalid(LoadWith([candidate]), [candidate]);

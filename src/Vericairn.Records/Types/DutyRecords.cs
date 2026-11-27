@@ -78,7 +78,7 @@ internal static partial class DutyRecords
                 RecordEnvelope? review = PolicyRecords.Reference(context, source.Nested("review", true), true, "review");
                 if (result is not null && review is not null && (review.Subject != result.Reference || review.By == result.By || EstateModel.BodyString(review, "outcome") != "pass" || !SignatureChecks.IsAuthentic(context.Model, result) || !SignatureChecks.IsAuthentic(context.Model, review)))
                     source.RelationshipError("duty.date-source", "review", "A report date cites an admitted-device signed result and an exact, signed, independent passing review.");
-                if (result is not null && !PolicyRecords.Items(PolicyRecords.Property(result.Body, "outputs")).Any()) source.Error("duty.date-source", "result", "A source report retains its bytes in hashed outputs.");
+                if (result is not null && !PolicyRecords.Items(PolicyRecords.Property(result.Body, "outputs")).Any()) source.RelationshipError("duty.date-source", "result", "A source report retains its bytes in hashed outputs.");
                 break;
         }
         source.NoOtherKeys();
@@ -104,7 +104,7 @@ internal static partial class DutyRecords
                     string? commit = clause.Enum("commitSource", false, "result-scope", "publication");
                     if (commit == "result-scope") PolicyRecords.IdentityField(context, clause, "repository", "resource");
                     if (mode == "result" && review == "none") clause.Error("duty.review", "subject", "A result-subject verification requires independent or operator review.");
-                    if (subject is { Type: "resource" } && EstateModel.BodyString(subject, "kind") == "repository" && commit is null) clause.Error("duty.commit", "commitSource", "Repository verification names its commit source.");
+                    if (subject is { Type: "resource" } && EstateModel.BodyString(subject, "kind") == "repository" && commit is null) clause.RelationshipError("duty.commit", "commitSource", "Repository verification names its commit source.");
                     break;
                 case "device-rotation":
                     if (subject is not null && subject.Type != "device") clause.Error("duty.subject", "kind", "Device rotation needs a device subject.");

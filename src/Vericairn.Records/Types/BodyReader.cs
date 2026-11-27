@@ -314,7 +314,10 @@ public sealed class BodyReader
         }
     }
 
-    /// <summary>Adds an error the record's own content decides. Use <see cref="RelationshipError"/> after consulting another record or a signature.</summary>
+    /// <summary>
+    /// Reports a field error that can be checked before signing using only the record's own content. Use
+    /// <see cref="RelationshipError"/> when reporting the error requires estate state or signatures.
+    /// </summary>
     public void Error(string code, string name, string message) => findings.Error(code, Field(name), message);
 
     /// <summary>Reports a field error that depends on estate state or on the record's signatures.</summary>

@@ -209,10 +209,10 @@ public sealed partial class EstateService
                 inputs.Add(new JsonObject { ["type"] = "possibility", ["id"] = first });
             }
 
-            (AuthoredRecord? order, string? refusal) = AuthorLocked(new RecordDraft("work-order", request.By, Element(body)), model);
+            (AuthoredRecord? order, Problem? refusal) = AuthorLocked(new RecordDraft("work-order", request.By, Element(body)), model);
             if (order is null)
             {
-                return Refuse(refusal!);
+                return WriteOutcome.Fail(refusal!);
             }
 
             JsonObject adopting = JsonNode.Parse(possibility.Body.GetRawText())!.AsObject();
@@ -222,7 +222,7 @@ public sealed partial class EstateService
             (AuthoredRecord? adopted, refusal) = AuthorLocked(new RecordDraft("possibility", request.By, Element(adopting), Supersedes: possibility.Id), model);
             if (adopted is null)
             {
-                return Refuse(refusal!);
+                return WriteOutcome.Fail(refusal!);
             }
 
             (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherLocked([order, adopted], "Create a work order from a possibility and record its adoption.", null);

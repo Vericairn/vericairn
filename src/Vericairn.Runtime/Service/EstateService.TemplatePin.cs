@@ -44,8 +44,8 @@ public sealed partial class EstateService
             if (EstateChecks.Content(request.Path, after).HasErrors) return new(null, null, new("refused", "The prepared document fails repository content checks.", []));
             JsonObject body = JsonNode.Parse(draft.Body.GetRawText())!.AsObject();
             body["hash"] = ContentHash.Sha256(after); body["bytes"] = after.LongLength;
-            (AuthoredRecord? pin, string? refusal) = AuthorLocked(draft with { Body = JsonSerializer.SerializeToElement(body) }, model, scanContent: true);
-            if (pin is null) return new(null, null, new("refused", refusal!, []));
+            (AuthoredRecord? pin, Problem? refusal) = AuthorLocked(draft with { Body = JsonSerializer.SerializeToElement(body) }, model, scanContent: true);
+            if (pin is null) return new(null, null, refusal);
             if (TemplateDocuments.RefreshGenerated(LoadWith([pin]), declaration, next) != next)
                 return new(null, null, new("refused", "The generated content depends on its own output hash or another unstable source; no pin or output was stored.", []));
             var stored = StoreTogetherLocked([pin], "Refresh template regions and pin the resulting document revision.", null, current =>

@@ -86,7 +86,7 @@ public sealed class EstatePolicyType : IRecordType
 
         string identity = PolicyRecords.Identity(context.Model, context.Record);
         RecordEnvelope first = context.Find(identity) ?? context.Record;
-        if (starts is not null && string.CompareOrdinal(starts, first.At) < 0) body.Error("policy.activation", "startsAt", "Activation cannot precede the declaration.");
+        if (starts is not null && string.CompareOrdinal(starts, first.At) < 0) body.RelationshipError("policy.activation", "startsAt", "Activation cannot precede the declaration.");
         if (context.Model.OfType(Name).Any(p => p.Id != context.Record.Id && PolicyRecords.Identity(context.Model, p) != identity && EstateModel.BodyString(p, "key") == key)) body.RelationshipError("policy.duplicate-key", "key", "A key belongs to one identity, including after retirement.");
         if (previous is not null)
         {

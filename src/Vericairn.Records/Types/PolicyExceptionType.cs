@@ -83,17 +83,17 @@ public sealed class PolicyExceptionType : IRecordType
         foreach (BodyReader target in targets)
         {
             string? kind = target.Enum("kind", true, "record", "publication", "file", "occurrence", "pair");
-            if (policy is not null && DutyRecords.IsDuty(DutyRecords.Rule(policy, rule)) && kind != "occurrence") target.Error("exception.occurrence", "kind", "A duty exception enumerates exact occurrences.");
+            if (policy is not null && DutyRecords.IsDuty(DutyRecords.Rule(policy, rule)) && kind != "occurrence") target.RelationshipError("exception.occurrence", "kind", "A duty exception enumerates exact occurrences.");
             // From 0.9.4 (POLICY-08) a concurrent-paths rule is excepted only for exact pairs of assignment revisions, and only such a rule takes a pair.
             bool pairs = policy is not null && PolicyRecords.Text(DutyRecords.Rule(policy, rule), "kind") == AssignmentOverlaps.PolicyKind;
             if (policy is not null && kind is not null && pairs != (kind == "pair"))
-                target.Error("exception.pair", "kind", pairs ? "A concurrent-paths exception names exact pairs of assignment revisions." : "Only a concurrent-paths rule takes a pair target.");
+                target.RelationshipError("exception.pair", "kind", pairs ? "A concurrent-paths exception names exact pairs of assignment revisions." : "Only a concurrent-paths rule takes a pair target.");
             switch (kind)
             {
                 case "record": PolicyRecords.Reference(context, target.Nested("record", true)); break;
                 case "publication":
                     RecordEnvelope? publication = PolicyRecords.Reference(context, target.Nested("publication", true), true, "release");
-                    if (publication is not null && EstateModel.BodyString(publication, "status") != "published") target.Error("exception.publication", "publication", "A publication target pins an observed publication.");
+                    if (publication is not null && EstateModel.BodyString(publication, "status") != "published") target.RelationshipError("exception.publication", "publication", "A publication target pins an observed publication.");
                     break;
                 case "file":
                     PolicyRecords.Repository(context, target);

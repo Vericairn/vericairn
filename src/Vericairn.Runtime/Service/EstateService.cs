@@ -1555,16 +1555,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // The closing and the acceptance are judged together and stored as one batch, both announced before the first presence prompt.
             var closingDraft = new RecordDraft("goal-status", request.By, JsonSerializer.SerializeToElement(closing.Body()), current.Reference);
             using IDisposable counted = presence.Action("goal accept " + current.Id, SignsWithPresence(model, request.By) ? [DescribeRecord(closingDraft, model), DescribeRecord(accepting, model)] : null);
-            (AuthoredRecord? closed, string? refusal) = AuthorLocked(closingDraft, model);
+            (AuthoredRecord? closed, Problem? refusal) = AuthorLocked(closingDraft, model);
             if (closed is null)
             {
-                return Refuse(refusal!);
+                return WriteOutcome.Fail(refusal!);
             }
 
             (AuthoredRecord? accepted, refusal) = AuthorLocked(accepting, model);
             if (accepted is null)
             {
-                return Refuse(refusal!);
+                return WriteOutcome.Fail(refusal!);
             }
 
             (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherLocked([closed, accepted], "Close a goal's run with its unsettled steps and accept the goal.", null);
@@ -1883,9 +1883,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             if (dependency is not null)
             {
-                (AuthoredRecord? signed, string? refusal) = AuthorLocked(new RecordDraft("observation", request.By, dependency.Envelope.Body,
+                (AuthoredRecord? signed, Problem? refusal) = AuthorLocked(new RecordDraft("observation", request.By, dependency.Envelope.Body,
                     dependency.Envelope.Subject, At: dependency.Envelope.AtTime, Id: dependency.Envelope.Id, Format: dependency.Envelope.Format), model);
-                if (signed is null) return (null, new Problem("refused", refusal!, []));
+                if (signed is null) return (null, refusal);
                 dependency = signed;
                 plan = EstateUpgrade.Plan(model, signed.Envelope, request.Line, request.Channel);
             }
@@ -1956,11 +1956,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
             var migrationDraft = new RecordDraft("migration", request.By, body.RootElement,
                 Subject: VericairnReleaseObservation.Is(plan.Release) ? plan.Release.Reference : null, Format: Math.Min(plan.ToFormat, RecordFormats.Current));
-            (AuthoredRecord? migration, string? migrationRefusal) = AuthorLocked(migrationDraft, model);
+            (AuthoredRecord? migration, Problem? migrationRefusal) = AuthorLocked(migrationDraft, model);
             if (migration is null)
             {
                 UpgradeReturns.Discard(restore.Directory);
-                return (null, new Problem("refused", migrationRefusal!, []));
+                return (null, migrationRefusal);
             }
 
             AuthoredRecord[] proposed = dependency is null ? [migration] : [dependency, migration];
@@ -1975,9 +1975,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 TriggeredCheckpoint? upgradeCheckpoint = null;
                 if (global::Vericairn.Records.History.SignedHistory.Adopted(model))
                 {
-                    (PreparedCheckpoint? checkpoint, string? skipped) = context.Staged.Keys.Any(k => k.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal))
-                        ? (null, "The migrations rewrite record files, so no history checkpoint was written with the upgrade; the next checkpoint witnesses them.")
+                    (PreparedCheckpoint? checkpoint, Problem? checkpointProblem) = context.Staged.Keys.Any(k => k.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal))
+                        ? (null, new Problem("refused", "The migrations rewrite record files, so no history checkpoint was written with the upgrade; the next checkpoint witnesses them.", []))
                         : CheckpointLocked(LoadWith(proposed), "upgrade", request.By);
+                    string? skipped = CheckpointSkip(checkpointProblem);
                     upgradePrepared = checkpoint;
                     if (checkpoint is not null && JudgeProposedLocked([.. proposed, checkpoint.Record]) is Problem refusedCheckpoint)
                     {
@@ -2484,12 +2485,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 (presenceDraft, presenceHash, presenceSignature, note + $" It is the presence device of device {plan.Record}, presented in the same exchange: a second key of that phone whose every signature needs its owner's presence, used to sign records."),
             })
             {
-                (AuthoredRecord? deviceRecord, string? deviceRefusal) = AuthorLocked(deviceDraft, model, [new PresignedSigner(deviceDraft.Id!, deviceHash, deviceSignature)]);
-                if (deviceRecord is null) return Refused("refused", deviceRefusal! + " Nothing was recorded.");
+                (AuthoredRecord? deviceRecord, Problem? deviceRefusal) = AuthorLocked(deviceDraft, model, [new PresignedSigner(deviceDraft.Id!, deviceHash, deviceSignature)]);
+                if (deviceRecord is null)
+                    return (WriteOutcome.Fail(deviceRefusal! with { Message = deviceRefusal.Message + " Nothing was recorded." }), null, null, null);
                 using JsonDocument admission = JsonDocument.Parse(new JsonObject { ["principal"] = plan.Principal, ["status"] = "admitted", ["note"] = admissionNote }.ToJsonString());
-                (AuthoredRecord? admitted, string? admissionRefusal) = AuthorLocked(new RecordDraft("admission", issuer.Principal, admission.RootElement.Clone(),
+                (AuthoredRecord? admitted, Problem? admissionRefusal) = AuthorLocked(new RecordDraft("admission", issuer.Principal, admission.RootElement.Clone(),
                     new RecordReference("device", deviceDraft.Id!, deviceRecord.Envelope.ComputedHash)), model);
-                if (admitted is null) return Refused("refused", "Nothing was recorded: a device's admission was refused. " + admissionRefusal);
+                if (admitted is null)
+                    return (WriteOutcome.Fail(admissionRefusal! with { Message = "Nothing was recorded: a device's admission was refused. " + admissionRefusal.Message }), null, null, null);
                 records.Add(deviceRecord);
                 records.Add(admitted);
             }
@@ -2853,14 +2856,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
-    private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null, bool scanContent = false)
-    {
-        (AuthoredRecord? record, Problem? problem) = AuthorCheckedLocked(draft, current, signers, scanContent);
-        string? refusal = problem is { Findings.Count: > 0 }
-            ? $"{problem.Message} {string.Join(" ", problem.Findings.Select(f => f.Message))}"
-            : problem?.Message;
-        return (record, refusal);
-    }
+    private (AuthoredRecord? Record, Problem? Problem) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null, bool scanContent = false) =>
+        AuthorCheckedLocked(draft, current, signers, scanContent);
 
     private (AuthoredRecord? Record, Problem? Problem) AuthorCheckedLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers, bool scanContent = true)
     {
@@ -3551,7 +3548,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>Authors a record with no signature, for a device to sign or as a candidate the store refuses. Caller holds the gate.</summary>
-    private (AuthoredRecord? Record, string? Refusal) AuthorUnsignedLocked(RecordDraft draft, EstateModel current) => AuthorLocked(draft, current, []);
+    private (AuthoredRecord? Record, Problem? Problem) AuthorUnsignedLocked(RecordDraft draft, EstateModel current) => AuthorLocked(draft, current, []);
 
     /// <summary>A signature a device made elsewhere over the content hash of exactly this record; any other digest is refused.</summary>
     private sealed class PresignedSigner(string deviceId, string hash, string signature) : IRecordSigner

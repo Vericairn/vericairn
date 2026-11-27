@@ -27,7 +27,7 @@ internal static partial class DutyRecords
             BodyReader? occurrence = duty.Nested("occurrence", true);
             if (policy is not null) Occurrence(context, occurrence, policy, rule, subject);
             string identity = policy?.Id + ":" + rule + ":" + (subject is null ? "?" : PolicyRecords.Identity(context.Model, subject)) + ":" + (occurrence is null ? "?" : CanonicalJson.Serialize(occurrence.Element));
-            if (!seen.Add(identity)) duty.Error("duty.duplicate", "occurrence", "A result names an occurrence only once, even across subject revisions.");
+            if (!seen.Add(identity)) duty.RelationshipError("duty.duplicate", "occurrence", "A result names an occurrence only once, even across subject revisions.");
             Scope(context, duty.Nested("scope", true));
             duty.Text("coverage", true, 8000);
             Proofs(context, duty, policy is null ? default : Rule(policy, rule));

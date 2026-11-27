@@ -152,8 +152,8 @@ public sealed partial class EstateService
                     var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, ParseAt(at), id);
                     EstateModel model = session.Load();
                     ownDraft = draft;
-                    (authored, string? refusal) = AuthorLocked(draft, model, scanContent: true);
-                    if (authored is null) throw new ProviderRefusedException(refusal!);
+                    (authored, Problem? refusal) = AuthorLocked(draft, model, scanContent: true);
+                    if (authored is null) return AuthoringRefused(refusal!);
                     // A revision taking a role away is written after a history checkpoint, which this path cannot carry, or is refused where
                     // it would make records fail (design/signed-history.md § 8).
                     if (OperatorRecordRemovalRefusal(draft, model, authored) is { } removal)
@@ -213,8 +213,8 @@ public sealed partial class EstateService
                         if (request.Subject is not null && !TryParseSubject(request.Subject, out subject))
                             throw new ProviderRefusedException("The resumed subject is invalid.");
                         ownDraft = new(request.Type, request.By, request.Body, subject, request.Supersedes, ParseAt(checkpoint.At), checkpoint.Id);
-                        (authored, string? refusal) = AuthorLocked(ownDraft, session.Load(), scanContent: true);
-                        if (authored is null) throw new ProviderRefusedException(refusal!);
+                        (authored, Problem? refusal) = AuthorLocked(ownDraft, session.Load(), scanContent: true);
+                        if (authored is null) return AuthoringRefused(refusal!);
                     }
                     if (authored.Envelope.ComputedHash != checkpoint.Hash) throw new ProviderRefusedException("The resumed record differs from the original intent.");
                     // The removal is judged again at the record stage, against what arrived since the prepare step. Nothing is stored,
@@ -391,6 +391,9 @@ public sealed partial class EstateService
 
         OperatorRecordResponse Answer(string status, string message, bool ok, string next, ChangeResponse? latest = null) =>
             new(identity, status, message, ok, next, written, checkpoint?.Branch, checkpoint?.Head, latest);
+
+        OperatorRecordResponse AuthoringRefused(Problem problem) =>
+            Answer("stopped", Describe(problem), false, "Resolve this failure and " + resume, change) with { Problem = problem };
 
         OperatorRecordResponse Stopped(ChangeResponse latest)
         {
