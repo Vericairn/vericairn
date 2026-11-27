@@ -410,8 +410,9 @@ records into the SDK's own directory, where the SDK trusts whatever it finds.
 ## Examples smoke
 
 The product-owned manifest under `tests/examples/examples.json` pins the public example estates to full commits. Only a reviewed
-change moves a pin or adds an expected finding. The read leg fetches the pins anonymously in scratch Git repositories, with hooks
-and credential helpers disabled. It treats README links, manifests, records and registers as data. Its only executable from another
+change moves a pin or adds an expected finding. The read leg anonymously fetches each repository's default branch into a scratch
+Git repository, with hooks and credential helpers disabled. It checks that the branch reaches the pin before checking out the commit.
+It treats README links, manifests, records and registers as data. Its only executable from another
 archive is this run's checksummed, published Vericairn command line. That command line runs `estate check`, `status` and
 `estate upgrade --check` against those records. The upgrade gets the platform archive and `SHA256SUMS` through `--from`, with an
 offline stand-in release snapshot confined to scratch. Each README names the release its estate pins and links to paths that the
@@ -419,7 +420,7 @@ pinned commit contains. Any unexpected finding or changed tree fails the leg. Th
 missing decisions-register directory that its README still links to.
 
 Tier 1 uses the ordinary test shares and the in-process driver, with a controllable flow clock. The guide-region test also runs in
-`docs-check`. Tier 2 uses the unpacked archive after the Linux single-file smoke in `package.yml`, and the macOS and Windows
+`docs-check`. Tier 2 uses the unpacked Linux archive after `package.yml` uploads the release artifact, and the macOS and Windows
 release archives in the same workflow's published CLI jobs. `examples-nightly.yml` builds and checks all three platform archives
 from main at 07:37 UTC. The Linux step has a three-minute timeout. On the CI-12 trial, its queue run must finish by the end of the
 slowest other queue job. Move the step to nightly if the trial misses that bound.
