@@ -80,13 +80,21 @@ A refused comment is final for its key too: nothing was sent, and following does
 destination are kept for a person to check; the follower never compares them with anything.
 
 An event's key names one change, so its entry is kept. A wait's key names what waits (an ask, an open operator request, or a
-run's step and stop kind), not one time it waits, so its entry guards against a second comment only while it waits. Once it no
-longer waits, a commented or refused entry is dropped, and when the same thing waits again, as a second review round of the same
-step does, it is commented on again. An uncertain entry of a wait that ended is kept for a person as `ended:<time>:<key>`, where it
-blocks nothing. A wait that ends and begins again while no follower is running is not commented on again, as before.
+run's step and stop kind), not one time it waits. A commented or refused entry of a wait therefore guards against a second comment
+only while the wait is listed: a step's stop is listed while its delivery is due or delivered and its goal is active. Once a batch
+that reads the waits no longer lists it, the entry is dropped, and the next time the same thing is listed, as a second review round
+of the same step is, it is commented on again. A stop that leaves the list for a moment, queued behind three others for the same
+person or with its goal paused, is commented on again when listed again, as before this version. An uncertain entry is never
+dropped: when its wait is listed again, nothing is sent, and the follower prints a stopped outcome naming the entry. A wait that ends
+and begins again while no follower is running is not commented on again, as before.
 
-Each write of `progress-targets-state.json` reaches the disk before it replaces the earlier file, so a machine that stops loses at
-most the write in progress. If the file cannot be read, following refuses rather than forget the attempts it holds; move it aside to
+After checking a comment's destination, remove its entry with `vericairn progress target resolve <name> <key>`, which sends
+nothing. The same event or wait seen again is then commented on. It refuses an entry with no outcome while a follower holds the
+target, since that follower is sending it. Entries are otherwise kept until resolved or until the target is removed.
+
+Each write of `progress-targets-state.json` reaches the disk, and its replacement of the earlier file is synchronized where the
+system allows a directory to be (macOS and Linux), so a machine that stops loses at most the write in progress. On Windows the
+replacement is left to the system. If the file cannot be read, following refuses rather than forget the attempts it holds; move it aside to
 start every target's local state afresh, accepting that the attempts it held are forgotten.
 
 ## Forms

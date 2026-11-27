@@ -98,6 +98,52 @@ internal sealed class ProgressTargetOperations(CommandContext context)
         }
     }
 
+    /// <summary>
+    /// From 0.9.5 (FIX-177): removes a comment entry a target keeps on this machine, once a person has checked its destination. An
+    /// uncertain comment is never sent again while its entry is kept; once removed, the same event or wait seen again is commented on.
+    /// </summary>
+    public int Resolve(string root, string name, string key, bool json)
+    {
+        if (!IsEstate(root)) return context.Fail(NotAnEstate(root));
+        try
+        {
+            ProgressTargetStore store = ProgressTargetStore.Of(root);
+            if (store.Load().All(t => t.Name != name)) return context.Fail($"No progress target is named '{name}' on this machine.");
+            ProgressTargetComment? entry = store.State(name).Comments.GetValueOrDefault(key);
+            if (entry is null) return context.Fail($"Progress target {name} keeps no comment entry {key}; 'vericairn progress target list' shows the uncertain ones.");
+            if (entry.Outcome is null && store.Followed(name))
+                return context.Fail($"A follower of progress target {name} is sending comment {key} now; resolve it once that follower has stopped.");
+
+            ProgressTargetComment? removed = null;
+            store.Update(name, state =>
+            {
+                if (!state.Comments.TryGetValue(key, out removed)) return state;
+                return state with { Comments = state.Comments.Remove(key) };
+            });
+            if (removed is null) return context.Fail($"Progress target {name} keeps no comment entry {key}; 'vericairn progress target list' shows the uncertain ones.");
+
+            string outcome = removed.Outcome ?? "uncertain";
+            if (json)
+            {
+                JsonObject resolved = removed.ToJson();
+                resolved["target"] = name;
+                resolved["key"] = key;
+                resolved["outcome"] = outcome;
+                context.Output.WriteLine(new JsonObject { ["format"] = TargetsFormat, ["resolved"] = resolved }.ToJsonString());
+            }
+            else
+            {
+                context.Output.WriteLine($"Resolved comment {key} of progress target {name}: its {outcome} entry for {removed.PlaceUrl} is removed, so the same event or wait seen again is commented on.");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return context.Fail(exception.Message);
+        }
+    }
+
     public int Refresh(string root, string name, bool dryRun, bool json)
     {
         if (!IsEstate(root)) return context.Fail(NotAnEstate(root));

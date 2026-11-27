@@ -156,7 +156,7 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
                 if (entry.Outcome is not null) continue;
                 comments = comments.SetItem(key, entry with { Outcome = "uncertain" });
                 recovered.Add(new ProgressOutcome(name, "uncertain", entry.PlaceUrl, entry.Form, [],
-                    $"The follower stopped before saving the outcome for comment {key}. Check the original destination. The follower will keep the entry without retrying.")
+                    $"The follower stopped before saving the outcome for comment {key}. Check the original destination. The follower will keep the entry without retrying; resolve it with 'vericairn progress target resolve {name} {key}'.")
                     { CommentKey = key });
             }
             return comments == state.Comments ? state : state with { Comments = comments };
@@ -195,14 +195,17 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
 
         bool refresh = look || refreshing.Any(p => Fires(model, p.Trigger, p.Event, fresh));
         var comments = new List<(string Key, Remark Remark)>();
+        var held = new List<(string Key, ProgressTargetComment Entry)>();
         var commented = new HashSet<string>(StringComparer.Ordinal);
         // Each wait that began since the target last looked, once, for a waiting comment trigger an event woke or a fresh look (a
         // reset, or following started again) wakes; then each event a comment trigger names whose condition the records show.
         foreach (ProgressTrigger trigger in configuration.Comment.Where(t => t.When == "waiting" && (look || commenting.Any(p => p.Trigger.Equals(t)))))
         {
-            foreach (Wait wait in fresh.Where(w => w.Kind == trigger.Kind && Matches(model, w.Principal, trigger.To)
-                && !state.Comments.ContainsKey(w.Key) && commented.Add(w.Key)))
-                comments.Add((wait.Key, WaitComment(model, wait)));
+            foreach (Wait wait in fresh.Where(w => w.Kind == trigger.Kind && Matches(model, w.Principal, trigger.To) && commented.Add(w.Key)))
+            {
+                if (!state.Comments.TryGetValue(wait.Key, out ProgressTargetComment? kept)) comments.Add((wait.Key, WaitComment(model, wait)));
+                else if (kept.Outcome == "uncertain") held.Add((wait.Key, kept));
+            }
         }
 
         foreach ((EventEnvelope envelope, ProgressTrigger trigger) in commenting.Where(p => p.Trigger.When != "waiting"))
@@ -214,6 +217,11 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
         var outcomes = new List<ProgressOutcome>();
         // A refresh only where a refresh trigger fires; the text is replaced before any comment of the same batch is added.
         if (refresh) outcomes.Add(Refresh(target, model, dryRun: false));
+        // Waiting again under a key whose earlier comment is uncertain: nothing is sent while its entry is kept, and a person is told.
+        foreach ((string key, ProgressTargetComment entry) in held)
+            outcomes.Add(new ProgressOutcome(configuration.Name, "stopped", entry.PlaceUrl, entry.Form, [],
+                $"An earlier comment for {key} is uncertain, so nothing is sent for it while its entry is kept. Check {entry.PlaceUrl}, then resolve it with 'vericairn progress target resolve {configuration.Name} {key}'.")
+                { CommentKey = key });
         foreach ((string key, Remark remark) in comments)
         {
             if (Comment(target, model, key, remark, at) is ProgressOutcome outcome) outcomes.Add(outcome);
@@ -227,34 +235,29 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
                     Cursor = cursor ?? current.Cursor,
                     Waiting = waits is null ? current.Waiting : [.. waits.Select(w => w.Key).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
                 };
-                return waits is null ? next : next with { Comments = Retire(next.Comments, waits.Select(w => w.Key).ToHashSet(StringComparer.Ordinal), at) };
+                return waits is null ? next : next with { Comments = Retire(next.Comments, waits.Select(w => w.Key).ToHashSet(StringComparer.Ordinal)) };
             });
         return outcomes;
     }
 
     /// <summary>
     /// The comment entries kept once the waits now seen are known. A wait's key names what waits, not one occurrence of its waiting (a
-    /// step's key is its goal, step and stop kind), so its entry guards against a second comment only while it waits. Once it has ended,
-    /// a commented or refused entry is dropped, so the next time the same thing waits it is commented on again; an uncertain one is kept
-    /// for a person under <c>ended:</c>, its time and the key, where it blocks nothing. An entry with no outcome yet is left alone, and an
-    /// event's entry is always kept: an event's key names one change.
+    /// step's key is its goal, step and stop kind), so a commented or refused entry guards against a second comment only while the wait
+    /// is listed: once it is not, the entry is dropped, so the next time the same thing is listed as waiting it is commented on again. An
+    /// uncertain entry is never dropped, so that comment is never sent again; a person resolves it with <c>progress target resolve</c>.
+    /// An entry with no outcome yet and an event's entry, whose key names one change, are kept as they are.
     /// </summary>
     internal static ImmutableSortedDictionary<string, ProgressTargetComment> Retire(
-        ImmutableSortedDictionary<string, ProgressTargetComment> comments, IReadOnlySet<string> waiting, DateTimeOffset at)
+        ImmutableSortedDictionary<string, ProgressTargetComment> comments, IReadOnlySet<string> waiting)
     {
         ImmutableSortedDictionary<string, ProgressTargetComment> kept = comments;
         foreach ((string key, ProgressTargetComment entry) in comments)
         {
-            if (!IsWaitKey(key) || waiting.Contains(key) || entry.Outcome is null) continue;
-            kept = kept.Remove(key);
-            if (entry.Outcome == "uncertain") kept = kept.SetItem($"{EndedPrefix}{at.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}:{key}", entry);
+            if (IsWaitKey(key) && !waiting.Contains(key) && entry.Outcome is "commented" or "refused") kept = kept.Remove(key);
         }
 
         return kept;
     }
-
-    /// <summary>The prefix of an uncertain entry kept after its wait ended.</summary>
-    internal const string EndedPrefix = "ended:";
 
     // The keys Waits gives: a step's, an open operator request's and a waiting ask's. An event's key is a hash ("sha256:").
     private static bool IsWaitKey(string key) =>

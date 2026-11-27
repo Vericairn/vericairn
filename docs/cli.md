@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 50, November 27, 2026. A progress target keeps each comment attempt before it is sent and never sends a comment whose outcome is uncertain again; `progress target resolve` removes an entry once a person has checked it, and one follower follows a target on a machine at a time, in the development build.
+
 Revision 48, November 27, 2026. A present `vericairn-enclave` helper must complete its availability check: one that cannot start, exits unexpectedly, is killed or times out makes `devices create` refuse before it makes a key and `doctor` mark the Secure Enclave default unavailable, while exit 3 and an absent helper keep file custody; a daemon that cannot read its Secure Enclave identity refuses to start and keeps the identity, in the development build.
 
 Revision 47, November 26, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
@@ -1602,7 +1604,9 @@ Keeps the estate's progress at a target, such as a pinned GitHub discussion, thr
 machine chooses (`WATCH-06`): `set`, `list` and `remove` configure targets and send nothing; `refresh <name>` brings one equal to
 the estate's progress now, creating its place once and replacing its text only when it differs, and `--dry-run` shows the text
 and sends nothing; `follow <name>` follows the daemon's event journal and refreshes and comments only on the events the target's
-triggers name, until interrupted or after `--count` outcomes. A destination anyone may read always takes the public form, which
+triggers name, until interrupted or after `--count` outcomes; a second `follow` of the same target refuses while one follows. From
+0.9.5 (FIX-177) a comment whose outcome is uncertain is never sent again; `list` shows it, and `resolve <name> <key>` removes its
+entry once you have checked its destination, sending nothing. A destination anyone may read always takes the public form, which
 carries nothing a disclosure rule holds. `refresh` exits 0 when the target is equal, 2 when it refused and sent nothing, and 1
 when an effect was stopped or not confirmed; `--json` writes `vericairn.progress-target-outcome/1`, naming every record the text
 carries. See [Progress targets](progress-targets.md).

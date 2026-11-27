@@ -416,9 +416,8 @@ public sealed class ProgressTargetTests : IDisposable
     }
 
     [Fact]
-    public void AnEndedWaitsUncertainEntryIsKeptForAPersonAndBlocksNothing()
+    public void OnlyACommentedOrRefusedEntryOfAWaitNoLongerListedIsDropped()
     {
-        var at = DateTimeOffset.Parse("2026-11-26T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
         var entry = new ProgressTargetComment("fake-target", "sha256:" + new string('0', 64), "private", "D_1", "https://example.invalid/discussions/1");
         ImmutableSortedDictionary<string, ProgressTargetComment> comments = ImmutableSortedDictionary.CreateRange(StringComparer.Ordinal,
         [
@@ -430,12 +429,44 @@ public sealed class ProgressTargetTests : IDisposable
             KeyValuePair.Create("sha256:E", entry with { Outcome = "commented", Url = "https://example.invalid/discussions/1#comment-3" }),
         ]);
 
-        // Only step:G still waits. A commented or refused entry of an ended wait is dropped; an uncertain one is kept under ended:, where no
-        // wait's key can meet it; one with no outcome yet, a waiting one's and an event's are kept as they are.
-        ImmutableSortedDictionary<string, ProgressTargetComment> kept = ProgressTargetRunner.Retire(comments, new HashSet<string>(["step:G/review/review"], StringComparer.Ordinal), at);
-        Assert.Equal(["ask:D", "ended:2026-11-26T12:00:00Z:ask:B", "sha256:E", "step:G/review/review"], kept.Keys);
-        Assert.Equal(entry with { Outcome = "uncertain" }, kept["ended:2026-11-26T12:00:00Z:ask:B"]);
-        Assert.Same(kept, ProgressTargetRunner.Retire(kept, new HashSet<string>(["step:G/review/review"], StringComparer.Ordinal), at));
+        // Only step:G is listed. An uncertain entry is never dropped, nor one with no outcome yet, a listed wait's or an event's.
+        ImmutableSortedDictionary<string, ProgressTargetComment> kept = ProgressTargetRunner.Retire(comments, new HashSet<string>(["step:G/review/review"], StringComparer.Ordinal));
+        Assert.Equal(["ask:B", "ask:D", "sha256:E", "step:G/review/review"], kept.Keys);
+        Assert.Same(kept, ProgressTargetRunner.Retire(kept, new HashSet<string>(["step:G/review/review"], StringComparer.Ordinal)));
+    }
+
+    [Fact]
+    public void AnUncertainCommentIsNeverSentAgainWhenItsWaitIsListedAgainAndAPersonIsTold()
+    {
+        Configure("private", refresh: ["none"], comment: ["ask to=operator when=waiting"]);
+        Assert.Equal(["created"], Runner().Take(Target(), [], look: true).Select(o => o.Action));
+        RecordEnvelope ask = Ask("Publish the notes?");
+        string key = "ask:" + ask.Id;
+        adapter.OnComment = accepted =>
+        {
+            if (accepted) throw new ProviderUncertainException("The request may have taken effect.");
+        };
+        Assert.Equal(["uncertain"], Take(Runner(), Event("ask", ask, change: "raised", to: estate.OperatorId)).Select(o => o.Action));
+        adapter.OnComment = null;
+
+        // Withdrawn and opened again, as a wait missing from one look and listed at the next is: the uncertain entry stays, nothing is sent.
+        RecordEnvelope withdrawn = estate.Add("ask", estate.OperatorId, AskBody("Publish the notes?", "withdrawn"), supersedes: ask.Id);
+        Runner().Take(Target(), [Event("ask", withdrawn, change: "withdrawn", to: estate.OperatorId)], look: true);
+        Assert.Equal("uncertain", Store.State("status").Comments[key].Outcome);
+        RecordEnvelope reopened = estate.Add("ask", estate.OperatorId, AskBody("Publish the notes?", "open"), supersedes: withdrawn.Id);
+        ProgressOutcome told = Assert.Single(Take(Runner(), Event("ask", reopened, change: "raised", to: estate.OperatorId)));
+        Assert.Equal(("stopped", key), (told.Action, told.CommentKey));
+        Assert.Contains($"vericairn progress target resolve status {key}", told.Detail, StringComparison.Ordinal);
+        Assert.Single(adapter.Comments);
+        Assert.Single(adapter.Calls, call => call == "comment");
+
+        // Once a person resolves it, the next time the ask waits it is commented on.
+        Store.Update("status", state => state with { Comments = state.Comments.Remove(key) });
+        RecordEnvelope again = estate.Add("ask", estate.OperatorId, AskBody("Publish the notes?", "withdrawn"), supersedes: reopened.Id);
+        Runner().Take(Target(), [Event("ask", again, change: "withdrawn", to: estate.OperatorId)], look: true);
+        RecordEnvelope last = estate.Add("ask", estate.OperatorId, AskBody("Publish the notes?", "open"), supersedes: again.Id);
+        Assert.Equal(["commented"], Take(Runner(), Event("ask", last, change: "raised", to: estate.OperatorId)).Select(o => o.Action));
+        Assert.Equal(2, adapter.Comments.Count);
     }
 
     [Fact]

@@ -3,6 +3,7 @@
 
 using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -291,7 +292,32 @@ internal sealed class ProgressTargetStore(string directory)
         }
 
         File.Move(temporary, path, overwrite: true);
+        SyncDirectory(directory);
     }
+
+    // The rename reaches the disk too, where the system lets a directory be synchronized; on Windows the move is left to the system.
+    private static void SyncDirectory(string directory)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        int handle = open(directory, 0);
+        if (handle < 0) return;
+        try
+        {
+            _ = fsync(handle);
+        }
+        finally
+        {
+            _ = close(handle);
+        }
+    }
+
+#pragma warning disable SYSLIB1054
+#pragma warning disable CA2101
+    [DllImport("libc", SetLastError = true)] private static extern int open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+    [DllImport("libc", SetLastError = true)] private static extern int fsync(int handle);
+    [DllImport("libc", SetLastError = true)] private static extern int close(int handle);
+#pragma warning restore CA2101
+#pragma warning restore SYSLIB1054
 
     /// <summary>
     /// Holds a target for one follower on this machine until the stream is disposed, or null when another follower holds it. The hold is
