@@ -310,10 +310,10 @@ public sealed class PublishedDependencyUpgradeTests
         Assert.Contains(problem.Findings, f => f.Code == "migration.author");
         Assert.Equal(before, Snapshot(estate.Root));
         Assert.Empty(estate.Load().OfType("observation"));
-        // From 0.9.4 (FIX-145) the restore point the refused upgrade made first is removed again.
+        // From 0.9.4 (FIX-145) the restore point the refused upgrade made first is removed again, and from 0.9.5 (FIX-174) the directory
+        // of restore points with it, which keeps no other.
         string points = Path.Combine(Path.GetDirectoryName(service.Session.Live.Path)!, Vericairn.Runtime.Upgrade.UpgradeReturns.RestorePointsDirectory);
-        Assert.True(Directory.Exists(points));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(points));
+        Assert.False(Directory.Exists(points));
     }
 
     [Fact]
@@ -390,6 +390,49 @@ public sealed class PublishedDependencyUpgradeTests
         Assert.NotNull(service.Upgrade(new(PublishedReleaseFixture.Version, null, true)).Problem);
         Assert.Equal(state, Snapshot(live));
         Assert.Equal(before, Snapshot(root));
+    }
+
+    [Fact]
+    public async Task WithNoDaemonALocalOnlyEstatesRestorePointHoldsItsDatabasesEachCheckedAsOneFile()
+    {
+        // FIX-174: the command line's upgrade with no daemon opens the estate read-only (EstateService.OpenForUpgrade); a local-only
+        // estate's records are in its live store, and its objects in objects.db beside it, both exported from their files on disk.
+        using var scratch = new TestEstate();
+        using var previous = new PublishedReleaseFixture("9.1.0");
+        VerifiedRelease oldRelease = await previous.VerifyAsync();
+        string root = Path.Combine(scratch.Root, "local");
+        var initialization = new EstateInitialization("Local", "local", "A dependency pin.", "Operator", "Example", null,
+            VerifiedRelease.Repository, PublishedReleaseFixture.Commit, Profile: "local-only") { Release = oldRelease };
+        PreparedEstate prepared = EstateInitializer.Prepare(root, initialization);
+        Directory.CreateDirectory(Path.Combine(root, "estate"));
+        File.WriteAllBytes(Path.Combine(root, EstateLayout.ManifestPath), prepared.ManifestBytes);
+        string clone;
+        using (EstateSession writer = EstateSession.Open(root))
+        {
+            writer.Write(prepared.Operator);
+            writer.Write(prepared.Estate);
+            writer.Write(prepared.Release!);
+            writer.Objects.Put("an object the estate keeps"u8);
+            clone = Path.GetDirectoryName(writer.Live.Path)!;
+        }
+
+        IReadOnlyDictionary<string, long> records = RestorePointInspection.Rows(Path.Combine(clone, "live.db"));
+        IReadOnlyDictionary<string, long> objects = RestorePointInspection.Rows(Path.Combine(clone, "objects.db"));
+        Assert.True(records["files"] == 3 && objects["objects"] == 1);
+        using var fixture = new PublishedReleaseFixture();
+        using var client = new HttpClient(fixture);
+        using EstateService service = EstateService.OpenForUpgrade(root);
+        service.DependencyBuild = fixture.Build;
+        service.DependencyPlatform = "linux-x64";
+        service.Providers = new() { VericairnReleases = new GitHubReleaseSource(client) };
+        var (plan, problem) = service.Upgrade(new(PublishedReleaseFixture.Version, prepared.Operator.Envelope.Id, false) { OneWay = true });
+        Assert.Null(problem);
+        UpgradeRestorePoint point = plan!.Return!.RestorePoint!;
+        Assert.Null(point.Commit);
+        Assert.Equal(["live.db", "objects.db"], point.Files);
+        Assert.Equal(records, RestorePointInspection.Rows(Path.Combine(point.Directory, "state", "live.db")));
+        Assert.Equal(objects, RestorePointInspection.Rows(Path.Combine(point.Directory, "state", "objects.db")));
+        Assert.Contains("first removing live.db-wal, live.db-shm, objects.db-wal and objects.db-shm there.", plan.Return.Steps[2], StringComparison.Ordinal);
     }
 
     private static EstateService Open(TestEstate estate, PublishedReleaseFixture fixture, HttpClient client, bool readOnly = false)
