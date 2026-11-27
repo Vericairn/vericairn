@@ -123,7 +123,8 @@ internal sealed class McpBrowserAuthorization(TimeProvider clock, string issuer)
                 + "</dd></dl><p>Tool results go to this client and any model it uses.</p>"
                 + "<button name=\"action\" value=\"approve\">Approve</button> <button name=\"action\" value=\"deny\">Deny</button>";
         http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
-        http.Response.Headers["Referrer-Policy"] = "no-referrer";
+        // A same-origin form POST must carry the issuer Origin. Never send the page URL to the client callback.
+        http.Response.Headers["Referrer-Policy"] = "same-origin";
         http.Response.ContentType = "text/html; charset=utf-8";
         return http.Response.WriteAsync("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Authorize MCP client</title>"
             + "<h1>Authorize MCP client</h1>" + message + "<form method=\"post\" action=\"/oauth/authorize\"><input type=\"hidden\" name=\"transaction\" value=\""

@@ -157,11 +157,11 @@ public sealed partial class NetworkMcpTokenTests
         Assert.DoesNotContain(fixture.Estate.BuilderId, page, StringComparison.Ordinal);
         string transaction = Transaction().Match(page).Groups[1].Value;
         Assert.NotEmpty(transaction);
-        using HttpResponseMessage proved = await PostFormAsync(client, "/oauth/authorize",
+        using HttpResponseMessage proved = await PostBrowserFormAsync(client, landing,
             ("transaction", transaction), ("action", "prove"), ("approval_code", issued.Code));
         Assert.Equal(HttpStatusCode.OK, proved.StatusCode);
         Assert.Contains("Tool results go to this client", await proved.Content.ReadAsStringAsync(Stop), StringComparison.Ordinal);
-        using HttpResponseMessage approved = await PostFormAsync(client, "/oauth/authorize",
+        using HttpResponseMessage approved = await PostBrowserFormAsync(client, proved,
             ("transaction", transaction), ("action", "approve"));
         Assert.Equal(HttpStatusCode.Redirect, approved.StatusCode);
         Dictionary<string, Microsoft.Extensions.Primitives.StringValues> query = QueryHelpers.ParseQuery(approved.Headers.Location!.Query);
@@ -201,6 +201,26 @@ public sealed partial class NetworkMcpTokenTests
 
     private static Task<HttpResponseMessage> RefreshAsync(PublicHarness fixture, string clientId, string secret) =>
         PostFormAsync(fixture.Http, "/oauth/token", ("grant_type", "refresh_token"), ("client_id", clientId), ("refresh_token", secret), ("resource", fixture.Resource));
+
+    private static async Task<HttpResponseMessage> PostBrowserFormAsync(
+        HttpClient client, HttpResponseMessage page, params (string Name, string Value)[] values)
+    {
+        Uri pageUri = page.RequestMessage!.RequestUri!;
+        string policy = page.Headers.GetValues("Referrer-Policy").Single();
+        // Chromium sent a null Origin with no-referrer, even while sending the secure transaction cookie
+        // and reporting a same-origin navigation. Replay those wire headers with the page's current policy.
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/oauth/authorize")
+        {
+            Content = new FormUrlEncodedContent(values.Select(pair => KeyValuePair.Create(pair.Name, pair.Value))),
+        };
+        request.Headers.Add("Origin", policy == "no-referrer" ? "null" : pageUri.GetLeftPart(UriPartial.Authority));
+        request.Headers.Add("Sec-Fetch-Site", "same-origin");
+        request.Headers.Add("Sec-Fetch-Mode", "navigate");
+        request.Headers.Add("Sec-Fetch-Dest", "document");
+        request.Headers.Add("Upgrade-Insecure-Requests", "1");
+        if (policy == "same-origin") request.Headers.Referrer = pageUri;
+        return await client.SendAsync(request, Stop);
+    }
 
     private static async Task<HttpResponseMessage> PostFormAsync(HttpClient client, string path, params (string Name, string Value)[] values)
     {
