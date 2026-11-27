@@ -407,6 +407,7 @@ public static partial class FlowContract
         string? kind = step.Enum("kind", true, StepKinds);
         string? role = step.Text("role", true, 60, Patterns.Slug, "a role of the flow");
         Marking(step, "step");
+        FlowPermissions.Validate(step);
 
         string? reserved = step.Enum("reserved", false, ReservedActs);
         string? following = step.Text("following", false, 100, Patterns.Slug, "a step key");

@@ -256,8 +256,8 @@ public sealed class DaemonHost : IAsyncDisposable
         {
             settings = RuntimeSettings.Load(directory);
             localNetwork = options.LocalNetwork ?? settings.LocalNetworkEndPoint();
-            certificates = loopback || localNetwork is not null ? new RuntimeCertificates(directory) : null;
             identity = localNetwork is null ? null : RuntimeIdentity.LoadOrCreate(directory, options.IdentityStore, options.Log);
+            certificates = loopback || localNetwork is not null ? new RuntimeCertificates(directory) : null;
         }
         catch
         {
@@ -372,7 +372,10 @@ public sealed class DaemonHost : IAsyncDisposable
         // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
         RouteGroupBuilder routes = app.MapGroup(string.Empty);
         routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log, () => host.BeforeDeviceWrite?.Invoke()));
-        ApiRoutes.Map(routes, service, () => _ = Task.Run(host.StopAsync));
+        string serverObserverFallback = Guid.NewGuid().ToString("N");
+        ApiRoutes.Map(routes, service, () => _ = Task.Run(host.StopAsync), () =>
+            new RevocationObserver("server", service.RevocationJournalIdentity ?? serverObserverFallback, "write-served",
+                RecordParser.FormatTimestamp(host.Time.GetUtcNow())));
         DaemonRoutes.Map(routes, host);
         EventRoutes.Map(routes, host);
         try

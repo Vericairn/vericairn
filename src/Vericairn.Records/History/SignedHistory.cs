@@ -17,11 +17,13 @@ public sealed class HistoryState
     internal HistoryState(bool adopted, IReadOnlyList<RecordReference> heads, int witnessed, int tail, IReadOnlyList<Finding> findings, bool inventoriesRead,
         IReadOnlySet<string> altered, IReadOnlyDictionary<string, WitnessedEntry> entries, IReadOnlySet<string> acknowledged, IReadOnlySet<string> counting,
         IReadOnlyDictionary<string, DateTimeOffset>? adoptionTimes = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? listings = null,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? predecessors = null)
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? predecessors = null,
+        IReadOnlyDictionary<(string Id, string Hash), IReadOnlyList<string>>? otherListings = null)
     {
         AdoptionTimes = adoptionTimes ?? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         Listings = listings ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         Predecessors = predecessors ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        OtherListings = otherListings ?? new Dictionary<(string, string), IReadOnlyList<string>>();
         CountingCheckpoints = counting;
         Adopted = adopted;
         Heads = heads;
@@ -75,6 +77,14 @@ public sealed class HistoryState
 
     /// <summary>Each witnessed record present with listed bytes, and the counting checkpoints that list it with those bytes.</summary>
     internal IReadOnlyDictionary<string, IReadOnlyList<string>> Listings { get; }
+
+    /// <summary>Counting checkpoints that list exact versions absent from the canonical records in this copy.</summary>
+    private IReadOnlyDictionary<(string Id, string Hash), IReadOnlyList<string>> OtherListings { get; }
+
+    /// <summary>Counting checkpoints that list these exact bytes, including versions missing or replaced in the current copy.</summary>
+    internal IReadOnlyList<string> ExactListings(string id, string hash) =>
+        OtherListings.TryGetValue((id, hash), out IReadOnlyList<string>? other) ? other
+        : Entries.TryGetValue(id, out WitnessedEntry? entry) && entry.Entry.Hash == hash ? Listings.GetValueOrDefault(id) ?? [] : [];
 
     /// <summary>Each counting checkpoint and the counting checkpoints it follows through hashes that match.</summary>
     internal IReadOnlyDictionary<string, IReadOnlyList<string>> Predecessors { get; }
@@ -341,6 +351,7 @@ internal sealed class HistoryAnalysis
         var inventories = new Dictionary<string, IReadOnlyList<InventoryEntry>>(StringComparer.Ordinal);
         var adoptionTimes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         var listingsByRecord = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        var otherListings = new Dictionary<(string, string), IReadOnlyList<string>>();
         bool read = objects is not null;
         if (read)
         {
@@ -381,6 +392,7 @@ internal sealed class HistoryAnalysis
                         listingsByRecord[id] = [.. agreeing.Select(v => v.Checkpoint).Distinct(StringComparer.Ordinal)];
                     }
                     if (disagreeing.Count == 0) continue;
+                    KeepOtherListings(id, disagreeing);
 
                     // Only a listing by an author who may anchor can make a present record that one who may anchor signed, or that is anchored
                     // with these bytes, count for nothing; another author's listing of other bytes is reported, and the record keeps counting.
@@ -405,6 +417,7 @@ internal sealed class HistoryAnalysis
                 }
 
                 WitnessedEntry witnessed = standing[0];
+                KeepOtherListings(id, standing);
                 entries[id] = witnessed;
                 InventoryEntry absent = witnessed.Entry;
                 if (standing.Select(v => v.Entry.Hash).Distinct(StringComparer.Ordinal).Skip(1).FirstOrDefault() is { } other)
@@ -462,7 +475,13 @@ internal sealed class HistoryAnalysis
         Dictionary<string, IReadOnlyList<string>> predecessors = counting.ToDictionary(c => c.Record.Id, c => (IReadOnlyList<string>)[.. c.Previous
             .Where(p => countingIds.Contains(p.Id) && byId[p.Id].Record.ComputedHash == p.Hash).Select(p => p.Id).Distinct(StringComparer.Ordinal)], StringComparer.Ordinal);
         return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged, countingIds, adoptionTimes,
-            listingsByRecord, predecessors) { OldestTailAt = oldest };
+            listingsByRecord, predecessors, otherListings) { OldestTailAt = oldest };
+
+        void KeepOtherListings(string id, List<WitnessedEntry> versions)
+        {
+            foreach (var version in versions.GroupBy(v => v.Entry.Hash, StringComparer.Ordinal))
+                otherListings[(id, version.Key)] = [.. version.Select(v => v.Checkpoint).Distinct(StringComparer.Ordinal)];
+        }
     }
 
     /// <summary>

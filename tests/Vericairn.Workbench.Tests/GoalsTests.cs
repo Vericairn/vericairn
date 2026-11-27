@@ -151,6 +151,19 @@ public class GoalsTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public void TheGoalsWorkspaceShowsTheRuntimesFlowPathRefusal()
+    {
+        using JsonDocument goal = JsonDocument.Parse("""
+            {"status":"proposed","goal":{"id":"G1","body":{"title":"Write the guide"}},
+             "flow":{"pathRefusals":[{"step":"draft","code":"flow.permitted-paths","message":"Flow step draft would receive no interpretable permitted path."}]}}
+            """);
+        using JsonDocument next = JsonDocument.Parse("""{"format":"vericairn.next/1","next":null}""");
+
+        GoalPresentation view = GoalPresentation.From(goal.RootElement, next.RootElement);
+        Assert.Contains("flow.permitted-paths — Flow step draft would receive no interpretable permitted path.", view.Next, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnAsksAttentionComesFromTheDeliveryAndTheRestWaitInOrder()
     {
         Assert.Empty(AskAttention.From(default, "now"));

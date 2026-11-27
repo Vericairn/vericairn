@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Vericairn.Protocol;
 
@@ -21,6 +22,7 @@ internal sealed class AttentionDerivation(
     private readonly Dictionary<string, IReadOnlyList<RecordResponse>> histories = new(StringComparer.Ordinal);
     private ProgressResponse? progress;
     private IReadOnlyList<GoalRow>? goals;
+    private List<JsonElement>? orders;
 
     internal IReadOnlyList<CommunicationAttention> Derive(string? recipient)
     {
@@ -149,11 +151,60 @@ internal sealed class AttentionDerivation(
             case "operation":
                 string? status = Str(body, "status");
                 if (status is "observed-success" or "canceled" or "not-started") { return; }
-                Add(status == "known-failure" ? "incident" : "uncertain-effect", record, status ?? "unknown",
-                    $"Operation {status ?? "unknown"}; reconcile the original effect before retrying.");
+                string? settlement = status == "known-failure" ? IncidentSettlement(record) : null;
+                if (settlement is not null)
+                    Add("information", record, "known-failure", $"Operation known-failure. {settlement}");
+                else
+                    Add(status == "known-failure" ? "incident" : "uncertain-effect", record, status ?? "unknown",
+                        $"Operation {status ?? "unknown"}; reconcile the original effect before retrying.");
                 break;
         }
     }
+
+    private string? IncidentSettlement(RecordResponse record, string? assignmentId = null)
+    {
+        JsonElement body = Body(record);
+        try
+        {
+            if (Str(body, "action") == "agent-run" && Str(body, "status") is "observed-success" or "known-failure" or "canceled")
+            {
+                assignmentId ??= Str(Property(body, "target"), "assignment");
+                if (assignmentId is null && Subject(record) is { Type: "assignment" } subject)
+                    assignmentId = subject.Id;
+                if (assignmentId is null) return null;
+                RecordResponse assignment = Required(assignmentId, "assignment");
+                RecordResponse successor = Latest(assignment);
+                if (successor.Id != assignment.Id)
+                    return $"Operation {record.Id} settled the run, and assignment {successor.Id} supersedes its assignment {assignment.Id}.";
+
+                if (SubjectRecord(assignment) is { Type: "work-order" } pinned)
+                {
+                    RecordResponse order = Latest(pinned);
+                    JsonElement basis = Property(Orders().FirstOrDefault(o => Str(o, "id") == order.Id && Str(o, "status") == "accepted"), "basis");
+                    if (Str(basis, "type") == "acceptance" && Str(basis, "id") is string id && Required(id, "acceptance").Current)
+                        return $"Operation {record.Id} settled the run, and acceptance {id} accepts work order {order.Id}.";
+                }
+            }
+            else if (CheckedChange(body) && Str(body, "status") == "known-failure")
+            {
+                // A name in prose is an explicit reference only when the whole record id is present as a token.
+                string pattern = @"(?:^|[^A-Za-z0-9])" + Regex.Escape(record.Id) + @"(?:$|[^A-Za-z0-9])";
+                RecordResponse? retry = History("operation").FirstOrDefault(r => Later(r, record)
+                    && Str(Body(r), "status") == "observed-success" && Str(Body(r), "reconciliation") is string reconciliation
+                    && Regex.IsMatch(reconciliation, pattern, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking));
+                if (retry is not null)
+                    return $"Operation {retry.Id} succeeded and names this refusal in its reconciliation.";
+            }
+        }
+        catch (Exception exception) when (Unavailable(exception))
+        {
+            // An unavailable settlement leaves the original incident visible.
+        }
+
+        return null;
+    }
+
+    private static bool CheckedChange(JsonElement body) => Str(body, "action") is "change-push" or "change-open" or "change-merge";
 
     private bool Accepted(RecordResponse record) => History("acceptance").Any(a => Same(Subject(a), Reference(record)));
 
@@ -227,7 +278,7 @@ internal sealed class AttentionDerivation(
 
     private IReadOnlyList<GoalRow> Goals() => goals ??= readGoals();
     private ProgressResponse Progress() => progress ??= readProgress();
-    private List<JsonElement> Orders() => Array(Progress().Json.GetProperty("workOrders"), "states").SelectMany(s => Array(s, "workOrders")).ToList();
+    private List<JsonElement> Orders() => orders ??= Array(Progress().Json.GetProperty("workOrders"), "states").SelectMany(s => Array(s, "workOrders")).ToList();
 
     private void Blockers()
     {
@@ -398,9 +449,11 @@ internal sealed class AttentionDerivation(
                 IReadOnlyList<RunSignal> recorded = Body(record).TryGetProperty("signals", out JsonElement signals)
                     ? signals.Deserialize<RunSignal[]>(ProtocolJson.Options) ?? [] : [];
                 bool local = run.Signals?.Except(recorded).Any() == true;
-                Add("incident", record, run.Status,
+                string? settlement = IncidentSettlement(record, run.Assignment);
+                Add(settlement is null ? "incident" : "information", record, run.Status,
                     (local ? "Local worker observations: " : string.Empty) +
-                    $"Run {run.Status}; {run.Signals?.Count ?? 0} worker signals, {run.Scope?.OutsideCount ?? 0} changes outside scope{(run.Scope?.Problem is null ? string.Empty : "; scope inspection unavailable")}; inspect worker observations.", command: "vericairn worker runs");
+                    $"Run {run.Status}; {run.Signals?.Count ?? 0} worker signals, {run.Scope?.OutsideCount ?? 0} changes outside scope{(run.Scope?.Problem is null ? string.Empty : "; scope inspection unavailable")}; inspect worker observations."
+                    + (settlement is null ? string.Empty : " " + settlement), command: "vericairn worker runs");
             }, reference: new("operation", run.Run, null));
         }
         foreach (LedgerRow ledger in runs.Goals.Where(g => g.Status == "budget-limited" || g.Units.Any(u => u.Remaining <= 0)))
@@ -467,6 +520,9 @@ internal sealed class AttentionDerivation(
         ? subject : throw new InvalidOperationException("The exact subject pin is unavailable.");
     private static string Describe(AttentionReference? reference) => reference is null ? "none" : $"{reference.Type} {reference.Id}" + (reference.Hash is null ? string.Empty : " at " + reference.Hash);
     private static string? At(RecordResponse record) => Str(record.Envelope, "at");
+    private static JsonElement Property(JsonElement parent, string name) =>
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out JsonElement value) ? value : default;
+
     private static JsonElement Body(RecordResponse record) => record.Envelope.GetProperty("body");
     private static string? Str(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out JsonElement found) && found.ValueKind == JsonValueKind.String ? found.GetString() : null;
     private static List<JsonElement> RequiredArray(JsonElement value, string name) => value.GetProperty(name).ValueKind == JsonValueKind.Array

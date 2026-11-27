@@ -166,7 +166,7 @@ public class ReleaseFlowJourneyTests
     {
         var body = new JsonObject
         {
-            ["key"] = key, ["kind"] = "ordinary", ["title"] = "Order " + key, ["intent"] = "Carry " + key + ".", ["scope"] = new JsonArray("widget"),
+            ["key"] = key, ["kind"] = "ordinary", ["title"] = "Order " + key, ["intent"] = "Carry " + key + ".", ["scope"] = new JsonArray("path:docs/", "widget"),
             ["exitQuestion"] = "Is " + key + " done?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("the work"),
         };
         foreach ((string name, JsonNode? value) in extra.ToList())

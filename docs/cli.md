@@ -13,6 +13,12 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 51, November 27, 2026. Add `--flow-path` to `goal propose --flow` and `--check` to `goal step` for runs of a flow. An agent work step without a permitted path is refused at proposal or activation in the development build.
+
+Revision 50, November 27, 2026. A progress target keeps each comment attempt before it is sent and never sends a comment whose outcome is uncertain again; `progress target resolve` removes an entry once a person has checked it, and one follower follows a target on a machine at a time, in the development build.
+
+Revision 49, November 27, 2026. The runtime preserves an unreadable Secure Enclave identity and names the recovery for each failure. `runtime rotate --identity --replace-unreadable` explicitly replaces an identity that cannot be read here, keeping the replaced record, in the development build.
+
 Revision 48, November 27, 2026. A present `vericairn-enclave` helper must complete its availability check: one that cannot start, exits unexpectedly, is killed or times out makes `devices create` refuse before it makes a key and `doctor` mark the Secure Enclave default unavailable, while exit 3 and an absent helper keep file custody; a daemon that cannot read its Secure Enclave identity refuses to start and keeps the identity, in the development build.
 
 Revision 47, November 26, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
@@ -536,6 +542,24 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
 per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused.
+
+From 0.9.5 (FIX-166), give `--flow-path 'src/docs/**'` with `goal propose --flow` to set a repository-relative pattern for
+the run. Repeat `--flow-path` for each pattern. Routing derives each step's assignment brief from that step's declared
+`paths`, the goal's `--flow-path` patterns and the run's work-order `scope` entries prefixed `path:`. Each supplied list
+constrains the result. If an agent work step has no interpretable pattern covered by all its supplied lists, `goal propose`
+and `goal activate` refuse with `flow.permitted-paths`. Choose compatible lists and declare a narrower pattern where they overlap.
+
+The work order's `path:` entries are read from the revision the goal's plan names and from every later revision of it, each a list
+of its own, so a revision written after proposal can narrow a run's paths and never widen them. When the named revision has no
+`path:` entry, a later revision's entries grant nothing. To widen them, or to give them first, revise the goal to name the new
+revision. A later revision that drops every `path:` entry withdraws nothing: the run keeps the named revision's paths until the
+goal names another. A step a person carries, or a reserved one, needs no pattern: its brief carries the work order's prose
+entries that cannot be read as a pattern, never a pattern. `worker run` on a step's held assignment refuses with
+`flow.permitted-paths` unless the assignment's brief is within the step's current paths, as `goal step` does; a standing agent's
+steps keep their own briefs.
+
+`goal step <goal> --by <principal> --check` previews a flow run's next eligible step and its permitted changes without
+signing, recording or dispatching. With `--json`, the preview includes `step.permittedChanges` for the routed assignment.
 
 From PROC-10 (0.9.2), `goal next` also routes each review before hand-off as `<step> review`, and each step's required
 attention as route state `attention`. For a review, `goal step` records an assignment whose `step.review` names the items and
@@ -1100,8 +1124,8 @@ From 0.9.5 (FIX-175), a present helper must complete its availability check. If 
 or times out, `devices create` refuses before making a key. Exit 3 still reports that the Secure Enclave is unavailable, and
 a Mac with no helper or with that result uses file custody by default. `doctor` reports the helper failure, and its `custody`
 line marks the Secure Enclave default unavailable until the helper from this command line's release archive is beside it.
-The diagnostics and refusal omit the helper's path. If a daemon cannot read its held Secure Enclave identity because the helper
-fails, it refuses to start with the same remedy and preserves the identity so paired devices keep their pin.
+The diagnostics and refusal omit the helper's path. For a daemon with a saved Secure Enclave identity, see
+[Recovering a runtime identity](#recovering-a-runtime-identity-095).
 
 ```text
 helper    vericairn-enclave reports no version and serves no sign-record, so it comes from a release before 0.9.4; vericairn 0.9.5+<commit> expects vericairn-enclave 0.9.5: mismatch, so Secure Enclave signatures are refused until the vericairn-enclave from this command line's release archive is beside it
@@ -1121,6 +1145,26 @@ Three commands refuse `--json`: `runtime serve`, which serves until stopped and 
 standard output carries the MCP protocol; and `recover inspect`, whose report is text, while `status --json`, `devices list --json`
 and `estate reconcile --json` give the same facts as JSON. The refusal is a parse error: exit code 1, the reason on standard error
 and, as for any parse error, the usage help on standard output.
+
+## Recovering a runtime identity (0.9.5)
+
+When startup of the local-network profile cannot read a saved Secure Enclave identity, it refuses and keeps the identity byte for
+byte. If the helper is absent, put the `vericairn-enclave` from this command line's release archive beside it and retry. If the
+helper answers exit 3, start the runtime in a context where the Secure Enclave on the Mac holding the key is available. A helper
+that fails its availability check, answers anything but one P-256 public key, or exits otherwise also refuses startup; settle the
+helper first.
+
+If the helper cannot use the key on this Mac (exit 4), the key was made on another Mac or its blob is damaged: use the Mac that
+holds it, or restore the blob from a backup. If the key blob is missing, restore it on that Mac. If the helper answers a different
+key from the saved record, or the record itself cannot be read, restore the matching record and blob from a backup.
+
+To keep serving from this machine with a new identity instead, stop the runtime if it is running, then run
+`vericairn runtime rotate --identity --replace-unreadable`. It replaces the identity in each case above where the identity cannot
+be read here: a missing, unusable or mismatched key, a record that cannot be read, or a machine that offers no Secure Enclave (not
+a Mac, no helper, or helper exit 3), where the new identity takes the custody the machine offers, such as an owner-only file. It
+refuses an identity that can be read and a helper that is failing, keeps the replaced record beside the new one as
+`runtime-identity.json.replaced-<time>`, removes no key blob, and reads a new key back before saving it. Start the runtime again
+after it succeeds. Every paired device must pair again.
 
 ## Presence prompts on standard error (0.9.3)
 
@@ -1219,6 +1263,66 @@ when it opened, how many records were signed under it and when and why it ended;
 type, id and hash, and each refusal with its code. `--json` writes each session with its `terms`, `nonce`, `fingerprint`, `openedAt`,
 `signed` and `refused` lists, `ended` reason and the rest. The ledger is owner-only machine state, a diagnostic that a process of the
 same operating-system user could alter; it is never a record, and no export or support bundle carries it.
+
+## `vericairn devices reach` (0.9.5)
+
+```sh
+vericairn devices reach <device> --since 2026-11-16T10:00:00Z
+vericairn devices reach <device> --since 2026-11-16T10:00:00Z --json
+```
+
+The device may be named by its identity or a revision id. The report includes available signatures that name a revision of
+the device and verify under a key in its verified revision history. This includes superseded records and records that fail an
+admission or history check. Use seconds and `Z` or an explicit UTC offset for `--since`. The cutoff is inclusive.
+
+The report lists a matching record unless a counting checkpoint signed by another device witnesses its exact id and hash
+before the cutoff. A checkpoint can witness the version in its own inventory or through the checkpoints it follows by hash.
+Checkpoints signed by any revision of the suspected device supply no cutoff evidence. The first witness is the qualifying
+checkpoint with the earliest stated time. Its time dates the witness as claimed by its signer. The record's own stated time
+is its author's claim.
+
+- **Witnessed after the cutoff** (`witnessed-after-cutoff`) means the first qualifying witness is at or after the cutoff.
+- **Unwitnessed** (`unwitnessed`) means there is no qualifying checkpoint witness and the record's claimed time is before the
+  cutoff or the record is available only in the presence ledger. This keeps backdated records visible even before a checkpoint.
+- **Listed on the record's own claimed time** (`claimed-time`) means the record's claimed time is at or after the cutoff and
+  there is no qualifying checkpoint witness.
+- **Signed after the cutoff by this machine's ledger** (`ledger-time`) means an independent checkpoint witnessed the content
+  before the cutoff, but this machine logged the device's signing of it at or after the cutoff: a checkpoint pins content,
+  not signatures.
+
+A matching local ledger signing time is what this machine logged for the exact device, record id and hash. A ledger entry
+at or after the cutoff supplies a row whatever checkpoint witnessed the content, labelled `ledger-time` when an independent
+checkpoint witnessed it before the cutoff, and supplies one when the exact signed record is unavailable.
+The report also shows when a version is outside the witnessed history of a signed device closing at or after the cutoff.
+Older records can arrive from another copy after a closing. The exact signing time may remain unknown.
+
+The JSON report has `device` (the stable device id), `since` (the cutoff in UTC with `Z`), `records`, `sessions` and
+`revocations`. `presenceProblem` and `journalProblem` appear when the corresponding local diagnostic is unavailable.
+Each `records` row has `id`, `hash`, `type`, `path`, `at`, `source`, `evidence` (one of the three values above), `sessions`
+(linked session ids) and `ledgerSignedAt` (the matching times in the ledger). For `source: record-signature`, `at` is the
+record's stated time. For `source: presence-ledger`,
+`at` is the first matching local signing time at or after the cutoff, `path` is null and the exact signed record could not be
+verified here. `firstWitness` and `outsideClosing`, where present, each give the checkpoint `id`, `hash` and stated `at`.
+`sessions` contains the linked entries and any sessions announced at or after the cutoff. Its `announcedAt`, `openedAt`,
+`endedAt` and each `signed` or `refused` entry's `at` are local ledger times. Each session carries the announced terms.
+
+Each `revocations` row has `id`, `hash`, `at` (the record's stated time), `revokedAt` (its stated effective time), `counts`,
+`current` and `observations`. The two booleans describe the reporting runtime's history and current admission. A read of a
+revocation record establishes observation of that exact version. Use `counts` and `current` to judge the record's standing.
+Each observation gives `kind`, `identity`, `evidence` and the observer's own clock time `at`.
+
+When a daemon is serving the estate, the command asks it for revocations and its own observations. `record-read` names the
+reading runtime process and `server-read` names the responding server by its current journal epoch. `journal-found` and
+`journal-written` name the journal epoch when it retains a matching event. Without a daemon, `record-read` names the CLI's
+embedded runtime and journal evidence comes from the snapshot of the local retained journal. `devices revoke` reports
+`written` for its runtime process and, when a daemon handles the write, `write-served` for its journal epoch. With `--json`
+the write includes these as `revocationReach` alongside the written record's id and hash.
+
+The CLI reads the available signatures and presence session lists on this machine. The presence ledger and journal are
+owner-only diagnostics. Another running server can report its revocation observations through
+`GET /v1/devices/{id}/revocation-reach` or the SDK's `DeviceRevocationReachAsync`, using an authorized connection. A journal's
+initial baseline or retention can leave historical events unavailable. Absence of an observation leaves that observer's
+status unknown.
 
 ## `vericairn work overlap` (0.9.4)
 
@@ -1602,7 +1706,9 @@ Keeps the estate's progress at a target, such as a pinned GitHub discussion, thr
 machine chooses (`WATCH-06`): `set`, `list` and `remove` configure targets and send nothing; `refresh <name>` brings one equal to
 the estate's progress now, creating its place once and replacing its text only when it differs, and `--dry-run` shows the text
 and sends nothing; `follow <name>` follows the daemon's event journal and refreshes and comments only on the events the target's
-triggers name, until interrupted or after `--count` outcomes. A destination anyone may read always takes the public form, which
+triggers name, until interrupted or after `--count` outcomes; a second `follow` of the same target refuses while one follows. From
+0.9.5 (FIX-177) a comment whose outcome is uncertain is never sent again; `list` shows it, and `resolve <name> <key>` removes its
+entry once you have checked its destination, sending nothing. A destination anyone may read always takes the public form, which
 carries nothing a disclosure rule holds. `refresh` exits 0 when the target is equal, 2 when it refused and sent nothing, and 1
 when an effect was stopped or not confirmed; `--json` writes `vericairn.progress-target-outcome/1`, naming every record the text
 carries. See [Progress targets](progress-targets.md).

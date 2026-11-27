@@ -74,6 +74,63 @@ public class CommunicationAttentionTests
         Assert.Empty(f.Attention());
     }
 
+    [Theory]
+    [InlineData("accepted")]
+    [InlineData("superseded")]
+    [InlineData("open")]
+    [InlineData("in-flight")]
+    [InlineData("unnamed-acceptance")]
+    public void ARunIncidentReadsAsInformationOnlyWithSettlementAndDisposition(string disposition)
+    {
+        var f = new Fixture();
+        RecordResponse order = f.Add("work-order", "run-order", "{}");
+        RecordResponse assignment = f.Add("assignment", "run-assignment", "{}", order);
+        string state = disposition == "in-flight" ? "dispatched" : "known-failure";
+        RecordResponse operation = f.Add("operation", "run", $$$"""{"status":"{{{state}}}","action":"agent-run","target":{"assignment":"{{{assignment.Id}}}"}}""", assignment);
+        RecordResponse? settlement = null;
+        if (disposition is "accepted" or "unnamed-acceptance" or "in-flight")
+        {
+            var acceptance = f.Add("acceptance", "run-acceptance", "{}", order);
+            f.OrderStates.Add(new { id = order.Id, status = "accepted", basis = disposition == "unnamed-acceptance" ? null : new { type = acceptance.Type, id = acceptance.Id } });
+            if (disposition == "accepted") settlement = acceptance;
+        }
+        else if (disposition == "superseded")
+        {
+            f.Replace(assignment with { Current = false });
+            settlement = f.Add("assignment", "replacement-assignment", "{}", order, supersedes: assignment.Id);
+        }
+        f.RunRows.Add(new(operation.Id, "identity", "generic", null, assignment.Id, null, null, state, default, null, default, null, null, false, true,
+            Signals: [new("scope-read", "warning", "now", "Scope could not be inspected.")]));
+        CommunicationAttention item = Assert.Single(f.Attention(), a => a.Record == operation.Id && a.Kind is "incident" or "information");
+        Assert.Equal(settlement is null ? "incident" : "information", item.Kind);
+        if (settlement is null)
+            Assert.Contains($"Run {state}; 1 worker signals, 0 changes outside scope; inspect worker observations.", item.Text, StringComparison.Ordinal);
+        else
+        {
+            Assert.Contains(operation.Id, item.Text, StringComparison.Ordinal);
+            Assert.Contains(settlement.Id, item.Text, StringComparison.Ordinal);
+            Assert.False(CommunicationPresentation.ShouldDeliver("none", "progress", [item]));
+        }
+    }
+
+    [Theory]
+    [InlineData("change-push", "observed-success", "change-push", true, true)]
+    [InlineData("change-push", "known-failure", "change-push", true, false)]
+    [InlineData("change-push", "observed-success", "inspect", true, true)]
+    [InlineData("change-push", "observed-success", "change-push", false, false)]
+    [InlineData("inspect", "observed-success", "change-push", true, false)]
+    public void RefusedCheckedChangesNeedAnExactRecordNameInALaterSuccessfulReconciliation(
+        string failedAction, string status, string retryAction, bool exact, bool settled)
+    {
+        var f = new Fixture();
+        RecordResponse failure = f.Add("operation", "checked-failure", $$"""{"status":"known-failure","action":"{{failedAction}}"}""");
+        RecordResponse retry = f.Add("operation", "checked-retry",
+            $$"""{"status":"{{status}}","action":"{{retryAction}}","reconciliation":"Retry after operation {{failure.Id}}{{(exact ? "." : "x")}}"}""");
+        CommunicationAttention item = Assert.Single(f.Attention(), a => a.Record == failure.Id);
+        Assert.Equal(settled ? "information" : "incident", item.Kind);
+        Assert.Contains(settled ? retry.Id : "Operation known-failure; reconcile the original effect before retrying.", item.Text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void LaterPassMatchesSubjectMethodEnvironmentAndCommandButNotCommitOrEnvironmentKeyOrder()
     {
