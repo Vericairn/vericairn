@@ -842,10 +842,11 @@ The estate's `bootstrap` and `bootstrap.ps1` accept `--expect <checkpoint>` befo
 `estate check --expect <checkpoint>` first and stop unless it passes, then run the arguments given, or nothing more
 when there are none. `vericairn estate bootstrap --force` writes the new scripts into an existing estate.
 
-`estate check` also warns `history.deleted-in-git` for each record file deleted in the checked-out commit's reachable
-history, merges included, that is absent here and that no history checkpoint witnessed; a witnessed one is already the
-error `history.removed`. The warning depends on the clone, so it is not part of the canonical status. In a shallow
-clone it is reported unavailable, as information.
+`estate check` reports `history.deleted-in-git` for record files deleted in the checked-out commit's reachable
+history, merges included, that are absent here and that no history checkpoint witnessed. It warns by default. From 0.9.5
+(ID-19), a verified acknowledgment by the root operator with presence makes the finding informational and names the
+checkpoint. See the [checkpoint entry format](record-format-v3.md#history-checkpoints-092). The finding depends on the
+clone and appears only in the check. A shallow clone reports the history as unavailable.
 
 From OPS-07 the check also keeps this machine's memory of the estate's history, beside the clone's live store under the
 Vericairn home and never in the estate, kept by the clone's directory, so a fresh clone into the same directory keeps it: the newest checkpoint it verified and the main-line commit that held it. The main

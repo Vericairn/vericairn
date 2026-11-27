@@ -10,6 +10,7 @@ using Vericairn.Records.History;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Types;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Store;
@@ -26,6 +27,55 @@ public sealed partial class EstateService
     private const string Adoption = "adoption";
     private const string Interval = "interval";
     private const string ClosingTrigger = "closing";
+
+    /// <summary>Checks the exact Git evidence before signing and again under the record write lock.</summary>
+    private string? GitDeletionRefusal(EstateModel model, string by, JsonElement body, string checkpoint)
+    {
+        if (by != model.RootOperator)
+            return "Only the root operator may acknowledge a Git deletion of an unwitnessed record.";
+        IReadOnlyList<GitRemoval> removals = HistoryCheckpointType.GitRemovals(body, checkpoint, out FindingList findings);
+        if (findings.HasErrors) return string.Join(" ", findings.Select(finding => finding.Message));
+        ISourceAdapter? git = model.Manifest?.Profile == "repository-synced" ? Providers.Source("git") : null;
+        foreach (GitRemoval removal in removals)
+        {
+            if (git is null || GitDeletionPath(model, git, removal) is not { } path)
+                return $"The main line does not establish the exact deletion of {removal.Id} at {removal.Hash} in commit {removal.Commit}. A complete local history is required.";
+            if (model.FilePaths?.Contains(path) == true || model.ById.ContainsKey(removal.Id))
+                return $"Record {removal.Id} is present here; a Git deletion acknowledgment requires it to be absent.";
+        }
+
+        return null;
+    }
+
+    private static string? GitDeletionPath(EstateModel model, ISourceAdapter git, GitRemoval removal)
+    {
+        if (git.DeletedRecordAtCommit(model.Root, removal.Commit, removal.Id) is not { } file) return null;
+        var findings = new FindingList();
+        RecordEnvelope? record = RecordParser.Parse(file.Bytes, file.Path, findings, checkFormatting: false);
+        return !findings.HasErrors && record is not null && record.Id == removal.Id && record.ComputedHash == removal.Hash &&
+            record.ExpectedPath == file.Path ? file.Path : null;
+    }
+
+    /// <summary>Candidate acknowledgments, indexed by the record and deleting commit they name. The clone must still prove each deletion.</summary>
+    private static Dictionary<(string Id, string Commit), List<(GitRemoval Removal, RecordEnvelope Checkpoint)>> GitDeletionAcknowledgments(EstateModel model)
+    {
+        var claims = new Dictionary<(string Id, string Commit), List<(GitRemoval Removal, RecordEnvelope Checkpoint)>>();
+        foreach (RecordEnvelope checkpoint in model.OfType("history-checkpoint")
+            .Where(record => HistoryCheckpointType.HasGitRemovals(record.Body) && model.Counts(record) && model.Trust.MayAcknowledgeGitDeletion(record))
+            .OrderBy(record => record.Id, StringComparer.Ordinal))
+        {
+            if (model.Findings.Any(finding => finding.Severity == Severity.Error && finding.Location.StartsWith(checkpoint.ExpectedPath, StringComparison.Ordinal)))
+                continue;
+            foreach (GitRemoval removal in HistoryCheckpointType.GitRemovals(checkpoint.Body, checkpoint.Id, out _))
+            {
+                var key = (removal.Id, removal.Commit);
+                if (!claims.TryGetValue(key, out var candidates)) claims.Add(key, candidates = []);
+                candidates.Add((removal, checkpoint));
+            }
+        }
+
+        return claims;
+    }
 
     /// <summary>How long before the commit that added it a record's stated time may be before adoption's check points it out.</summary>
     private static readonly TimeSpan BackdatingNotice = TimeSpan.FromDays(1);

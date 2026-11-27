@@ -8,6 +8,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.History;
 
@@ -123,7 +124,7 @@ internal sealed record CheckpointBody(RecordEnvelope Record, IReadOnlyList<(stri
     (string Kind, string Id)? Closes = null)
 {
     internal static CheckpointBody Read(RecordEnvelope record) => new(record, Pins(record.Body, "previous"), Strings(record.Body, "inventory"),
-        Pins(record.Body, "anchored"), Pins(record.Body, "removed"),
+        Pins(record.Body, "anchored"), Pins(record.Body, "removed", excludeGitRemovals: true),
         record.Body.TryGetProperty("records", out JsonElement count) && count.ValueKind == JsonValueKind.Number && count.TryGetInt64(out long n) ? n : null,
         EstateModel.BodyString(record, "recordSetHash"), ReadCloses(record.Body));
 
@@ -134,9 +135,10 @@ internal sealed record CheckpointBody(RecordEnvelope Record, IReadOnlyList<(stri
         closes.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String
             ? (kind.GetString()!, id.GetString()!) : null;
 
-    private static List<(string Id, string Hash)> Pins(JsonElement body, string name) =>
+    private static List<(string Id, string Hash)> Pins(JsonElement body, string name, bool excludeGitRemovals = false) =>
         body.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array
-            ? [.. list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String &&
+            ? [.. list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object && (!excludeGitRemovals || !HistoryCheckpointType.HasGitCommit(e)) &&
+                    e.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String &&
                     e.TryGetProperty("hash", out JsonElement hash) && hash.ValueKind == JsonValueKind.String)
                 .Select(e => (e.GetProperty("id").GetString()!, e.GetProperty("hash").GetString()!))]
             : [];
@@ -818,6 +820,16 @@ public static class SignedHistory
         {
             if (!closure.Versions.TryGetValue(id, out HashSet<string>? versions) || !versions.Contains(hash)) return $"It acknowledges the removal of {id} at {hash}, which no head witnesses with that hash.";
             if (model.ById.TryGetValue(id, out RecordEnvelope? present) && present.ComputedHash == hash) return $"It acknowledges the removal of {id}, which is present here with the witnessed hash.";
+        }
+
+        IReadOnlyList<GitRemoval> gitRemovals = HistoryCheckpointType.GitRemovals(body, record.Id, out FindingList removalFindings);
+        if (removalFindings.HasErrors) return string.Join(" ", removalFindings.Select(finding => finding.Message));
+        foreach (GitRemoval removal in gitRemovals)
+        {
+            if (closure.Versions.ContainsKey(removal.Id))
+                return $"Record {removal.Id} has a witnessed version. Acknowledge the witnessed version under the witnessed removal rule.";
+            if (model.ById.ContainsKey(removal.Id))
+                return $"Record {removal.Id} is present here; a Git deletion acknowledgment requires it to be absent.";
         }
 
         if (closure.Witnessed(draft.Removed) is not { } set) return "The heads witness a record with two hashes; acknowledge the removal of the version that is not here.";

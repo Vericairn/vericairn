@@ -6,10 +6,12 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Adapters.Git;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.History;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Service;
@@ -146,6 +148,123 @@ public class HistoryCheckpointServiceTests
     }
 
     [Fact]
+    public void AnUnwitnessedDeletionIsAcknowledgedByARecordSignedWithRootPresence()
+    {
+        TestPrerequisites.RequireGit();
+        using var f = new Fixture();
+        PresenceKeyStore presence = f.HoldPresenceKey();
+        (RecordEnvelope record, RecordEnvelope other, string commit) = PrepareDeletions(f);
+        Assert.Equal(2, f.Api.Check().Findings.Count(x => x.Code == "history.deleted-in-git" && x.Severity == "warning"));
+        presence.LastReason = null;
+
+        RecordWritten written = Ok(WriteDeletionAcknowledgment(f, record, commit, "Remove duplicate test evidence."));
+        Assert.Contains("acknowledges", presence.LastReason, StringComparison.Ordinal);
+        Assert.Contains(record.Id, presence.LastReason, StringComparison.Ordinal);
+
+        FindingsResponse checkedEstate = f.Api.Check();
+        FindingDto acknowledged = Assert.Single(checkedEstate.Findings, x => x.Code == "history.deleted-in-git" && x.Location == record.ExpectedPath);
+        Assert.Equal("info", acknowledged.Severity);
+        Assert.Contains("Acknowledged", acknowledged.Message, StringComparison.Ordinal);
+        Assert.Contains(written.Id, acknowledged.Message, StringComparison.Ordinal);
+        Assert.Contains(commit, acknowledged.Message, StringComparison.Ordinal);
+        Assert.Contains(checkedEstate.Findings, x => x.Code == "history.deleted-in-git" && x.Location == other.ExpectedPath && x.Severity == "warning");
+        Assert.False(SignedHistory.Of(f.Api.Session.Load()).IsAcknowledgedRemoval(record.Id));
+        Assert.DoesNotContain("history.deleted-in-git", f.Api.Status().Json.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("wrong-hash", "exact deletion")]
+    [InlineData("unreachable", "main line")]
+    [InlineData("non-root", "root operator")]
+    [InlineData("missing-reason", "reason")]
+    [InlineData("blank-reason", "reason")]
+    [InlineData("no-presence", "presence")]
+    public void AnUnwitnessedDeletionWithoutExactHistoryOrRootPresenceIsRefused(string defect, string explanation)
+    {
+        TestPrerequisites.RequireGit();
+        using var f = new Fixture();
+        (RecordEnvelope record, _, string commit) = PrepareDeletions(f, leaveOffMain: defect == "unreachable");
+        if (defect is not ("no-presence" or "non-root")) f.HoldPresenceKey();
+        int checkpoints = f.Api.Session.Load().OfType("history-checkpoint").Count();
+        int signatures = 0;
+        f.Api.BeforeSigningRecord = () => signatures++;
+        WriteOutcome refused = WriteDeletionAcknowledgment(f, record, commit, defect switch
+        {
+            "missing-reason" => null,
+            "blank-reason" => "  ",
+            _ => "Remove duplicate test evidence.",
+        }, defect == "wrong-hash" ? f.Records.Decision.ComputedHash : null,
+            defect == "non-root" ? f.Records.Estate.BuilderId : null);
+
+        Assert.False(refused.Ok);
+        Assert.Contains(explanation, refused.Problem!.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(checkpoints, f.Api.Session.Load().OfType("history-checkpoint").Count());
+        Assert.Equal(0, signatures);
+        Assert.Contains(f.Api.Check().Findings, x => x.Code == "history.deleted-in-git" && x.Location == record.ExpectedPath && x.Severity == "warning");
+    }
+
+    [Fact]
+    public void ADeletionCommitCannotReplaceTheWitnessedRemovalRule()
+    {
+        TestPrerequisites.RequireGit();
+        using var f = new Fixture();
+        f.HoldPresenceKey();
+        (RecordEnvelope record, _, string commit) = PrepareDeletions(f, witness: true);
+
+        WriteOutcome refused = WriteDeletionAcknowledgment(f, record, commit, "Remove duplicate test evidence.");
+        Assert.False(refused.Ok);
+        Assert.Contains("witnessed", refused.Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains(f.Api.Check().Findings, x => x.Code == "history.removed" && x.Location == record.ExpectedPath);
+    }
+
+    private static (RecordEnvelope Record, RecordEnvelope Other, string Commit) PrepareDeletions(Fixture f, bool leaveOffMain = false, bool witness = false)
+    {
+        if (!witness) Ok(f.Checkpoint(f.Records.Estate.OperatorId, "adoption", f.Unsigned()));
+        RecordEnvelope record = f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("HIS-26"))!.AsObject());
+        RecordEnvelope other = f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("HIS-27"))!.AsObject());
+        if (witness) Ok(f.Checkpoint(f.Records.Estate.OperatorId, "adoption", f.Unsigned()));
+        string root = f.Records.Estate.Root;
+        Git(root, "init", "-q", "-b", "main");
+        Git(root, "config", "core.autocrlf", "false");
+        File.WriteAllText(Path.Combine(root, ".gitignore"), ".vericairn/\n");
+        Git(root, "add", "-A");
+        Git(root, [.. GitIdentity, "commit", "-q", "-m", "The estate"]);
+        if (leaveOffMain) Git(root, "switch", "-c", "side");
+        Git(root, "rm", "-q", record.ExpectedPath, other.ExpectedPath);
+        Git(root, [.. GitIdentity, "commit", "-q", "-m", "Remove two records"]);
+        f.Api.Providers.Register(new GitCommandAdapter());
+        return (record, other, Git(root, "rev-parse", "HEAD"));
+    }
+
+    private static WriteOutcome WriteDeletionAcknowledgment(Fixture f, RecordEnvelope record, string commit, string? reason, string? hash = null, string? by = null)
+    {
+        JsonObject body = JsonNode.Parse(f.Prepare("manual").Body.GetRawText())!.AsObject();
+        var removal = new JsonObject { ["id"] = record.Id, ["hash"] = hash ?? record.ComputedHash, ["commit"] = commit };
+        if (reason is not null) removal["reason"] = reason;
+        body["removed"] = new JsonArray(removal);
+        return f.Api.NewRecord(new NewRecordRequest("history-checkpoint", by ?? f.Records.Estate.OperatorId, PolicyFixture.Element(body)));
+    }
+
+    /// <summary>File-backed test key with an observable presence prompt at the store boundary.</summary>
+    private sealed class PresenceKeyStore(FileKeyStore keys, string device) : IDeviceKeyStore
+    {
+        public string Kind => DeviceKeyStores.IosSecureEnclaveKind;
+        public string? LastReason { get; set; }
+        public bool Has(string deviceId) => deviceId == device && keys.Has(deviceId);
+        public byte[] Create(string deviceId) => keys.Create(deviceId);
+        public byte[]? PublicKey(string deviceId) => keys.PublicKey(deviceId);
+        public byte[] Sign(string deviceId, ReadOnlySpan<byte> digest) => keys.Sign(deviceId, digest);
+        public byte[] Sign(string deviceId, ReadOnlySpan<byte> digest, string reason)
+        {
+            LastReason = reason;
+            return Sign(deviceId, digest);
+        }
+
+        public void Remove(string deviceId) => keys.Remove(deviceId);
+        public void Promote(string keyId, string deviceId) => keys.Promote(keyId, deviceId);
+    }
+
+    [Fact]
     public void InventoryObjectsAreReadWithinTheObjectLimitAndNeverThroughALink()
     {
         using var f = new Fixture();
@@ -275,6 +394,20 @@ public class HistoryCheckpointServiceTests
         public PolicyFixture Records { get; } = new();
 
         public EstateService Api { get; }
+
+        public PresenceKeyStore HoldPresenceKey()
+        {
+            string id = Ulid.NewUlid().Value;
+            var keys = new FileKeyStore(VericairnHome.Path());
+            var presence = new PresenceKeyStore(keys, id);
+            string principal = Records.Estate.OperatorId;
+            string publicKey = RecordSigning.EncodePublicKey(keys.Create(id));
+            JsonObject body = DeviceRecords.Body(principal, "Presence test device", "ios", presence.Kind, publicKey, ["embedded"], 3, "required");
+            RecordEnvelope device = Records.Estate.Add("device", principal, body.ToJsonString(), id: id, signer: new StoreSigner(presence, id));
+            Records.Add("admission", new JsonObject { ["principal"] = principal, ["status"] = "admitted", ["note"] = "Test presence device." }, subject: device.Reference);
+            Api.KeyStores = [presence, keys];
+            return presence;
+        }
 
         public RecordEnvelope Require() => Records.Add("estate", new JsonObject
         {
