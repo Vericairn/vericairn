@@ -306,8 +306,11 @@ A work order can carry `"disclosure": "held"`, for example a security fix whose 
 While it is held, a checked push to a repository whose resource records `"visibility": "public"` is refused before anything is
 pushed if the push's commit messages or added lines contain the work order's key as a whole word, or a distinctive phrase of
 its title, intent or scope. Case, Unicode compatibility forms (full-width letters, ligatures such as `ﬁ`, circled and
-mathematical letters), line wrapping and a sentence's closing punctuation do not hide a match. From 0.9.2 the text is compared
-after Unicode NFKC normalization and full case folding computed by Vericairn itself from pinned Unicode 16.0.0 tables, the same
+mathematical letters), whitespace and a sentence's closing punctuation are normalized for matching: line breaks fold to one space,
+so a phrase wrapped across consecutive added lines matches. Two wrappings escape it (FIX-137's residual): a phrase split between an
+added line and an unchanged one, since added lines are read without their context, and a phrase wrapped across lines that each
+begin with a marker, such as `>`, `//` or `#` in quoted text, comments and headings, since the marker stays between its words. From
+0.9.2 the text is compared after Unicode NFKC normalization and full case folding computed by Vericairn itself from pinned Unicode 16.0.0 tables, the same
 on every platform and build. A phrase shorter than 24 characters, or one another current work order also uses, such as a standard closing step,
 is not matched on its own. The check applies whoever authored the commits.
 
@@ -501,6 +504,18 @@ shows as merged, never as an open change out of the queue:
   earlier removal: the merge is `uncertain`. It is never retried until a later
   observation settles it or the operator's `--cancel` reconciles it, as for any
   uncertain effect.
+
+From 0.9.5 (FIX-173), the GitHub provider reads a removal's reason as GitHub
+sends it. Its pull request timeline records reasons such as `failed_checks`,
+`merge_conflict` and `merged`; the upper-case reasons GitHub documents for its
+`dequeued` webhook, such as `CI_FAILURE`, read alike. A removal for failed
+checks is `failed`, so the merge's summary says the queue took the change out
+for a failure (`FAILED_CHECKS`), where 0.9.3 and 0.9.4 read it as `removed`.
+The removal GitHub records beside each merge its queue makes (`merged`) takes
+nothing out unmerged: the place reads `absent`, with that reason, and the merge
+stays `uncertain` until its pull request reads merged, where before, a pull
+request that did not read merged yet at that moment settled it as a
+`known-failure`.
 
 A retry keeps its route. A merge recorded through the queue is refused if the
 branch no longer requires one; push a new head to merge it directly.

@@ -264,6 +264,34 @@ public sealed class PullRequestProviderTests
         Assert.Equal(reason is null ? null : new DateTimeOffset(2026, 11, 13, 7, 15, 30, TimeSpan.Zero), observed.RemovedAt);
     }
 
+    // FIX-173: each removal reason GitHub's timeline recorded on real pull requests, as a read-only query of their
+    // RemovedFromMergeQueueEvent answered it in November 2026, and the documented webhook reasons that mean the same. A removal for
+    // failed checks is a failure, where failed_checks read as a plain removal; the removal GitHub records beside each merge the queue makes
+    // takes nothing out unmerged, so the change reads absent until its pull request reads merged, where merged read as an unmerged removal.
+    [Theory]
+    [InlineData("failed_checks", "FAILED_CHECKS", "failed")]
+    [InlineData("merge_conflict", "MERGE_CONFLICT", "failed")]
+    [InlineData("merged", "MERGED", "absent")]
+    [InlineData("CI_FAILURE", "CI_FAILURE", "failed")]
+    [InlineData("CI_TIMEOUT", "CI_TIMEOUT", "failed")]
+    [InlineData("MERGE", "MERGE", "absent")]
+    [InlineData("ALREADY_MERGED", "ALREADY_MERGED", "absent")]
+    [InlineData("MANUAL", "MANUAL", "removed")]
+    [InlineData("QUEUE_CLEARED", "QUEUE_CLEARED", "removed")]
+    public void TheGitHubProviderReadsEachRemovalReasonAsGitHubSendsIt(string sent, string token, string state)
+    {
+        var provider = new GitHubPullRequestProvider(info =>
+        {
+            string query = info.ArgumentList.Single(a => a.StartsWith("query=", StringComparison.Ordinal));
+            if (query.Contains("timelineItems", StringComparison.Ordinal))
+                return Success(JsonSerializer.Serialize(new { data = new { repository = new { pullRequest = new { timelineItems = new { nodes = new[] { new { createdAt = "2026-11-23T06:17:21Z", reason = sent } } } } } } }));
+            return Success(JsonSerializer.Serialize(new { data = new { repository = new { pullRequest = new { id = "PR_kwDOexample", number = 1, headRefOid = Head,
+                isMergeQueueEnabled = true, mergeQueueEntry = (object?)null } } } }));
+        });
+        MergeQueueObservation observed = provider.ObserveQueue("Example/widget", "1");
+        Assert.Equal(new MergeQueueObservation(true, state, Head, token) { RemovedAt = new DateTimeOffset(2026, 11, 23, 6, 17, 21, TimeSpan.Zero) }, observed);
+    }
+
     [Theory]
     [InlineData("merge_queue_merge")]
     [InlineData("push")]

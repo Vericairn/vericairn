@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 47, November 26, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
+
 Revision 46, November 24, 2026. An agent's `operator done` or `operator dismiss` citing the operator's words writes `--said-at`, which needs `Z` or an explicit offset, in whole seconds UTC, and the time of the recording without it, and `docs pass --before` without `--previous` and `--by` reads the estate's releases read-only, in the development build.
 
 Revision 45, November 24, 2026. `doctor` reports the `vericairn-enclave` helper's version beside the command line's and flags a mismatch, `doctor --json` adds the `helper` probe, and a command line refuses to sign through a helper older than itself, or to make a key beside one that cannot be started, in the development build.
@@ -646,6 +648,22 @@ vericairn estate upgrade --to <published-version> --check
 vericairn estate upgrade --to <published-version> --by <principal id> --one-way
 ```
 
+From 0.9.5 (FIX-174), the restore point exports the live store from its file on disk, whichever runtime applies the upgrade: in
+0.9.4 the command line's upgrade of a repository-synced estate with no daemon serving it kept no live store, since it opens the
+estate read-only and exported an in-memory stand-in, which wrote no file. Every SQLite database beside the live store, such as the
+daemon's `events.db` and a local-only estate's `objects.db`, is exported the same way, as one file read through SQLite, never as its
+files copied while a runtime holds them open, so the restore point holds no database's `-wal`, `-shm` or `-journal` file. Before the
+upgrade writes anything, each copy must exist, pass SQLite's integrity check and hold as many rows in each table as the database it
+copies; otherwise the upgrade, one-way or not, is refused (`refused`) with nothing changed, and the message names the database and
+what failed. The copies are made while the upgrade holds the clone's writer lock, `live.lock`, alone, as `estate cache rebuild`
+does, so no writable session opens meanwhile. While a daemon, an MCP server (`vericairn mcp serve`, as an AI client or a run starts
+it) or another command has the estate open for writing, the upgrade is refused with nothing changed, and the message says to run it
+through the daemon serving the estate, or after stopping the daemon and closing any MCP server. A change detected while a database is
+copied refuses the upgrade too; the check catches some changes by a process that writes without the lock, not all of them
+([limitations](limitations-and-platforms.md)). The
+way back names each database's `-wal` and `-shm` to remove before the exported state is copied back, and the clone's live store too
+when it kept none before the upgrade.
+
 `vericairn runtime status` adds a `release` line with the serving daemon's release against the estate's pin and, while they
 differ, a `mismatch:` line with the commands that settle it. Its `--json` adds `servingRelease`, `pin` (the manifest's pin as
 `estate upgrade` describes it), `pinnedRelease` (null for a source pin) and `mismatch` (null when they agree or no daemon
@@ -1111,7 +1129,7 @@ signatures it adds, with why, before they are asked for; and when it ends, how m
 command's answer, so `--json` output stays one JSON document. A command that signs nothing with presence prints none of this,
 and neither does a daemon of an older release. The [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
 lists how many prompts the release and acceptance steps ask for. From 0.9.4 each prompt's line ends with the signed record's short
-hash, the first twelve hexadecimal digits of its content hash, which the release build's helper also shows in its dialog's label, and
+hash, the first twelve hexadecimal digits of its content hash, which the helper also shows in its dialog's label, and
 every one of these lines begins with `runtime:`: its words are the runtime's, and the mark keeps them from passing for a line the
 command line derived itself. Control characters and escape sequences in them are shown escaped, never passed to the terminal, each run
 of spaces is one space, and a line longer than the terminal (80 columns when standard error goes to a file or a pipe, or its width

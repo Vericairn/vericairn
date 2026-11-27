@@ -15,8 +15,9 @@
   request it received over its local socket or named pipe, the profiles on which a presence session opens.
 - `Vericairn.Daemon.ServiceInstaller.Plan(platform, root, estateId, launcher, userHome, vericairnHome, userId, environment)`: a new
   overload with the service's environment; the existing overload is unchanged.
-- Behavior: `SecureEnclaveCustody.HelperPath()` ignores `VERICAIRN_ENCLAVE_HELPER` in a release build. `doctor --json` gains the
-  probe `presence`. The charter's policies admit `presence` from record format 3.
+- Behavior: `SecureEnclaveCustody.HelperPath()` uses the bundled helper when the build carries a Developer ID team identifier.
+  The published 0.9.4 archives omit that identifier and honor `VERICAIRN_ENCLAVE_HELPER`. `doctor --json` gains the probe
+  `presence`. The charter's policies admit `presence` from record format 3.
 - No public API changes in the follow-up. Protocol (the release helper's presence sessions, `vericairn.presence-session/1`, which
   no release has shipped yet): a `dispatch-release-workflow` kind entry's `fixed` values must carry `workflow`, held to the branch's
   character set; terms that omit it, or state one outside that set, are refused with `terms.invalid`, and a dispatch record whose
