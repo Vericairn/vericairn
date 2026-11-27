@@ -294,11 +294,6 @@ def check_findings(entry, pin, findings):
 def journey_leg(cli, scratch, environment, selected, report):
     if not any("tier2" in entry["legs"] for entry in selected):
         return
-    # Build the product's own test driver. It is separate from the candidate and only reaches it by spawning it.
-    build = execute(["dotnet", "build", "tests/Vericairn.Cli.Tests", "-c", "Release", "-p:RestoreLockedMode=true",
-                     "--verbosity", "quiet"], ROOT, os.environ.copy())
-    if build.returncode != 0:
-        raise SmokeFailure("The journey driver did not build: " + build.stdout + build.stderr)
     journey_report = scratch / "journeys.json"
     environment.update(VERICAIRN_EXAMPLES_BINARY=str(cli), VERICAIRN_EXAMPLES_JOURNEY_REPORT=str(journey_report))
     test = ROOT / "artifacts/bin/Vericairn.Cli.Tests/release/Vericairn.Cli.Tests.dll"

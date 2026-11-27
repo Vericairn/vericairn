@@ -18,6 +18,30 @@ SPEC.loader.exec_module(SMOKE)
 FIXTURE = ROOT / "tests/examples/read-fixture"
 
 
+class ExamplesJourneyTests(unittest.TestCase):
+    def test_tier_two_runs_only_the_prebuilt_driver(self):
+        with tempfile.TemporaryDirectory(prefix="example-driver-test-") as directory:
+            scratch = Path(directory)
+            cli = scratch / "candidate"
+            journey_report = scratch / "journeys.json"
+            environment = {}
+            report = {}
+            finished = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            SMOKE.write_json(journey_report, [{"result": "passed"}])
+            with patch.object(SMOKE, "execute", return_value=finished) as execute:
+                SMOKE.journey_leg(cli, scratch, environment, [{"legs": ["tier2"]}], report)
+
+            driver = ROOT / "artifacts/bin/Vericairn.Cli.Tests/release/Vericairn.Cli.Tests.dll"
+            self.assertEqual(1, execute.call_count, "Tier 2 must not build the driver inside the smoke.")
+            execute.assert_called_once_with(
+                ["dotnet", str(driver), "--filter-method",
+                 "Vericairn.Cli.Tests.ExamplesJourneyTests.TierTwoRunsEveryRegisteredJourney"],
+                ROOT,
+                {"VERICAIRN_EXAMPLES_BINARY": str(cli), "VERICAIRN_EXAMPLES_JOURNEY_REPORT": str(journey_report)},
+            )
+            self.assertEqual({"journeys": [{"result": "passed"}]}, report)
+
+
 class ExamplesReadTests(unittest.TestCase):
     def setUp(self):
         scratch = self.enterContext(tempfile.TemporaryDirectory(prefix="example-read-test-"))
