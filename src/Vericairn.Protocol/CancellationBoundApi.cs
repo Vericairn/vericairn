@@ -297,6 +297,13 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     public Task<IReadOnlyList<DeviceRow>> DevicesAsync(CancellationToken cancellationToken = default) => ForwardAsync(token => inner.DevicesAsync(cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public DeviceRevocationReachReport? DeviceRevocationReach(string device) => inner.DeviceRevocationReachAsync(device, cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<DeviceRevocationReachReport?> DeviceRevocationReachAsync(string device, CancellationToken cancellationToken = default) =>
+        ForwardAsync(token => inner.DeviceRevocationReachAsync(device, token), cancellationToken);
+
+    /// <inheritdoc />
     public WriteOutcome DeviceCreate(DeviceCreateRequest request) => inner.DeviceCreateAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

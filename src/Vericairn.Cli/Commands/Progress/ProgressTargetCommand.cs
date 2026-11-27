@@ -18,6 +18,7 @@ internal sealed class ProgressTargetCommand : Command
         Subcommands.Add(Set(context, operations));
         Subcommands.Add(List(context, operations));
         Subcommands.Add(Remove(context, operations));
+        Subcommands.Add(Resolve(context, operations));
         Subcommands.Add(Refresh(context, operations));
         Subcommands.Add(Follow(context, operations));
     }
@@ -53,6 +54,17 @@ internal sealed class ProgressTargetCommand : Command
         var name = new Argument<string>("name") { Description = "The target's name." };
         command.Arguments.Add(name);
         command.SetAction(p => operations.Remove(p.GetValue(context.EstateOption)!, p.GetValue(name)!, p.GetValue(context.JsonOption)));
+        return command;
+    }
+
+    private static Command Resolve(CommandContext context, ProgressTargetOperations operations)
+    {
+        var command = new Command("resolve", "From 0.9.5: remove a comment entry a progress target keeps on this machine, once you have checked its destination. An uncertain comment is never sent again while its entry is kept; once removed, the same event or wait seen again is commented on. Sends nothing.");
+        var name = new Argument<string>("name") { Description = "The target's name." };
+        var key = new Argument<string>("key") { Description = "The comment's event or wait key, as 'progress target list' shows it." };
+        command.Arguments.Add(name);
+        command.Arguments.Add(key);
+        command.SetAction(p => operations.Resolve(p.GetValue(context.EstateOption)!, p.GetValue(name)!, p.GetValue(key)!, p.GetValue(context.JsonOption)));
         return command;
     }
 
