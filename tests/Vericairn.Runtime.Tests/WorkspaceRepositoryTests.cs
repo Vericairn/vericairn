@@ -163,6 +163,64 @@ public class WorkspaceRepositoryTests
     }
 
     [Fact]
+    public void RetentionCarriesACommitAReusedWorkspaceNeverRetained()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        string path = Path.Combine(run.Scratch, "workspace");
+        PreparedWorkspace first = provider.Prepare(run.Clone, "work/reused", null, path);
+        Directory.CreateDirectory(Path.Combine(path, "widget"));
+        File.WriteAllText(Path.Combine(path, "widget", "one.txt"), "never retained\n");
+        RunEstate.Git(path, "add", ".");
+        RunEstate.Git(path, "commit", "-q", "-m", "A commit never retained");
+        string unretained = RunEstate.Git(path, "rev-parse", "HEAD");
+
+        // The workspace is reused for the next run, whose commit sits on the one never retained.
+        PreparedWorkspace second = provider.Prepare(run.Clone, first.Branch, null, path);
+        WorkspaceSnapshot baseline = provider.Capture(second);
+        File.WriteAllText(Path.Combine(path, "widget", "two.txt"), "retained\n");
+        RunEstate.Git(path, "add", ".");
+        RunEstate.Git(path, "commit", "-q", "-m", "The retained commit");
+        string head = RunEstate.Git(path, "rev-parse", "HEAD");
+        Assert.Null(provider.CheckScope(second, baseline, ["widget/**"]).Problem);
+
+        Assert.Null(provider.RetainForReview(second));
+        Assert.Equal(head, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + second.Branch));
+        Assert.Equal("commit", RunEstate.Git(run.Clone, "cat-file", "-t", unretained));
+        RunEstate.Git(run.Clone, "fsck", "--connectivity-only", "--no-dangling");
+    }
+
+    [Fact]
+    public void AShallowFileInAWorkspaceRefusesItsAuditAndRetention()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/shallow", null, Path.Combine(run.Scratch, "workspace"));
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        File.WriteAllText(Path.Combine(workspace.Path, "README.md"), "outside the brief\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "Outside change");
+        Directory.CreateDirectory(Path.Combine(workspace.Path, "widget"));
+        File.WriteAllText(Path.Combine(workspace.Path, "widget", "inside.txt"), "inside\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "Inside change");
+        // The agent writes a shallow file naming its head, which would hide the outside commit from the audit and the transfer.
+        File.WriteAllText(Path.Combine(workspace.Path, ".git", "shallow"), RunEstate.Git(workspace.Path, "rev-parse", "HEAD") + "\n");
+
+        string shallow = Path.Combine(workspace.Path, ".git", "shallow");
+        RunScope scope = provider.CheckScope(workspace, baseline, ["widget/**"]);
+        Assert.Contains("shallow file", scope.Problem, StringComparison.Ordinal);
+        Assert.NotNull(provider.RetainForReview(workspace));
+
+        // Without the file the audit sees the outside commit; a shallow file written after the audit still refuses retention.
+        File.Delete(shallow);
+        Assert.Contains("README.md", provider.CheckScope(workspace, baseline, ["widget/**"]).Outside);
+        File.WriteAllText(shallow, RunEstate.Git(workspace.Path, "rev-parse", "HEAD") + "\n");
+        Assert.Contains("shallow file", provider.RetainForReview(workspace), StringComparison.Ordinal);
+        Assert.DoesNotContain("refs/heads/" + workspace.Branch, RunEstate.Git(run.Clone, "for-each-ref", "--format=%(refname)", "refs/heads"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AWorkspaceFetchTakesTheNamedCommitWithoutSubmoduleAdministrationOrInstall()
     {
         using var run = new RunEstate();

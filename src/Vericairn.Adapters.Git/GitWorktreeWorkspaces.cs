@@ -181,6 +181,12 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
     /// <inheritdoc />
     public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, IReadOnlyList<string> excluded)
     {
+        if (ShallowProblem(workspace.Path) is string shallow)
+        {
+            if (reviews.TryGetValue(workspace, out Review? refused)) refused.Head = null;
+            return new RunScope(0, 0, [], shallow);
+        }
+
         WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory,
             startExclude: baseline.ExcludeHash);
         RunScope scope = WorkspaceScopeAudit.Compare(baseline, after, permitted, excluded);
@@ -198,6 +204,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         try
         {
             // A transfer's sender and receiver both use disposable, runtime-owned administration.
+            if (ShallowProblem(workspace.Path) is string shallow) return shallow + " Preserve the workspace for review.";
             using GitHardening source = GitHardening.Create();
             AcquisitionGitView sender = source.Acquire(workspace.Path);
             if (CloneHead(sender.Directory, workspace.Branch) != review.Head)
@@ -212,7 +219,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
 
             string staging = Path.Combine(target.Control, "transfer");
             WorkspaceGitCommand.Require(target.Control, "init", "--quiet", "--bare", "--template=", "--object-format=" + settings.ObjectFormat, staging);
-            StageNewObjects(sender.Directory, staging, Path.Combine(target.Control, "packed"), review.Head, [review.Expected, workspace.Commit]);
+            bool staged = StageNewObjects(sender.Directory, staging, Path.Combine(target.Control, "packed"), review.Head, ClonedCommits(destination.Directory));
 
             beforeReferenceUpdate?.Invoke();
             // Use Git's ref lock convention, so concurrent Git writers cannot overwrite this comparison.
@@ -238,7 +245,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
                 if (latest.HasPackedReferenceConflict(refName))
                     return "The workspace branch was not retained: a packed branch name conflicts with the requested branch. Preserve the workspace and choose a different branch name.";
                 RefuseCheckedOut(latest, workspace.Branch);
-                PublishPacks(staging, destination);
+                if (staged) PublishPacks(staging, destination);
                 AcquisitionWorkingTree.Move(destination.Boundary, locked, reference, overwrite: true);
                 committed = true;
             }
@@ -308,18 +315,26 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
     }
 
     /// <summary>
-    /// Stages only the objects the reviewed head adds to what the clone holds (its expected head and the commit the workspace was
-    /// prepared from, which the workspace still holds): a pack made in the sender's runtime-owned view, then indexed and checked object by object by a separate Git
-    /// process in the staging repository. A fetch into the empty staging repository would carry the branch's whole history, and
-    /// each retained run would grow the clone by about its own size.
+    /// Stages only the objects the reviewed head adds to what the clone holds: everything reachable from it and from none of the
+    /// commits the clone's own branches, remote branches and tags name, since Git keeps everything those reach. A pack is made in
+    /// the sender's runtime-owned view, then indexed and checked object by object by a separate Git process in the staging
+    /// repository. A commit the workspace has but the clone does not, such as one a reused workspace never retained, is packed with
+    /// the rest. False when the clone already holds everything the head reaches, as for a branch moved back.
     /// </summary>
-    private static void StageNewObjects(string sender, string staging, string scratch, string head, IEnumerable<string?> held)
+    private static bool StageNewObjects(string sender, string staging, string scratch, string head, IReadOnlyList<string> cloned)
     {
         Directory.CreateDirectory(scratch);
-        // What the clone holds: the branch's expected head where it has one, and always the commit the workspace was prepared from.
-        string revisions = head + "\n" + string.Concat(held.OfType<string>().Distinct(StringComparer.Ordinal)
-            .Where(commit => commit != head && Git(sender, out _, "cat-file", "-e", commit + "^{commit}") == 0)
-            .Select(commit => "^" + commit + "\n"));
+        // Only the clone's commits the sender also has can be excluded by the sender's Git.
+        HashSet<string> held = [];
+        if (cloned.Count > 0 && WorkspaceGitCommand.RunWithInput(sender, out string present, TimeSpan.FromMinutes(2),
+            string.Concat(cloned.Select(commit => commit + "^{commit}\n")), "cat-file", "--batch-check=%(objectname)") == 0)
+            held = [.. present.Split('\n').Where(line => line.Length is 40 or 64 && line.All(char.IsAsciiHexDigitLower))];
+        string revisions = head + "\n" + string.Concat(held.Where(commit => commit != head).Select(commit => "^" + commit + "\n"));
+
+        if (WorkspaceGitCommand.RunWithInput(sender, out string reachable, TimeSpan.FromMinutes(10), revisions, "rev-list", "--objects", "--stdin") != 0)
+            throw new IOException("The workspace's new objects could not be listed for the registered clone.");
+        if (reachable.Trim().Length == 0) return false;
+
         if (WorkspaceGitCommand.RunWithInput(sender, out string name, TimeSpan.FromMinutes(10), revisions,
             "pack-objects", "--revs", "--quiet", Path.Combine(scratch, "pack")) != 0 || name.Trim() is not { Length: 40 or 64 } packName)
             throw new IOException("The workspace's new objects could not be packed for the registered clone.");
@@ -328,25 +343,45 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         File.Copy(Path.Combine(scratch, "pack-" + packName + ".pack"), pack);
         WorkspaceGitCommand.Require(staging, "index-pack", "--fsck-objects", pack);
         WorkspaceGitCommand.Require(staging, "cat-file", "-e", head + "^{commit}");
+        return true;
+    }
+
+    // The commits the registered clone's branches, remote branches and tags name, read from its copied references alone.
+    private static IReadOnlyList<string> ClonedCommits(string clone) =>
+        Git(clone, out string output, "for-each-ref", "--format=%(objectname)", "--count=5000", "refs/heads", "refs/remotes", "refs/tags") == 0
+            ? [.. output.Split('\n').Select(line => line.Trim()).Where(line => line.Length is 40 or 64).Distinct(StringComparer.Ordinal)]
+            : [];
+
+    // A worker's workspace is an independent repository Vericairn prepared; a shallow file in it can only be the agent's, and would
+    // hide commits from the audit and the transfer.
+    private static string? ShallowProblem(string workspace)
+    {
+        string git = Path.Combine(workspace, ".git");
+        if (File.Exists(git)) return "The workspace's .git is a file, not the independent repository Vericairn prepared; its scope cannot be audited.";
+        return File.Exists(Path.Combine(git, "shallow"))
+            ? "The workspace holds a shallow file, which Vericairn never writes and which would hide commits from the audit; its scope cannot be audited."
+            : null;
     }
 
     private static void PublishPacks(string staging, AcquisitionGitView destination)
     {
         string packs = Path.Combine(destination.Common, "objects", "pack");
         AcquisitionWorkingTree.CreateDirectories(destination.Boundary, packs);
-        foreach (string file in Directory.EnumerateFiles(Path.Combine(staging, "objects", "pack")).OrderByDescending(Path.GetExtension, StringComparer.Ordinal))
+        string[] staged = [.. Directory.EnumerateFiles(Path.Combine(staging, "objects", "pack")).Where(f => Path.GetExtension(f) is ".pack" or ".idx")];
+        // A pack's name is the hash of the objects it holds, so a pack of that name already in the clone holds these objects, though
+        // its bytes may differ: such a pack is left whole, its pack and index never replaced or mixed with this one's. Decided before
+        // anything is published.
+        HashSet<string> held = [.. staged.Select(Path.GetFileNameWithoutExtension).OfType<string>().Distinct(StringComparer.Ordinal).Where(stem =>
         {
-            if (Path.GetExtension(file) is not (".pack" or ".idx")) continue;
+            using var heldPack = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, Path.Combine(packs, stem + ".pack"));
+            using var heldIndex = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, Path.Combine(packs, stem + ".idx"));
+            return heldPack is not null || heldIndex is not null;
+        })];
+        foreach (string file in staged.OrderByDescending(Path.GetExtension, StringComparer.Ordinal))
+        {
+            if (held.Contains(Path.GetFileNameWithoutExtension(file))) continue;
             string member = Path.Combine(packs, Path.GetFileName(file));
             using var bytes = File.OpenRead(file);
-            using var existing = AcquisitionWorkingTree.TryOpenRegular(destination.Boundary, member);
-            if (existing is not null)
-            {
-                using var stream = new FileStream(existing, FileAccess.Read);
-                if (!SHA256.HashData(stream).AsSpan().SequenceEqual(SHA256.HashData(bytes)))
-                    throw new IOException("The registered clone already holds different bytes at an acquired pack name.");
-                continue;
-            }
 
             string temporary = Path.Combine(packs, ".vericairn-" + Guid.NewGuid().ToString("N"));
             AcquisitionWorkingTree.WriteNew(destination.Boundary, temporary, bytes);
