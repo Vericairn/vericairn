@@ -35,6 +35,30 @@ public sealed record Problem(string Code, string Message, IReadOnlyList<FindingD
 /// <param name="Hash">Content hash.</param>
 public sealed record RecordWritten(string Path, string Id, string Hash);
 
+/// <summary>One runtime or server's evidence of observing a revocation, as of the stated time.</summary>
+/// <param name="Kind">runtime or server.</param>
+/// <param name="Identity">The observing instance's identifier, its paired identity fingerprint when available, or a journal epoch.</param>
+/// <param name="Evidence">written, write-served, record-read, server-read, journal-written or journal-found.</param>
+/// <param name="At">When the runtime or server observed it.</param>
+public sealed record RevocationObserver(string Kind, string Identity, string Evidence, string At);
+
+/// <summary>One exact revocation revision and the runtime and server observations supported by their evidence.</summary>
+/// <param name="Id">Revocation record id.</param>
+/// <param name="Hash">Revocation record hash.</param>
+/// <param name="At">The record's claimed envelope time.</param>
+/// <param name="RevokedAt">The effective time stated in the revocation, when present.</param>
+/// <param name="Counts">Whether the revision counts in this copy.</param>
+/// <param name="Current">Whether the revision is this copy's current admission of the device.</param>
+/// <param name="Observations">Observations of this exact id and hash.</param>
+public sealed record DeviceRevocationReach(string Id, string Hash, string At, string? RevokedAt, bool Counts, bool Current, IReadOnlyList<RevocationObserver> Observations);
+
+/// <summary>Revocation observations available to the answering runtime for one device.</summary>
+/// <param name="Device">The device's identity, even if the request named a later revision.</param>
+/// <param name="Revocations">The device's revocation revisions in the answering runtime's copy.</param>
+/// <param name="JournalProblem">Why retained journal evidence could not be read, when applicable.</param>
+public sealed record DeviceRevocationReachReport(string Device, IReadOnlyList<DeviceRevocationReach> Revocations,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? JournalProblem = null);
+
 /// <summary>The outcome of a write. An interrupted companion batch carries both the stored record and its recovery problem, with HTTP 200 over the daemon. A refusal has no stored record.</summary>
 /// <param name="Written">The record, when written.</param>
 /// <param name="Problem">A refusal, or a recovery problem after the named record was already stored; never retry that record as new work.</param>
@@ -54,6 +78,10 @@ public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Notices { get; init; }
+
+    /// <summary>The observers of this device revocation's written record. Absent on other writes and servers that do not report it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<RevocationObserver>? RevocationReach { get; init; }
 
     /// <summary>A written outcome.</summary>
     public static WriteOutcome Success(RecordWritten written) => new(written, null);
@@ -432,6 +460,10 @@ public sealed record OverlapPreviewRequest(JsonElement Brief, string? Repository
 /// <param name="ContextPackage">Optional expected hash of the assembled run context; a mismatch refuses dispatch.</param>
 public sealed record GoalStepRequest(string By, string? Repository = null, IReadOnlyDictionary<string, string>? Settings = null, long? WallMinutes = null, string? Branch = null, string? Base = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null)
 {
+    /// <summary>Inspect the flow step's route and permitted paths without signing, recording, or starting work.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Check { get; init; }
+
     /// <summary>For an agent's step, up to five search queries whose top three new candidates each join the run's package as optional sources.</summary>
     public IReadOnlyList<string>? Search { get; init; }
 
@@ -464,6 +496,10 @@ public sealed record GoalStepRequest(string By, string? Repository = null, IRead
 /// <param name="Problem">Why nothing was dispatched.</param>
 public sealed record GoalStepResponse(string Goal, string Outcome, string Message, bool Ok, string? Step = null, string? Route = null, string? Principal = null, RecordWritten? Assignment = null, RecordWritten? Ask = null, RunResponse? Run = null, Problem? Problem = null)
 {
+    /// <summary>The flow assignment's permitted path patterns when the step is checked without recording it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? PermittedChanges { get; init; }
+
     /// <summary>For a run's reserved act, the operator request this call wrote, carrying the step's exact command; it grants nothing (0.9.2).</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public RecordWritten? Request { get; init; }

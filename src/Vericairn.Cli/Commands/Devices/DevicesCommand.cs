@@ -14,6 +14,7 @@ internal sealed class DevicesCommand : Command
         Subcommands.Add(new DevicesListCommand(context));
         Subcommands.Add(new DevicesAdmitCommand(context));
         Subcommands.Add(new DevicesRevokeCommand(context));
+        Subcommands.Add(new DevicesReachCommand(context));
         Subcommands.Add(new DevicesRecoveryCommand(context));
         Subcommands.Add(new DevicesPairCommand(context));
         Subcommands.Add(new DevicesWritesCommand(context));

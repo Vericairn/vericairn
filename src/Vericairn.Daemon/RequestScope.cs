@@ -78,6 +78,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/context/prepare", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/context/brief", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/overlaps/preview", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/goals/{id}/step/check", StringComparison.OrdinalIgnoreCase) &&
             // The index is derived machine-local state, never a record: updating it is part of reading.
             !operation.Equals("POST /v1/search", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/search/index", StringComparison.OrdinalIgnoreCase) &&
@@ -264,6 +265,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/standing/outputs"] = typeof(StandingOutputRequest),
         ["POST /v1/work/takeover"] = typeof(TakeoverRequest),
         ["GET /v1/devices"] = null,
+        ["GET /v1/devices/{id}/revocation-reach"] = null,
         ["POST /v1/devices"] = typeof(DeviceCreateRequest),
         ["POST /v1/devices/admit"] = typeof(AdmitRequest),
         ["POST /v1/devices/rename"] = typeof(DeviceRenameRequest),
@@ -316,6 +318,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/overlaps"] = null,
         ["POST /v1/overlaps/preview"] = typeof(OverlapPreviewRequest),
         ["POST /v1/goals/{id}/step"] = typeof(GoalStepRequest),
+        ["POST /v1/goals/{id}/step/check"] = typeof(GoalStepRequest),
         ["POST /v1/goals/{id}/activate"] = typeof(GoalActionRequest),
         ["POST /v1/goals/{id}/pause"] = typeof(GoalActionRequest),
         ["POST /v1/goals/{id}/resume"] = typeof(GoalActionRequest),
@@ -377,14 +380,16 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     internal static bool Covers(string operation) => Operations.TryGetValue(operation, out Type? type) && (type is null || Covers(type));
 
     /// <summary>
-    /// The operations a device-signed request may ask only for an administrator: stopping the runtime and replacing its certificate or
-    /// identity. Over the local network they are refused before this, as operations on the runtime's own machine.
+    /// Stopping the runtime, replacing its certificate or identity, and inspecting revocation reach require an administrator.
+    /// The local-network profile also refuses shutdown and certificate or identity changes as operations on the runtime's own machine.
     /// </summary>
     private string? Refusal(string operation, AuthenticatedDevice device) =>
         !Covers(operation)
             ? $"{operation} has no request scope rule and is refused."
             : operation == "POST /v1/handoff/desktop/open"
             ? "Open the handoff from Workbench on the runtime's machine."
+            : operation == "GET /v1/devices/{id}/revocation-reach"
+            ? Administrator("Reading revocation reach", device)
             : operation is "POST /v1/shutdown" or "POST /v1/runtime/certificate" && !service.Administers(device.Principal)
             ? $"{operation} is an administrator's: device {device.Identity} acts for {device.Principal}, which is neither an operator nor holds the 'administer' scope. On the runtime's machine its operating-system user reaches it over the local socket."
             : null;

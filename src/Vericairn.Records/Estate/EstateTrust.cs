@@ -1479,6 +1479,23 @@ internal sealed partial class EstateTrust
     /// </summary>
     internal bool MayAnchor(RecordEnvelope checkpoint) => MayAnchor(checkpoint, Acting);
 
+    /// <summary>Whether an anchoring signature is by the root operator's key held in custody requiring presence at that signature.</summary>
+    internal bool MayAcknowledgeGitDeletion(RecordEnvelope checkpoint)
+    {
+        if (RootOperator is null || checkpoint.By != RootOperator || !MayAnchor(checkpoint)) return false;
+        for (int i = 0; i < checkpoint.Signatures.Count; i++)
+        {
+            SignatureProof proof = Proof(checkpoint, i);
+            if (proof.Key is { } key && DeviceChain(proof.Identity).Any(device =>
+                string.CompareOrdinal(device.At, checkpoint.At) <= 0 && EstateModel.BodyString(device, "publicKey") == key &&
+                EstateModel.BodyString(device, "presence") == "required" &&
+                DeviceKeyStores.PresenceKinds.Contains(EstateModel.BodyString(device, "custody") ?? "")))
+                return true;
+        }
+
+        return false;
+    }
+
     /// <summary>Whether the author of a checkpoint may anchor, reading authority against the closings given.</summary>
     private bool MayAnchor(RecordEnvelope checkpoint, IReadOnlyList<Closing> bound)
     {

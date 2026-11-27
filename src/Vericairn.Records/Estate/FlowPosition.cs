@@ -3367,6 +3367,11 @@ public static partial class FlowPosition
 
         List<FlowRuns.Setting> configured = position.Configuration.Values.Values.Where(v => v.Record is not null).OrderBy(v => v.Option, StringComparer.Ordinal).ToList();
         text.Append("  Configuration: ").Append(configured.Count == 0 ? "the flow's defaults" : string.Join("; ", configured.Select(v => $"{v.Option} {v.Value}, from {v.Source}"))).Append('\n');
+        foreach (FlowStep step in MissingPaths(model, position))
+        {
+            text.Append("  ").Append(FlowPermissions.Code).Append(" — ").Append(FlowPermissions.Message(step.Key)).Append('\n');
+        }
+
         List<StepInstance> next = running.Where(s => s.State == "next").ToList();
         text.Append("  Next: ").Append(next.Count == 0 ? "none" : string.Join(", ", next.Select(s => s.Name))).Append('\n');
         foreach (Attention attention in position.RunAttention)
@@ -3454,6 +3459,12 @@ public static partial class FlowPosition
             ["source"] = v.Source,
             ["record"] = v.Record is null ? null : new JsonObject { ["type"] = v.Record.Type, ["id"] = v.Record.Id, ["hash"] = v.Record.ComputedHash },
         }).ToArray());
+        JsonArray pathRefusals = PathRefusalsJson(model, position);
+        if (pathRefusals.Count > 0)
+        {
+            json["pathRefusals"] = pathRefusals;
+        }
+
         json["complete"] = position.Complete;
         if (ClosingJson(model, position) is JsonObject closed)
         {
@@ -3560,4 +3571,14 @@ public static partial class FlowPosition
 
         static JsonObject AttentionJson(Attention attention) => new() { ["kind"] = attention.Kind, ["summary"] = attention.Summary, ["trigger"] = Reference(attention.Trigger) };
     }
+    internal static JsonArray PathRefusalsJson(EstateModel model, Position position) => new([.. MissingPaths(model, position).Select(step => new JsonObject
+    {
+        ["step"] = step.Key, ["code"] = FlowPermissions.Code, ["message"] = FlowPermissions.Message(step.Key),
+    })]);
+
+    private static IReadOnlyList<FlowStep> MissingPaths(EstateModel model, Position position) =>
+        position is { Work: { } order, Flow: { } flow, Configuration: { } configuration, Closing: null, Complete: false }
+        && GoalRules.Status(model, position.Goal) is "proposed" or "active"
+            ? FlowPermissions.Missing(model, position.Goal, flow, configuration, order) : [];
+
 }
