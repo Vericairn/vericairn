@@ -97,10 +97,18 @@ internal static class ExampleJourneyRunner
                         instant ? "instant" : step.Clock is null ? "ordinary" : "injected clock", standIns);
                     steps.Add(reportStep);
                     var invocation = new ExampleCommand(command, estate, scratch, home, clock, registry, binary, captures, variant, step.Text);
-                    if (binary is not null && command is ["goal", "step", ..] && !ExampleJourney.AgentCheck(command))
-                        invocation = CheckPeopleRoute(invoke, invocation, step.Id);
-                    CliHarness.Outcome outcome = step.Surface is null ? invoke(invocation)
-                        : Surfaces.Value.TryGetValue(step.Surface, out IExampleJourneySurface? surface) ? surface.Run(invocation, invoke)
+                    CliHarness.Outcome InvokeChecked(ExampleCommand next)
+                    {
+                        if (next.Executable is not null)
+                        {
+                            if (next.Arguments is ["worker", "run", ..]) throw new InvalidDataException("The shipped driver only previews an agent step.");
+                            if (next.Arguments is ["goal", "step", ..] && !ExampleJourney.AgentCheck(next.Arguments))
+                                next = CheckPeopleRoute(invoke, next, step.Id);
+                        }
+                        return invoke(next);
+                    }
+                    CliHarness.Outcome outcome = step.Surface is null ? InvokeChecked(invocation)
+                        : Surfaces.Value.TryGetValue(step.Surface, out IExampleJourneySurface? surface) ? surface.Run(invocation, InvokeChecked)
                         : throw new InvalidDataException($"Unknown journey test surface '{step.Surface}'.");
                     steps[^1] = reportStep with { ExitCode = outcome.Code };
                     expected.Assert(outcome, captures);
