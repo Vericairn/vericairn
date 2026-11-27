@@ -131,10 +131,18 @@ public class StandingAgentRoutingTests
             JsonObject result = PolicyFixture.ResultBody();
             result["outputs"] = new JsonArray(new JsonObject { ["name"] = "findings", ["hash"] = FlowFixture.Hash('a'), ["mediaType"] = "text/markdown" });
             clock.Advance(TimeSpan.FromSeconds(1));
-            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("result", researcher, PolicyFixture.Element(result),
+            RecordWritten written = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("result", researcher, PolicyFixture.Element(result),
                 $"attempt:{attempt.Id}:{attempt.Hash}", At: RecordParser.FormatTimestamp(clock.GetUtcNow()))));
             Assert.Equal((key, "settled"), StandingDutyJourneyTests.Occurrence(run, goal, key));
-            Assert.Null(run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource) { Occurrence = key }).Assignment);
+
+            // D07-A: a second step for the same key is refused because that occurrence's result is waiting for review.
+            GoalStepResponse replay = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)
+            {
+                Occurrence = key, Now = RecordParser.FormatTimestamp(clock.GetUtcNow()),
+            });
+            Assert.Equal(("none", key), (replay.Outcome, replay.Step));
+            Assert.Contains($"it is settled, its result {written.Id} ", replay.Message, StringComparison.Ordinal);
+            Assert.Null(replay.Assignment);
             return key;
         }
     }
@@ -183,15 +191,20 @@ public class StandingAgentRoutingTests
                 ["key"] = "bugs", ["kind"] = "event", ["recordType"] = "work-order", ["fields"] = new JsonObject { ["title"] = "Open bug" },
             }), outputs: new JsonObject { ["open"] = 1 });
         AllowStandInWithFixtureKey(run, goal);
-        RecordEnvelope activated = Assert.Single(GoalRules.Statuses(run.Estate.Load(), run.Estate.Load().ById[goal]));
-        Assert.True(SpinWait.SpinUntil(() => DateTimeOffset.UtcNow >= activated.AtTime.AddSeconds(1), TestTiming.HangTimeout),
-            "the event records must postdate activation at record timestamp precision");
+        EstateModel model = run.Estate.Load();
+        RecordEnvelope activated = Assert.Single(GoalRules.Statuses(model, model.ById[goal]));
+        // Event records must postdate activation at record timestamp precision.
+        var clock = new FixedClock(activated.AtTime.AddSeconds(1));
+        run.Service.FlowClock = clock;
+        run.Service.PresenceHost = StandInSessions.Host([], clock: clock);
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Clock = clock };
+        string eventAt = RecordParser.FormatTimestamp(clock.GetUtcNow());
         for (int i = 1; i <= 3; i++)
         {
             RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json($$"""
                 {"key":"BUG-{{i}}","kind":"ordinary","title":"Open bug","intent":"Inspect the reported bug.",
                  "scope":["Inspect the widget"],"exitQuestion":"Was the bug inspected?","inputs":[],"deliverables":["Findings"]}
-                """))));
+                """), At: eventAt)));
         }
 
         JsonElement[] due = [.. run.Service.GoalDue(goal)!.Json.GetProperty("occurrences").EnumerateArray()];
