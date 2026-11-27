@@ -150,6 +150,25 @@ public sealed class ExamplesJourneyTests
         Assert.Equal(actions, dispatched);
     }
 
+    [Theory]
+    [InlineData("test-local-step", "passed", 1)]
+    [InlineData("test-restore", "failed", 0)]
+    public void ATestSurfaceCanTakeALocalStepButCannotDispatchThroughTheShippedBinary(string surface, string result, int actions)
+    {
+        ExampleJourney journey = Sample() with { Steps = [new("take-step", "operator", ["goal", "step"], new(0), Surface: surface)] };
+        int dispatched = 0;
+        ExampleJourneyRun run = ExampleJourneyRunner.Run(journey, "agents", CliHarness.BuiltExecutable, invocation =>
+        {
+            if (invocation.Arguments.Contains("--check"))
+                return new(0, """{"step":{"ok":true,"route":"agent"}}""", "");
+            dispatched++;
+            Assert.Null(invocation.Executable);
+            return new(0, "{}", "");
+        });
+        Assert.Equal(result, run.Result);
+        Assert.Equal(actions, dispatched);
+    }
+
     [Fact]
     public void ASecondContextSharesCapturesAndFixturesWithItsOwnHome()
     {
@@ -198,6 +217,14 @@ public sealed class ExamplesJourneyTests
 
         public CliHarness.Outcome Run(ExampleJourneyRunner.ExampleCommand command, Func<ExampleJourneyRunner.ExampleCommand, CliHarness.Outcome> invoke)
             => invoke(command);
+    }
+
+    private sealed class TestLocalStepSurface : IExampleJourneySurface
+    {
+        public string Name => "test-local-step";
+
+        public CliHarness.Outcome Run(ExampleJourneyRunner.ExampleCommand command, Func<ExampleJourneyRunner.ExampleCommand, CliHarness.Outcome> invoke)
+            => invoke(command with { Executable = null });
     }
 
     [Theory]
