@@ -29,6 +29,20 @@
       "legs": ["read"],
       "platforms": ["linux", "macos", "windows"],
       "liveLaunchers": []
+    },
+    {
+      "key": "E3",
+      "name": "A service request on the starter flow",
+      "journeys": ["J160"],
+      "journey": "e3-services.json",
+      "guideRegion": "docs/templates.md",
+      "repositories": [],
+      "release": "0.9.5",
+      "guidedSteps": null,
+      "expectedReadFindings": [],
+      "legs": ["tier1", "tier2"],
+      "platforms": ["linux", "macos", "windows"],
+      "liveLaunchers": []
     }
   ]
 }

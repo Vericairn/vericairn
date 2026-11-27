@@ -914,35 +914,57 @@ reserved and nothing leaves the estate, so approving books, confirms or charges
 nothing. In this build only an operator records a review of another's work as a
 person, so the approver is a person with the operator role.
 
-The flow ships with Vericairn: install it, and `templates list` shows the flow
-without a file copied into the estate. Name the agent that drafts and the person
-who approves in the roster, then propose and activate a run for one request:
+The flow ships with Vericairn and appears in `templates list` on a fresh estate.
+This example uses a fictional pool service business and one service request,
+SR-0001. The operator records the request's scope as a sentence. In the commands
+below, replace `${operator}` with your principal ID and `${workOrder}` with the
+ID printed by `work new`. The last command shows the scope as recorded.
 
+<!-- example:E3 -->
 ```sh
 vericairn templates show vericairn.starter/service-appointment --version 1.0.0
+vericairn work new --by '${operator}' --key SR-0001 --title 'Pool cleaning visit' --intent 'Turn the sample request into an approved appointment.' --scope 'Draft an appointment for a pool cleaning visit at 1 Sample Lane.' --deliverable 'An approved appointment' --exit-question 'Is the appointment for SR-0001 approved?'
+vericairn records show '${workOrder}'
+```
+<!-- /example:E3 -->
+
+Use a separate workspace repository for the business's appointment drafts. Adopt
+that repository with `sources adopt` and register its clone with `sources clone`.
+Use the resulting repository resource ID when running the scheduler's step.
+Review its baseline with the [worker's repository review](software.md#coding-agents-the-worker-and-its-launchers) before dispatch.
+
+Name the agent that drafts and the person who approves in the roster. From
+0.9.5 (FIX-166), set `--flow-path 'appointments/**'` when proposing the run.
+This typed pattern gives the draft its permitted paths. The request and its
+work-order scope explain the job in prose. A run whose agent step receives no
+typed pattern is refused with `flow.permitted-paths`.
+
+```sh
 vericairn records new roster --by <you> --body roster.json
 vericairn goal propose --by <you> --title "Appointment for SR-0001" \
   --objective "Turn the service request into an approved appointment." \
   --done '{"type":"work-order","fields":{"key":"SR-0001"}}' --work-order <work order id> \
   --budget wallMinutes=30 --budget attemptsPerStep=2 \
-  --flow vericairn.starter/service-appointment@1.0.0 \
+  --flow vericairn.starter/service-appointment@1.0.0 --flow-path 'appointments/**' \
   --subject request="SR-0001: a pool cleaning visit at 1 Sample Lane, any weekday morning."
 vericairn goal activate <goal> --by <you>
+vericairn goal step <goal> --by <you> --repository <resource> --check
 vericairn goal step <goal> --by <you> --repository <resource>
 ```
 
 Here `roster.json` is
 `{"roles":[{"role":"scheduler","principals":["<agent>"]},{"role":"approver","principals":["<you>"]}]}`.
-`goal step` takes one step per command. The draft goes to the agent through the
-worker, as any agent's step does ([runs of a flow](operator-guide.md#runs-of-a-flow-092)):
-the agent runs in your own coding-agent harness, under your own account, in a
-workspace made from a repository clone registered on your machine (`sources adopt`
-and `sources clone`), and signs its attempt and result with its own device
-admitted there. No hosted service takes part. The next `goal step` assigns the
-approval to you and asks you. Read the proposed appointment, which
-`vericairn work observe SR-0001` names by hash, and approve that exact result:
+`goal step --check` previews the draft's route, brief and exposure. Check that
+its permitted changes contain only `path:appointments/**` and that the exposure
+verdict allows the run. When you take the step, the worker starts the scheduler
+in its registered workspace using your own coding-agent harness. The scheduler
+signs its attempt and result with its admitted device. The next `goal step` assigns
+the approval to you and asks you. Read the proposed appointment, which
+`vericairn work observe SR-0001` names by hash, and approve that exact result.
 
 ```sh
+vericairn goal step <goal> --by <you>
+vericairn work observe SR-0001
 vericairn records new review --by <you> --subject result:<result id>:<result hash> --body approval.json
 ```
 
@@ -957,14 +979,25 @@ attempt or a revision of the result, the earlier approval covers nothing:
 `approve` reads `stale`, naming the result its brief pinned and the one there is
 now, and after a revision `estate check` reports the earlier review as
 `record.subject-stale`. The flow asks again only through `goal step`, never
-unattended: the next `goal step` assigns the approval afresh and asks you. `goal show` names the exact flow that
-ran, `Flow: vericairn.starter/service-appointment 1.0.0 (sha256:...)`, with each
+unattended. Run `goal step` again to get the new approval ask, then review the
+revised result by its new ID and hash. `goal show` names the exact flow that ran,
+`Flow: vericairn.starter/service-appointment 1.0.0 (sha256:...)`, with each
 step's result and the review that passed it, and `records show <review>` gives
-who approved which result revision. `estate export` and `estate restore` carry the
-run to another machine as they carry any records
-([export and restore](operator-guide.md#10-export-restore-recovery-and-divergence)):
-there `recover inspect` lists the devices whose keys stayed behind, and
-`goal show` gives the same position.
+who approved which result revision. Workbench's [Goals workspace](workbench.md#what-exists)
+shows the run's position and who it waits on. Over MCP, `goal_get` returns the
+flow position and `work_observe` traces the request's results and reviews.
+
+Export the completed estate and restore it in an empty directory under a fresh
+Vericairn home on the second machine. `recover inspect` lists the devices whose
+keys stayed behind, and `goal show` gives the same position. See
+[export and restore](operator-guide.md#10-export-restore-recovery-and-divergence).
+
+```sh
+vericairn estate export --by <you> --out services.zip
+vericairn estate restore --from services.zip --to restored-services
+vericairn --estate restored-services recover inspect
+vericairn --estate restored-services goal show <goal>
+```
 
 ## Client and extension contract
 

@@ -1,0 +1,78 @@
+{
+  "format": "vericairn.example-journey/1",
+  "startsAt": "2026-11-27T12:00:00Z",
+  "steps": [
+    {
+      "id": "init",
+      "role": "operator",
+      "arguments": [
+        "estate", "init", "--name", "Example Services", "--slug", "example-services",
+        "--purpose", "Arrange sample pool cleaning visits.", "--operator-name", "Sample Operator",
+        "--organization", "Example Services", "--commit", "0123456789abcdef0123456789abcdef01234567"
+      ],
+      "expect": { "exitCode": 0, "fields": { "/manifest": "estate/manifest.json" } },
+      "capture": { "operator": "/operator" },
+      "setup": true
+    },
+    {
+      "id": "create-operator-device",
+      "role": "operator",
+      "arguments": ["devices", "create", "--principal", "${operator}", "--name", "Sample operator device", "--custody", "file"],
+      "expect": { "exitCode": 0 },
+      "capture": { "device": "/id" },
+      "setup": true
+    },
+    {
+      "id": "admit-operator-device",
+      "role": "operator",
+      "arguments": ["devices", "admit", "${device}", "--by", "${operator}", "--note", "Admit the sample estate's first device."],
+      "expect": { "exitCode": 0 },
+      "setup": true
+    },
+    {
+      "id": "inspect-starter-flow",
+      "role": "operator",
+      "arguments": ["templates", "show", "vericairn.starter/service-appointment", "--version", "1.0.0"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/templates/0/pin/id": "vericairn.starter/service-appointment",
+          "/templates/0/pin/version": "1.0.0",
+          "/templates/0/definition/subject/fields/0": { "name": "request", "type": "text" },
+          "/templates/0/definition/roles/0/holder": "agent",
+          "/templates/0/definition/roles/1/holder": "person",
+          "/templates/0/definition/steps/0/key": "draft",
+          "/templates/0/definition/steps/0/outputs/0/name": "appointment",
+          "/templates/0/definition/steps/1/key": "approve",
+          "/templates/0/definition/steps/1/inputs/0/output": "appointment"
+        }
+      }
+    },
+    {
+      "id": "record-request",
+      "role": "operator",
+      "arguments": [
+        "work", "new", "--by", "${operator}", "--key", "SR-0001", "--title", "Pool cleaning visit",
+        "--intent", "Turn the sample request into an approved appointment.",
+        "--scope", "Draft an appointment for a pool cleaning visit at 1 Sample Lane.",
+        "--deliverable", "An approved appointment",
+        "--exit-question", "Is the appointment for SR-0001 approved?"
+      ],
+      "expect": { "exitCode": 0 },
+      "capture": { "workOrder": "/id" }
+    },
+    {
+      "id": "inspect-request",
+      "role": "operator",
+      "arguments": ["records", "show", "${workOrder}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/type": "work-order",
+          "/body/key": "SR-0001",
+          "/body/scope": ["Draft an appointment for a pool cleaning visit at 1 Sample Lane."]
+        }
+      }
+    }
+  ]
+}
