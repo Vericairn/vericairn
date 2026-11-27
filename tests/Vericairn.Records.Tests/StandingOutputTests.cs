@@ -196,6 +196,8 @@ public class StandingOutputTests
         Assert.Contains(Validate(fixture, "possibility", Possibility(raised, "late"), builder: true), f => f.Code == "standing.raised-by" && f.Message.Contains("settled", StringComparison.Ordinal));
     }
 
+    // Naming the declined possibility with new evidence admits the otherwise refused fingerprint.
+    [Trait("Journey", "D07-A")]
     [Fact]
     public void AnotherPrincipalDisposesOfAPossibilityAndADeclinedOneIsRaisedAgainOnlyByNamingIt()
     {
@@ -226,6 +228,11 @@ public class StandingOutputTests
         Assert.Contains(Validate(fixture, "possibility", again, builder: true), f => f.Code == "standing.raises-again");
         again = Possibility(raised, "cache/index");
         again["raisesAgain"] = possibility.Id;
+        again["sources"]![0]!["hash"] = FlowFixture.Hash('d');
+        again["evidence"] = new JsonArray(new JsonObject
+        {
+            ["stance"] = "for", ["statement"] = "A second profile measures the read under the new workload.", ["sources"] = new JsonArray(0),
+        });
         again["links"] = new JsonArray(new JsonObject { ["relation"] = "supersedes", ["possibility"] = decline.Id, ["hash"] = decline.ComputedHash });
         Assert.Equal(string.Empty, Errors(Validate(fixture, "possibility", again, builder: true)));
 

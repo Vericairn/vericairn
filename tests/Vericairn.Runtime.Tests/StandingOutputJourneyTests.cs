@@ -21,6 +21,8 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class StandingOutputJourneyTests
 {
+    // Possibilities identify their run and occurrence, and disposition belongs to another principal.
+    [Trait("Journey", "D07-A")]
     [Fact]
     public void AResearchersOutputsAreDisposedOfByAnotherPrincipalAndNeverByTheAgent()
     {
@@ -45,12 +47,18 @@ public class StandingOutputJourneyTests
         // Over MCP: the three write tools, open to the occurrence's contributor; a possibility with a draft work order.
         var registry = new ToolRegistry(run.Service, builder);
         Assert.Contains(registry.Visible(), t => t.Name == "standing_possibility");
-        ToolCallResult raised = registry.Call("standing_possibility", new JsonObject { ["assignment"] = assignment, ["body"] = Possibility("cache/index", draft: true) });
+        JsonObject cited = Possibility("cache/index", draft: true);
+        const string citedExtents = "the index read in the second row of the profile";
+        cited["sources"]![0]!["extents"] = citedExtents;
+        ToolCallResult raised = registry.Call("standing_possibility", new JsonObject { ["assignment"] = assignment, ["body"] = cited });
         Assert.False(raised.IsError, raised.Text);
         string adoptable = JsonDocument.Parse(raised.Text).RootElement.GetProperty("written").GetProperty("id").GetString()!;
         RecordEnvelope recorded = run.Estate.Load().ById[adoptable];
         Assert.Equal(("open", goal, StandingAgents.KeyOf(carried)), (EstateModel.BodyString(recorded, "disposition"), recorded.Body.GetProperty("raisedBy").GetProperty("goal").GetString(), recorded.Body.GetProperty("raisedBy").GetProperty("occurrence").GetString()));
         Assert.True(recorded.Body.GetProperty("raisedBy").TryGetProperty("run", out _));
+        // D07-A requires the possibility to record the extents relied on for its citation.
+        JsonElement source = Assert.Single(recorded.Body.GetProperty("sources").EnumerateArray());
+        Assert.Equal(citedExtents, source.GetProperty("extents").GetString());
 
         // What raised it, and its disposition, are the runtime's to name; the operator is not the occurrence's contributor.
         JsonObject forged = Possibility("forged");

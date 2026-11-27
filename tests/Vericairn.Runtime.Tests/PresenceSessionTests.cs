@@ -110,6 +110,8 @@ public sealed class PresenceSessionTests
         Assert.Equal("Signed 18 of 18 with 2 presence checks.", Since(f, 0)[^1].Text);
     }
 
+    // An unsettled unattended run requires a check for every acceptance.
+    [Trait("Journey", "J135")]
     [Fact]
     public void WhileAnAgentRunThisMachineStartedIsUnsettledEachJudgmentKeepsItsOwnCheck()
     {
@@ -126,6 +128,8 @@ public sealed class PresenceSessionTests
         Assert.Equal(3, sessions.Custody.Reasons.Count);
     }
 
+    // Development and unqualified builds keep one prompt per signature.
+    [Trait("Journey", "J135")]
     [Theory]
     [InlineData("charter")]
     [InlineData("owner")]
@@ -211,6 +215,8 @@ public sealed class PresenceSessionTests
         }
     }
 
+    // A helper refusal ends the session and raises attention.
+    [Trait("Journey", "J133")]
     [Fact]
     public void AHelperThatRefusesWhatTheRuntimesChecksAdmittedEndsTheSessionAndRaisesAttention()
     {
@@ -273,6 +279,8 @@ public sealed class PresenceSessionTests
         Assert.True(bad.Load().Findings.HasErrors);
     }
 
+    // Development and unlisted macOS builds give distinct reasons for disabling sessions.
+    [Trait("Journey", "J135")]
     [Fact]
     public void DoctorSaysWhySessionsAreOffForThisMachineAndBuild()
     {
@@ -280,7 +288,8 @@ public sealed class PresenceSessionTests
         Assert.Null(host.MachineOff("helper"));
         Assert.Equal("this is a development build, which carries no release identity; only a release build's signed helper opens a session",
             host.With(build: PresenceSessionBuild.Parse(null, null, "26")).MachineOff("helper"));
-        Assert.Equal("this release has not qualified macOS 26 for presence sessions", host.With(build: PresenceSessionBuild.Parse("ABCDE12345", null, "15")).MachineOff("helper"));
+        PresenceSessionHost unlisted = host.With(build: PresenceSessionBuild.Parse("ABCDE12345", null, "15"));
+        Assert.Equal("this release has not qualified macOS 26 for presence sessions", EstateService.PresenceSessionsOff(unlisted));
         Assert.Equal("this release lists no macOS version qualified for presence sessions", host.With(build: PresenceSessionBuild.Parse("ABCDE12345", null, null)).MachineOff("helper"));
         Assert.Equal("the release helper is not beside the command line", host.MachineOff(null));
         Assert.StartsWith("the release helper does not meet the release requirement: ", host.With(requirement: "unsigned").MachineOff("helper"), StringComparison.Ordinal);
@@ -347,6 +356,8 @@ public sealed class PresenceSessionTests
         Assert.Equal(opened == 1 ? 0 : 2, sessions.Custody.Reasons.Count);
     }
 
+    // The charter can require per-signature checks.
+    [Trait("Journey", "J135")]
     [Theory]
     [InlineData("per-action", false)]
     [InlineData("per-signature", true)]
@@ -897,18 +908,21 @@ internal static class PresenceSessionHostVariation
 /// <summary>A test host whose sessions are stand-ins signing with the device's file key, for an estate whose operator's device needs presence.</summary>
 internal static class StandInSessions
 {
-    internal static PresenceSessionHost Host(List<PresenceHelperStandIn> helpers, string check = "passed", TimeProvider? clock = null) => new()
+    internal static PresenceSessionHost Host(List<PresenceHelperStandIn> helpers, string check = "passed", TimeProvider? clock = null,
+        Func<int, string>? checkForSession = null, Func<PresenceHelperStandIn, IPresenceHelperChannel>? channel = null,
+        Func<bool>? agentRun = null) => new()
     {
         Clock = clock ?? TimeProvider.System,
         Build = PresenceSessionBuild.Parse("ABCDE12345", "vericairn-enclave", "26"),
         MacOS = () => true, MacOSMajor = () => 26, Requirement = new Accepting(), HelperOf = _ => "helper", Setting = _ => PresenceSetting.Default,
-        SameUserAgentRun = () => false, CheckWait = TimeSpan.Zero,
+        SameUserAgentRun = agentRun ?? (() => false), CheckWait = TimeSpan.Zero,
         Start = signer =>
         {
             var key = new FileKeyStore(VericairnHome.Path());
-            var helper = new PresenceHelperStandIn(digest => key.Sign(signer.DeviceId, digest), key.PublicKey(signer.DeviceId)!, clock) { Check = check };
+            var helper = new PresenceHelperStandIn(digest => key.Sign(signer.DeviceId, digest), key.PublicKey(signer.DeviceId)!, clock)
+            { Check = checkForSession?.Invoke(helpers.Count) ?? check };
             helpers.Add(helper);
-            return helper;
+            return channel?.Invoke(helper) ?? helper;
         },
     };
 

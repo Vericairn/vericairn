@@ -233,6 +233,8 @@ public sealed class PresenceSessionSurfaceTests
 
     // ---- The runtime's notices, the wait for a following client, and the ledger ----
 
+    // The following client and the helper show the same fingerprint.
+    [Trait("Journey", "J132")]
     [Fact]
     public async Task AFollowingClientReadsTheTermsBeforeTheNonceAndShowsTheFingerprintTheHelperWrote()
     {

@@ -99,6 +99,75 @@ public class FlowHandOffRoutingTests
     }
 
     [Fact]
+    [Trait("Journey", "J87")]
+    public void AReviewerLeaseLapseLeadsToAHandoverARefusedResultAndAStoppedRun()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string reviewer = run.Estate.BuilderId;
+        string replacement = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""
+            {"kind":"human","name":"Replacement Reviewer","roles":["operator"]}
+            """)))).Id;
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("roster", op, RunEstate.Json($$"""
+            {"roles":[{"role":"reviewer","principals":["{{reviewer}}","{{replacement}}"]}],
+             "limits":{"watch":{"reassignAfterSeconds":120} } }
+            """))));
+        string goal = FlowStepRoutingTests.Run(run, change: body =>
+        {
+            body["plan"]!["flow"]!["options"] = new JsonObject { ["review"] = "independent", ["step.review-lyrics"] = "off" };
+            body["roles"]![0] = FlowFixture.Role("writer", op);
+            body["roles"]!.AsArray().RemoveAt(1);
+        });
+        StandingAgentRoutingTests.AllowStandInWithFixtureKey(run, goal);
+        var clock = new SteppedClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        run.Service.EnableEvents(Path.Combine(run.Scratch, "live"), clock);
+        GoalStepResponse writing = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
+        Assert.Equal(("ask", "draft"), (writing.Outcome, writing.Step));
+        FlowStepRoutingTests.Done(run, writing.Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), "text/markdown"), by: op);
+
+        var command = new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("ack-stop", run.Report("reviewing")) };
+        GoalStepResponse reviewing = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource, command, WallMinutes: 30));
+        Assert.True(reviewing.Ok, reviewing.Message);
+        Assert.Equal(("run", "draft review", reviewer), (reviewing.Outcome, reviewing.Step, reviewing.Principal));
+        string assignment = reviewing.Assignment!.Id;
+        string running = reviewing.Run!.Run;
+        run.WaitUntil(() => run.Row(running).Observed && File.Exists(run.Report("reviewing")));
+        PresenceLease lease = run.Service.PresenceRegister(new PresenceRegisterRequest(reviewer, "the reviewer's session")).Lease!;
+        RecordWritten attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(assignment, reviewer, "Review workspace", "Read the lyrics.")));
+        run.Service.SweepPresence();
+        Assert.Contains(assignment, Assert.Single(run.Service.Presence().Sessions).Holds);
+
+        clock.Advance(TimeSpan.FromSeconds(91));
+        run.Service.SweepPresence();
+        Assert.Equal("lapsed", Assert.Single(run.Service.Presence().Sessions).State);
+        AttentionNotice attention = Assert.Single(run.Service.AttentionGet(op).Items, item => item.Kind == "incident" && item.SubjectId == assignment);
+        Assert.Contains("A local observation of this runtime", attention.Why, StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Estate.Load().OfType("ask"), ask => ask.Subject?.Id == assignment);
+        clock.Advance(TimeSpan.FromSeconds(119));
+        run.Service.SweepPresence();
+        RecordEnvelope lapse = Assert.Single(run.Estate.Load().OfType("ask"), ask => ask.Subject?.Id == assignment);
+        Assert.Equal(op, EstateModel.BodyString(lapse, "to"));
+        Assert.Contains("Hand the step to another principal of its role?", EstateModel.BodyString(lapse, "question"), StringComparison.Ordinal);
+
+        TakeoverResponse handover = run.Service.WorkTakeover(new TakeoverRequest(assignment, op, replacement) { Basis = lapse.Id });
+        Assert.True(handover.Ok, handover.Message + "\n" + string.Join("\n", handover.Problem?.Findings.Select(finding => finding.Code + ": " + finding.Message) ?? []));
+        RecordEnvelope next = run.Estate.Load().ById[handover.Assignment!.Id];
+        Assert.Equal((replacement, lapse.Id), (EstateModel.BodyString(next, "contributor"), EstateModel.BodyString(next, "basis")));
+        Assert.Equal(run.Estate.Load().ById[assignment].Body.GetProperty("step").GetRawText(), next.Body.GetProperty("step").GetRawText());
+        Assert.True(Assert.Single(handover.Stops!).Ok);
+        RunRow stopped = run.Settled(running);
+        Assert.Equal(op, stopped.Stop!.RequestedBy);
+        Assert.NotNull(stopped.Stop.ContainedAt);
+
+        Assert.True(run.Service.PresenceHeartbeat(lease.Lease).Ok);
+        WriteOutcome late = run.Service.Result(new ResultRequest(attempt.Id, reviewer, PolicyFixture.Element(PolicyFixture.ResultBody())));
+        Assert.False(late.Ok);
+        Assert.Contains("no longer holds its step", late.Problem!.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Estate.Load().OfType("result"), result => result.Subject?.Id == attempt.Id);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void AStepWhoseResultNamesAnUnresolvedEffectIsNotRunAgainUntilItIsReconciled()
     {
         using var run = new RunEstate(recordFormat: 3);

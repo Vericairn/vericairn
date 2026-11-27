@@ -129,6 +129,8 @@ public sealed class PresenceSessionCommandTests
         finally { CliHarness.Delete(scratch); }
     }
 
+    // The terminal computes its fingerprint from the listed terms and the check's nonce.
+    [Trait("Journey", "J132")]
     [Fact]
     public async Task TheCommandLineShowsASessionsListFromItsTermsItsOwnFingerprintAndEachSignature()
     {

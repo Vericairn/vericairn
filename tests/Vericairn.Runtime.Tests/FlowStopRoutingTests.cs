@@ -22,6 +22,54 @@ namespace Vericairn.Runtime.Tests;
 public class FlowStopRoutingTests
 {
     [Fact]
+    [Trait("Journey", "J91")]
+    public void AReservedReleaseAcceptanceWaitsOnAnAwayOperatorAsAnOperatorRequest()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        string goal = FlowStepRoutingTests.Run(run, change: Options);
+        (_, _, RecordWritten master) = ToAcceptance(run, goal);
+        FlowStepRoutingTests.Review(run, master);
+
+        DateTimeOffset returns = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeSeconds());
+        string until = RecordParser.FormatTimestamp(returns);
+        var availability = new CommunicationValues { Availability = new CommunicationAvailability("away", until) };
+        RunEstate.Ok(run.Service.CommunicationSet(new CommunicationSetRequest(op, "person", availability, op)));
+        Assert.Contains($"availability: away until {until}; away now", CommunicationPresentation.Describe(run.Service.Communication(op)), StringComparison.Ordinal);
+
+        GoalStepResponse asking = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
+        Assert.True(asking.Ok, asking.Message);
+        Assert.Equal(("request", "accept", "request", op), (asking.Outcome, asking.Step, asking.Route, asking.Principal));
+        Assert.Null(asking.Ask);
+        Assert.Null(asking.Assignment);
+        Assert.Null(asking.Run);
+        string id = asking.Request!.Id;
+        RecordEnvelope waiting = run.Estate.Load().ById[id];
+        Assert.Equal(("operator-request", op), (waiting.Type, EstateModel.BodyString(waiting, "to")));
+        Assert.Contains(waiting.Body.GetProperty("content").EnumerateArray(), c =>
+            c.GetProperty("kind").GetString() == "command" && c.GetProperty("text").GetString()!.StartsWith("example-provider accept ", StringComparison.Ordinal));
+
+        AssertWaiting();
+        run.Service.FlowClock = new WorkerClock(returns);
+        Assert.Null(Routing.AwayUntil(run.Estate.Load(), op, returns));
+        AssertWaiting();
+        Assert.Equal(0, run.Service.Check().Errors);
+
+        void AssertWaiting()
+        {
+            Assert.Contains(run.Service.OperatorRequests().Json.GetProperty("delivered").EnumerateArray(), request =>
+                request.GetProperty("revision").GetString() == id);
+            GoalStepResponse repeat = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
+            Assert.Equal("none", repeat.Outcome);
+            Assert.Contains($"operator request {id} waits on", repeat.Message, StringComparison.Ordinal);
+            Assert.Single(run.Estate.Load().OfType("operator-request"), request => request.Body.TryGetProperty("flowStep", out JsonElement step)
+                && step.GetProperty("goal").GetString() == goal && step.GetProperty("key").GetString() == "accept");
+        }
+    }
+
+    // A reserved release acceptance waits for the operator's own act.
+    [Trait("Journey", "J91")]
+    [Fact]
     public void GoalStepPutsAReservedStepToTheOperatorWithItsExactCommandOnlyWhenItIsNext()
     {
         using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);

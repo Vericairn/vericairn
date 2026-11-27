@@ -13,7 +13,7 @@ namespace Vericairn.Cli.Tests;
 /// each step's state shown by goal show from the records alone, until the run is complete and its acceptance remains.
 /// </summary>
 [Collection("cli")]
-public class FlowCliJourneyTests
+public partial class FlowCliJourneyTests
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
 

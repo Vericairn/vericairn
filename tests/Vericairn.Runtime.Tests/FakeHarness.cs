@@ -7,6 +7,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Mcp;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Tests;
@@ -611,6 +612,21 @@ internal static class FakeHarness
                 Git("commit", "-q", "-m", "Commit inside the workspace");
                 if (scenario == "workspace-commit-ignored") WriteLargeIgnoredOutput(Environment.CurrentDirectory);
                 return 0;
+            case "write-compatibility-fragment":
+                string key = Path.GetFileNameWithoutExtension(report);
+                if (key is not ("FIX-1" or "FIX-2")) return 2;
+                string directory = Path.Combine("docs", "changes", "0.9.5");
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, key + ".md"), $"""
+                    # {key}: Record a compatibility change
+
+                    ## docs/api-compatibility-0.9.5.md
+
+                    ### Under the 0.9.5 changes
+
+                    > Compatibility change from {key}.
+                    """ + "\n");
+                return 0;
             case "scope-edits":
                 Directory.CreateDirectory("src");
                 Directory.CreateDirectory("docs");
@@ -691,18 +707,55 @@ internal static class FakeHarness
                 return Mcp(scenario["mcp:".Length..], arguments);
             case "mcp":
                 return Mcp(null, arguments);
+            case "mcp-tool":
+                return Mcp(null, arguments, JsonNode.Parse(File.ReadAllText(report + ".call"))!.AsObject());
+            case "mcp-relay":
+                for (int sequence = 0; Console.ReadLine() is string request; sequence++)
+                {
+                    string exchange = McpExchange(report, sequence);
+                    PublishMcpMessage(exchange + ".request", request);
+                    WaitForFile(exchange + ".reply");
+                    Emit(File.ReadAllText(exchange + ".reply").TrimEnd('\r', '\n'));
+                }
+
+                return 0;
             default:
                 Console.Error.WriteLine($"stand-in harness: no scenario {scenario} for {string.Join(' ', arguments)}");
                 return 64;
         }
     }
 
+    /// <summary>Serves the stand-in's stdio requests in the fixture process so its records share the runtime's ID generator.</summary>
+    internal static void ServeMcp(string report, McpServer server, int requests)
+    {
+        using var changed = new FileSignal(Path.GetDirectoryName(report)!);
+        for (int sequence = 0; sequence < requests; sequence++)
+        {
+            string exchange = McpExchange(report, sequence);
+            string request = exchange + ".request";
+            changed.Until(() => File.Exists(request), "the stand-in MCP request", TestContext.Current.CancellationToken);
+            using var input = new StringReader(File.ReadAllText(request));
+            using var output = new StringWriter(CultureInfo.InvariantCulture);
+            server.Run(input, output);
+            PublishMcpMessage(exchange + ".reply", output.ToString());
+        }
+    }
+
+    private static string McpExchange(string report, int sequence) => report + ".mcp-" + sequence.ToString(CultureInfo.InvariantCulture);
+
+    private static void PublishMcpMessage(string path, string message)
+    {
+        File.WriteAllText(path + ".new", message);
+        File.Move(path + ".new", path);
+    }
+
     /// <summary>
     /// Does what a coding agent does with the worker's MCP configuration: starts the server it names, records an attempt on the
     /// assignment and then its result through the server's tools, and reports done the way Claude Code's stream does. Without an
     /// assignment named, it takes the latest one of its own principal from the brief the worker exported, as an agent reads its brief.
+    /// When a tool call is supplied, sends it with that assignment in place of the usual attempt and result.
     /// </summary>
-    private static int Mcp(string? assignment, string[] arguments)
+    private static int Mcp(string? assignment, string[] arguments, JsonObject? toolCall = null)
     {
         string configuration = arguments[Array.IndexOf(arguments, "--mcp-config") + 1];
         JsonObject server = JsonNode.Parse(File.ReadAllText(configuration))!["mcpServers"]!["vericairn"]!.AsObject();
@@ -737,6 +790,27 @@ internal static class FakeHarness
         }
 
         Call("initialize", new JsonObject { ["protocolVersion"] = "2025-06-18", ["capabilities"] = new JsonObject(), ["clientInfo"] = new JsonObject { ["name"] = "stand-in", ["version"] = "1" } });
+        if (toolCall is not null)
+        {
+            toolCall["arguments"]!["assignment"] = assignment;
+            JsonObject reply = Call("tools/call", toolCall);
+            mcp.StandardInput.Close();
+            if (!mcp.WaitForExit(TestTiming.HangTimeoutMilliseconds))
+            {
+                mcp.Kill(entireProcessTree: true);
+                throw new IOException("The MCP server did not exit after its input closed.");
+            }
+
+            if (reply["result"]?["isError"]?.GetValue<bool>() != false)
+            {
+                Console.Error.WriteLine("stand-in harness: the tool call failed: " + Text(reply));
+                return 1;
+            }
+
+            Emit("""{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Done."}""");
+            return 0;
+        }
+
         JsonObject attempt = Call("tools/call", new JsonObject { ["name"] = "work_attempt", ["arguments"] = new JsonObject { ["assignment"] = assignment, ["workspace"] = "widget, branch work/w-1", ["note"] = "Build the widget toward the exit question." } });
         string attempted = Text(attempt);
         string id = JsonNode.Parse(attempted)!["written"]?["id"]?.GetValue<string>() ?? throw new IOException("No attempt was recorded: " + attempted);

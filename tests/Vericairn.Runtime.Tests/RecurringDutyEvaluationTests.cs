@@ -117,6 +117,8 @@ public class RecurringDutyEvaluationTests
         Assert.Contains("overflows", finding.Actual, StringComparison.Ordinal);
     }
 
+    // Each missed duty stays owed as its own occurrence.
+    [Trait("Journey", "D07-B")]
     [Fact]
     public void CatchUpNamesEachOccurrenceAndNeverPrepaysOrForgivesAnother()
     {

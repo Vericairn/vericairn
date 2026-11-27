@@ -236,6 +236,8 @@ public class EnclaveSessionTests(EnclaveSessionFixture fixture) : IClassFixture<
         Assert.Equal(2, ProcessResult.Run(release, ["fingerprint", release, "AAAAAAAAAAAAAAAAAAAAAA"], environment: null, input: null).Code);
     }
 
+    // The macOS helper opens a per-signature dialog with the record's label.
+    [Trait("Journey", "J135")]
     [Fact]
     public void SignRecordReadsTheRecordAndOpensItsDialogWithTheHelpersLabel()
     {

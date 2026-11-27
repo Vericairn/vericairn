@@ -186,7 +186,9 @@ public class GoalStepTests
         Assert.All(ledger.Spent.Values, spent => Assert.Equal(0, spent));
     }
 
+    // A hand-over asks the displaced holder's in-flight run to stop.
     [Fact]
+    [Trait("Journey", "J87")]
     public void APersonTakesOverAStepAnAgentHoldsAndItsRunInFlightIsAskedToStop()
     {
         using var run = new RunEstate();

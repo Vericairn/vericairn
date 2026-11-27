@@ -39,6 +39,8 @@ public sealed class PresenceSessionRulesTests
     /// The runtime applies the helper's checks to every shared session a runtime can compose: each opening answers as the helper does, and
     /// each record is matched to the entry the helper signs it under with the signatures left, or refused with the helper's code.
     /// </summary>
+    // The shared vectors exercise refusals for records and operations outside the list.
+    [Trait("Journey", "J133")]
     [Theory]
     [MemberData(nameof(RuntimeSessions))]
     public void TheRuntimesChecksAnswerEachSharedSessionAsTheHelperDoes(string name)

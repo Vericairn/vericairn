@@ -34,6 +34,8 @@ public class StandingAgentTests
         return findings;
     }
 
+    // Ordinary schedule ticks coalesce after missed intervals.
+    [Trait("Journey", "D07-E")]
     [Fact]
     public void ScheduleTicksFollowTheCalendarFromTheirAnchorAndMissedTicksCoalesce()
     {
@@ -208,6 +210,8 @@ public class StandingAgentTests
         Assert.Contains(agent.Occurrences, o => o.Occurrence.Key == first.Occurrence.Key && o.Assignment is not null);
     }
 
+    // The duty trigger retains the duty identity across carriers.
+    [Trait("Journey", "D07-B")]
     [Fact]
     public void ADutyTriggerCarriesTheDutyOccurrencesOwnIdentitySoTwoAgentsNeverBothCarryIt()
     {
@@ -306,6 +310,8 @@ public class StandingAgentTests
         Assert.Contains(Validate(fixture, "goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, brief.Reference), f => f.Code == "goal-status.standing" && f.Message.Contains("has passed", StringComparison.Ordinal));
     }
 
+    // A renewal revision keeps the existing occurrence keys for unchanged triggers.
+    [Trait("Journey", "D07-F")]
     [Fact]
     public void ARenewalKeepsAnUnchangedTriggersKeysAndAChangedTriggerStartsItsOwn()
     {
@@ -1044,6 +1050,8 @@ public class StandingAgentTests
             f => f.Code == "assignment.occurrence" && f.Message.Contains("has passed when this assignment is recorded", StringComparison.Ordinal));
     }
 
+    // Results awaiting review hold the next dispatch at their cap.
+    [Trait("Journey", "D07-E")]
     [Fact]
     public void ASettledOccurrenceRunsAgainOnlyWhenAReviewReturnsItsResultAndResultsAwaitingReviewHoldDispatchAtTheirCap()
     {

@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
@@ -467,6 +468,8 @@ public sealed class OperatorRecordTests
             && o.Body.GetProperty("target").GetProperty("observation").GetString() == "pull-request"));
     }
 
+    // The acceptance action announces and asks for each per-signature check.
+    [Trait("Journey", "J135")]
     [Fact]
     public void EveryPresencePromptOfTheActionIsAnnouncedAndARepeatedObservationIsAnnouncedBeforeItAsks()
     {
@@ -511,6 +514,8 @@ public sealed class OperatorRecordTests
         Assert.StartsWith("sign Vericairn signature 25 of 25: operation ", custody.Reasons[^1], StringComparison.Ordinal);
     }
 
+    // The exact acceptance and the branch's operations share one check for 22 signatures.
+    [Trait("Journey", "J132")]
     [Fact]
     public void OneCheckCoversAWholeOperatorRecordThatFinishesWithinTheSessionsLimit()
     {
@@ -544,6 +549,68 @@ public sealed class OperatorRecordTests
         IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
         Assert.Equal("Signed 22 of 22 with one presence check.", notices[^1].Text);
         Assert.DoesNotContain(notices, n => n.Kind is "revised" or "renewed");
+    }
+
+    [Fact]
+    [Trait("Journey", "J132")]
+    public void TheDefaultWaitInEachCheckPhaseRenewsWithTheRemainingSignatures()
+    {
+        using var f = new Fixture();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var clock = new WorkerClock();
+        var helpers = new List<PresenceHelperStandIn>();
+        var custody = new RecordingCustody(VericairnHome.Path());
+        f.Service.KeyStores = [custody];
+        f.Service.PresenceRequired = device => device == f.Device;
+        f.Service.HostsEmbedded = true;
+        f.Service.PresenceHost = StandInSessions.Host(helpers, clock: clock);
+        f.Remote.Memory.QueueRequired = true;
+        var request = new OperatorRecordRequest(f.Request.Type, f.Request.By, f.Request.Body, f.Request.Subject);
+        Assert.Equal(120, request.WaitSeconds);
+
+        // The provider resolves each check synchronously after advancing elapsed time by the full default wait.
+        // The runtime's polling loop never sleeps. UTC still follows the fixture's authored record timestamps.
+        var phases = new List<string>();
+        f.Remote.Read = pull =>
+        {
+            if (phases.Count == 0) Wait("pull request checks");
+            return pull;
+        };
+        f.Remote.AfterEnqueue = (destination, number) =>
+        {
+            Wait("merge queue");
+            f.Remote.Memory.SettleQueue(destination, number, "merged");
+        };
+        f.Remote.BeforeQueuedTarget = () => Wait("target checks");
+
+        long start = f.Service.PresencePrompts(new()).Cursor;
+        OperatorRecordResponse result = f.Service.OperatorRecord(request, cancellation.Token);
+
+        Assert.True(result.Ok, result.Message + " " + result.NextStep);
+        Assert.Equal(["pull request checks", "merge queue", "target checks"], phases);
+        Assert.Equal(TimeSpan.FromSeconds(360), clock.GetElapsedTime(0));
+        Assert.Empty(custody.Reasons);
+        Assert.InRange(helpers.Count, 2, 3);
+        Assert.Equal(1, PresenceSessionRules.ReadTerms(Assert.Single(helpers[0].Terms)).ExactCount);
+        IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
+        PresenceNotice[] renewals = [.. notices.Where(n => n.Kind == "renewed" && n.Text.Contains("renews its presence session", StringComparison.Ordinal))];
+        Assert.Equal(helpers.Count - 1, renewals.Length);
+        foreach ((PresenceNotice renewal, PresenceHelperStandIn helper) in renewals.Zip(helpers.Skip(1)))
+        {
+            byte[] announced = Assert.Single(helper.Terms);
+            Assert.Equal(System.Text.Encoding.UTF8.GetString(announced), renewal.Session!.Terms);
+            Assert.NotEmpty(renewal.Session.Reason!);
+            PresenceSessionRules remainder = PresenceSessionRules.ReadTerms(announced);
+            Assert.Equal(0, remainder.ExactCount);
+            Assert.NotEmpty(remainder.References);
+            Assert.NotEmpty(helper.SignedHashes);
+        }
+
+        void Wait(string phase)
+        {
+            phases.Add(phase);
+            clock.Advance(TimeSpan.FromSeconds(request.WaitSeconds));
+        }
     }
 
     [Theory]
@@ -587,6 +654,8 @@ public sealed class OperatorRecordTests
         }
     }
 
+    // An extra observation renews the list with the action's remainder and another check.
+    [Trait("Journey", "J133")]
     [Fact]
     public void ChecksStillRunningBeyondTheAnnouncedRepetitionsRenewWithTheRemainderAndOneMoreCheck()
     {
@@ -616,6 +685,156 @@ public sealed class OperatorRecordTests
         Assert.Equal("Signed 25 of 25 with 2 presence checks.", notices[^1].Text);
         // The renewal lists the action's recorded operations as references, which the rest supersede and observe.
         Assert.NotEmpty(PresenceSessionRules.ReadTerms(helpers[1].Terms[0]).References);
+    }
+
+    [Theory]
+    [Trait("Journey", "J133")]
+    [InlineData("accept2")]
+    [InlineData("pushOtherBranch")]
+    [InlineData("unlist")]
+    public void AnExactOutsideListInputEndsTheHelperAndRaisesRuntimeAttention(string vector)
+    {
+        using var f = new Fixture();
+        var helpers = new List<PresenceHelperStandIn>();
+        OutsideRecordChannel? channel = null;
+        f.Service.KeyStores = [new RecordingCustody(VericairnHome.Path())];
+        f.Service.PresenceRequired = device => device == f.Device;
+        f.Service.HostsEmbedded = true;
+        f.Service.PresenceHost = StandInSessions.Host(helpers, channel: helper => channel = new OutsideRecordChannel(helper, vector));
+
+        OperatorRecordResponse result = f.Run();
+
+        Assert.False(result.Ok);
+        Assert.Single(helpers);
+        Assert.NotNull(channel);
+        Assert.NotNull(channel.Outside);
+        Assert.Equal(("record.outside", "refusal"), (channel.Code, channel.EndReason));
+        Assert.DoesNotContain(channel.Outside, helpers[0].SignedHashes);
+        Assert.DoesNotContain(channel.Original, helpers[0].SignedHashes);
+        Assert.Equal(vector == "accept2" ? 0 : 1, helpers[0].SignedHashes.Count);
+        Assert.DoesNotContain("push", f.Events);
+        Assert.DoesNotContain("merge", f.Events);
+
+        // The runtime reports its own attempted record's digest. The substituted bytes are visible to the helper alone.
+        PresenceOutsideList refusal = Assert.Single(f.Service.PresenceOutside);
+        Assert.Equal((channel.Original, "record.outside"), (refusal.Hash, refusal.Code));
+        AttentionNotice attention = Assert.Single(f.Service.AttentionGet(f.Request.By).Items, item => item.SubjectType == "presence.outside-list");
+        Assert.Equal(refusal.Hash, attention.SubjectId);
+        Assert.Contains($"refused to sign {refusal.Type}", attention.Why, StringComparison.Ordinal);
+    }
+
+    /// <summary>A stand-in peer sends one outside-list record after the runtime has finished its own independent check.</summary>
+    private sealed class OutsideRecordChannel(PresenceHelperStandIn helper, string vector) : IPresenceHelperChannel
+    {
+        internal string? Original { get; private set; }
+        internal string? Outside { get; private set; }
+        internal string? Code { get; private set; }
+        internal string? EndReason { get; private set; }
+        public bool Ended => helper.Ended;
+
+        public void Send(byte[] message)
+        {
+            JsonObject command = JsonNode.Parse(message)!.AsObject();
+            if (Outside is null && command["type"]!.GetValue<string>() == "sign")
+            {
+                byte[] bytes = PresenceText.Base64Url(command["record"]!.GetValue<string>())!;
+                JsonObject record = JsonNode.Parse(bytes)!.AsObject();
+                bool target = vector == "accept2" ? record["type"]!.GetValue<string>() == "acceptance"
+                    : record["body"]!["action"]?.GetValue<string>() == "change-push";
+                if (target)
+                {
+                    JsonObject outside = JsonNode.Parse(Vectors.Root.GetProperty("records").GetProperty(vector).GetRawText())!.AsObject();
+                    if (vector == "pushOtherBranch")
+                    {
+                        string other = outside["body"]!["target"]!["branch"]!.GetValue<string>();
+                        outside = (JsonObject)record.DeepClone();
+                        JsonNode body = outside["body"]!;
+                        string branch = body["target"]!["branch"]!.GetValue<string>();
+                        body["target"]!["branch"] = other;
+                        body["identity"] = body["identity"]!.GetValue<string>().Replace(branch, other, StringComparison.Ordinal);
+                    }
+
+                    outside["at"] = record["at"]!.DeepClone();
+                    outside["by"] = record["by"]!.DeepClone();
+                    byte[] substituted = CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(outside));
+                    Original = PresenceText.Hash(bytes);
+                    Outside = PresenceText.Hash(substituted);
+                    command["record"] = PresenceText.Base64UrlText(substituted);
+                    message = CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(command));
+                }
+            }
+
+            helper.Send(message);
+        }
+
+        public JsonElement? Receive(TimeSpan wait)
+        {
+            JsonElement? reply = helper.Receive(wait);
+            if (reply is { } received)
+            {
+                string? type = received.GetProperty("type").GetString();
+                if (type == "refused") Code = received.GetProperty("code").GetString();
+                if (type == "ended") EndReason = received.GetProperty("reason").GetString();
+            }
+
+            return reply;
+        }
+
+        public void Kill() => helper.Kill();
+        public void Dispose() => helper.Dispose();
+    }
+
+    [Fact]
+    [Trait("Journey", "J134")]
+    public void AnUnansweredRenewalInChecksLeavesTheMergeForAResumedAction()
+    {
+        using var f = new Fixture();
+        var helpers = new List<PresenceHelperStandIn>();
+        UseSessions();
+        int reads = 0;
+        f.Remote.Read = pull =>
+        {
+            if (++reads == 1) return pull with { Checks = [new(Required[0], Head, "queued", null)] };
+            if (reads == 2) Assert.Single(helpers).EndSession("limit");
+            return pull;
+        };
+
+        long start = f.Service.PresencePrompts(new()).Cursor;
+        OperatorRecordResponse stopped = f.Service.OperatorRecord(f.Request with { WaitSeconds = 120 }, TestContext.Current.CancellationToken);
+        Assert.False(stopped.Ok, stopped.Message);
+        Assert.Equal(2, helpers.Count);
+        Assert.Empty(helpers[1].SignedHashes);
+        Assert.DoesNotContain("merge", f.Events);
+        Assert.DoesNotContain(f.Service.Session.Load().OfType("operation"), operation => EstateModel.BodyString(operation, "action") == "change-merge");
+        Assert.Contains(f.Service.PresencePrompts(new(start)).Notices, notice => notice.Kind == "renewed");
+
+        OperatorUnfinishedAction unfinished = f.Service.OperatorUnfinished().Action!;
+        Assert.Equal(stopped.Record!.Id, unfinished.RecordId);
+        Assert.Equal(stopped.Branch, unfinished.Branch);
+        Assert.NotNull(unfinished.PullRequest);
+        Assert.Null(unfinished.Merge);
+        string opening = f.Service.Session.Load().Current("operation").Single(operation => EstateModel.BodyString(operation, "action") == "change-open").Id;
+
+        f.Remote.Read = null;
+        f.Reopen();
+        UseSessions();
+        OperatorRecordResponse resumed = f.Run();
+        Assert.True(resumed.Ok, resumed.Message + " " + resumed.NextStep);
+        Assert.Equal(stopped.Record.Id, resumed.Record!.Id);
+        Assert.Equal(3, helpers.Count);
+        Assert.NotEmpty(helpers[2].SignedHashes);
+        PresenceSessionRules terms = PresenceSessionRules.ReadTerms(Assert.Single(helpers[2].Terms));
+        Assert.Contains(terms.References, reference => reference.Id == opening);
+        Assert.Single(f.Events, effect => effect == "merge");
+        Assert.Null(f.Service.OperatorUnfinished().Action);
+
+        void UseSessions()
+        {
+            f.Service.KeyStores = [new RecordingCustody(VericairnHome.Path())];
+            f.Service.PresenceRequired = device => device == f.Device;
+            f.Service.HostsEmbedded = true;
+            f.Service.PresenceHost = StandInSessions.Host(helpers, checkForSession: index => index == 1 ? "unanswered" : "passed");
+        }
     }
 
     [Fact]
@@ -1159,17 +1378,25 @@ public sealed class OperatorRecordTests
         public MergeQueueObservation ObserveQueue(string destination, string number) => Memory.ObserveQueue(destination, number);
         // The process stops right after the enqueue was sent, before anything records its outcome.
         internal bool StopAfterEnqueue { get; set; }
+        internal Action<string, string>? AfterEnqueue { get; set; }
+        internal Action? BeforeQueuedTarget { get; set; }
         public ChangeReceipt Enqueue(string destination, string number, string head)
         {
             fixture.Step("enqueue");
             Assert.Equal(fixture.Local.Head, head);
             ChangeReceipt receipt = Memory.Enqueue(destination, number, head);
             if (StopAfterEnqueue) throw new NotSupportedException("The controlled process stopped.");
+            AfterEnqueue?.Invoke(destination, number);
             Receipt("enqueue");
             return receipt;
         }
         public TargetObservation ObserveQueuedTarget(string destination, string branch, string commit)
-        { fixture.Step("target"); Assert.Equal(Merged, commit); return Memory.ObserveQueuedTarget(destination, branch, commit); }
+        {
+            fixture.Step("target");
+            Assert.Equal(Merged, commit);
+            BeforeQueuedTarget?.Invoke();
+            return Memory.ObserveQueuedTarget(destination, branch, commit);
+        }
         private void Receipt(string step) { if (LoseReceipt == step) throw new ProviderUncertainException("The receipt was lost."); }
     }
 }

@@ -26,6 +26,111 @@ namespace Vericairn.Runtime.Tests;
 public class ConcurrentPathsPolicyTests
 {
     [Fact]
+    [Trait("Journey", "J120")]
+    public void FourDraftersBecomeDisjointAndTheRevisionRecorderWaitsForAllFour()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string op = run.Estate.OperatorId;
+        var drafters = new List<(string Key, string Person, string Assignment)>();
+        for (int i = 1; i <= 4; i++)
+        {
+            string key = "DRAFT-" + i.ToString(CultureInfo.InvariantCulture);
+            Order(run, key);
+            string writer = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json($$"""
+                {"kind":"human","name":"{{key}} writer","roles":["contributor"]}
+                """)))).Id;
+            string assignment = RunEstate.Ok(run.Service.Assign(new AssignRequest(key, writer, op, Brief(["path:design/**"], []))
+            { Repository = run.Resource })).Id;
+            drafters.Add((key, writer, assignment));
+        }
+
+        JsonElement[] pairs = [.. run.Service.WorkOverlap(run.Resource).Json.GetProperty("overlaps").EnumerateArray()];
+        Assert.Equal(6, pairs.Length);
+        foreach (var drafter in drafters)
+        {
+            Assert.Equal(3, pairs.Count(pair => pair.GetProperty("first").GetProperty("assignment").GetString() == drafter.Assignment
+                || pair.GetProperty("second").GetProperty("assignment").GetString() == drafter.Assignment));
+        }
+
+        string[] narrowed = [.. drafters.Select(draft => Revise(run, draft.Assignment,
+            body => body["brief"]!["permittedChanges"] = new JsonArray("path:design/" + draft.Key + ".md")).Id)];
+        Assert.Empty(run.Service.WorkOverlap(run.Resource).Json.GetProperty("overlaps").EnumerateArray());
+        foreach (var (draft, assignment) in drafters.Zip(narrowed))
+        {
+            RunEstate.Ok(run.Service.Attempt(new AttemptRequest(assignment, draft.Person, "widget repository, a design branch", "Draft the document.")));
+        }
+
+        Order(run, "RECORD-1");
+        string recorder = RunEstate.Ok(run.Service.Assign(new AssignRequest("RECORD-1", run.Estate.BuilderId, op,
+            AfterAll(RunEstate.Brief, narrowed)) { Repository = run.Resource })).Id;
+        var record = new AttemptRequest(recorder, run.Estate.BuilderId, "widget repository, a records branch", "Record the draft revisions.");
+        foreach (var draft in drafters)
+        {
+            Assert.Contains(run.Service.Attempt(record).Problem!.Findings, finding => finding.Code == "attempt.after");
+            AcceptOrder(run, draft.Key);
+        }
+        RunEstate.Ok(run.Service.Attempt(record));
+    }
+
+    [Fact]
+    [Trait("Journey", "J121")]
+    public void FixesCanStartWithTheNotesExcludedAndTheirOwnerWaitsForBoth()
+    {
+        const string notes = "docs/api-compatibility-0.9.5.md";
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        Order(run, "FIX-1", run.Goal);
+        Order(run, "FIX-2", run.Goal);
+        StandingAgentRoutingTests.AllowStandInWithFixtureKey(run, run.Goal);
+        Order(run, "DOCS-1");
+        Declare(run, "compatibility-notes", [notes], "refuse");
+        string first = RunEstate.Ok(Assign("FIX-1", Brief(["path:docs/**"], []))).Id;
+        WriteOutcome refused = Assign("FIX-2", Brief(["path:docs/**"], []));
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "assignment.concurrent-paths");
+
+        first = Revise(run, first, body => body["brief"]!["excludedChanges"] = new JsonArray("path:" + notes)).Id;
+        string second = RunEstate.Ok(Assign("FIX-2", Brief(["path:docs/**"], ["path:" + notes]))).Id;
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(first, run.Estate.BuilderId, "widget repository, branch work/fix-1", "Write the first fragment.")));
+        RunEstate.Ok(run.Service.Attempt(new AttemptRequest(second, run.Estate.BuilderId, "widget repository, branch work/fix-2", "Write the second fragment.")));
+
+        WriteFragment("FIX-1", first);
+        WriteFragment("FIX-2", second);
+
+        JsonElement owner = AfterAll(Brief(["path:" + notes], []).GetRawText(), first, second);
+        string docs = RunEstate.Ok(Assign("DOCS-1", owner)).Id;
+        Assert.DoesNotContain(run.Service.WorkOverlap(run.Resource).Json.GetProperty("overlaps").EnumerateArray(), pair =>
+            pair.GetProperty("first").GetProperty("assignment").GetString() == docs || pair.GetProperty("second").GetProperty("assignment").GetString() == docs);
+        var apply = new AttemptRequest(docs, run.Estate.BuilderId, "widget repository, branch work/docs-1", "Apply both fragments.");
+        foreach (string key in new[] { "FIX-1", "FIX-2" })
+        {
+            Assert.Contains(run.Service.Attempt(apply).Problem!.Findings, finding => finding.Code == "attempt.after");
+            AcceptOrder(run, key);
+        }
+        RunEstate.Ok(run.Service.Attempt(apply));
+
+        void WriteFragment(string key, string assignment)
+        {
+            string branch = "work/" + key.ToLowerInvariant();
+            var settings = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["command"] = FakeHarness.Setting("write-compatibility-fragment", run.Report(key)),
+            };
+            RunResponse work = run.Service.RunStart(new RunStartRequest(assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId,
+                run.Resource, Branch: branch, WallMinutes: 10, Settings: settings));
+            Assert.True(work.Ok, work.Message);
+            RunRow settled = run.Settled(work.Run);
+            Assert.Equal("observed-success", settled.Status);
+            Assert.Equal((1, 0), (settled.Scope!.Changed, settled.Scope.OutsideCount));
+            string workspace = Assert.Single(FakeHarness.Reports(run.Report(key)))["directory"]!.GetValue<string>();
+            string fragment = Path.Combine(workspace, "docs", "changes", "0.9.5", key + ".md");
+            Assert.Contains("## " + notes, File.ReadAllText(fragment), StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(workspace, notes.Replace('/', Path.DirectorySeparatorChar))));
+        }
+
+        WriteOutcome Assign(string key, JsonElement brief) =>
+            run.Service.Assign(new AssignRequest(key, run.Estate.BuilderId, run.Estate.OperatorId, brief) { Repository = run.Resource });
+    }
+
+    [Fact]
     public void ARefuseLevelPolicyRefusesANewAssignmentThatLeavesAnUnmetPairAndNamesTheRemediesThatApplyToIt()
     {
         using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
@@ -490,6 +595,13 @@ public class ConcurrentPathsPolicyTests
         JsonObject body = JsonNode.Parse(brief)!.AsObject();
         body["after"] = new JsonArray([.. assignments.Select(a => (JsonNode)a)]);
         return JsonSerializer.SerializeToElement(body);
+    }
+
+    private static void AcceptOrder(RunEstate run, string key)
+    {
+        RecordEnvelope order = run.Estate.Load().Current("work-order").Single(item => EstateModel.BodyString(item, "key") == key);
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("acceptance", run.Estate.OperatorId,
+            RunEstate.Json("""{"statement":"The change is accepted.","basis":[],"self":true}"""), $"work-order:{order.Id}:{order.ComputedHash}")));
     }
 
     private static void Order(RunEstate run, string key, string? goal = null) =>
