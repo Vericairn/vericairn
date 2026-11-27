@@ -8,9 +8,9 @@ namespace Vericairn.Remote;
 /// <summary>The action and the exact state reviewed before sending it.</summary>
 public sealed record RemoteIntervention(string Operation, string Target, string Revision, string KnownState, string Effect)
 {
-    /// <summary>One original stop per run, or one pause per active status record.</summary>
-    [JsonIgnore]
-    public string Key => Operation == "Pause goal" ? Target + "/" + Revision : Target;
+    /// <summary>The earlier stop a reviewed containment will tighten, when there is one.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExpectedStopReason { get; init; }
     /// <summary>The target, review basis and expected effect.</summary>
     [JsonIgnore]
     public string Review => $"{Operation}\nTarget {Target}\n{KnownState}\n{Effect}";
@@ -19,6 +19,13 @@ public sealed record RemoteIntervention(string Operation, string Target, string 
 /// <summary>The original submission, kept before sending, and the last observed result of that submission.</summary>
 public sealed record RemoteInterventionReceipt(RemoteIntervention Request, string Id, string State, string Observation, string? Record = null)
 {
+    internal (string Target, string Operation, string Id) Key => (Request.Target, Request.Operation, Id);
+
+    internal bool Pending => State is "pending" or "uncertain" or "requested" or "transmitted" or "acknowledged" or "escalated";
+
+    internal bool Blocks(RemoteIntervention review) =>
+        Pending && Request.Target == review.Target && Request.Operation == review.Operation;
+
     /// <summary>How this original request is named in the runtime's stop reason or pause record.</summary>
     [JsonIgnore]
     public string Marker => $"{Request.Operation} requested in Remote ({Id}).";

@@ -1267,7 +1267,7 @@ public static class OpenApiDocument
             ["BriefContextRequest"] = ContextRequestSchema(true),
             ["ContextResponse"] = Required(Object(("text", "string"), ("package", "object"), ("problem", "object")), "text"),
             ["BriefResponse"] = Required(Object(("markdown", "string"), ("json", "object"), ("markdownMeasurement", "object"), ("problem", "object"), ("jsonMeasurement", "object")), "markdown", "json"),
-            ["RunStopRequest"] = Object(("by", "string"), ("reason", "string"), ("graceSeconds", "integer"), ("expectedOperationHash", "string")),
+            ["RunStopRequest"] = Object(("by", "string"), ("reason", "string"), ("graceSeconds", "integer"), ("expectedOperationHash", "string"), ("expectedStopReason", "string")),
             ["RunSettleRequest"] = Object(("by", "string"), ("recordsChecked", "boolean")),
             ["RunSettleResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("problem", "object")),
             ["HarnessQualifyRequest"] = Object(("launcher", "string"), ("by", "string"), ("settings", "object")),

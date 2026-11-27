@@ -23,12 +23,13 @@ public sealed partial class LocalNetworkConnections
         ArgumentNullException.ThrowIfNull(receipt);
         lock (InterventionStorageGate)
         {
-            var receipts = ReadInterventions(connection).ToDictionary(r => r.Request.Key, StringComparer.Ordinal);
-            if (receipts.TryGetValue(receipt.Request.Key, out RemoteInterventionReceipt? previous) &&
-                (previous.Id != receipt.Id || previous.Request != receipt.Request))
-                throw new InvalidOperationException("This intervention was already attempted. Reconcile the original request.");
+            var receipts = ReadInterventions(connection).ToDictionary(r => r.Key);
+            if (receipts.TryGetValue(receipt.Key, out RemoteInterventionReceipt? previous)
+                ? previous.Request != receipt.Request
+                : receipts.Values.Any(r => r.Blocks(receipt.Request)))
+                throw new InvalidOperationException("This intervention already has an outstanding request. Reconcile it first.");
 
-            receipts[receipt.Request.Key] = receipt;
+            receipts[receipt.Key] = receipt;
             string path = InterventionPath(connection);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -54,7 +55,7 @@ public sealed partial class LocalNetworkConnections
             if (saved is null || saved.Binding != Binding(connection) || saved.Receipts is null ||
                 saved.Receipts.Any(r => r is not { Request: { Target: not null, Revision: not null, KnownState: not null, Effect: not null }, Id: not null, State: not null, Observation: not null } ||
                     r.Request.Operation is not ("Pause goal" or "Cancel run" or "Contain run") || !Guid.TryParseExact(r.Id, "N", out _)) ||
-                saved.Receipts.Select(r => r.Request.Key).Distinct(StringComparer.Ordinal).Count() != saved.Receipts.Count)
+                saved.Receipts.Select(r => r.Key).Distinct().Count() != saved.Receipts.Count)
                 throw new InvalidDataException("The intervention records are incomplete. Recover them before submitting another request.");
             return saved.Receipts;
         }

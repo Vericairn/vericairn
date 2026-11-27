@@ -831,6 +831,10 @@ public sealed record RunStopRequest(string By, string? Reason = null, int? Grace
     /// <summary>The operation revision required for a stop requested from a reviewed observation.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ExpectedOperationHash { get; init; }
+
+    /// <summary>The exact reason marking the earlier stop, when reviewed zero-grace containment follows a cancel.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExpectedStopReason { get; init; }
 }
 
 /// <summary>Settle an exited run from the worker's retained observation.</summary>

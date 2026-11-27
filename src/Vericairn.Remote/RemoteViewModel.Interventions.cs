@@ -144,10 +144,10 @@ public sealed partial class RemoteViewModel
                 InterventionMessage = "The runtime did not report an eligible current target. Inspect the run or continue in Workbench.";
                 return;
             }
-            if (Interventions.FirstOrDefault(r => r.Request.Key == review.Key) is { } prior)
+            if (Interventions.FirstOrDefault(r => r.Blocks(review)) is { } prior)
             {
                 SelectedIntervention = prior;
-                InterventionMessage = "This target has an original request. Reconcile it before acting again.";
+                InterventionMessage = "This operation has an outstanding request. Reconcile it before acting again.";
                 return;
             }
             SetIntervention(review);
@@ -159,7 +159,7 @@ public sealed partial class RemoteViewModel
         finally { Busy = false; }
     }
 
-    private static async Task<RemoteIntervention?> ReadInterventionAsync(IEstateApi api, string operation, string runId)
+    private async Task<RemoteIntervention?> ReadInterventionAsync(IEstateApi api, string operation, string runId)
     {
         RunRow? run = (await api.RunsAsync().ConfigureAwait(true)).Runs.SingleOrDefault(r => r.Run == runId);
         if (run is null) return null;
@@ -176,11 +176,24 @@ public sealed partial class RemoteViewModel
                 "Prevents new dispatch for this goal. Runs already in flight continue. An authorized person can resume the goal.");
         }
 
-        if (run.Stop is not null || run.Status is not ("not-started" or "dispatched" or "uncertain") || run.OperationHash is not string operationHash)
+        if (run.Status is not ("not-started" or "dispatched" or "uncertain") || run.OperationHash is not string operationHash)
             return null;
+        string? priorStop = null;
+        if (run.Stop is { } stop)
+        {
+            if (operation != ContainRun || stop is not { Reason: string reason, EscalatedAt: null, ContainedAt: null } ||
+                !Interventions.Any(r => r.Request.Operation == CancelRun && r.Request.Target == runId && r.Marker == reason))
+                return null;
+
+            priorStop = reason;
+            state += $" The runtime reported an earlier cancel at {stop.RequestedAt} as {stop.State}.";
+        }
         return new(operation, runId, operationHash, state + $" Operation revision {operationHash}.", operation == ContainRun
             ? "Requests containment of this run's launch boundary. Its worker may escalate without an additional grace period. The stop cannot be undone once observed."
-            : "Requests termination of this run. Its worker gives the harness the configured grace period before escalating. The stop cannot be undone once observed.");
+            : "Requests termination of this run. Its worker gives the harness the configured grace period before escalating. The stop cannot be undone once observed.")
+        {
+            ExpectedStopReason = priorStop,
+        };
     }
 
     private async Task SubmitInterventionAsync()
@@ -239,20 +252,33 @@ public sealed partial class RemoteViewModel
         }
 
         RunStopResponse stopped = await api.RunStopAsync(review.Target,
-            new(principal, receipt.Marker, review.Operation == ContainRun ? 0 : null) { ExpectedOperationHash = review.Revision }).ConfigureAwait(true);
+            new(principal, receipt.Marker, review.Operation == ContainRun ? 0 : null)
+            {
+                ExpectedOperationHash = review.Revision,
+                ExpectedStopReason = review.ExpectedStopReason,
+            }).ConfigureAwait(true);
+        if (!stopped.Ok && stopped.Problem?.Code is not (null or "unavailable"))
+            return receipt with { State = "rejected", Observation = stopped.Message };
         if (stopped.Run == review.Target && stopped.Stop is { } facts)
             return ObserveRunStop(receipt, facts);
         return receipt with
         {
-            State = stopped.Ok || stopped.Problem?.Code is null or "unavailable" ? "uncertain" : "rejected",
+            State = "uncertain",
             Observation = stopped.Message,
         };
     }
 
-    private static RemoteInterventionReceipt ObserveRunStop(RemoteInterventionReceipt receipt, RunStop facts) =>
-        facts.Reason == receipt.Marker
-            ? receipt with { State = facts.State, Observation = StopObservation(facts) }
-            : receipt with { State = "uncertain", Observation = "A different stop request was observed. This original request has no matching receipt.\n" + StopObservation(facts) };
+    private static RemoteInterventionReceipt ObserveRunStop(RemoteInterventionReceipt receipt, RunStop facts)
+    {
+        if (facts.Reason == receipt.Marker)
+            return receipt with { State = facts.State, Observation = StopObservation(facts) };
+        if (!receipt.Pending) return receipt;
+        return receipt with
+        {
+            State = facts.Reason == receipt.Request.ExpectedStopReason && facts.ContainedAt is null ? "uncertain" : "superseded",
+            Observation = "A different stop request was observed. This original request has no matching receipt.\n" + StopObservation(facts),
+        };
+    }
 
     private async Task ReconcileInterventionAsync()
     {
@@ -310,7 +336,7 @@ public sealed partial class RemoteViewModel
             if (Selected == estate)
             {
                 Interventions = connections.LoadInterventions(estate.Connection);
-                SelectedIntervention = Interventions.Single(r => r.Id == receipt.Id);
+                SelectedIntervention = Interventions.Single(r => r.Key == receipt.Key);
             }
             return true;
         }
