@@ -391,6 +391,78 @@ public sealed class ProgressTargetTests : IDisposable
         Assert.Equal("c2", Store.State("status").Cursor);
     }
 
+    [Fact]
+    public void AWaitThatEndsAndWaitsAgainIsCommentedOnAgain()
+    {
+        Configure("private", refresh: ["none"], comment: ["ask to=operator when=waiting"]);
+        Assert.Equal(["created"], Runner().Take(Target(), [], look: true).Select(o => o.Action));
+        RecordEnvelope ask = Ask("Publish the notes?");
+        string key = "ask:" + ask.Id;
+        Assert.Equal(["commented"], Take(Runner(), Event("ask", ask, change: "raised", to: estate.OperatorId)).Select(o => o.Action));
+        Assert.Equal("commented", Store.State("status").Comments[key].Outcome);
+
+        // Withdrawn, it no longer waits: its entry has done its work and is dropped.
+        RecordEnvelope withdrawn = estate.Add("ask", estate.OperatorId, AskBody("Publish the notes?", "withdrawn"), supersedes: ask.Id);
+        Assert.DoesNotContain(Runner().Take(Target(), [Event("ask", withdrawn, change: "withdrawn", to: estate.OperatorId)], look: true), o => o.Action == "commented");
+        Assert.Empty(Store.State("status").Waiting!.Value);
+        Assert.False(Store.State("status").Comments.ContainsKey(key));
+
+        // Opened again, the same ask waits again under the same key, and is commented on again, once.
+        RecordEnvelope reopened = estate.Add("ask", estate.OperatorId, AskBody("Publish the notes?", "open"), supersedes: withdrawn.Id);
+        Assert.Equal(["commented"], Take(Runner(), Event("ask", reopened, change: "raised", to: estate.OperatorId)).Select(o => o.Action));
+        Assert.Empty(Take(Runner(), Event("ask", reopened, change: "changed", to: estate.OperatorId)));
+        Assert.Equal(2, adapter.Comments.Count);
+        Assert.Equal(adapter.Comments[0], adapter.Comments[1]);
+    }
+
+    [Fact]
+    public void AnEndedWaitsUncertainEntryIsKeptForAPersonAndBlocksNothing()
+    {
+        var at = DateTimeOffset.Parse("2026-11-26T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var entry = new ProgressTargetComment("fake-target", "sha256:" + new string('0', 64), "private", "D_1", "https://example.invalid/discussions/1");
+        ImmutableSortedDictionary<string, ProgressTargetComment> comments = ImmutableSortedDictionary.CreateRange(StringComparer.Ordinal,
+        [
+            KeyValuePair.Create("ask:A", entry with { Outcome = "commented", Url = "https://example.invalid/discussions/1#comment-1" }),
+            KeyValuePair.Create("ask:B", entry with { Outcome = "uncertain" }),
+            KeyValuePair.Create("request:C", entry with { Outcome = "refused" }),
+            KeyValuePair.Create("ask:D", entry),
+            KeyValuePair.Create("step:G/review/review", entry with { Outcome = "commented", Url = "https://example.invalid/discussions/1#comment-2" }),
+            KeyValuePair.Create("sha256:E", entry with { Outcome = "commented", Url = "https://example.invalid/discussions/1#comment-3" }),
+        ]);
+
+        // Only step:G still waits. A commented or refused entry of an ended wait is dropped; an uncertain one is kept under ended:, where no
+        // wait's key can meet it; one with no outcome yet, a waiting one's and an event's are kept as they are.
+        ImmutableSortedDictionary<string, ProgressTargetComment> kept = ProgressTargetRunner.Retire(comments, new HashSet<string>(["step:G/review/review"], StringComparer.Ordinal), at);
+        Assert.Equal(["ask:D", "ended:2026-11-26T12:00:00Z:ask:B", "sha256:E", "step:G/review/review"], kept.Keys);
+        Assert.Equal(entry with { Outcome = "uncertain" }, kept["ended:2026-11-26T12:00:00Z:ask:B"]);
+        Assert.Same(kept, ProgressTargetRunner.Retire(kept, new HashSet<string>(["step:G/review/review"], StringComparer.Ordinal), at));
+    }
+
+    [Fact]
+    public async Task ASecondFollowerOfTheSameTargetIsRefusedWhileOneFollows()
+    {
+        Configure("private");
+        var stream = Channel.CreateUnbounded<EventStreamItem>();
+        var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        stop.CancelAfter(TestTiming.HangTimeout);
+        Task following = Runner().FollowAsync("status", (_, _) =>
+        {
+            opened.TrySetResult();
+            return stream.Reader.ReadAllAsync(stop.Token);
+        }, _ => { }, stop.Token);
+        await opened.Task.WaitAsync(stop.Token);
+
+        Assert.True(Store.Followed("status"));
+        InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(() => Follow(new EventStreamItem("c1")));
+        Assert.Contains("Another follower is following progress target status", refused.Message, StringComparison.Ordinal);
+
+        stream.Writer.Complete();
+        await following;
+        Assert.False(Store.Followed("status"));
+        await Follow(new EventStreamItem("c1"));
+    }
+
     private Task Follow(EventStreamItem item) =>
         Runner().FollowAsync("status", (_, _) => Stream(item), _ => { }, TestContext.Current.CancellationToken);
 
@@ -484,8 +556,10 @@ public sealed class ProgressTargetTests : IDisposable
         return estate.Add("result", estate.BuilderId, """{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""", attempt.Reference);
     }
 
-    private RecordEnvelope Ask(string question) => estate.Add("ask", estate.OperatorId,
-        $$"""{"to":"{{estate.OperatorId}}","question":"{{question}}","recommendation":"Answer yes.","consequence":"Nothing moves.","state":"open"}""");
+    private RecordEnvelope Ask(string question) => estate.Add("ask", estate.OperatorId, AskBody(question, "open"));
+
+    private string AskBody(string question, string state) =>
+        $$"""{"to":"{{estate.OperatorId}}","question":"{{question}}","recommendation":"Answer yes.","consequence":"Nothing moves.","state":"{{state}}"}""";
 
     private RecordEnvelope Release(string version, string status) =>
         estate.Add("release", estate.OperatorId, ReleaseBody(version, status), new RecordReference("product", product.Id, null));

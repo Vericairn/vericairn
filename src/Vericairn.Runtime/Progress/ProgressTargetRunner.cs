@@ -87,6 +87,10 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
         ArgumentNullException.ThrowIfNull(told);
         (Target? target, string? problem) = Resolve(name);
         if (target is null) throw new InvalidOperationException(problem);
+        // One follower per target on this machine, for as long as it follows: an entry with no outcome is then one a follower that
+        // stopped left behind, never one another follower is sending.
+        using FileStream lease = store.Follow(name)
+            ?? throw new InvalidOperationException($"Another follower is following progress target {name} on this machine. Stop it before following again.");
         ProgressTargetState state = RecoverComments(name, told);
         var channel = Channel.CreateUnbounded<EventStreamItem>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         using var pumpStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -216,13 +220,45 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
         }
 
         if (waits is not null || cursor is not null)
-            store.Update(configuration.Name, current => current with
+            store.Update(configuration.Name, current =>
             {
-                Cursor = cursor ?? current.Cursor,
-                Waiting = waits is null ? current.Waiting : [.. waits.Select(w => w.Key).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
+                ProgressTargetState next = current with
+                {
+                    Cursor = cursor ?? current.Cursor,
+                    Waiting = waits is null ? current.Waiting : [.. waits.Select(w => w.Key).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
+                };
+                return waits is null ? next : next with { Comments = Retire(next.Comments, waits.Select(w => w.Key).ToHashSet(StringComparer.Ordinal), at) };
             });
         return outcomes;
     }
+
+    /// <summary>
+    /// The comment entries kept once the waits now seen are known. A wait's key names what waits, not one occurrence of its waiting (a
+    /// step's key is its goal, step and stop kind), so its entry guards against a second comment only while it waits. Once it has ended,
+    /// a commented or refused entry is dropped, so the next time the same thing waits it is commented on again; an uncertain one is kept
+    /// for a person under <c>ended:</c>, its time and the key, where it blocks nothing. An entry with no outcome yet is left alone, and an
+    /// event's entry is always kept: an event's key names one change.
+    /// </summary>
+    internal static ImmutableSortedDictionary<string, ProgressTargetComment> Retire(
+        ImmutableSortedDictionary<string, ProgressTargetComment> comments, IReadOnlySet<string> waiting, DateTimeOffset at)
+    {
+        ImmutableSortedDictionary<string, ProgressTargetComment> kept = comments;
+        foreach ((string key, ProgressTargetComment entry) in comments)
+        {
+            if (!IsWaitKey(key) || waiting.Contains(key) || entry.Outcome is null) continue;
+            kept = kept.Remove(key);
+            if (entry.Outcome == "uncertain") kept = kept.SetItem($"{EndedPrefix}{at.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}:{key}", entry);
+        }
+
+        return kept;
+    }
+
+    /// <summary>The prefix of an uncertain entry kept after its wait ended.</summary>
+    internal const string EndedPrefix = "ended:";
+
+    // The keys Waits gives: a step's, an open operator request's and a waiting ask's. An event's key is a hash ("sha256:").
+    private static bool IsWaitKey(string key) =>
+        key.StartsWith("step:", StringComparison.Ordinal) || key.StartsWith("request:", StringComparison.Ordinal) || key.StartsWith("ask:", StringComparison.Ordinal);
 
     private ProgressOutcome Refresh(Target target, EstateModel model, bool dryRun)
     {

@@ -60,7 +60,8 @@ daemon must be running (`vericairn runtime start`): once the stream is open it r
 missed, then refreshes it for each event a refresh trigger names and adds a comment for each event a comment trigger names, until
 interrupted. Events read together refresh the target once. After a reset (a cursor the journal can no longer honor) it refreshes
 again. It keeps the cursor it reached after each batch and resumes there when started again. `--count <n>` stops after `n`
-outcomes. A refresh or comment that an adapter refuses is printed and following goes on. Run one follower per target.
+outcomes. A refresh or comment that an adapter refuses is printed and following goes on. One follower follows a target on a
+machine at a time: a second `follow` of the same target refuses until the first stops.
 
 From 0.9.5 (FIX-177), the follower saves a pending comment with its event or wait key, payload hash, form and destination before
 calling the adapter to send it. It records a confirmed comment's address, a refusal or an uncertain outcome. With that target's
@@ -74,6 +75,19 @@ from `follow --json` name their event or wait in `commentKey`. An adapter withou
 comment receipt lookup, including GitHub Discussions, cannot establish whether the request reached the service, was accepted
 or notified anyone. Check the original destination before deciding how to handle the comment manually. Following keeps the
 uncertain entry and never retries it, even if the interruption happened before the request left the machine.
+
+A refused comment is final for its key too: nothing was sent, and following does not send it again. The saved hash, form and
+destination are kept for a person to check; the follower never compares them with anything.
+
+An event's key names one change, so its entry is kept. A wait's key names what waits (an ask, an open operator request, or a
+run's step and stop kind), not one time it waits, so its entry guards against a second comment only while it waits. Once it no
+longer waits, a commented or refused entry is dropped, and when the same thing waits again, as a second review round of the same
+step does, it is commented on again. An uncertain entry of a wait that ended is kept for a person as `ended:<time>:<key>`, where it
+blocks nothing. A wait that ends and begins again while no follower is running is not commented on again, as before.
+
+Each write of `progress-targets-state.json` reaches the disk before it replaces the earlier file, so a machine that stops loses at
+most the write in progress. If the file cannot be read, following refuses rather than forget the attempts it holds; move it aside to
+start every target's local state afresh, accepting that the attempts it held are forgotten.
 
 ## Forms
 

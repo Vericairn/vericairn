@@ -169,6 +169,14 @@ internal sealed class ProgressTargetOperations(CommandContext context)
         return session.Load();
     }, ProviderRegistry.Current, ProgressTargetStore.Of(root));
 
+    // The comments a person should check: those whose outcome is uncertain, and those with no outcome when no follower holds the target
+    // (one stopped before saving it). While a follower holds it, an entry with no outcome is one it is sending.
+    private static IEnumerable<KeyValuePair<string, ProgressTargetComment>> Uncertain(ProgressTargetStore store, string name, ProgressTargetState state)
+    {
+        bool followed = state.Comments.Values.Any(entry => entry.Outcome is null) && store.Followed(name);
+        return state.Comments.Where(entry => entry.Value.Outcome == "uncertain" || (entry.Value.Outcome is null && !followed));
+    }
+
     private int Show(ProgressTargetStore store, IReadOnlyList<ProgressTargetConfiguration> targets, bool json)
     {
         if (json)
@@ -180,7 +188,7 @@ internal sealed class ProgressTargetOperations(CommandContext context)
                 ProgressTargetState state = store.State(target.Name);
                 item["place"] = state.PlaceUrl is null ? null : new JsonObject { ["id"] = state.PlaceId, ["url"] = state.PlaceUrl };
                 var uncertain = new JsonArray();
-                foreach ((string key, ProgressTargetComment entry) in state.Comments.Where(entry => entry.Value.Uncertain))
+                foreach ((string key, ProgressTargetComment entry) in Uncertain(store, target.Name, state))
                 {
                     JsonObject comment = entry.ToJson();
                     comment["key"] = key;
@@ -203,7 +211,7 @@ internal sealed class ProgressTargetOperations(CommandContext context)
             context.Output.WriteLine("  refreshes on: " + (target.Refresh.IsEmpty ? "no event" : string.Join("; ", target.Refresh)));
             context.Output.WriteLine("  comments on: " + (target.Comment.IsEmpty ? "no event" : string.Join("; ", target.Comment)));
             context.Output.WriteLine("  place: " + (state.PlaceUrl ?? "none yet; the first refresh creates it"));
-            foreach ((string key, ProgressTargetComment entry) in state.Comments.Where(entry => entry.Value.Uncertain))
+            foreach ((string key, ProgressTargetComment entry) in Uncertain(store, target.Name, state))
                 context.Output.WriteLine($"  uncertain comment {key} ({entry.Form} form, {entry.PayloadHash}) at {entry.PlaceUrl} through {entry.Adapter}. Check the original destination.");
         }
 

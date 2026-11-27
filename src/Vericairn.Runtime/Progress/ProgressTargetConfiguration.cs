@@ -3,6 +3,7 @@
 
 using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -273,12 +274,49 @@ internal sealed class ProgressTargetStore(string directory)
         }
     }
 
+    // The new text reaches the disk before it replaces the old, so a machine that stops loses at most this write, never a comment entry an
+    // earlier write kept.
     private void Write(string name, JsonObject node)
     {
         OwnerOnlyState.CreateDirectory(directory);
         string path = Path.Combine(directory, name);
         string temporary = path + ".tmp";
-        OwnerOnlyState.WriteAllBytes(temporary, Encoding.UTF8.GetBytes(node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n"));
+        File.Delete(temporary);
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = OwnerOnlyState.FileMode;
+        using (var stream = new FileStream(temporary, options))
+        {
+            stream.Write(Encoding.UTF8.GetBytes(node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n"));
+            stream.Flush(flushToDisk: true);
+        }
+
         File.Move(temporary, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// Holds a target for one follower on this machine until the stream is disposed, or null when another follower holds it. The hold is
+    /// released when its process ends, however it ends.
+    /// </summary>
+    internal FileStream? Follow(string name)
+    {
+        OwnerOnlyState.CreateDirectory(directory);
+        string hashed = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(name)))[..16];
+        var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = OwnerOnlyState.FileMode;
+        try
+        {
+            return new FileStream(Path.Combine(directory, $"progress-target-{hashed}.follow"), options);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>True when a follower on this machine holds the target now.</summary>
+    internal bool Followed(string name)
+    {
+        using FileStream? held = Follow(name);
+        return held is null;
     }
 }
