@@ -13,6 +13,12 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 51, November 27, 2026. Add `--flow-path` to `goal propose --flow` and `--check` to `goal step` for runs of a flow. An agent work step without a permitted path is refused at proposal or activation in the development build.
+
+Revision 50, November 27, 2026. A progress target keeps each comment attempt before it is sent and never sends a comment whose outcome is uncertain again; `progress target resolve` removes an entry once a person has checked it, and one follower follows a target on a machine at a time, in the development build.
+
+Revision 49, November 27, 2026. The runtime preserves an unreadable Secure Enclave identity and names the recovery for each failure. `runtime rotate --identity --replace-unreadable` explicitly replaces an identity that cannot be read here, keeping the replaced record, in the development build.
+
 Revision 48, November 27, 2026. A present `vericairn-enclave` helper must complete its availability check: one that cannot start, exits unexpectedly, is killed or times out makes `devices create` refuse before it makes a key and `doctor` mark the Secure Enclave default unavailable, while exit 3 and an absent helper keep file custody; a daemon that cannot read its Secure Enclave identity refuses to start and keeps the identity, in the development build.
 
 Revision 47, November 26, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
@@ -536,6 +542,24 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
 per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused.
+
+From 0.9.5 (FIX-166), give `--flow-path 'src/docs/**'` with `goal propose --flow` to set a repository-relative pattern for
+the run. Repeat `--flow-path` for each pattern. Routing derives each step's assignment brief from that step's declared
+`paths`, the goal's `--flow-path` patterns and the run's work-order `scope` entries prefixed `path:`. Each supplied list
+constrains the result. If an agent work step has no interpretable pattern covered by all its supplied lists, `goal propose`
+and `goal activate` refuse with `flow.permitted-paths`. Choose compatible lists and declare a narrower pattern where they overlap.
+
+The work order's `path:` entries are read from the revision the goal's plan names and from every later revision of it, each a list
+of its own, so a revision written after proposal can narrow a run's paths and never widen them. When the named revision has no
+`path:` entry, a later revision's entries grant nothing. To widen them, or to give them first, revise the goal to name the new
+revision. A later revision that drops every `path:` entry withdraws nothing: the run keeps the named revision's paths until the
+goal names another. A step a person carries, or a reserved one, needs no pattern: its brief carries the work order's prose
+entries that cannot be read as a pattern, never a pattern. `worker run` on a step's held assignment refuses with
+`flow.permitted-paths` unless the assignment's brief is within the step's current paths, as `goal step` does; a standing agent's
+steps keep their own briefs.
+
+`goal step <goal> --by <principal> --check` previews a flow run's next eligible step and its permitted changes without
+signing, recording or dispatching. With `--json`, the preview includes `step.permittedChanges` for the routed assignment.
 
 From PROC-10 (0.9.2), `goal next` also routes each review before hand-off as `<step> review`, and each step's required
 attention as route state `attention`. For a review, `goal step` records an assignment whose `step.review` names the items and
@@ -1104,8 +1128,8 @@ From 0.9.5 (FIX-175), a present helper must complete its availability check. If 
 or times out, `devices create` refuses before making a key. Exit 3 still reports that the Secure Enclave is unavailable, and
 a Mac with no helper or with that result uses file custody by default. `doctor` reports the helper failure, and its `custody`
 line marks the Secure Enclave default unavailable until the helper from this command line's release archive is beside it.
-The diagnostics and refusal omit the helper's path. If a daemon cannot read its held Secure Enclave identity because the helper
-fails, it refuses to start with the same remedy and preserves the identity so paired devices keep their pin.
+The diagnostics and refusal omit the helper's path. For a daemon with a saved Secure Enclave identity, see
+[Recovering a runtime identity](#recovering-a-runtime-identity-095).
 
 ```text
 helper    vericairn-enclave reports no version and serves no sign-record, so it comes from a release before 0.9.4; vericairn 0.9.5+<commit> expects vericairn-enclave 0.9.5: mismatch, so Secure Enclave signatures are refused until the vericairn-enclave from this command line's release archive is beside it
@@ -1125,6 +1149,26 @@ Three commands refuse `--json`: `runtime serve`, which serves until stopped and 
 standard output carries the MCP protocol; and `recover inspect`, whose report is text, while `status --json`, `devices list --json`
 and `estate reconcile --json` give the same facts as JSON. The refusal is a parse error: exit code 1, the reason on standard error
 and, as for any parse error, the usage help on standard output.
+
+## Recovering a runtime identity (0.9.5)
+
+When startup of the local-network profile cannot read a saved Secure Enclave identity, it refuses and keeps the identity byte for
+byte. If the helper is absent, put the `vericairn-enclave` from this command line's release archive beside it and retry. If the
+helper answers exit 3, start the runtime in a context where the Secure Enclave on the Mac holding the key is available. A helper
+that fails its availability check, answers anything but one P-256 public key, or exits otherwise also refuses startup; settle the
+helper first.
+
+If the helper cannot use the key on this Mac (exit 4), the key was made on another Mac or its blob is damaged: use the Mac that
+holds it, or restore the blob from a backup. If the key blob is missing, restore it on that Mac. If the helper answers a different
+key from the saved record, or the record itself cannot be read, restore the matching record and blob from a backup.
+
+To keep serving from this machine with a new identity instead, stop the runtime if it is running, then run
+`vericairn runtime rotate --identity --replace-unreadable`. It replaces the identity in each case above where the identity cannot
+be read here: a missing, unusable or mismatched key, a record that cannot be read, or a machine that offers no Secure Enclave (not
+a Mac, no helper, or helper exit 3), where the new identity takes the custody the machine offers, such as an owner-only file. It
+refuses an identity that can be read and a helper that is failing, keeps the replaced record beside the new one as
+`runtime-identity.json.replaced-<time>`, removes no key blob, and reads a new key back before saving it. Start the runtime again
+after it succeeds. Every paired device must pair again.
 
 ## Presence prompts on standard error (0.9.3)
 
@@ -1606,7 +1650,9 @@ Keeps the estate's progress at a target, such as a pinned GitHub discussion, thr
 machine chooses (`WATCH-06`): `set`, `list` and `remove` configure targets and send nothing; `refresh <name>` brings one equal to
 the estate's progress now, creating its place once and replacing its text only when it differs, and `--dry-run` shows the text
 and sends nothing; `follow <name>` follows the daemon's event journal and refreshes and comments only on the events the target's
-triggers name, until interrupted or after `--count` outcomes. A destination anyone may read always takes the public form, which
+triggers name, until interrupted or after `--count` outcomes; a second `follow` of the same target refuses while one follows. From
+0.9.5 (FIX-177) a comment whose outcome is uncertain is never sent again; `list` shows it, and `resolve <name> <key>` removes its
+entry once you have checked its destination, sending nothing. A destination anyone may read always takes the public form, which
 carries nothing a disclosure rule holds. `refresh` exits 0 when the target is equal, 2 when it refused and sent nothing, and 1
 when an effect was stopped or not confirmed; `--json` writes `vericairn.progress-target-outcome/1`, naming every record the text
 carries. See [Progress targets](progress-targets.md).

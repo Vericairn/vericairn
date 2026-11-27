@@ -138,6 +138,164 @@ public class FlowStepRoutingTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ProposeAndActivateRefuseAnAgentStepWithOnlyProseScope(bool activate)
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        var prepared = Setup(run, null, """["widget", "produce a song"]""");
+        JsonElement body = JsonSerializer.SerializeToElement(Body(run, prepared, op));
+
+        string? existing = activate ? RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("goal", op, body))).Id : null;
+        WriteOutcome outcome = existing is null ? run.Service.GoalPropose(new GoalProposeRequest(op, body))
+            : run.Service.GoalActivate(existing, new GoalActionRequest(op));
+        Assert.False(outcome.Ok);
+        Assert.Equal("flow.permitted-paths", outcome.Problem!.Code);
+        Assert.Contains("draft", outcome.Problem.Message, StringComparison.Ordinal);
+        if (existing is not null)
+        {
+            GoalResponse proposed = run.Service.Goal(existing)!;
+            Assert.Equal("proposed", proposed.Json.GetProperty("status").GetString());
+            Assert.Contains(proposed.Json.GetProperty("flow").GetProperty("pathRefusals").EnumerateArray(),
+                refusal => refusal.GetProperty("code").GetString() == "flow.permitted-paths" && refusal.GetProperty("step").GetString() == "draft");
+            Assert.Contains(run.Service.Status().Json.GetProperty("flowPathRefusals").EnumerateArray(),
+                refused => refused.GetProperty("goal").GetString() == existing);
+            Assert.Contains(run.Service.AttentionGet(op).Items,
+                notice => notice.SubjectType == "goal" && notice.SubjectId == existing && notice.State == "flow.permitted-paths");
+        }
+    }
+
+    [Theory]
+    [InlineData(null, "song/rough mixes/**", """["song", "produce the song"]""", "path:song/rough mixes/**")]
+    [InlineData("song/lyrics/**", "song/**", """["song", "path:song", "path:docs/**"]""", "path:song/lyrics/**")]
+    [InlineData("song/**", "song", """["song", "path:song/lyrics/**"]""", "path:song/lyrics/**")]
+    public void RoutedPathsNarrowEverySourceAndPassAdmission(string? declared, string paths, string scope, string expected)
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        JsonObject flow = FlowFixture.Song();
+        if (declared is not null)
+        {
+            flow["steps"]!.AsArray().First(step => step!["key"]!.GetValue<string>() == "draft")!["paths"] = new JsonArray(declared);
+        }
+
+        string goal = Run(run, flow, body => body["plan"]!["flow"]!["paths"] = new JsonArray(paths), scope);
+        int before = run.Estate.Load().ById.Count;
+        GoalStepResponse preview = run.Service.GoalStep(goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource) { Check = true });
+        Assert.True(preview.Ok, preview.Message);
+        Assert.Equal(new[] { expected }, preview.PermittedChanges);
+        Assert.Equal(before, run.Estate.Load().ById.Count);
+
+        GoalStepResponse result = Step(run, goal, "narrow-routed");
+        Assert.True(result.Ok, result.Message);
+        RecordEnvelope assignment = run.Estate.Load().ById[result.Assignment!.Id];
+        Assert.Equal(expected, Assert.Single(assignment.Body.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray()).GetString());
+        Assert.Equal("observed-success", run.Settled(result.Run!.Run).Status);
+    }
+
+    [Fact]
+    public void ADisjointPathSourceRefusesTheStep()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        JsonObject flow = FlowFixture.Song();
+        flow["steps"]!.AsArray().First(step => step!["key"]!.GetValue<string>() == "draft")!["paths"] = new JsonArray("docs/**");
+        JsonObject body = Body(run, Setup(run, flow), op);
+        body["plan"]!["flow"]!["paths"] = new JsonArray("song/**");
+
+        WriteOutcome refused = run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)));
+        Assert.False(refused.Ok);
+        FindingDto finding = Assert.Single(refused.Problem!.Findings);
+        Assert.Equal(("flow.permitted-paths", "plan.flow.draft"), (finding.Code, finding.Location));
+    }
+
+    [Fact]
+    public void AStepAPersonCarriesWithoutATypedPathIsTakenAndItsBriefCarriesNoPattern()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        TemplateDefinition installed = FlowFixture.Install(run.Estate, FlowFixture.Song());
+        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":["song", "produce the song"],"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}""")))).Id;
+        JsonObject body = Body(run, (order, installed), op);
+        // The operator carries the writer's role, so no agent carries any step and no typed path is needed.
+        body["roles"]!.AsArray()[0] = FlowFixture.Role("writer", op);
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
+
+        GoalStepResponse check = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource) { Check = true });
+        Assert.True(check.Ok, check.Message);
+        Assert.Equal(["produce the song"], check.PermittedChanges);
+        GoalStepResponse taken = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
+        Assert.True(taken.Ok, taken.Message);
+        RecordEnvelope assignment = run.Estate.Load().ById[taken.Assignment!.Id];
+        string[] permitted = [.. assignment.Body.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray().Select(e => e.GetString()!)];
+        // The bare word "song" could be read as a pattern, so it is left out; the prose is kept.
+        Assert.Equal(["produce the song"], permitted);
+        Assert.All(permitted, entry => Assert.Null(PathPatterns.Pattern(entry)));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ARevisionOfTheWorkOrderAfterProposalNarrowsTheRunsPathsAndNeverWidensThem()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Run(run, scope: """["path:song/lyrics/**"]""");
+        string named = run.Estate.Load().ById[goal].Body.GetProperty("plan").GetProperty("workOrders")[0].GetString()!;
+
+        // Widened by a later revision, the run still reads the revision its goal names.
+        string widened = Revise(run, """["path:**"]""", named);
+        GoalStepResponse check = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource) { Check = true });
+        Assert.True(check.Ok, check.Message);
+        Assert.Equal(["path:song/lyrics/**"], check.PermittedChanges);
+
+        // Narrowed by a later revision, the run takes the narrower paths.
+        Revise(run, """["path:song/lyrics/verse/**"]""", widened);
+        GoalStepResponse step = Step(run, goal, "narrowed-after");
+        Assert.True(step.Ok, step.Message);
+        Assert.Equal("path:song/lyrics/verse/**", Assert.Single(run.Estate.Load().ById[step.Assignment!.Id].Body.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray()).GetString());
+    }
+
+    [Fact]
+    public void PathEntriesFirstAddedAfterTheNamedRevisionGrantNothing()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        TemplateDefinition installed = FlowFixture.Install(run.Estate, FlowFixture.Song());
+        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":["produce the song"],"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}""")))).Id;
+        JsonObject body = Body(run, (order, installed), op);
+        body["roles"]!.AsArray()[0] = FlowFixture.Role("writer", op);
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
+
+        // The named revision is prose only, and neither the step nor the goal declares paths: a later revision's path:** grants nothing.
+        string widened = Revise(run, """["path:**"]""", order);
+        EstateModel model = run.Estate.Load();
+        FlowStep draft = FlowRuns.Resolve(model, model.ById[goal]).Flow!.Step("draft")!;
+        Assert.Empty(FlowPermissions.For(model, model.ById[goal], model.ById[widened], draft));
+    }
+
+    [Fact]
+    public void AHeldAssignmentStartedDirectlyAfterItsPathsNarrowIsRefused()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Run(run);
+        string named = run.Estate.Load().ById[goal].Body.GetProperty("plan").GetProperty("workOrders")[0].GetString()!;
+        GoalStepResponse first = Step(run, goal, "held-first");
+        Assert.True(first.Ok, first.Message);
+        string held = first.Assignment!.Id;
+
+        Revise(run, """["path:song/lyrics/**"]""", named);
+        RunResponse direct = run.Service.RunStart(new RunStartRequest(held, "claude-code", run.Estate.BuilderId, op, run.Resource, goal, WallMinutes: 30, Settings: Command(run, "held-direct")));
+        Assert.False(direct.Ok);
+        Assert.Contains("flow.permitted-paths", direct.Message, StringComparison.Ordinal);
+    }
+
+    private static string Revise(RunEstate run, string scope, string supersedes) =>
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId, RunEstate.Json($$"""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":{{scope}},"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}"""), Supersedes: supersedes))).Id;
+
     [Fact]
     public void AnItemsToolIsTheLauncherOfTheRunThatProducedIt()
     {
@@ -288,10 +446,10 @@ public class FlowStepRoutingTests
     }
 
     /// <summary>Installs the song flow, a work order and a run of it the operator sponsors and activates; returns the goal's id.</summary>
-    internal static string Run(RunEstate run, JsonObject? flow = null, Action<JsonObject>? change = null)
+    internal static string Run(RunEstate run, JsonObject? flow = null, Action<JsonObject>? change = null, string? scope = null)
     {
         string op = run.Estate.OperatorId;
-        (string Order, TemplateDefinition Flow) prepared = Setup(run, flow);
+        (string Order, TemplateDefinition Flow) prepared = Setup(run, flow, scope);
         JsonObject body = Body(run, prepared, op);
         change?.Invoke(body);
         string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
@@ -300,12 +458,12 @@ public class FlowStepRoutingTests
     }
 
     /// <summary>The builder as a Claude Code agent, the flow installed, and the run's work order.</summary>
-    private static (string Order, TemplateDefinition Flow) Setup(RunEstate run, JsonObject? flow)
+    private static (string Order, TemplateDefinition Flow) Setup(RunEstate run, JsonObject? flow, string? scope = null)
     {
         string op = run.Estate.OperatorId;
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}"""), Supersedes: run.Estate.BuilderId)));
         TemplateDefinition installed = FlowFixture.Install(run.Estate, flow ?? FlowFixture.Song());
-        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":["path:song/"],"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}""")))).Id;
+        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json($$"""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":{{scope ?? """["path:song/"]"""}},"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}""")))).Id;
         return (order, installed);
     }
 

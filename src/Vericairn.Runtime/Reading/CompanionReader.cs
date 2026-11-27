@@ -107,7 +107,7 @@ internal static class CompanionReader
                     sources = sources with { Sources = [DocumentSourceSnapshot.Record(record)] };
                     currentness = model.IsCurrent(record) ? "current" : "historical";
                     var subjectFinding = model.Findings.FirstOrDefault(f => f.Location == record.ExpectedPath
-                        && f.Code is "record.subject-stale" or "record.subject-withdrawn");
+                        && f.Code is "record.subject-stale" or "record.subject-withdrawn" or "record.subject-settled");
                     if (subjectFinding is not null)
                     {
                         currentness = "historical";

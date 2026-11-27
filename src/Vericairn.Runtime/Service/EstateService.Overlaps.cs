@@ -332,7 +332,7 @@ public sealed partial class EstateService
     /// and those a new assignment of its next step would have, from the work order's scope as routing writes it, with whether goal step
     /// would record it to run after the earlier one.
     /// </summary>
-    private (string Text, JsonArray Json) GoalOverlaps(EstateModel model, IReadOnlyCollection<RecordEnvelope> work, (RecordEnvelope Order, string Key)? next)
+    private (string Text, JsonArray Json) GoalOverlaps(EstateModel model, IReadOnlyCollection<RecordEnvelope> work, (RecordEnvelope Order, string Key, IReadOnlyList<string>? Paths)? next)
     {
         HashSet<string> orders = [.. work.Select(o => model.Chain(model.Latest(o))[0])];
         RepositoryView view = View(model);
@@ -348,7 +348,7 @@ public sealed partial class EstateService
 
         if (next is { } step)
         {
-            var brief = new JsonObject { ["permittedChanges"] = new JsonArray([.. Strings(step.Order.Body, "scope").Select(s => (JsonNode)s)]) };
+            var brief = new JsonObject { ["permittedChanges"] = PathArray(step.Paths ?? Strings(step.Order.Body, "scope")) };
             JsonElement filled = FillRepository(model, Element(brief), null, out _, step.Order) ?? Element(brief);
             string? identity = TJson.Text(filled, "repository") is string named ? AssignmentOverlaps.IdentityOf(model, named) : null;
             AssignmentOverlaps.Party draft = AssignmentOverlaps.Draft(model, filled, identity, step.Key);
