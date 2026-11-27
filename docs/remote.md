@@ -106,7 +106,7 @@ record's identity, and only then sends the signature. A change at either check l
 draft beside the new revision; another review is required. A declined or failed presence prompt signs and sends nothing, and
 your words stay a draft for another review.
 
-Only the presence key signs a decision or an acceptance. The phone's request key, which signs every request without asking,
+Only a verified presence key signs a decision or an acceptance on a runtime from 0.9.5. The phone's request key, which signs every request without asking,
 never does. A phone without a presence key for the estate cannot sign a decision: the review says so and offers **Add presence
 key**, described under [Pairing a phone](#pairing-a-phone). The runtime records the presence key's signature, and its local-network
 write ledger names the request device that sent it.
@@ -253,8 +253,8 @@ On the phone, enter the runtime's address, the code and a name for the phone, th
 Remote may use the local network. The runtime proves its identity and its knowledge of the code; the phone creates its request
 key and, where its custody can require presence, its presence key, and the phone asks for your presence once, so the presence
 key can sign its own device record. The runtime records both devices for the same person and profiles, and admits both under
-the authority of the administrator who issued the code; the presence device's record states presence required, and its admission
-names the request device it pairs with. If the runtime refuses either device, it records neither. If the phone cannot make the
+the authority of the administrator who issued the code. The presence device's record says whether the runtime verified the
+requirement, and its admission names the request device it pairs with. If the runtime refuses either device, it records neither. If the phone cannot make the
 presence key (an iPhone without a passcode, an Android phone without a secure lock screen) or you decline the prompt, the phone
 pairs with its request key alone and can add the presence key later. The connection pins the runtime's identity.
 
@@ -278,17 +278,23 @@ record says how its key is held and whether it needs its owner's presence:
 
 | Where | Request key | Presence key |
 | --- | --- | --- |
-| iPhone or iPad | `ios-secure-enclave`, presence `none`: generated in the Secure Enclave, usable only on that device while it is unlocked, never exported or backed up. | `ios-secure-enclave`, presence `required`: generated in the Secure Enclave with user presence, so every signature needs Face ID, Touch ID or the device passcode; it exists only while the device has a passcode. |
-| Android 11 or later | `android-keystore`, presence `none`: generated in Android Keystore, never exported, hardware-backed where the device provides it. | `android-keystore`, presence `required`: generated with per-use authentication, so every signature needs a strong biometric or the device credential; it exists only while the device has a secure lock screen. |
+| iPhone or iPad | `ios-secure-enclave`, presence `none`. The key stays on its device and is available while it is unlocked. | `ios-secure-enclave`, presence `declared`. Remote configures Face ID, Touch ID or the device passcode for every signature. The runtime cannot verify those access controls. |
+| Android 11 or later | `android-keystore`, presence `none`. The key stays in Android Keystore, hardware-backed where the device provides it. | `android-keystore`, presence `required` and `presenceVerification: android-key-attestation` after verification. The hardware requires an authentication token for each signature. |
 | Android 8 to 10 | As above. | None: per-use authentication with the device credential needs Android 11, so the phone signs no decision. |
 | iOS simulator | `file-owner-only`, presence `none`: the simulator has no Secure Enclave, so the key is an owner-only file in the app's storage. | None: an owner-only file cannot require presence, so a simulator build claims none and signs no decision. |
 
-The request key signs every request to the runtime, and its connection certificates, without asking for anything. The presence
-key signs only records, and only after you confirm your presence; the phone's keystore enforces that, not Remote. Exactly the
-presence keys of iPhones and iPads and of Android 11 or later phones enforce presence; the request keys, the simulator and older
-Android phones do not, and their records say so. A presence key's device record is the phone's own statement, which the runtime
-cannot verify: presence on a real iPhone or Android phone is recorded as qualified only when a platform qualification observes
-it on a device. Simulator and CI builds observe no prompt.
+The request key signs requests and connection certificates without prompting. Starting in 0.9.5 (REMOTE-12), the runtime
+verifies Android presence keys during pairing. It checks the certificate chain against Google's Android attestation roots and
+certificate status list, matches the leaf public key and the exchange's fresh challenge, and checks that the hardware requires
+authentication for each use. A status-list request goes from the runtime to Google without a phone or estate identifier. A
+failed check refuses the pairing, and the estate keeps the verification method and the administrator's signed admission.
+The certificate chain stays out of the device record.
+
+On iOS, App Attest can establish app integrity and bind data to an app assertion. Apple provides no attestation for the
+per-use access controls of the separate Secure Enclave signing key Remote uses. Its access-control claim is therefore
+`declared`. The runtime reports previously paired phone keys without verification as declared and requires verified presence
+before a paired phone key can sign a plan another device prepared. Use a verified Android presence key or the desktop for
+those decisions. Simulator and CI builds observe no phone prompt.
 
 Remote's connections are excluded from backups: a replacement phone pairs again instead of inheriting access. To retire a lost
 phone, revoke both of its devices with `vericairn devices revoke <device>`. That erases no estate history. Enrolling a new

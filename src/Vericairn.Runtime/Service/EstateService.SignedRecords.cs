@@ -82,8 +82,8 @@ public sealed partial class EstateService
                 if (Standing(model, device.Device) is not DeviceStanding requester || Standing(model, signer) is not DeviceStanding signing
                     || signing.Admission != "admitted" || !string.Equals(signing.Principal, requester.Principal, StringComparison.Ordinal))
                     return WriteOutcome.Fail(new Problem("denied", $"Device {signer} is not an admitted device of device {device.Device}'s principal, so it cannot sign this plan.", []));
-                if (EstateModel.BodyString(model.Latest(model.ById[signing.Identity]), "presence") != "required")
-                    return Refuse($"Device {signer} does not need its owner's presence at each signature, so it cannot sign a plan another device prepared.");
+                if (ReportedPresence(model, model.Latest(model.ById[signing.Identity])) != "required")
+                    return Refuse($"Device {signer} has no verified per-signature presence requirement, so it cannot sign a plan another device prepared.");
                 // The record's signature names the device's identity, whichever of its record ids the request gave.
                 signer = signing.Identity;
                 key = signing.PublicKey;

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json.Nodes;
+using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Identity;
@@ -13,6 +15,64 @@ namespace Vericairn.Runtime.Service;
 
 public sealed partial class EstateService
 {
+    // Tests provide isolated trust anchors and a recorded status list, never platform keys or a network call.
+    internal AndroidKeyAttestation PairingAttestation { get; set; } = AndroidKeyAttestation.Google;
+
+    private string? PairingPresenceRefusal(PairingPlan plan, PairingDevice device)
+    {
+        if (device.AndroidAttestation is not { } chain)
+        {
+            return device.Presence == "required" || device.Presence == "declared" && device.Custody == DeviceKeyStores.AndroidKeystoreKind
+                ? "Android hardware attestation is required to record verified presence. Update Remote and pair again, or pair a request key alone. Nothing was recorded."
+                : null;
+        }
+        if (plan.Format < 2 || device.Presence != "required" || device.Platform != "android" || device.Custody != DeviceKeyStores.AndroidKeystoreKind
+            || !PairingAttestation.Verify(chain, plan.RuntimeNonce, device.PublicKey))
+        {
+            return "Android key attestation did not verify per-use hardware authentication for this key and pairing. Nothing was recorded.";
+        }
+        return null;
+    }
+
+    private static JsonObject PairedDeviceBody(PairingPlan plan, IReadOnlyList<string> profiles, PairingDevice device)
+    {
+        JsonObject body = DeviceRecords.Body(plan.Principal, device.Name, device.Platform, device.Custody, device.PublicKey, profiles, plan.Format, device.Presence);
+        if (device.AndroidAttestation is not null) body["presenceVerification"] = DeviceRecords.AndroidKeyAttestation;
+        return body;
+    }
+
+    private const string AndroidPresenceReceipt = "The runtime verified Android hardware key attestation for this device record.";
+
+    private static string? ReportedPresence(EstateModel model, RecordEnvelope device)
+    {
+        string? presence = EstateModel.BodyString(device, "presence");
+        if (presence != "required") return presence;
+        string? custody = EstateModel.BodyString(device, "custody");
+        RecordEnvelope initial = model.ById[model.Chain(device)[0]];
+        if (custody == DeviceKeyStores.AndroidKeystoreKind && EstateModel.BodyString(device, "platform") == "android"
+            && EstateModel.BodyString(device, "presenceVerification") == DeviceRecords.AndroidKeyAttestation)
+        {
+            // The phone's signature covers the marker. The verified administrator's admission covers that very record.
+            bool sameAttestedKey = EstateModel.BodyString(initial, "publicKey") == EstateModel.BodyString(device, "publicKey")
+                && EstateModel.BodyString(initial, "platform") == "android"
+                && EstateModel.BodyString(initial, "custody") == DeviceKeyStores.AndroidKeystoreKind
+                && EstateModel.BodyString(initial, "presence") == "required"
+                && EstateModel.BodyString(initial, "presenceVerification") == DeviceRecords.AndroidKeyAttestation;
+            bool verified = sameAttestedKey && model.About(initial.Id, "admission").Any(admission =>
+                admission.Subject?.Hash == initial.ComputedHash && admission.Signatures.Count > 0
+                && EstateModel.BodyString(admission, "status") == "admitted"
+                && EstateModel.BodyString(admission, "note")?.EndsWith(AndroidPresenceReceipt, StringComparison.Ordinal) == true
+                && SignatureChecks.Counts(model, admission));
+            return verified ? "required" : "declared";
+        }
+        bool wasPaired = model.About(initial.Id, "admission").Any(admission =>
+            EstateModel.BodyString(admission, "note") is string note
+            && (note.StartsWith("Paired over the local network with a pairing code ", StringComparison.Ordinal) || note.EndsWith(AndroidPresenceReceipt, StringComparison.Ordinal))
+            && SignatureChecks.Counts(model, admission));
+        // Signed historical records remain intact. Earlier pairings did not independently establish presence.
+        return wasPaired || custody is DeviceKeyStores.AndroidKeystoreKind or DeviceKeyStores.IosSecureEnclaveKind ? "declared" : presence;
+    }
+
     /// <summary>Checks issuance and pins its requesting device (or local admission signer) and the authority it uses.</summary>
     public (PairingAuthority? Authority, string? Problem) PairingIssuer(string principal, string by, IReadOnlyList<string> profiles)
     {

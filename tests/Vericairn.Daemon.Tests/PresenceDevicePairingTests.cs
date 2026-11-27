@@ -11,7 +11,7 @@ namespace Vericairn.Daemon.Tests;
 
 /// <summary>
 /// A phone pairs two keys under one code: its request key, which signs requests unattended, and its presence key, a second device of
-/// the same principal stating presence required, recorded and admitted with it under the same administrator's authority. An
+/// the same principal stating declared presence for iOS, recorded and admitted with it under the same administrator's authority. An
 /// existing pairing adds its presence key with a new code for the same principal; custody that cannot require presence claims none.
 /// </summary>
 [Collection("daemon")]
@@ -39,7 +39,7 @@ public class PresenceDevicePairingTests
         RecordEnvelope request = model.ById[phone.Device];
         RecordEnvelope second = model.ById[phone.PresenceDevice!];
         Assert.Equal((person, person), (EstateModel.BodyString(request, "principal"), EstateModel.BodyString(second, "principal")));
-        Assert.Equal(("none", "required"), (EstateModel.BodyString(request, "presence"), EstateModel.BodyString(second, "presence")));
+        Assert.Equal(("none", "declared"), (EstateModel.BodyString(request, "presence"), EstateModel.BodyString(second, "presence")));
         Assert.Equal(("file-owner-only", DeviceKeyStores.IosSecureEnclaveKind), (EstateModel.BodyString(request, "custody"), EstateModel.BodyString(second, "custody")));
         Assert.Equal(phone.PresenceDevicePublicKey, EstateModel.BodyString(second, "publicKey"));
         Assert.Equal(["local-network"], second.Body.GetProperty("profiles").EnumerateArray().Select(p => p.GetString()));
@@ -121,7 +121,7 @@ public class PresenceDevicePairingTests
         Assert.NotNull(added.PresenceDevice);
         EstateModel model = harness.Estate.Load();
         Assert.Equal(before + 1, model.Current("device").Count());
-        Assert.Equal("required", EstateModel.BodyString(model.ById[added.PresenceDevice!], "presence"));
+        Assert.Equal("declared", EstateModel.BodyString(model.ById[added.PresenceDevice!], "presence"));
         Assert.Equal(person, EstateModel.BodyString(model.ById[added.PresenceDevice!], "principal"));
         Assert.Equal("admitted", harness.Host.Service.Standing(added.PresenceDevice!)!.Admission);
         Assert.Equal(added.PresenceDevice, Assert.Single(harness.Connections.List()).PresenceDevice);

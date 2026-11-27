@@ -13,6 +13,9 @@ namespace Vericairn.Records.Authoring;
 /// </summary>
 public static class DeviceRecords
 {
+    /// <summary>The method recorded when a paired Android key proves per-use hardware authentication.</summary>
+    public const string AndroidKeyAttestation = "android-key-attestation";
+
     /// <summary>The body of a device's first record; record format 2 adds presence (none unless given) and purpose.</summary>
     public static JsonObject Body(string principal, string name, string platform, string custody, string publicKey, IReadOnlyList<string> profiles, long format, string? presence = null, string purpose = "signing")
     {

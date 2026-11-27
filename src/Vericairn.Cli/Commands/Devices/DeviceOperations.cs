@@ -27,7 +27,13 @@ internal sealed class DeviceOperations(CommandContext context)
         {
             foreach (DeviceRow row in rows)
             {
-                string presence = row.Presence is null ? string.Empty : row.Presence == "required" ? "  presence required" : "  no presence";
+                string presence = row.Presence switch
+                {
+                    "required" => "  presence required",
+                    "declared" => "  presence declared",
+                    "none" => "  no presence",
+                    _ => string.Empty,
+                };
                 string purpose = row.Purpose == "recovery" ? "  recovery" : string.Empty;
                 string profiles = row.Profiles is { Count: > 0 } ? "  profiles " + string.Join(", ", row.Profiles) : string.Empty;
                 context.Output.WriteLine($"{row.Id}  {row.PrincipalName}  {row.Name}  {row.Platform}  {row.Custody}{presence}{purpose}  {row.Admission}{(row.HeldHere ? "  key held on this machine" : string.Empty)}{profiles}");
@@ -216,7 +222,8 @@ internal sealed class DeviceOperations(CommandContext context)
             context.Output.WriteLine(charter == "per-signature"
                 ? "  the estate's charter asks one presence check per signature for every device, which wins"
                 : "  the estate's charter states a presence policy that is neither per-signature nor per-action, so every signature asks its own check");
-        if (row.Presence != "required") context.Output.WriteLine("  this device's signatures ask no presence check, so the setting changes nothing for it");
+        if (row.Presence == "declared") context.Output.WriteLine("  the runtime has no verified presence requirement for this paired device");
+        else if (row.Presence != "required") context.Output.WriteLine("  this device's signatures ask no presence check, so the setting changes nothing for it");
         context.Output.WriteLine(effective == "per-signature"
             ? "  in effect: one presence check per signature"
             : "  in effect: presence sessions where this build and this macOS version open them ('vericairn doctor' says whether they do)");
