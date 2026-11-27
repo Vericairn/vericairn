@@ -51,13 +51,13 @@ public sealed partial class EstateService
             {
                 NextEligible.FlowRunRoutes flow = NextEligible.FlowRoutes(model, current, Machine(model));
                 (string runOverlaps, JsonArray runJson) = GoalOverlaps(model, flow.Position.Work is { } work ? [work] : [],
-                    flow.Position.Work is { } order && flow.Next is NextEligible.FlowStepRoute { Route.Assignment: null } step ? (order, step.Name) : null);
+                    flow.Position.Work is { } order && flow.Next is NextEligible.FlowStepRoute { Route.Assignment: null } step ? (order, step.Name, FlowPermissions.For(current, order, step.Step.Step)) : null);
                 return new NextResponse(NextEligible.RenderText(model, flow) + runOverlaps, WithOverlaps(NextEligible.RenderJson(model, flow), runJson));
             }
 
             NextEligible.GoalRoutes routes = NextEligible.Routes(model, current, Machine(model));
             (string overlaps, JsonArray overlapJson) = GoalOverlaps(model, [.. GoalRules.Work(model, current)],
-                routes.Next is NextEligible.GoalStep { Route.Assignment: null } next ? (next.Order, EstateModel.BodyString(next.Order, "key") ?? next.Order.Id) : null);
+                routes.Next is NextEligible.GoalStep { Route.Assignment: null } next ? (next.Order, EstateModel.BodyString(next.Order, "key") ?? next.Order.Id, null) : null);
             return new NextResponse(NextEligible.RenderText(model, routes) + overlaps, WithOverlaps(NextEligible.RenderJson(model, routes), overlapJson));
         }
     }
@@ -107,7 +107,7 @@ public sealed partial class EstateService
         // its route authors them completely in advance, so a person's assignment and ask share one presence check, listed by exact hash
         // in the step's presence session; the list is read at the step's first signature, once the route has filled it.
         List<RecordDraft> stepDrafts = [];
-        using IDisposable counted = SessionAction("goal step " + goal, null, GoalStepSession(goal, stepDrafts));
+        using IDisposable? counted = request.Check ? null : SessionAction("goal step " + goal, null, GoalStepSession(goal, stepDrafts));
         AuthoredRecord? routed = null;
         RunStartRequest run;
         IReadOnlyList<string> notices = [];
@@ -144,6 +144,11 @@ public sealed partial class EstateService
                 return StepProblem(goalId, "refused", $"Goal {goalId} is {status}: a step is taken only for an active goal, and nothing was recorded.");
             }
 
+            if (request.Check && !FlowRuns.IsRun(current))
+            {
+                return StepProblem(goalId, "refused", "Goal step --check inspects a run of a flow. Nothing was recorded.");
+            }
+
             Taken taken;
             if (StandingAgents.IsStanding(current))
             {
@@ -167,6 +172,11 @@ public sealed partial class EstateService
                 // The run's own required attention is asked of the sponsor first, and holds every dispatch until it is answered.
                 if (flow.AttentionNext is NextEligible.AttentionRoute held)
                 {
+                    if (request.Check)
+                    {
+                        return new GoalStepResponse(goalId, "check", held.Route.Reason, true, Route: held.Route.State, Principal: held.Route.Principal);
+                    }
+
                     return AttentionAsk(model, current, new Taken(flow.Position.Work, "the run", "the run's required attention", held.Route, flow.Position, null, null, held.Attention), request);
                 }
 
@@ -195,6 +205,38 @@ public sealed partial class EstateService
 
             route = taken.Route;
             key = taken.Key;
+            if (taken.Step is { } routedStep && route.State is not ("rule" or "request" or "attention"))
+            {
+                IReadOnlyList<string> paths = FlowPermissions.For(current, taken.Order, routedStep.Step);
+                if (route.State == "agent")
+                {
+                    if (paths.Count == 0)
+                    {
+                        return StepProblem(goalId, FlowPermissions.Code, FlowPermissions.Message(key), key, route);
+                    }
+
+                    if (route.Assignment is RecordEnvelope previous)
+                    {
+                        if (FlowPermissions.Carried(paths, previous) is not { } carriedPaths)
+                        {
+                            return StepProblem(goalId, FlowPermissions.Code, $"Assignment {previous.Id} of flow step {key} needs a brief with permitted paths within the step's current path declarations.", key, route);
+                        }
+
+                        paths = carriedPaths;
+                    }
+                }
+
+                if (request.Check)
+                {
+                    return new GoalStepResponse(goalId, "check", route.Reason, true, key, route.State, route.Principal) { PermittedChanges = paths };
+                }
+            }
+
+            if (request.Check)
+            {
+                return new GoalStepResponse(goalId, "check", route.Reason, true, key, route.State, route.Principal);
+            }
+
             if (route.State == "rule")
             {
                 return RuleStep(model, current, taken, request);

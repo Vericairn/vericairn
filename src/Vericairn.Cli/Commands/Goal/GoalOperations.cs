@@ -7,6 +7,7 @@ using Json = System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Types;
 using Vericairn.Records.Canonical;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Templates;
 using Vericairn.Sdk;
@@ -177,6 +178,11 @@ internal sealed class GoalOperations(CommandContext context)
             return context.Fail("--subject, --flow-option and --until configure a run, and go with --flow or --standing.");
         }
 
+        if (proposal.Flow is null && proposal.FlowPaths is { Length: > 0 })
+        {
+            return context.Fail("--flow-path configures a run and goes with --flow.");
+        }
+
         if (!standing && ((proposal.Triggers?.Length ?? 0) > 0 || (proposal.Period?.Length ?? 0) > 0 || proposal.RunsOn is not null || proposal.AwaitingReview is not null || (proposal.Outputs?.Length ?? 0) > 0))
         {
             return context.Fail("--trigger, --period, --awaiting-review, --outputs and --runs-on configure a standing agent, and go with --standing.");
@@ -194,7 +200,7 @@ internal sealed class GoalOperations(CommandContext context)
             }
 
             WriteOutcome outcome = api.GoalPropose(new GoalProposeRequest(proposal.By, CommandJson.Element(body), proposal.Supersedes));
-            int code = context.ReportOutcome(outcome, json);
+            int code = ReportGoalWrite(outcome, json);
             // A standing agent's preview: its triggers, what would be due and its caps, before its sponsor activates it.
             if (standing && outcome.Ok && !json && outcome.Written is RecordWritten written && api.GoalDue(written.Id) is GoalDueResponse due)
             {
@@ -296,6 +302,11 @@ internal sealed class GoalOperations(CommandContext context)
         if (options.Count > 0)
         {
             run["options"] = options;
+        }
+
+        if (proposal.FlowPaths is { Length: > 0 } paths)
+        {
+            run["paths"] = new Json.JsonArray(paths.Select(path => (Json.JsonNode)path).ToArray());
         }
 
         if (proposal.Until is not null)
@@ -477,7 +488,7 @@ internal sealed class GoalOperations(CommandContext context)
     public int GoalAction(string root, string action, string goal, string by, string? note, bool json) => context.WithApi(root, api =>
     {
         var request = new GoalActionRequest(by, note);
-        return context.ReportOutcome(action switch
+        return ReportGoalWrite(action switch
         {
             "activate" => api.GoalActivate(goal, request),
             "pause" => api.GoalPause(goal, request),
@@ -485,6 +496,18 @@ internal sealed class GoalOperations(CommandContext context)
             _ => api.GoalStop(goal, request),
         }, json);
     });
+
+    private int ReportGoalWrite(WriteOutcome outcome, bool json)
+    {
+        if (outcome.Problem is { Code: FlowPermissions.Code } problem)
+        {
+            if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { problem }, ProtocolJson.Options));
+            CommandContext.WriteRuntime(context.Error, $"{problem.Code} {problem.Message}");
+            return Failed;
+        }
+
+        return context.ReportOutcome(outcome, json);
+    }
 
     /// <summary>Records the sponsor's custody exception for a goal's current revision, with its reason and its expiry.</summary>
     public int GoalCustodyException(string root, string goal, string by, string reason, string expires, bool json) => context.WithApi(root, api =>
@@ -520,7 +543,7 @@ internal sealed class GoalOperations(CommandContext context)
 
         return context.WithApi(root, api =>
         {
-            if (options.Detach && !context.UsingDaemon)
+            if (options.Detach && !options.Check && !context.UsingDaemon)
             {
                 return context.Fail("--detach leaves an agent's run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or take the step in the foreground.");
             }
@@ -532,11 +555,17 @@ internal sealed class GoalOperations(CommandContext context)
             }
 
             GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(options.By, options.Repository, settings.Count == 0 ? null : settings, options.WallMinutes, options.Branch, options.Base,
-                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage) { Search = options.Choices?.Search, Occurrence = options.Occurrence, Now = options.Now });
+                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage) { Search = options.Choices?.Search, Occurrence = options.Occurrence, Now = options.Now, Check = options.Check });
             if (!step.Ok)
             {
                 // From 0.9.4 (CODE-80) the runtime's problem is shown as its own words, marked and escaped.
                 if (step.Run?.Problem is { Findings.Count: > 0 } rejected) return context.ReportOutcome(WriteOutcome.Fail(rejected), json, runtimeProblem: true);
+                if (step.Problem is { } stepProblem && (options.Check || stepProblem.Code == FlowPermissions.Code))
+                {
+                    if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { step }, ProtocolJson.Options));
+                    CommandContext.WriteRuntime(context.Error, $"{stepProblem.Code} {step.Message}");
+                    return Failed;
+                }
                 CommandContext.WriteRuntime(context.Error, step.Message);
                 return Failed;
             }
@@ -552,11 +581,17 @@ internal sealed class GoalOperations(CommandContext context)
             {
                 context.Output.WriteLine(step.Step is null ? $"goal {step.Goal}  {step.Outcome}" : $"step {step.Step}  {step.Route}  {step.Outcome}{(step.Principal is null ? string.Empty : "  " + step.Principal)}");
                 context.Output.WriteLine("  " + step.Message);
+                if (options.Check && step.PermittedChanges is { Count: > 0 } paths)
+                {
+                    context.Output.WriteLine("  Permitted changes");
+                    foreach (string path in paths) context.Output.WriteLine("    " + path);
+                }
+
                 RunConsole.PrintSettled(context, row);
             }
 
             return step.Outcome != "run" || options.Detach || row?.Status == "observed-success" ? Clean : HasErrors;
-        });
+        }, readOnly: options.Check);
     }
 
     /// <summary>Records a goal's evaluation from the evaluator's verdicts, n:verdict:reason, and the records read, n:id.</summary>

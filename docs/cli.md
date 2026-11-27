@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 49, November 27, 2026. Add `--flow-path` to `goal propose --flow` and `--check` to `goal step` for runs of a flow. An agent work step without a permitted path is refused at proposal or activation in the development build.
+
 Revision 48, November 27, 2026. A present `vericairn-enclave` helper must complete its availability check: one that cannot start, exits unexpectedly, is killed or times out makes `devices create` refuse before it makes a key and `doctor` mark the Secure Enclave default unavailable, while exit 3 and an absent helper keep file custody; a daemon that cannot read its Secure Enclave identity refuses to start and keeps the identity, in the development build.
 
 Revision 47, November 26, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
@@ -536,6 +538,15 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
 per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused.
+
+From 0.9.5 (FIX-166), give `--flow-path 'src/docs/**'` with `goal propose --flow` to set a repository-relative pattern for
+the run. Repeat `--flow-path` for each pattern. Routing derives each step's assignment brief from that step's declared
+`paths`, the goal's `--flow-path` patterns and the run's work-order `scope` entries prefixed `path:`. Each supplied list
+constrains the result. If an agent work step has no interpretable pattern covered by all its supplied lists, `goal propose`
+and `goal activate` refuse with `flow.permitted-paths`. Choose compatible lists and declare a narrower pattern where they overlap.
+
+`goal step <goal> --by <principal> --check` previews a flow run's next eligible step and its permitted changes without
+signing, recording or dispatching. With `--json`, the preview includes `step.permittedChanges` for the routed assignment.
 
 From PROC-10 (0.9.2), `goal next` also routes each review before hand-off as `<step> review`, and each step's required
 attention as route state `attention`. For a review, `goal step` records an assignment whose `step.review` names the items and

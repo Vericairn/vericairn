@@ -115,6 +115,9 @@ public sealed partial class EstateService
         foreach (JsonElement finding in AttentionRows(document, "reconcile"))
             Add("incident", AttentionString(finding, "location"), AttentionString(finding, "message"), AttentionString(finding, "code"),
                 "Inspect reconciliation in Workbench or the command line.", "reconciliation", AttentionString(finding, "location") + ":" + AttentionString(finding, "code"));
+        foreach (JsonElement goal in AttentionRows(document, "flowPathRefusals"))
+            Add("failed check", AttentionString(goal, "title"), string.Join(" ", AttentionRows(goal, "refusals").Select(refusal => AttentionString(refusal, "message"))),
+                FlowPermissions.Code, "Review the run's permitted paths in Workbench or with vericairn goal show.", "goal", AttentionString(goal, "goal"));
         RunsResponse? observedRuns = null;
         RunsResponse ReadRuns() => observedRuns ??= Runs(model);
         foreach (CommunicationAttention item in RequiredAttention(model, () => progress, recipient: principal, runs: ReadRuns))
