@@ -212,9 +212,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
 
             string staging = Path.Combine(target.Control, "transfer");
             WorkspaceGitCommand.Require(target.Control, "init", "--quiet", "--bare", "--template=", "--object-format=" + settings.ObjectFormat, staging);
-            WorkspaceGitCommand.Require(staging, "-c", "fetch.unpackLimit=1", "fetch", "--no-tags", "--no-write-fetch-head",
-                "--no-recurse-submodules", "--no-auto-maintenance", "--", sender.Directory, review.Head);
-            WorkspaceGitCommand.Require(staging, "cat-file", "-e", review.Head + "^{commit}");
+            StageNewObjects(sender.Directory, staging, Path.Combine(target.Control, "packed"), review.Head, [review.Expected, workspace.Commit]);
 
             beforeReferenceUpdate?.Invoke();
             // Use Git's ref lock convention, so concurrent Git writers cannot overwrite this comparison.
@@ -307,6 +305,29 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         throw new ProviderRefusedException(selected
             ? $"Branch {branch} is checked out in the registered clone; choose a work branch so its working tree stays unchanged."
             : $"Branch {branch} has a legacy linked worktree. Preserve its committed and uncommitted work, then use git worktree remove from the registered clone before retrying.");
+    }
+
+    /// <summary>
+    /// Stages only the objects the reviewed head adds to what the clone holds (its expected head and the commit the workspace was
+    /// prepared from, which the workspace still holds): a pack made in the sender's runtime-owned view, then indexed and checked object by object by a separate Git
+    /// process in the staging repository. A fetch into the empty staging repository would carry the branch's whole history, and
+    /// each retained run would grow the clone by about its own size.
+    /// </summary>
+    private static void StageNewObjects(string sender, string staging, string scratch, string head, IEnumerable<string?> held)
+    {
+        Directory.CreateDirectory(scratch);
+        // What the clone holds: the branch's expected head where it has one, and always the commit the workspace was prepared from.
+        string revisions = head + "\n" + string.Concat(held.OfType<string>().Distinct(StringComparer.Ordinal)
+            .Where(commit => commit != head && Git(sender, out _, "cat-file", "-e", commit + "^{commit}") == 0)
+            .Select(commit => "^" + commit + "\n"));
+        if (WorkspaceGitCommand.RunWithInput(sender, out string name, TimeSpan.FromMinutes(10), revisions,
+            "pack-objects", "--revs", "--quiet", Path.Combine(scratch, "pack")) != 0 || name.Trim() is not { Length: 40 or 64 } packName)
+            throw new IOException("The workspace's new objects could not be packed for the registered clone.");
+
+        string pack = Path.Combine(staging, "objects", "pack", "pack-" + packName + ".pack");
+        File.Copy(Path.Combine(scratch, "pack-" + packName + ".pack"), pack);
+        WorkspaceGitCommand.Require(staging, "index-pack", "--fsck-objects", pack);
+        WorkspaceGitCommand.Require(staging, "cat-file", "-e", head + "^{commit}");
     }
 
     private static void PublishPacks(string staging, AcquisitionGitView destination)

@@ -77,6 +77,65 @@ public sealed class AcquisitionWorkingTreeTests : IDisposable
     }
 
     [Fact]
+    public void AnIndexGitWroteWithAnEntryOutsideTheRootIsRefusedBeforeAnyWorkingTreeCommand()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Skip("The proof uses a named pipe outside the repository.");
+        string repository = Repository();
+        // Outside the repository, a named pipe: anything that opened it to read or hash would block until the test's deadline.
+        string outside = Path.Combine(scratch, "outside");
+        Directory.CreateDirectory(outside);
+        Assert.Equal(0, mkfifo(Path.Combine(outside, "pipe"), 0x180));
+        string blob = RunEstate.Git(repository, "rev-parse", "HEAD:tracked.txt");
+        File.WriteAllBytes(Path.Combine(repository, ".git", "index"), Index(("tracked.txt", blob), ("../outside/pipe", blob)));
+        // Git itself reads this index: its own listing names the entry outside the root.
+        Assert.Contains("../outside/pipe", RunEstate.Git(repository, "ls-files", "--stage"), StringComparison.Ordinal);
+
+        var commands = new List<string>();
+        var adapter = new GitCommandAdapter(info =>
+        {
+            commands.Add(string.Join(' ', info.ArgumentList));
+            return BoundedProcess.Run(info, TestTiming.HangTimeout);
+        });
+        ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(repository));
+
+        Assert.Contains("unsafe path \"../outside/pipe\"", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains(commands, command => command.Contains("ls-files", StringComparison.Ordinal));
+        Assert.DoesNotContain(commands, command => command.Contains(" status", StringComparison.Ordinal) || command.Contains("diff-files", StringComparison.Ordinal)
+            || command.Contains("update-index", StringComparison.Ordinal) || command.Contains("--work-tree", StringComparison.Ordinal));
+    }
+
+    // A version 2 index with the given entries, in path order, written byte for byte as Git writes one.
+    private static byte[] Index(params (string Path, string Blob)[] entries)
+    {
+        using var body = new MemoryStream();
+        void Word(uint value) { body.WriteByte((byte)(value >> 24)); body.WriteByte((byte)(value >> 16)); body.WriteByte((byte)(value >> 8)); body.WriteByte((byte)value); }
+        body.Write("DIRC"u8);
+        Word(2);
+        Word((uint)entries.Length);
+        foreach ((string path, string blob) in entries.OrderBy(e => e.Path, StringComparer.Ordinal))
+        {
+            long start = body.Position;
+            for (int i = 0; i < 6; i++) Word(0);
+            Word(0x81A4);
+            Word(0);
+            Word(0);
+            Word(0);
+            body.Write(Convert.FromHexString(blob));
+            byte[] name = System.Text.Encoding.UTF8.GetBytes(path);
+            body.WriteByte((byte)(name.Length >> 8 & 0x0F));
+            body.WriteByte((byte)name.Length);
+            body.Write(name);
+            do body.WriteByte(0); while ((body.Position - start) % 8 != 0);
+        }
+
+        byte[] content = body.ToArray();
+        // Git's index checksum is SHA-1 in a SHA-1 repository: a format requirement here, not a security choice.
+#pragma warning disable CA5350
+        return [.. content, .. System.Security.Cryptography.SHA1.HashData(content)];
+#pragma warning restore CA5350
+    }
+
+    [Fact]
     public void AnObjectStoreThatSharesFilesNamesAnIndependentCloneAsTheRemedy()
     {
         string repository = Repository();

@@ -129,6 +129,40 @@ public class WorkspaceRepositoryTests
     }
 
     [Fact]
+    public void RetentionAddsOnlyTheRunsNewObjectsToTheClone()
+    {
+        using var run = new RunEstate();
+        // A history of its own in the clone, which a retained run must not copy again.
+        for (int i = 0; i < 20; i++)
+        {
+            File.WriteAllText(Path.Combine(run.Clone, $"history-{i}.txt"), $"history {i}\n");
+            RunEstate.Git(run.Clone, "add", ".");
+            RunEstate.Git(run.Clone, "commit", "-q", "-m", $"History {i}");
+        }
+
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/incremental", null, Path.Combine(run.Scratch, "workspace"));
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        Directory.CreateDirectory(Path.Combine(workspace.Path, "widget"));
+        File.WriteAllText(Path.Combine(workspace.Path, "widget", "new.txt"), "the run's one new file\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "The run's change");
+        string head = RunEstate.Git(workspace.Path, "rev-parse", "HEAD");
+        Assert.Null(provider.CheckScope(workspace, baseline, ["widget/**"]).Problem);
+
+        string packs = Path.Combine(run.Clone, ".git", "objects", "pack");
+        string[] before = Directory.Exists(packs) ? Directory.GetFiles(packs, "*.pack") : [];
+        Assert.Null(provider.RetainForReview(workspace));
+        Assert.Equal(head, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + workspace.Branch));
+        string added = Assert.Single(Directory.GetFiles(packs, "*.pack").Except(before));
+        // The run's commit, its root tree, the widget tree and the new blob: four objects, never the clone's 60-odd.
+        string listed = RunEstate.Git(run.Clone, "verify-pack", "-v", Path.ChangeExtension(added, ".idx"));
+        int objects = listed.Split('\n').Count(line => line.Length > 40 && line[40] == ' ' && !line.StartsWith("chain", StringComparison.Ordinal));
+        Assert.InRange(objects, 1, 6);
+        RunEstate.Git(run.Clone, "fsck", "--connectivity-only", "--no-dangling");
+    }
+
+    [Fact]
     public void AWorkspaceFetchTakesTheNamedCommitWithoutSubmoduleAdministrationOrInstall()
     {
         using var run = new RunEstate();
