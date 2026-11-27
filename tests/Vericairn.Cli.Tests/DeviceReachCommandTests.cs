@@ -62,7 +62,9 @@ public sealed class DeviceReachCommandTests
         JsonElement witness = row.GetProperty("firstWitness");
         Assert.Equal((checkpoint.Id, checkpoint.ComputedHash, checkpoint.At),
             (witness.GetProperty("id").GetString(), witness.GetProperty("hash").GetString(), witness.GetProperty("at").GetString()));
-        Assert.DoesNotContain(records, r => r.GetProperty("id").GetString() == earlier.Id);
+        // Witnessed before the cutoff, but this machine's ledger logged the device signing it at the cutoff: a checkpoint pins
+        // content, not signatures, so the row is listed on the ledger's time.
+        Assert.Equal("ledger-time", Assert.Single(records, r => r.GetProperty("id").GetString() == earlier.Id).GetProperty("evidence").GetString());
         string text = CliHarness.Ok(args).Out;
         Assert.Contains($"stated at {later.At}", text, StringComparison.Ordinal);
         Assert.Contains($"witnessed by checkpoint {checkpoint.Id} at {checkpoint.At}", text, StringComparison.Ordinal);
@@ -118,8 +120,12 @@ public sealed class DeviceReachCommandTests
         string at = RecordParser.FormatTimestamp(afterWitness);
         ledger.Append(new(at, session, "announced") { Device = device });
         ledger.Append(new(at, session, "signed") { Record = backdated.Id, Type = backdated.Type, Hash = backdated.ComputedHash });
-        row = Assert.Single(RecordsSince(afterWitness), r => r.GetProperty("id").GetString() == backdated.Id);
-        Assert.Equal((changed.Envelope.ComputedHash, "unwitnessed"), (row.GetProperty("hash").GetString(), row.GetProperty("evidence").GetString()));
+        JsonElement[] rows = [.. RecordsSince(afterWitness).Where(r => r.GetProperty("id").GetString() == backdated.Id)];
+        row = Assert.Single(rows, r => r.GetProperty("hash").GetString() == changed.Envelope.ComputedHash);
+        Assert.Equal("unwitnessed", row.GetProperty("evidence").GetString());
+        // The ledger logged the device signing the earlier content after the cutoff, which a checkpoint witnessed before it.
+        JsonElement signedLate = Assert.Single(rows, r => r.GetProperty("hash").GetString() == backdated.ComputedHash);
+        Assert.Equal(("presence-ledger", "ledger-time"), (signedLate.GetProperty("source").GetString(), signedLate.GetProperty("evidence").GetString()));
 
         JsonElement.ArrayEnumerator RecordsSince(DateTimeOffset since) =>
             CliHarness.Ok("--estate", estate.Root, "--json", "devices", "reach", revision.Id, "--since", RecordParser.FormatTimestamp(since))
@@ -429,7 +435,8 @@ public sealed class DeviceReachCommandTests
             "--since", "2020-01-01T00:00:00Z").Json.GetProperty("revocations").EnumerateArray());
         JsonElement[] serving = revocation.GetProperty("observations").EnumerateArray().Where(o => o.GetProperty("kind").GetString() == "server").ToArray();
         JsonElement live = Assert.Single(serving, o => o.GetProperty("evidence").GetString() == "server-read");
-        JsonElement retained = Assert.Single(serving, o => o.GetProperty("evidence").GetString() == "journal-found");
+        // The daemon wrote the revocation itself, so its journal names it as written, by the guide's definitions.
+        JsonElement retained = Assert.Single(serving, o => o.GetProperty("evidence").GetString() == "journal-written");
         Assert.Equal(observers[1].GetProperty("identity").GetString(), live.GetProperty("identity").GetString());
         Assert.Equal(live.GetProperty("identity").GetString(), retained.GetProperty("identity").GetString());
     }

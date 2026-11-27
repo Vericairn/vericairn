@@ -29,6 +29,7 @@ internal sealed record DeviceSignatureReach(string Id, string Hash, string? Type
     internal const string WitnessedAfterCutoff = "witnessed-after-cutoff";
     internal const string Unwitnessed = "unwitnessed";
     internal const string ClaimedTime = "claimed-time";
+    internal const string LedgerTime = "ledger-time";
 }
 
 internal sealed record DeviceCheckpointEvidence(string Id, string Hash, string At)
@@ -77,11 +78,15 @@ public sealed partial class EstateService
             if (!record.Signatures.Any(s => revisionIds.Contains(s.Device))) continue;
             var key = (record.Id, record.ComputedHash);
             RecordEnvelope? witness = FirstWitness(history, witnesses, key);
-            if (witness?.AtTime < since || !VerifiesDeviceSignature(record, revisionIds, publicKeys)) continue;
             var entries = signedBySession[key];
+            // A checkpoint pins content, not signatures: this machine's ledger logging the signing at or after the cutoff qualifies
+            // the row even where an independent checkpoint witnessed the same content before it.
+            bool signedAfter = entries.Any(e => AtOrAfter(e.Signature.At, since));
+            if ((witness?.AtTime < since && !signedAfter) || !VerifiesDeviceSignature(record, revisionIds, publicKeys)) continue;
             // A closing is positive evidence of a boundary, but absence from it could also be a late merge of older work.
             RecordEnvelope? outside = closings.FirstOrDefault(c => !model.Trust.Witnesses(c, record))?.Record;
-            string evidence = witness is not null ? DeviceSignatureReach.WitnessedAfterCutoff
+            string evidence = witness?.AtTime < since ? DeviceSignatureReach.LedgerTime
+                : witness is not null ? DeviceSignatureReach.WitnessedAfterCutoff
                 : record.AtTime >= since ? DeviceSignatureReach.ClaimedTime : DeviceSignatureReach.Unwitnessed;
             records.TryAdd(key, new(record.Id, record.ComputedHash, record.Type, record.ExpectedPath, record.At,
                 "record-signature", evidence, [.. entries.Select(e => e.Session).Distinct(StringComparer.Ordinal)],
@@ -94,9 +99,9 @@ public sealed partial class EstateService
             if (local.Signature is not { Hash: string hash } signature) continue;
             var key = (signature.Record, hash);
             RecordEnvelope? witness = FirstWitness(history, witnesses, key);
-            if (witness?.AtTime < since) continue;
             records.TryAdd(key, new(signature.Record, hash, signature.Type, null, signature.At, "presence-ledger",
-                witness is null ? DeviceSignatureReach.Unwitnessed : DeviceSignatureReach.WitnessedAfterCutoff,
+                witness is null ? DeviceSignatureReach.Unwitnessed
+                    : witness.AtTime < since ? DeviceSignatureReach.LedgerTime : DeviceSignatureReach.WitnessedAfterCutoff,
                 [.. entries.Select(e => e.Session).Distinct(StringComparer.Ordinal)], LedgerTimes(entries.Select(e => e.Signature)), DeviceCheckpointEvidence.From(witness)));
         }
 

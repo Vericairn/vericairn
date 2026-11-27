@@ -1242,9 +1242,13 @@ is its author's claim.
   cutoff or the record is available only in the presence ledger. This keeps backdated records visible even before a checkpoint.
 - **Listed on the record's own claimed time** (`claimed-time`) means the record's claimed time is at or after the cutoff and
   there is no qualifying checkpoint witness.
+- **Signed after the cutoff by this machine's ledger** (`ledger-time`) means an independent checkpoint witnessed the content
+  before the cutoff, but this machine logged the device's signing of it at or after the cutoff: a checkpoint pins content,
+  not signatures.
 
 A matching local ledger signing time is what this machine logged for the exact device, record id and hash. A ledger entry
-at or after the cutoff can supply a row when the exact signed record is unavailable, subject to the same checkpoint rule.
+at or after the cutoff supplies a row whatever checkpoint witnessed the content, labelled `ledger-time` when an independent
+checkpoint witnessed it before the cutoff, and supplies one when the exact signed record is unavailable.
 The report also shows when a version is outside the witnessed history of a signed device closing at or after the cutoff.
 Older records can arrive from another copy after a closing. The exact signing time may remain unknown.
 

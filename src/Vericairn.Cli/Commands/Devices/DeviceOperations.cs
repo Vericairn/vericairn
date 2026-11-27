@@ -100,6 +100,7 @@ internal sealed class DeviceOperations(CommandContext context)
                 {
                     DeviceSignatureReach.WitnessedAfterCutoff => "witnessed after the cutoff",
                     DeviceSignatureReach.ClaimedTime => "listed on the record's own claimed time",
+                    DeviceSignatureReach.LedgerTime => "signed after the cutoff by this machine's ledger",
                     _ => record.Evidence,
                 };
                 string line = $"  {record.Type} {record.Id}  {record.Hash}  {record.Source}  {at} {record.At}  {evidence}{sessions}";
