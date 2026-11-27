@@ -13,10 +13,17 @@ internal sealed class RuntimeRotateCommand : Command
         var operations = new RuntimeNetworkConfiguration(context);
         var compromisedOption = new Option<bool>("--compromised") { Description = "The certificate's key may be known to someone else: also close every open connection, so nothing continues under it." };
         var identityOption = new Option<bool>("--identity") { Description = "The runtime identity's key may be known to someone else: replace the identity too; every paired device then pairs again." };
+        var replaceUnreadableOption = new Option<bool>("--replace-unreadable")
+        {
+            Description = "With --identity and the runtime stopped, make a new identity when the saved Secure Enclave identity cannot be read here (its blob missing, unusable or not matching, or no Secure Enclave on this machine) or its record cannot be read. The replaced record is kept beside it. Every paired device must pair again.",
+        };
         var reasonOption = new Option<string?>("--reason") { Description = "Why, for the runtime's log." };
         Options.Add(compromisedOption);
         Options.Add(identityOption);
+        Options.Add(replaceUnreadableOption);
         Options.Add(reasonOption);
-        SetAction(parseResult => operations.RuntimeRotate(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(compromisedOption), parseResult.GetValue(identityOption), parseResult.GetValue(reasonOption), parseResult.GetValue(context.JsonOption)));
+        SetAction(parseResult => operations.RuntimeRotate(
+            parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(compromisedOption), parseResult.GetValue(identityOption),
+            parseResult.GetValue(replaceUnreadableOption), parseResult.GetValue(reasonOption), parseResult.GetValue(context.JsonOption)));
     }
 }

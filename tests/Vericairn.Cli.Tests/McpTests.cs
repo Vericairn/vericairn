@@ -224,13 +224,12 @@ public class McpTests
             Assert.True(before.GetProperty("ready").GetBoolean());
             string hash = before.GetProperty("goal").GetProperty("hash").GetString()!;
 
-            // The goal tools are reads but, from 0.9.4 (PROC-19), goal_decide, the decision of a run's step its assignee records; the writes a
-            // worker sees are the five of its contract and goal_decide, none of which records a goal's status, evaluation or acceptance.
+            // Goal lifecycle and routing writes are operator tools. A worker can record its decision when its assignment holds the step.
             var registry = new ToolRegistry(api, builder);
             foreach (string name in new[] { "document_sections", "section_brief" })
                 Assert.False(registry.Visible().Single(t => t.Name == name).Writes);
             Assert.Equal(["goal_decide", "goal_due", "goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
-            Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal) && t.Name != "goal_decide"), t => Assert.False(t.Writes));
+            Assert.All(registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal) && t.Name != "goal_decide"), t => Assert.False(t.Writes));
             // From 0.9.4 (GOAL-08) the standing outputs' three writes too, each refused for an assignment that carries no occurrence.
             Assert.Equal(["document_review", "goal_decide", "standing_possibility", "standing_publication", "standing_question", "work_amend", "work_attempt", "work_progress", "work_result"],
                 registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
@@ -257,7 +256,7 @@ public class McpTests
             Assert.Contains($"[ask {ask}], by Builder, open", api.Asks(op).Text, StringComparison.Ordinal);
             Assert.DoesNotContain(registry.All, t => t.Writes && (t.Name.Contains("ask", StringComparison.Ordinal) || t.Name.Contains("decision", StringComparison.Ordinal) || t.Name.Contains("answer", StringComparison.Ordinal)));
 
-            // Nor does any tool launch, stop or settle an agent run: the worker is no tool of an agent's.
+            // No tool available to this worker launches, stops or settles an agent run.
             Assert.Empty(api.Records("operation"));
             Assert.DoesNotContain(registry.All, t => t.Name.Contains("run", StringComparison.Ordinal) || t.Name.Contains("launch", StringComparison.Ordinal) || t.Name.Contains("worker", StringComparison.Ordinal));
 

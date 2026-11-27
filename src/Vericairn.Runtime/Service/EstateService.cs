@@ -15,6 +15,7 @@ using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Objects;
@@ -313,13 +314,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The check-time warning for the unwitnessed tail (design/signed-history.md § 7): each record file deleted in the checked-out commit's
-    /// reachable history, absent here, that no counting checkpoint witnessed, since a witnessed one is already an error and an acknowledged
-    /// removal needs no warning. It depends on the clone, so it stays out of the canonical status; a shallow clone reports it unavailable.
+    /// reachable history, absent here, that no counting checkpoint witnessed. A verified acknowledgment of the exact
+    /// Git deletion is informational. It depends on the clone, so it stays out of the canonical status; a shallow clone reports it unavailable.
     /// </summary>
     private FindingList DeletedInGit(EstateModel model)
     {
         var findings = new FindingList();
-        if (model.Manifest?.Profile != "repository-synced" || Providers.Source("git")?.DeletedRecordFiles(model.Root) is not { } deletions) return findings;
+        if (model.Manifest?.Profile != "repository-synced" || Providers.Source("git") is not { } git ||
+            git.DeletedRecordFiles(model.Root) is not { } deletions) return findings;
         if (deletions.Shallow)
         {
             findings.Info("history.deleted-in-git", EstateLayout.RecordsDirectory, "Unavailable: this clone is shallow, so the record files deleted in its history cannot be listed. A full clone lists them.");
@@ -327,11 +329,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         global::Vericairn.Records.History.HistoryState history = global::Vericairn.Records.History.SignedHistory.Of(model);
+        var acknowledgments = GitDeletionAcknowledgments(model);
         foreach (RecordDeletion deletion in deletions.Deleted)
         {
             string id = Path.GetFileNameWithoutExtension(deletion.Path);
             if (model.FilePaths?.Contains(deletion.Path) == true || model.ById.ContainsKey(id) || history.IsWitnessed(id) || history.IsAcknowledgedRemoval(id)) continue;
-            findings.Warning("history.deleted-in-git", deletion.Path, $"Deleted in commit {deletion.Commit}, which the checked-out commit reaches, and absent here. No history checkpoint witnessed it, so nothing else shows that it was removed: restore it from that commit's parent if it belongs here.");
+            if (acknowledgments.TryGetValue(id, out var candidates) &&
+                candidates.FirstOrDefault(candidate => MatchesGitDeletion(model, git, deletion, candidate.Removal)) is { Checkpoint: { } checkpoint, Removal: { } removal })
+            {
+                string namedCommit = removal.Commit == deletion.Commit ? "" : $" The checkpoint names deleting commit {removal.Commit}.";
+                findings.Info("history.deleted-in-git", deletion.Path, $"Deleted in commit {deletion.Commit}. Acknowledged by history checkpoint {checkpoint.Id} at {checkpoint.ComputedHash}.{namedCommit}");
+            }
+            else
+                findings.Warning("history.deleted-in-git", deletion.Path, $"Deleted in commit {deletion.Commit}, which the checked-out commit reaches, and absent here. No history checkpoint witnessed it. Restore it from that commit's parent if it belongs here.");
         }
 
         return findings;
@@ -976,7 +986,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(revokedAt) };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: revokedAt);
-            return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+            WriteOutcome outcome = request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+            return outcome.Written is null ? outcome : outcome with { RevocationReach = [ObserveRevocation("written")] };
         }
     }
 
@@ -1356,7 +1367,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return Refuse(string.Join(" ", refusals.Select(r => r.Message)));
             }
 
-            return WriteLocked(new RecordDraft("goal", request.By, request.Body, null, request.Supersedes), model);
+            var draft = new RecordDraft("goal", request.By, request.Body, null, request.Supersedes);
+            if (TJson.Object(TJson.Object(request.Body, "plan"), "flow").ValueKind == JsonValueKind.Object)
+            {
+                // Derive against the unsigned goal before asking for any signature.
+                var candidate = new RecordEnvelope("goal", Ulid.NewUlid().Value, RecordParser.FormatTimestamp(FlowClock.GetUtcNow()),
+                    request.By, null, request.Supersedes, request.Body, string.Empty, string.Empty, [], model.Manifest?.RecordFormat ?? RecordFormats.Current);
+                if (FlowPathRefusal(model, candidate) is Problem paths)
+                {
+                    return WriteOutcome.Fail(paths);
+                }
+            }
+
+            return WriteLocked(draft, model);
         }
     }
 
@@ -1663,6 +1686,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 if (refusals.Count > 0)
                 {
                     return Refuse(string.Join(" ", refusals.Select(r => r.Message)));
+                }
+
+                if (FlowPathRefusal(model, current) is Problem paths)
+                {
+                    return WriteOutcome.Fail(paths);
                 }
             }
             else if (request.By != sponsor && !GoalRules.AccepterOf(model, current).Decides(model, request.By))
@@ -2899,6 +2927,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         if (draft.Type == "history-checkpoint" && global::Vericairn.Records.History.SignedHistory.AuthoringRefusal(current, draft.Body) is string historyRefusal)
             return (null, "Not written: " + historyRefusal);
 
+        bool acknowledgesGitDeletion = draft.Type == "history-checkpoint" && HistoryCheckpointType.HasGitRemovals(draft.Body);
+        if (acknowledgesGitDeletion && GitDeletionRefusal(current, draft.By, draft.Body, draft.Id ?? "") is { } gitRefusal)
+            return (null, "Not written: " + gitRefusal);
+
         if (signers is null)
         {
             string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
@@ -2909,6 +2941,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             signers = signer is null ? [] : [signer];
         }
+
+        if (acknowledgesGitDeletion && !signers.Any(signer => NeedsPresence(signer, draft, current)))
+            return (null, "Not written: a Git deletion acknowledgment requires the root operator's presence at signing on this machine.");
 
         // A record is written in its estate's format, never in one this build does not write.
         if (draft.Format is null)
@@ -3239,6 +3274,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             BeforeValidatingRecords?.Invoke(records);
             EstateModel proposed = LoadWith(records);
+            foreach (RecordEnvelope checkpoint in records.Select(record => record.Envelope)
+                .Where(record => record.Type == "history-checkpoint" && HistoryCheckpointType.HasGitRemovals(record.Body)))
+            {
+                string? refusal = GitDeletionRefusal(proposed, checkpoint.By, checkpoint.Body, checkpoint.Id);
+                if (refusal is not null) return new Problem("refused", "Not written: " + refusal, []);
+                if (!proposed.Trust.MayAcknowledgeGitDeletion(checkpoint))
+                    return new Problem("refused", "Not written: a Git deletion acknowledgment requires a signature from the root operator's admitted presence device.", []);
+            }
+
             if (UnclosedActRefusal(proposed, records, () => LoadWith([])) is Problem unclosed) return unclosed;
             FindingList relevant = Invalid(proposed, records);
             AttemptWaits(proposed, records, relevant);
@@ -3385,6 +3429,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     {
         signer = null;
         IReadOnlyList<IDeviceKeyStore> stores = HeldKeyStores();
+        bool requiresPresence = draft.Type == "history-checkpoint" && HistoryCheckpointType.HasGitRemovals(draft.Body);
         List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => model.Chain(d)[0], StringComparer.Ordinal).ToList();
         // Keys are held under a device's identity, its first record, which signatures name across renames and rotations.
         foreach (string identity in devices.Where(d => SignatureChecks.IsAdmitted(model, d)).Select(d => model.Chain(d)[0]))
@@ -3392,10 +3437,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             IDeviceKeyStore? store = stores.FirstOrDefault(s => s.Has(identity));
             if (store is not null)
             {
-                signer = new StoreSigner(store, identity);
+                var candidate = new StoreSigner(store, identity);
+                if (requiresPresence && !NeedsPresence(candidate, draft, model)) continue;
+                signer = candidate;
                 return null;
             }
         }
+
+        if (requiresPresence) return "A Git deletion acknowledgment requires an admitted key of the root operator that checks presence on this machine.";
 
         RecordEnvelope? estate = model.CurrentEstate;
         string? rootOperator = estate is null ? null : EstateModel.BodyString(estate, "operator");

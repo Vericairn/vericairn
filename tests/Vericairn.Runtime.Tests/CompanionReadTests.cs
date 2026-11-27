@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Store;
@@ -38,6 +39,28 @@ public sealed class CompanionReadTests
         Assert.Equal(fixture.Decision.ComputedHash, Assert.Single(historical.Sources).Hash);
         Assert.Equal(records, fixture.Estate.Load().Records.Count);
         Assert.Empty(fixture.Estate.Load().OfType("document-revision"));
+    }
+
+    [Fact]
+    public void ARecordWhoseStaleSubjectIsSettledReadsAsHistoricalWithTheSettlingRecord()
+    {
+        using var estate = new TestEstate(3);
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId,
+            """{"key":"W-1","kind":"ordinary","title":"Widget","intent":"A widget.","scope":["path:widget/**"],"exitQuestion":"Done?","inputs":[],"deliverables":["widget"]}""");
+        RecordEnvelope ask = estate.Add("ask", estate.BuilderId,
+            $$"""{"to":"{{estate.OperatorId}}","question":"Inspect?","recommendation":"Inspect.","consequence":"Work waits.","state":"open"}""", order.Reference);
+        RecordEnvelope decision = estate.Add("decision", estate.OperatorId,
+            $$"""{"title":"Inspection","statement":"Reviewed.","summary":"The work was reviewed.","synthesis":"Proceed.","effects":["Continue."],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"{{ask.At}}","stake":"low","notAuthorized":[],"answers":["{{ask.Id}}"]}""");
+        JsonObject revised = HistoryFixture.Body(order);
+        revised["title"] = "Revised widget";
+        estate.Add("work-order", estate.OperatorId, revised.ToJsonString(), supersedes: order.Id);
+        Assert.Contains(estate.Load().Findings, f => f.Location == ask.ExpectedPath && f.Code == "record.subject-settled");
+
+        using EstateService service = EstateService.Open(estate.Root);
+        CompanionResponse read = service.CompanionRender(new CompanionRequest("vericairn.records/items", "item", ask.Id));
+        Assert.Equal("success", read.Status);
+        Assert.Equal("historical", read.Currentness);
+        Assert.Contains(decision.Id, read.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

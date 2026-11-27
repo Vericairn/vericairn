@@ -104,6 +104,40 @@ public class HistoryCheckpointTests
         Assert.Contains(SignedHistory.Of(model).Heads, h => h.Id == agents.Id);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnUnauthorizedGitDeletionAcknowledgmentIsReportedWithoutDisablingWitnessing(bool byRootOperator)
+    {
+        using var f = new HistoryFixture();
+        f.Adopt();
+        RecordEnvelope removed = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("HIS-19"), signer: f.OperatorSigner);
+        f.Remove(removed);
+        CheckpointDraft draft = SignedHistory.Prepare(f.Load(), "manual");
+        f.StoreObjects(draft);
+        JsonObject body = JsonNode.Parse(draft.Body.GetRawText())!.AsObject();
+        body["removed"] = new JsonArray(new JsonObject
+        {
+            ["id"] = removed.Id,
+            ["hash"] = removed.ComputedHash,
+            ["commit"] = new string('a', 40),
+            ["reason"] = "A test deletion."
+        });
+        RecordEnvelope checkpoint = f.Estate.Add("history-checkpoint", byRootOperator ? f.Estate.OperatorId : f.Estate.BuilderId,
+            body.ToJsonString(), signer: byRootOperator ? f.OperatorSigner : f.BuilderSigner);
+
+        EstateModel model = f.Load();
+        Finding warning = Assert.Single(model.Findings, x => x.Code == "history.git-removal-author");
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Equal(checkpoint.ExpectedPath + "#body.removed", warning.Location);
+        Assert.Contains(removed.Id, warning.Message, StringComparison.Ordinal);
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+        Assert.True(model.Counts(checkpoint));
+        HistoryState history = SignedHistory.Of(model);
+        Assert.Equal(checkpoint.Id, Assert.Single(history.Heads).Id);
+        Assert.False(history.IsAcknowledgedRemoval(removed.Id));
+    }
+
     [Fact]
     public void OnlyTheRootOperatorOrAnAdministratorAdopts()
     {

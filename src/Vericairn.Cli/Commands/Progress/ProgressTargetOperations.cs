@@ -98,6 +98,52 @@ internal sealed class ProgressTargetOperations(CommandContext context)
         }
     }
 
+    /// <summary>
+    /// From 0.9.5 (FIX-177): removes a comment entry a target keeps on this machine, once a person has checked its destination. An
+    /// uncertain comment is never sent again while its entry is kept; once removed, the same event or wait seen again is commented on.
+    /// </summary>
+    public int Resolve(string root, string name, string key, bool json)
+    {
+        if (!IsEstate(root)) return context.Fail(NotAnEstate(root));
+        try
+        {
+            ProgressTargetStore store = ProgressTargetStore.Of(root);
+            if (store.Load().All(t => t.Name != name)) return context.Fail($"No progress target is named '{name}' on this machine.");
+            ProgressTargetComment? entry = store.State(name).Comments.GetValueOrDefault(key);
+            if (entry is null) return context.Fail($"Progress target {name} keeps no comment entry {key}; 'vericairn progress target list' shows the uncertain ones.");
+            if (entry.Outcome is null && store.Followed(name))
+                return context.Fail($"A follower of progress target {name} is sending comment {key} now; resolve it once that follower has stopped.");
+
+            ProgressTargetComment? removed = null;
+            store.Update(name, state =>
+            {
+                if (!state.Comments.TryGetValue(key, out removed)) return state;
+                return state with { Comments = state.Comments.Remove(key) };
+            });
+            if (removed is null) return context.Fail($"Progress target {name} keeps no comment entry {key}; 'vericairn progress target list' shows the uncertain ones.");
+
+            string outcome = removed.Outcome ?? "uncertain";
+            if (json)
+            {
+                JsonObject resolved = removed.ToJson();
+                resolved["target"] = name;
+                resolved["key"] = key;
+                resolved["outcome"] = outcome;
+                context.Output.WriteLine(new JsonObject { ["format"] = TargetsFormat, ["resolved"] = resolved }.ToJsonString());
+            }
+            else
+            {
+                context.Output.WriteLine($"Resolved comment {key} of progress target {name}: its {outcome} entry for {removed.PlaceUrl} is removed, so the same event or wait seen again is commented on.");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return context.Fail(exception.Message);
+        }
+    }
+
     public int Refresh(string root, string name, bool dryRun, bool json)
     {
         if (!IsEstate(root)) return context.Fail(NotAnEstate(root));
@@ -169,6 +215,14 @@ internal sealed class ProgressTargetOperations(CommandContext context)
         return session.Load();
     }, ProviderRegistry.Current, ProgressTargetStore.Of(root));
 
+    // The comments a person should check: those whose outcome is uncertain, and those with no outcome when no follower holds the target
+    // (one stopped before saving it). While a follower holds it, an entry with no outcome is one it is sending.
+    private static IEnumerable<KeyValuePair<string, ProgressTargetComment>> Uncertain(ProgressTargetStore store, string name, ProgressTargetState state)
+    {
+        bool followed = state.Comments.Values.Any(entry => entry.Outcome is null) && store.Followed(name);
+        return state.Comments.Where(entry => entry.Value.Outcome == "uncertain" || (entry.Value.Outcome is null && !followed));
+    }
+
     private int Show(ProgressTargetStore store, IReadOnlyList<ProgressTargetConfiguration> targets, bool json)
     {
         if (json)
@@ -179,6 +233,15 @@ internal sealed class ProgressTargetOperations(CommandContext context)
                 JsonObject item = target.ToJson();
                 ProgressTargetState state = store.State(target.Name);
                 item["place"] = state.PlaceUrl is null ? null : new JsonObject { ["id"] = state.PlaceId, ["url"] = state.PlaceUrl };
+                var uncertain = new JsonArray();
+                foreach ((string key, ProgressTargetComment entry) in Uncertain(store, target.Name, state))
+                {
+                    JsonObject comment = entry.ToJson();
+                    comment["key"] = key;
+                    comment["outcome"] = "uncertain";
+                    uncertain.Add(comment);
+                }
+                item["uncertainComments"] = uncertain;
                 list.Add(item);
             }
 
@@ -194,6 +257,8 @@ internal sealed class ProgressTargetOperations(CommandContext context)
             context.Output.WriteLine("  refreshes on: " + (target.Refresh.IsEmpty ? "no event" : string.Join("; ", target.Refresh)));
             context.Output.WriteLine("  comments on: " + (target.Comment.IsEmpty ? "no event" : string.Join("; ", target.Comment)));
             context.Output.WriteLine("  place: " + (state.PlaceUrl ?? "none yet; the first refresh creates it"));
+            foreach ((string key, ProgressTargetComment entry) in Uncertain(store, target.Name, state))
+                context.Output.WriteLine($"  uncertain comment {key} ({entry.Form} form, {entry.PayloadHash}) at {entry.PlaceUrl} through {entry.Adapter}. Check the original destination.");
         }
 
         return Clean;
@@ -214,6 +279,7 @@ internal sealed class ProgressTargetOperations(CommandContext context)
                 ["carried"] = new JsonArray([.. outcome.Carried.Select(r => (JsonNode)new JsonObject { ["type"] = r.Type, ["id"] = r.Id, ["hash"] = r.Hash })]),
                 ["leftOut"] = new JsonArray([.. outcome.LeftOut.Select(k => (JsonNode)JsonValue.Create(k))]),
             };
+            if (outcome.CommentKey is not null) node["commentKey"] = outcome.CommentKey;
             if (dryRun) node["text"] = outcome.Text;
             context.Output.WriteLine(node.ToJsonString());
             return;
