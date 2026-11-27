@@ -68,9 +68,15 @@ public sealed partial class EstateService
             && EstateModel.BodyString(device, "publicKey") is { } key
             && HasVerifiedAndroidPresence(model, initial, key)) return "required";
 
-        // Earlier phone pairings were declarations. A rotation retains the original device identity.
-        return IsPhone(device) || IsPhone(initial) ? "declared" : presence;
+        // Earlier phone pairings were declarations. A rotation retains the original device identity. Before 0.9.5 a pairing
+        // took any stated custody on the device's word, and from 0.9.5 only verified Android attestation records required, so a
+        // device a pairing admitted is declared. The note only lowers what a device reports; it never raises it.
+        return IsPhone(device) || IsPhone(initial) || WasPaired(model, initial) ? "declared" : presence;
     }
+
+    private static bool WasPaired(EstateModel model, RecordEnvelope initial) => model.About(initial.Id, "admission").Any(admission =>
+        EstateModel.BodyString(admission, "note")?.StartsWith(DeviceRecords.PairingAdmissionNote, StringComparison.Ordinal) == true
+        && SignatureChecks.Counts(model, admission));
 
     private static bool IsPhone(RecordEnvelope device) => EstateModel.BodyString(device, "platform") is "android" or "ios"
         || EstateModel.BodyString(device, "custody") is DeviceKeyStores.AndroidKeystoreKind or DeviceKeyStores.IosSecureEnclaveKind;

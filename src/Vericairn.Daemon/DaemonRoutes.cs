@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Service;
 
@@ -148,7 +149,7 @@ internal static class DaemonRoutes
                 return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "This exchange offered no presence device; nothing was recorded.");
             }
 
-            string note = $"Paired over the local network with a pairing code {pairing.By} issued from device {pairing.Issuer.Device}, under authority {pairing.Issuer.Authority}, at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. The device declared its name, platform and custody; its record identifies any verified presence.";
+            string note = $"{DeviceRecords.PairingAdmissionNote}{pairing.By} issued from device {pairing.Issuer.Device}, under authority {pairing.Issuer.Authority}, at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. The device declared its name, platform and custody; its record identifies any verified presence.";
             (WriteOutcome written, WriteOutcome? admitted, WriteOutcome? presence, WriteOutcome? presenceAdmitted) =
                 host.Service.PairDevice(exchange.Plan, pairing.Profiles, confirm.Device, confirm.Signature, pairing.Issuer, note, confirm.PresenceDevice, confirm.PresenceSignature);
             bool withPresence = confirm.PresenceDevice is not null;

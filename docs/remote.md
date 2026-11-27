@@ -298,7 +298,9 @@ Google without a phone or estate identifier.
 
 On iOS, App Attest can establish app integrity and bind data to an app assertion. Apple provides no attestation for the
 per-use access controls of the separate Secure Enclave signing key Remote uses, so the runtime reports the key as `declared`.
-The runtime reports previously paired Android and iOS presence keys without verification the same way. Both kinds of phone
+The runtime reports previously paired Android and iOS presence keys without verification the same way, and any device a
+pairing admitted that states another presence custody: before 0.9.5 a pairing took the stated custody on the device's word.
+Re-enroll such a device at the desk if it needs to sign as a presence device. Both kinds of phone
 can still use their admitted request keys for authorized requests. The API continues to accept a requesting device's
 signature on its own prepared record when that write is otherwise authorized. Remote uses a separate presence device for
 decisions, acceptances and reviewed acts, which the runtime refuses for a `declared` key. A locally held `declared` key may

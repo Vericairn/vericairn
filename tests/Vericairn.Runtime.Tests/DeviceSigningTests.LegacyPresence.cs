@@ -97,6 +97,44 @@ public sealed partial class DeviceSigningTests
         Assert.Equal("declared", Assert.Single(service.Devices(), row => row.Id == id).Presence);
     }
 
+    [Theory]
+    [InlineData("macos", true)]
+    [InlineData("other", true)]
+    [InlineData("macos", false)]
+    public void ADesktopCustodyAPairingAdmittedIsDeclaredAndCannotSignForAnotherDevice(string platform, bool paired)
+    {
+        using var estate = new TestEstate(3);
+        using EstateService service = EstateService.Open(estate.Root);
+        PairingAuthority authority = Authority(estate, service);
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string id = Ulid.NewUlid().Value;
+        JsonObject body = DeviceRecords.Body(estate.OperatorId, "Laptop", platform, "macos-secure-enclave",
+            RecordSigning.EncodePublicKey(key.ExportSubjectPublicKeyInfo()), Profiles, 3, "required");
+        estate.SetClock(DateTimeOffset.UtcNow.AddSeconds(-4));
+        RecordEnvelope device = estate.Add("device", estate.OperatorId, body.ToJsonString(), id: id, signer: new FixtureSigner(id, key));
+
+        // A pairing before 0.9.5 took the stated custody on the device's word; an administrator's own enrollment stands as written.
+        string note = paired ? DeviceRecords.PairingAdmissionNote + "pc-1 issued from device d-1, under authority a-1, at 2026-10-01T00:00:00Z."
+            : "Enrolled at the desk by the operator.";
+        WriteOutcome admitted = service.DeviceAdmit(new(id, estate.OperatorId, note));
+        Assert.True(admitted.Ok, admitted.Problem?.Message);
+        Assert.Empty(estate.Load().Findings);
+        Assert.Equal(paired ? "declared" : "required", Assert.Single(service.Devices(), row => row.Id == id).Presence);
+
+        string requesterKey = EstateModel.BodyString(estate.Load().ById[authority.Device], "publicKey")!;
+        using JsonDocument draft = JsonDocument.Parse(ResultOutputSchemeTests.OrderBody);
+        using (service.ForDeviceRequest(authority.Device, requesterKey, null))
+        {
+            RecordPrepareResponse prepared = service.PrepareRecord(new("work-order", estate.OperatorId, draft.RootElement.Clone()));
+            Assert.True(prepared.Ok, prepared.Problem?.Message);
+            var request = new SignedRecordRequest(prepared.Prepared!.Plan,
+                Base64Url.EncodeToString(key.SignHash(RecordSigning.Digest(prepared.Prepared.Hash)))) { Device = device.Id };
+            WriteOutcome signed = service.NewSignedRecord(request);
+            Assert.Equal(!paired, signed.Ok);
+            if (paired) Assert.Contains("no verified per-signature presence", signed.Problem?.Message, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void APhoneIdentityStaysDeclaredWhenItsRotationClaimsDesktopCustody()
     {

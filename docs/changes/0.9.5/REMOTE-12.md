@@ -6,7 +6,8 @@
 
 > A paired phone's request key has presence `none` and signs authorized requests without a prompt. From 0.9.5, the runtime
 > recognizes an Android presence device as `required` when it can verify the key's retained attestation and certificate status.
-> Earlier Android pairings and iPhone or iPad presence keys without such evidence are `declared`. Those phones retain request
+> Earlier Android pairings and iPhone or iPad presence keys without such evidence are `declared`, as is any device a pairing
+> admitted that states another presence custody, since a pairing before 0.9.5 took that custody on the device's word. Those phones retain request
 > access, but Remote's separate presence signature for a decision, acceptance or reviewed act is refused. Use Workbench or
 > the desktop CLI for those acts.
 >

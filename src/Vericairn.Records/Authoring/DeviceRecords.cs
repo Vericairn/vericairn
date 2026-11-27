@@ -16,6 +16,12 @@ public static class DeviceRecords
     /// <summary>The method recorded when a paired Android key proves per-use hardware authentication.</summary>
     public const string AndroidKeyAttestation = "android-key-attestation";
 
+    /// <summary>
+    /// How every pairing's admission note begins, from 0.9.0. Readers use it only to lower a device's reported presence to
+    /// <c>declared</c>, never to raise it.
+    /// </summary>
+    public const string PairingAdmissionNote = "Paired over the local network with a pairing code ";
+
     /// <summary>The body of a device's first record; record format 2 adds presence (none unless given) and purpose.</summary>
     public static JsonObject Body(string principal, string name, string platform, string custody, string publicKey, IReadOnlyList<string> profiles, long format, string? presence = null, string purpose = "signing")
     {
