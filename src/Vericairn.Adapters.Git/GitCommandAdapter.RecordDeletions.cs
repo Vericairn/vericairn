@@ -78,7 +78,7 @@ public sealed partial class GitCommandAdapter
                     IsFullObjectId(parent) && Run(out _, "merge-base", "--is-ancestor", ancestor, parent) == 0 &&
                     Run(out byte[] tree, "ls-tree", "-z", "--full-tree", parent, "--", ":(literal)" + path) == 0 &&
                     tree.Length == 0) &&
-                    Run(out byte[] added, "log", "-m", "--no-renames", "--no-ext-diff", "--no-textconv", "--diff-filter=A", "--format=%H",
+                    Run(out byte[] added, "log", "-m", "--full-history", "--no-renames", "--no-ext-diff", "--no-textconv", "--diff-filter=A", "--format=%H",
                         ancestor + ".." + commit, "--", ":(literal)" + path) == 0 && added.Length == 0;
             }
         }
