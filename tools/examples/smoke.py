@@ -61,9 +61,15 @@ def examples():
     return entries
 
 
-def execute(argv, cwd, environment):
+# The workflow's smoke step is capped at three minutes; the journeys get what the read leg left of it, less a margin for the
+# report, so the smoke fails with its own message before the runner stops the step.
+STEP_SECONDS = 180
+REPORT_MARGIN_SECONDS = 10
+
+
+def execute(argv, cwd, environment, timeout=120):
     return subprocess.run(argv, cwd=cwd, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          text=True, encoding="utf-8", errors="replace", timeout=120, check=False)
+                          text=True, encoding="utf-8", errors="replace", timeout=timeout, check=False)
 
 
 def git(root, environment, *args):
@@ -291,14 +297,20 @@ def check_findings(entry, pin, findings):
         raise SmokeFailure(f"Unexpected findings: {sorted(actual - expected)}; expected but absent: {sorted(expected - actual)}.")
 
 
-def journey_leg(cli, scratch, environment, selected, report):
+def journey_leg(cli, scratch, environment, selected, report, started):
     if not any("tier2" in entry["legs"] for entry in selected):
         return
+    budget = STEP_SECONDS - REPORT_MARGIN_SECONDS - (time.monotonic() - started)
+    if budget <= 0:
+        raise SmokeFailure("The read leg used the smoke step's time; no time is left for the process journeys.")
     journey_report = scratch / "journeys.json"
     environment.update(VERICAIRN_EXAMPLES_BINARY=str(cli), VERICAIRN_EXAMPLES_JOURNEY_REPORT=str(journey_report))
     test = ROOT / "artifacts/bin/Vericairn.Cli.Tests/release/Vericairn.Cli.Tests.dll"
-    result = execute(["dotnet", str(test), "--filter-method",
-                      "Vericairn.Cli.Tests.ExamplesJourneyTests.TierTwoRunsEveryRegisteredJourney"], ROOT, environment)
+    try:
+        result = execute(["dotnet", str(test), "--filter-method",
+                          "Vericairn.Cli.Tests.ExamplesJourneyTests.TierTwoRunsEveryRegisteredJourney"], ROOT, environment, timeout=budget)
+    except subprocess.TimeoutExpired as expired:
+        raise SmokeFailure(f"The process journeys did not finish in the {budget:.0f} seconds the smoke step had left.") from expired
     if journey_report.is_file():
         report["journeys"] = read_json(journey_report)
     if result.returncode or "journeys" not in report:
@@ -341,7 +353,7 @@ def smoke(dist, version, rid, commit, report, local_source=None):
         report["readRegressions"] = "passed" if regression.returncode == 0 else "failed"
         if regression.returncode:
             raise SmokeFailure("The read leg regression tests failed: " + regression.stderr)
-        journey_leg(cli, scratch, environment, selected, report)
+        journey_leg(cli, scratch, environment, selected, report, started)
     if not report["examples"]:
         raise SmokeFailure("The manifest selects no read leg for the running platform.")
     report["seconds"] = round(time.monotonic() - started, 3)
