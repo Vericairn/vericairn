@@ -157,6 +157,9 @@ public partial interface IEstateApi
     /// <summary>Devices known to the estate and whether this machine holds their keys.</summary>
     IReadOnlyList<DeviceRow> Devices();
 
+    /// <summary>Read revocation observations for a device in the answering runtime, or null when the device or operation is unavailable.</summary>
+    DeviceRevocationReachReport? DeviceRevocationReach(string device) => null;
+
     /// <summary>Create a device on the runtime's machine.</summary>
     WriteOutcome DeviceCreate(DeviceCreateRequest request);
 

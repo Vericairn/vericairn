@@ -8,6 +8,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.History;
 
@@ -17,11 +18,13 @@ public sealed class HistoryState
     internal HistoryState(bool adopted, IReadOnlyList<RecordReference> heads, int witnessed, int tail, IReadOnlyList<Finding> findings, bool inventoriesRead,
         IReadOnlySet<string> altered, IReadOnlyDictionary<string, WitnessedEntry> entries, IReadOnlySet<string> acknowledged, IReadOnlySet<string> counting,
         IReadOnlyDictionary<string, DateTimeOffset>? adoptionTimes = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? listings = null,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? predecessors = null)
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? predecessors = null,
+        IReadOnlyDictionary<(string Id, string Hash), IReadOnlyList<string>>? otherListings = null)
     {
         AdoptionTimes = adoptionTimes ?? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         Listings = listings ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         Predecessors = predecessors ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        OtherListings = otherListings ?? new Dictionary<(string, string), IReadOnlyList<string>>();
         CountingCheckpoints = counting;
         Adopted = adopted;
         Heads = heads;
@@ -76,6 +79,14 @@ public sealed class HistoryState
     /// <summary>Each witnessed record present with listed bytes, and the counting checkpoints that list it with those bytes.</summary>
     internal IReadOnlyDictionary<string, IReadOnlyList<string>> Listings { get; }
 
+    /// <summary>Counting checkpoints that list exact versions absent from the canonical records in this copy.</summary>
+    private IReadOnlyDictionary<(string Id, string Hash), IReadOnlyList<string>> OtherListings { get; }
+
+    /// <summary>Counting checkpoints that list these exact bytes, including versions missing or replaced in the current copy.</summary>
+    internal IReadOnlyList<string> ExactListings(string id, string hash) =>
+        OtherListings.TryGetValue((id, hash), out IReadOnlyList<string>? other) ? other
+        : Entries.TryGetValue(id, out WitnessedEntry? entry) && entry.Entry.Hash == hash ? Listings.GetValueOrDefault(id) ?? [] : [];
+
     /// <summary>Each counting checkpoint and the counting checkpoints it follows through hashes that match.</summary>
     internal IReadOnlyDictionary<string, IReadOnlyList<string>> Predecessors { get; }
 
@@ -123,7 +134,7 @@ internal sealed record CheckpointBody(RecordEnvelope Record, IReadOnlyList<(stri
     (string Kind, string Id)? Closes = null)
 {
     internal static CheckpointBody Read(RecordEnvelope record) => new(record, Pins(record.Body, "previous"), Strings(record.Body, "inventory"),
-        Pins(record.Body, "anchored"), Pins(record.Body, "removed"),
+        Pins(record.Body, "anchored"), Pins(record.Body, "removed", excludeGitRemovals: true),
         record.Body.TryGetProperty("records", out JsonElement count) && count.ValueKind == JsonValueKind.Number && count.TryGetInt64(out long n) ? n : null,
         EstateModel.BodyString(record, "recordSetHash"), ReadCloses(record.Body));
 
@@ -134,9 +145,10 @@ internal sealed record CheckpointBody(RecordEnvelope Record, IReadOnlyList<(stri
         closes.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String
             ? (kind.GetString()!, id.GetString()!) : null;
 
-    private static List<(string Id, string Hash)> Pins(JsonElement body, string name) =>
+    private static List<(string Id, string Hash)> Pins(JsonElement body, string name, bool excludeGitRemovals = false) =>
         body.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array
-            ? [.. list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String &&
+            ? [.. list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object && (!excludeGitRemovals || !HistoryCheckpointType.HasGitCommit(e)) &&
+                    e.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String &&
                     e.TryGetProperty("hash", out JsonElement hash) && hash.ValueKind == JsonValueKind.String)
                 .Select(e => (e.GetProperty("id").GetString()!, e.GetProperty("hash").GetString()!))]
             : [];
@@ -208,8 +220,20 @@ internal sealed class HistoryAnalysis
     internal static HistoryAnalysis Anchoring(EstateTrust trust, EstateModel model)
     {
         var analysis = new HistoryAnalysis(trust, model);
-        foreach (CheckpointBody checkpoint in analysis.checkpoints.Where(c => c.Previous.Count == 0 || c.Anchored.Count > 0 || c.Removed.Count > 0))
+        foreach (CheckpointBody checkpoint in analysis.checkpoints)
         {
+            RecordEnvelope record = checkpoint.Record;
+            if (record.Signatures.Count > 0 && HistoryCheckpointType.HasGitRemovals(record.Body) && !trust.MayAcknowledgeGitDeletion(record))
+            {
+                foreach (GitRemoval removal in HistoryCheckpointType.GitRemovals(record.Body, record.Id, out _))
+                {
+                    analysis.findings.Warning("history.git-removal-author", record.ExpectedPath + "#body.removed",
+                        $"This checkpoint's acknowledgment of the deletion of {removal.Id} in commit {removal.Commit} is ignored. Only the root operator may acknowledge a Git deletion, using an admitted signing device whose custody requires presence.");
+                }
+            }
+
+            bool hasAnchorsOrRemovals = checkpoint.Anchored.Count > 0 || checkpoint.Removed.Count > 0;
+            if (checkpoint.Previous.Count > 0 && !hasAnchorsOrRemovals) continue;
             bool eligible = trust.MayAnchor(checkpoint.Record);
             if (eligible) analysis.eligible.Add(checkpoint.Record.Id);
             if (checkpoint.Previous.Count == 0 && !eligible && checkpoint.Record.Signatures.Count > 0)
@@ -219,7 +243,7 @@ internal sealed class HistoryAnalysis
                     "An estate's first checkpoint, its adoption, is signed by the root operator or a person holding administer through a grant that rests on signatures, never an agent, with devices whose own admissions rest on signatures. This one counts for nothing and adopts nothing.");
             }
 
-            if (checkpoint.Anchored.Count == 0 && checkpoint.Removed.Count == 0) continue;
+            if (!hasAnchorsOrRemovals) continue;
             if (eligible)
             {
                 foreach ((string id, string hash) in checkpoint.Anchored) analysis.AnchorKeys.Add(SignatureChecks.AnchorKey(id, hash));
@@ -341,6 +365,7 @@ internal sealed class HistoryAnalysis
         var inventories = new Dictionary<string, IReadOnlyList<InventoryEntry>>(StringComparer.Ordinal);
         var adoptionTimes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         var listingsByRecord = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        var otherListings = new Dictionary<(string, string), IReadOnlyList<string>>();
         bool read = objects is not null;
         if (read)
         {
@@ -381,6 +406,7 @@ internal sealed class HistoryAnalysis
                         listingsByRecord[id] = [.. agreeing.Select(v => v.Checkpoint).Distinct(StringComparer.Ordinal)];
                     }
                     if (disagreeing.Count == 0) continue;
+                    KeepOtherListings(id, disagreeing);
 
                     // Only a listing by an author who may anchor can make a present record that one who may anchor signed, or that is anchored
                     // with these bytes, count for nothing; another author's listing of other bytes is reported, and the record keeps counting.
@@ -405,6 +431,7 @@ internal sealed class HistoryAnalysis
                 }
 
                 WitnessedEntry witnessed = standing[0];
+                KeepOtherListings(id, standing);
                 entries[id] = witnessed;
                 InventoryEntry absent = witnessed.Entry;
                 if (standing.Select(v => v.Entry.Hash).Distinct(StringComparer.Ordinal).Skip(1).FirstOrDefault() is { } other)
@@ -462,7 +489,13 @@ internal sealed class HistoryAnalysis
         Dictionary<string, IReadOnlyList<string>> predecessors = counting.ToDictionary(c => c.Record.Id, c => (IReadOnlyList<string>)[.. c.Previous
             .Where(p => countingIds.Contains(p.Id) && byId[p.Id].Record.ComputedHash == p.Hash).Select(p => p.Id).Distinct(StringComparer.Ordinal)], StringComparer.Ordinal);
         return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged, countingIds, adoptionTimes,
-            listingsByRecord, predecessors) { OldestTailAt = oldest };
+            listingsByRecord, predecessors, otherListings) { OldestTailAt = oldest };
+
+        void KeepOtherListings(string id, List<WitnessedEntry> versions)
+        {
+            foreach (var version in versions.GroupBy(v => v.Entry.Hash, StringComparer.Ordinal))
+                otherListings[(id, version.Key)] = [.. version.Select(v => v.Checkpoint).Distinct(StringComparer.Ordinal)];
+        }
     }
 
     /// <summary>
@@ -818,6 +851,16 @@ public static class SignedHistory
         {
             if (!closure.Versions.TryGetValue(id, out HashSet<string>? versions) || !versions.Contains(hash)) return $"It acknowledges the removal of {id} at {hash}, which no head witnesses with that hash.";
             if (model.ById.TryGetValue(id, out RecordEnvelope? present) && present.ComputedHash == hash) return $"It acknowledges the removal of {id}, which is present here with the witnessed hash.";
+        }
+
+        IReadOnlyList<GitRemoval> gitRemovals = HistoryCheckpointType.GitRemovals(body, record.Id, out FindingList removalFindings);
+        if (removalFindings.HasErrors) return string.Join(" ", removalFindings.Select(finding => finding.Message));
+        foreach (GitRemoval removal in gitRemovals)
+        {
+            if (closure.Versions.ContainsKey(removal.Id))
+                return $"Record {removal.Id} has a witnessed version. Acknowledge the witnessed version under the witnessed removal rule.";
+            if (model.ById.ContainsKey(removal.Id))
+                return $"Record {removal.Id} is present here; a Git deletion acknowledgment requires it to be absent.";
         }
 
         if (closure.Witnessed(draft.Removed) is not { } set) return "The heads witness a record with two hashes; acknowledge the removal of the version that is not here.";

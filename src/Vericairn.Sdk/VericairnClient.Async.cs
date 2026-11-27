@@ -262,6 +262,12 @@ public sealed partial class VericairnClient
     public Task<IReadOnlyList<DeviceRow>> DevicesAsync(CancellationToken cancellationToken = default) =>
         RunOperationAsync<IReadOnlyList<DeviceRow>>(nameof(Devices), async token => (await GetAsync<List<DeviceRow>>("/v1/devices", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Devices)), cancellationToken);
 
+    /// <inheritdoc />
+    public Task<DeviceRevocationReachReport?> DeviceRevocationReachAsync(string device, CancellationToken cancellationToken = default) =>
+        RunOperationAsync(nameof(DeviceRevocationReach), token => GetAsync<DeviceRevocationReachReport>(
+            "/v1/devices/" + Uri.EscapeDataString(device) + "/revocation-reach", allowNotFound: true, cancellationToken: token),
+            false, OperationTimeout?.Invoke(nameof(DeviceRevocationReach)), cancellationToken);
+
     /// <summary>The cancellable DeviceCreate operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> DeviceCreateAsync(DeviceCreateRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(DeviceCreate), async token => (await PostAsync<DeviceCreateRequest, WriteOutcome>("/v1/devices", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(DeviceCreate)), cancellationToken);

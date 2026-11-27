@@ -1035,7 +1035,7 @@ writes one. The design is the estate's signed history design, decision
 | `trigger` | `adoption` exactly when `previous` is empty; `closing` exactly when `closes` is present; otherwise `interval`, `upgrade`, `release`, `charter` or `manual`. |
 | `closes` | Optional `{kind, id}`, `kind` `device`, `key`, `grant` or, from 0.9.4, `role`: what a closing closes ([below](#closings-and-authority-at-a-records-time-092)). An older reader refuses a `role` closing's `kind` (`body.enum`), so readers upgrade before an estate writes one. |
 | `anchored` | Optional, nonempty `{id, hash}`, sorted by id: unsigned records that count under required signatures, and signed records a closing refused, because this checkpoint lists them. |
-| `removed` | Optional, nonempty `{id, hash, reason}`, sorted by id: witnessed records whose removal this checkpoint acknowledges. |
+| `removed` | Optional, nonempty, sorted by id. `{id, hash, reason}` acknowledges a witnessed removal. From 0.9.5 (ID-19), `{id, hash, commit, reason}` acknowledges an unwitnessed record deletion in Git. |
 
 A checkpoint has no subject and supersedes nothing, and none of its lists names the
 checkpoint itself. An inventory object is UTF-8 text with one line per record and a
@@ -1113,8 +1113,26 @@ leave it standing. An acknowledgement ends the error for the version it names an
 decides nothing else: that version is no longer witnessed, the estate reads on without
 the record, and a record under that id, written again or present with other bytes, is
 part of the tail and counts by its own rules until a checkpoint lists it. The runtime
-refuses a `removed` entry for a record present with the listed hash, or for a version
-no head witnesses.
+refuses a witnessed-removal entry for a record present with its listed hash or for a
+version no head witnesses.
+
+**Unwitnessed Git deletions (0.9.5).** An entry with `commit` requires the root
+operator's admitted presence device. It names the full deleting commit, the absent
+record's id and content hash from that commit's parent, and a non-blank reason.
+Signatures and formatting whitespace are outside the content hash. Only a record
+that parses and whose declared hash agrees with its computed hash can be
+acknowledged. A complete local history must show the deletion at the record's
+canonical path in that commit and reach the commit from the local main line.
+The deleted record contributes nothing to the checkpoint's inventory or record
+set hash. `estate check` reports `history.deleted-in-git` as acknowledged and
+names the checkpoint and listed deletion commit when it can verify the claim.
+The listed commit may differ from the one the checkpoint names when it is a
+merge that reaches the named commit through a parent that already lacks the path.
+Both commits must be reachable from the local main line and show the same record
+id and content hash deleted at that path. A later separate deletion of the same
+record still warns. `history.git-removal-author` reports an entry that lacks the
+root operator's required presence signature. Earlier readers refuse the added
+`commit` field.
 
 **Who writes them (OPS-07).** `vericairn estate checkpoint` writes one with trigger `manual` and, with `--adopt`, the
 adoption checkpoint, anchoring the unsigned records that count; a new estate's root operator's first device writes the

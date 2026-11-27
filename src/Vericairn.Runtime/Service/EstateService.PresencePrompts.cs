@@ -8,6 +8,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.History;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Runtime.Service;
 
@@ -173,6 +174,10 @@ public sealed partial class EstateService
                 _ => "records the release candidate for your acceptance",
             }),
             "document-revision" => PinSignature(BodyText(body, "path") ?? "the document"),
+            "history-checkpoint" when HistoryCheckpointType.GitRemovals(body, draft.Id ?? "", out _) is { Count: > 0 } deletions =>
+                new("history-checkpoint", deletions[0].Id, deletions.Count == 1
+                    ? "acknowledges the Git deletion of this unwitnessed record"
+                    : $"acknowledges the Git deletions of {deletions.Count} unwitnessed records"),
             "history-checkpoint" => CheckpointSignature(BodyText(body, "trigger") ?? "manual"),
             "goal-status" => new("goal-status", subject ?? "goal", "sets the goal " + (BodyText(body, "status") ?? "to its next status")),
             "goal" => new("goal", draft.Supersedes ?? "new", draft.Supersedes is null ? "proposes the goal" : "revises the goal"),
