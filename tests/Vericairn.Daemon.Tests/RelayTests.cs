@@ -213,6 +213,8 @@ public class RelayTests
             await SendBadJoinsAsync(relay, address, $"2001:db8:0:{client}::/64", 32);
         }
 
+        // The ninth client's join follows the first 256 being counted, so none of theirs is refused ahead of it.
+        await WaitForUnverifiedAsync(relay, address, 256);
         await SendBadJoinsAsync(relay, address, "2001:db8:0:ff::/64", 1);
         await WaitForUnverifiedAsync(relay, address, 257);
         long now = clock.GetUtcNow().ToUnixTimeSeconds();
