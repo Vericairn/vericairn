@@ -22,7 +22,7 @@ internal sealed record ProgressEffect(string Target, string Action, string Form,
 /// <summary>
 /// From 0.9.4 (WATCH-06): what one refresh or comment did: created, replaced, unchanged or commented; would-create, would-replace or
 /// would-comment in a dry run; refused (nothing was sent, as <paramref name="Detail"/> says), stopped (held for a person before
-/// dispatch) or uncertain (sent, not confirmed).
+/// dispatch) or uncertain (whether the adapter sent it or the service accepted it is unknown).
 /// </summary>
 internal sealed record ProgressOutcome(string Target, string Action, string? Url, string? Form, IReadOnlyList<RecordReference> Carried, string? Detail = null)
 {
@@ -31,6 +31,9 @@ internal sealed record ProgressOutcome(string Target, string Action, string? Url
 
     /// <summary>The keys of the work orders the public form left out.</summary>
     public IReadOnlyList<string> LeftOut { get; init; } = [];
+
+    /// <summary>The event or wait key of a comment.</summary>
+    public string? CommentKey { get; init; }
 
     /// <summary>True when the target refused the effect or its outcome is uncertain.</summary>
     public bool Failed => Action is "refused" or "uncertain";
@@ -84,15 +87,16 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
         ArgumentNullException.ThrowIfNull(told);
         (Target? target, string? problem) = Resolve(name);
         if (target is null) throw new InvalidOperationException(problem);
+        ProgressTargetState state = RecoverComments(name, told);
         var channel = Channel.CreateUnbounded<EventStreamItem>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
-        string? after = store.State(name).Cursor;
+        using var pumpStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Task pump = Task.Run(async () =>
         {
             try
             {
-                await foreach (EventStreamItem item in open(after, Filter(target.Configuration)).WithCancellation(cancellationToken).ConfigureAwait(false))
+                await foreach (EventStreamItem item in open(state.Cursor, Filter(target.Configuration)).WithCancellation(pumpStop.Token).ConfigureAwait(false))
                 {
-                    await channel.Writer.WriteAsync(item, cancellationToken).ConfigureAwait(false);
+                    await channel.Writer.WriteAsync(item, pumpStop.Token).ConfigureAwait(false);
                 }
 
                 channel.Writer.Complete();
@@ -101,35 +105,61 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
             {
                 channel.Writer.Complete(exception);
             }
-        }, cancellationToken);
+        }, CancellationToken.None);
 
-        bool first = true;
-        while (await channel.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+        try
         {
-            var events = new List<EventEnvelope>();
-            bool reset = false;
-            string? cursor = null;
-            while (channel.Reader.TryRead(out EventStreamItem? item))
+            bool first = true;
+            while (await channel.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                cursor = item.Cursor;
-                if (item.Event is EventEnvelope envelope) events.Add(envelope);
-                else if (item.Reset) reset = true;
-            }
+                var events = new List<EventEnvelope>();
+                bool reset = false;
+                string? cursor = null;
+                while (channel.Reader.TryRead(out EventStreamItem? item))
+                {
+                    cursor = item.Cursor;
+                    if (item.Event is EventEnvelope envelope) events.Add(envelope);
+                    else if (item.Reset) reset = true;
+                }
 
-            // A target configured afresh while following is read again at each batch.
-            (Target? current, string? changed) = Resolve(name);
-            if (current is null)
-            {
-                told(new ProgressOutcome(name, "refused", null, null, [], changed));
-                continue;
-            }
+                // A target configured afresh while following is read again at each batch.
+                (Target? current, string? changed) = Resolve(name);
+                if (current is null)
+                {
+                    told(new ProgressOutcome(name, "refused", null, null, [], changed));
+                    continue;
+                }
 
-            foreach (ProgressOutcome outcome in Take(current, events, first || reset)) told(outcome);
-            first = false;
-            if (cursor is not null) store.Save(name, store.State(name) with { Cursor = cursor });
+                foreach (ProgressOutcome outcome in Take(current, events, first || reset, cursor)) told(outcome);
+                first = false;
+            }
         }
+        finally
+        {
+            await pumpStop.CancelAsync().ConfigureAwait(false);
+            await pump.ConfigureAwait(false);
+        }
+    }
 
-        await pump.ConfigureAwait(false);
+    private ProgressTargetState RecoverComments(string name, Action<ProgressOutcome> told)
+    {
+        var recovered = new List<ProgressOutcome>();
+        ProgressTargetState recoveredState = store.Update(name, state =>
+        {
+            ImmutableSortedDictionary<string, ProgressTargetComment> comments = state.Comments;
+            foreach ((string key, ProgressTargetComment entry) in state.Comments)
+            {
+                if (entry.Outcome is not null) continue;
+                comments = comments.SetItem(key, entry with { Outcome = "uncertain" });
+                recovered.Add(new ProgressOutcome(name, "uncertain", entry.PlaceUrl, entry.Form, [],
+                    $"The follower stopped before saving the outcome for comment {key}. Check the original destination. The follower will keep the entry without retrying.")
+                    { CommentKey = key });
+            }
+            return comments == state.Comments ? state : state with { Comments = comments };
+        });
+
+        foreach (ProgressOutcome outcome in recovered) told(outcome);
+        return recoveredState;
     }
 
     /// <summary>
@@ -137,12 +167,16 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
     /// records. With <paramref name="look"/> (the stream opened or was reset) the target is refreshed whatever the events, and the
     /// waits are compared with those last seen.
     /// </summary>
-    internal IReadOnlyList<ProgressOutcome> Take(Target target, IReadOnlyList<EventEnvelope> events, bool look)
+    internal IReadOnlyList<ProgressOutcome> Take(Target target, IReadOnlyList<EventEnvelope> events, bool look, string? cursor = null)
     {
         ProgressTargetConfiguration configuration = target.Configuration;
         List<(EventEnvelope Event, ProgressTrigger Trigger)> refreshing = [.. events.SelectMany(e => configuration.Refresh.Where(t => t.Admits(e)).Select(t => (e, t)))];
         List<(EventEnvelope Event, ProgressTrigger Trigger)> commenting = [.. events.SelectMany(e => configuration.Comment.Where(t => t.Admits(e)).Select(t => (e, t)))];
-        if (!look && refreshing.Count == 0 && commenting.Count == 0) return [];
+        if (!look && refreshing.Count == 0 && commenting.Count == 0)
+        {
+            if (cursor is not null) store.Update(configuration.Name, state => state with { Cursor = cursor });
+            return [];
+        }
 
         EstateModel model = load();
         DateTimeOffset at = time.GetUtcNow();
@@ -156,27 +190,37 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
         List<Wait> fresh = waits is null || before is null ? [] : [.. waits.Where(w => !before.Contains(w.Key))];
 
         bool refresh = look || refreshing.Any(p => Fires(model, p.Trigger, p.Event, fresh));
-        var comments = new List<Remark>();
+        var comments = new List<(string Key, Remark Remark)>();
         var commented = new HashSet<string>(StringComparer.Ordinal);
         // Each wait that began since the target last looked, once, for a waiting comment trigger an event woke or a fresh look (a
         // reset, or following started again) wakes; then each event a comment trigger names whose condition the records show.
         foreach (ProgressTrigger trigger in configuration.Comment.Where(t => t.When == "waiting" && (look || commenting.Any(p => p.Trigger.Equals(t)))))
         {
-            foreach (Wait wait in fresh.Where(w => w.Kind == trigger.Kind && Matches(model, w.Principal, trigger.To) && commented.Add(w.Key)))
-                comments.Add(WaitComment(model, wait));
+            foreach (Wait wait in fresh.Where(w => w.Kind == trigger.Kind && Matches(model, w.Principal, trigger.To)
+                && !state.Comments.ContainsKey(w.Key) && commented.Add(w.Key)))
+                comments.Add((wait.Key, WaitComment(model, wait)));
         }
 
         foreach ((EventEnvelope envelope, ProgressTrigger trigger) in commenting.Where(p => p.Trigger.When != "waiting"))
         {
-            if (Fires(model, trigger, envelope, fresh) && commented.Add(envelope.Key)) comments.Add(EventComment(model, trigger, envelope));
+            if (!state.Comments.ContainsKey(envelope.Key) && Fires(model, trigger, envelope, fresh) && commented.Add(envelope.Key))
+                comments.Add((envelope.Key, EventComment(model, trigger, envelope)));
         }
 
         var outcomes = new List<ProgressOutcome>();
         // A refresh only where a refresh trigger fires; the text is replaced before any comment of the same batch is added.
         if (refresh) outcomes.Add(Refresh(target, model, dryRun: false));
-        foreach (Remark remark in comments) outcomes.Add(Comment(target, model, remark, at));
+        foreach ((string key, Remark remark) in comments)
+        {
+            if (Comment(target, model, key, remark, at) is ProgressOutcome outcome) outcomes.Add(outcome);
+        }
 
-        if (waits is not null) store.Save(configuration.Name, store.State(configuration.Name) with { Waiting = [.. waits.Select(w => w.Key).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)] });
+        if (waits is not null || cursor is not null)
+            store.Update(configuration.Name, current => current with
+            {
+                Cursor = cursor ?? current.Cursor,
+                Waiting = waits is null ? current.Waiting : [.. waits.Select(w => w.Key).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
+            });
         return outcomes;
     }
 
@@ -249,7 +293,7 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
         }
     }
 
-    private ProgressOutcome Comment(Target target, EstateModel model, Remark remark, DateTimeOffset at)
+    private ProgressOutcome? Comment(Target target, EstateModel model, string key, Remark remark, DateTimeOffset at)
     {
         string name = target.Configuration.Name;
         ProgressTargetSpec spec = Spec(target, model, store.State(name).PlaceId);
@@ -260,39 +304,55 @@ internal sealed class ProgressTargetRunner(Func<EstateModel> load, ProviderRegis
         }
         catch (ProviderRefusedException refused)
         {
-            return new ProgressOutcome(name, "refused", null, null, [], refused.Message);
+            return new ProgressOutcome(name, "refused", null, null, [], refused.Message) { CommentKey = key };
         }
 
         // A comment takes the form its destination allows now, as the text does.
         string form = Form(target.Configuration, destination).Form;
         string body = form == ProgressReport.PublicForm ? remark.Public : remark.Text;
         IReadOnlyList<RecordReference> charged = form == ProgressReport.PublicForm ? remark.PublicCarried : remark.Carried;
-        var composed = new ProgressOutcome(name, string.Empty, destination.Place?.Url, form, charged) { Text = body };
+        var composed = new ProgressOutcome(name, string.Empty, destination.Place?.Url, form, charged) { Text = body, CommentKey = key };
         if (ProgressReport.TargetRefusal(model, form, body, at) is string reason)
             return composed with { Action = "refused", Detail = $"The {form} form's comment would carry {reason}; nothing was sent." };
         if (destination.Place is not ProgressTargetPlace place) return composed with { Action = "refused", Detail = "The target has no place to comment on yet; refresh it first." };
         Keep(name, place);
         if (Stop?.Invoke(new ProgressEffect(name, "comment", form, body, charged)) is string stop) return composed with { Action = "stopped", Detail = stop };
+
+        string payloadHash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(body)));
+        var pending = new ProgressTargetComment(target.Configuration.Adapter, payloadHash, form, place.Id, place.Url);
+        bool reserved = false;
+        store.Update(name, state =>
+        {
+            if (state.Comments.ContainsKey(key)) return state;
+            reserved = true;
+            return state with { Comments = state.Comments.Add(key, pending) };
+        });
+        if (!reserved) return null;
+
+        ProgressOutcome outcome;
         try
         {
             string url = target.Adapter.Comment(spec, place, body);
-            return composed with { Action = "commented", Url = url };
+            outcome = composed with { Action = "commented", Url = url };
         }
         catch (ProviderRefusedException refused)
         {
-            return composed with { Action = "refused", Detail = refused.Message };
+            outcome = composed with { Action = "refused", Detail = refused.Message };
         }
         catch (ProviderUncertainException uncertain)
         {
-            // A comment notifies, so one that may have been added is never added again.
-            return composed with { Action = "uncertain", Detail = uncertain.Message + " It is not added again." };
+            outcome = composed with { Action = "uncertain", Detail = uncertain.Message + " Check the original destination. The follower will keep the entry without retrying." };
         }
+
+        var finished = pending with { Outcome = outcome.Action, Url = outcome.Action == "commented" ? outcome.Url : null };
+        store.Update(name, state => state.Comments.ContainsKey(key) ? state with { Comments = state.Comments.SetItem(key, finished) } : state);
+        return outcome;
     }
 
     private void Keep(string name, ProgressTargetPlace place)
     {
-        ProgressTargetState state = store.State(name);
-        if (state.PlaceId != place.Id || state.PlaceUrl != place.Url) store.Save(name, state with { PlaceId = place.Id, PlaceUrl = place.Url });
+        store.Update(name, state => state.PlaceId == place.Id && state.PlaceUrl == place.Url
+            ? state : state with { PlaceId = place.Id, PlaceUrl = place.Url });
     }
 
     /// <summary>

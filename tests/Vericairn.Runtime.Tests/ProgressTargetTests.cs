@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Channels;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
@@ -285,6 +287,121 @@ public sealed class ProgressTargetTests : IDisposable
         Assert.Equal("c3", after);
     }
 
+    [Theory]
+    [InlineData("before acceptance")]
+    [InlineData("after acceptance")]
+    [InlineData("before saving the outcome")]
+    public async Task RestartDoesNotResendAnInterruptedComment(string interruption)
+    {
+        Configure("private");
+        await Follow(new EventStreamItem("c1"));
+        RecordEnvelope candidate = Release("0.2.0", "candidate");
+        var item = new EventStreamItem("c2", Event("record", candidate));
+        string obstruction = Path.Combine(directory, ProgressTargetStore.StateFileName + ".tmp");
+        adapter.OnComment = accepted =>
+        {
+            if (interruption == "before saving the outcome" && accepted) Directory.CreateDirectory(obstruction);
+            if (interruption == (accepted ? "after acceptance" : "before acceptance"))
+                throw new InvalidOperationException("The follower stopped.");
+        };
+
+        Exception? failure = await Record.ExceptionAsync(() => Follow(item));
+        Assert.True(failure is InvalidOperationException or IOException or UnauthorizedAccessException, failure?.ToString());
+        int accepted = interruption == "before acceptance" ? 0 : 1;
+        Assert.Equal(accepted, adapter.Comments.Count);
+        ProgressTargetState state = Store.State("status");
+        Assert.Equal("c1", state.Cursor);
+        ProgressTargetComment pending = state.Comments[item.Event!.Key];
+        Assert.Equal(("fake-target", "private", "D_1", "https://example.invalid/discussions/1", null),
+            (pending.Adapter, pending.Form, pending.PlaceId, pending.PlaceUrl, pending.Outcome));
+        string body = "Example 0.2.0 is now candidate.";
+        Assert.Equal("sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(body))), pending.PayloadHash);
+        if (Directory.Exists(obstruction)) Directory.Delete(obstruction);
+        adapter.OnComment = null;
+
+        string? resumedAfter = null;
+        var outcomes = new List<ProgressOutcome>();
+        await Runner().FollowAsync("status", (cursor, _) =>
+        {
+            resumedAfter = cursor;
+            return Stream(item);
+        }, outcomes.Add, TestContext.Current.CancellationToken);
+
+        Assert.Equal("c1", resumedAfter);
+        Assert.Equal(accepted, adapter.Comments.Count);
+        Assert.Single(adapter.Calls, call => call == "comment");
+        Assert.Equal(item.Event.Key, Assert.Single(outcomes, outcome => outcome.Action == "uncertain").CommentKey);
+        ProgressTargetState resumed = Store.State("status");
+        Assert.Equal("c2", resumed.Cursor);
+        Assert.Equal(pending with { Outcome = "uncertain" }, resumed.Comments[item.Event.Key]);
+    }
+
+    [Fact]
+    public async Task AnInterruptedWaitKeepsItsOriginalTextFormAndPlaceAfterReconfiguration()
+    {
+        Configure("private", refresh: ["none"], comment: ["ask to=operator when=waiting"]);
+        await Follow(new EventStreamItem("c1"));
+        RecordEnvelope ask = Ask("Publish the notes?");
+        var item = new EventStreamItem("c2", Event("ask", ask, change: "raised", to: estate.OperatorId));
+        adapter.OnComment = _ => throw new InvalidOperationException("The follower stopped.");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Follow(item));
+        string key = "ask:" + ask.Id;
+        ProgressTargetState previous = Store.State("status");
+        Assert.Empty(previous.Waiting!.Value);
+        ProgressTargetComment pending = previous.Comments[key];
+
+        Configure("public", refresh: ["none"], comment: ["ask to=operator when=waiting"]);
+        adapter.Move("2");
+        adapter.OnComment = null;
+        await Follow(item);
+
+        Assert.Empty(adapter.Comments);
+        ProgressTargetState current = Store.State("status");
+        Assert.Equal("D_2", current.PlaceId);
+        Assert.Equal("c2", current.Cursor);
+        Assert.Equal([key], current.Waiting);
+        Assert.Equal(pending with { Outcome = "uncertain" }, Assert.Single(current.Comments).Value);
+    }
+
+    [Fact]
+    public void SavedOutcomesSurviveAnInterruptedBatchAndUnattemptedCommentsCanStillBeSent()
+    {
+        Configure("private");
+        ProgressTargetRunner runner = Runner();
+        ProgressTargetRunner.Target target = Target();
+        string[] versions = ["0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4"];
+        EventEnvelope[] events = [.. versions.Select(version => Event("record", Release(version, "candidate")))];
+        adapter.OnComment = accepted =>
+        {
+            int call = adapter.Calls.Count(action => action == "comment");
+            if (call == 2) throw new ProviderRefusedException("The request was refused.");
+            if (call == 3 && accepted) throw new ProviderUncertainException("The request may have taken effect.");
+            if (call == 4) throw new InvalidOperationException("The follower stopped.");
+        };
+        Assert.Throws<InvalidOperationException>(() => runner.Take(target, events, look: true, cursor: "c2"));
+        ProgressTargetState interrupted = Store.State("status");
+        Assert.Null(interrupted.Cursor);
+        Assert.Equal(["commented", "refused", "uncertain", null], events.Take(4).Select(e => interrupted.Comments[e.Key].Outcome));
+        Assert.Equal("https://example.invalid/discussions/1#comment-1", interrupted.Comments[events[0].Key].Url);
+        Assert.False(interrupted.Comments.ContainsKey(events[4].Key));
+
+        adapter.OnComment = null;
+        Assert.Equal(["unchanged", "commented"], runner.Take(target, events, look: true, cursor: "c2").Select(o => o.Action));
+        Assert.Equal(["Example 0.2.0 is now candidate.", "Example 0.2.2 is now candidate.", "Example 0.2.4 is now candidate."], adapter.Comments);
+        Assert.Equal("c2", Store.State("status").Cursor);
+    }
+
+    private Task Follow(EventStreamItem item) =>
+        Runner().FollowAsync("status", (_, _) => Stream(item), _ => { }, TestContext.Current.CancellationToken);
+
+    private static IAsyncEnumerable<EventStreamItem> Stream(EventStreamItem item)
+    {
+        var stream = Channel.CreateUnbounded<EventStreamItem>();
+        Assert.True(stream.Writer.TryWrite(item));
+        stream.Writer.Complete();
+        return stream.Reader.ReadAllAsync(TestContext.Current.CancellationToken);
+    }
+
     [Fact]
     public void TriggersAreReadInTheirTextFormAndTheDefaultsAreTheDecisions()
     {
@@ -320,7 +437,7 @@ public sealed class ProgressTargetTests : IDisposable
 
         ProgressTargetConfiguration saved = Make(title: "Our progress", settings: ("place", "here"));
         Store.Save(saved);
-        Store.Save("status", new ProgressTargetState("D_9", "https://example.invalid/d/9", "c9", ["ask:x"]));
+        Store.Update("status", _ => new ProgressTargetState("D_9", "https://example.invalid/d/9", "c9", ["ask:x"]));
         ProgressTargetConfiguration read = Assert.Single(Store.Load());
         Assert.Equal((saved.Name, saved.Adapter, saved.Form, saved.Title), (read.Name, read.Adapter, read.Form, read.Title));
         Assert.Equal(saved.Settings, read.Settings);
@@ -396,6 +513,8 @@ public sealed class ProgressTargetTests : IDisposable
 
         public List<string> Comments { get; } = [];
 
+        public Action<bool>? OnComment { get; set; }
+
         public List<ProgressTargetSpec> Specs { get; } = [];
 
         private string? id;
@@ -429,10 +548,14 @@ public sealed class ProgressTargetTests : IDisposable
         {
             Calls.Add("comment");
             Assert.Equal(id, place.Id);
+            OnComment?.Invoke(false);
             Comments.Add(body);
-            return $"https://example.invalid/discussions/1#comment-{Comments.Count}";
+            OnComment?.Invoke(true);
+            return $"{place.Url}#comment-{Comments.Count}";
         }
 
-        private static ProgressTargetPlace Place(string? body) => new("D_1", "https://example.invalid/discussions/1", body);
+        public void Move(string number) => id = "D_" + number;
+
+        private ProgressTargetPlace Place(string? body) => new(id!, $"https://example.invalid/discussions/{id![2..]}", body);
     }
 }

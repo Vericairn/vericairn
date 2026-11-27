@@ -179,6 +179,15 @@ internal sealed class ProgressTargetOperations(CommandContext context)
                 JsonObject item = target.ToJson();
                 ProgressTargetState state = store.State(target.Name);
                 item["place"] = state.PlaceUrl is null ? null : new JsonObject { ["id"] = state.PlaceId, ["url"] = state.PlaceUrl };
+                var uncertain = new JsonArray();
+                foreach ((string key, ProgressTargetComment entry) in state.Comments.Where(entry => entry.Value.Uncertain))
+                {
+                    JsonObject comment = entry.ToJson();
+                    comment["key"] = key;
+                    comment["outcome"] = "uncertain";
+                    uncertain.Add(comment);
+                }
+                item["uncertainComments"] = uncertain;
                 list.Add(item);
             }
 
@@ -194,6 +203,8 @@ internal sealed class ProgressTargetOperations(CommandContext context)
             context.Output.WriteLine("  refreshes on: " + (target.Refresh.IsEmpty ? "no event" : string.Join("; ", target.Refresh)));
             context.Output.WriteLine("  comments on: " + (target.Comment.IsEmpty ? "no event" : string.Join("; ", target.Comment)));
             context.Output.WriteLine("  place: " + (state.PlaceUrl ?? "none yet; the first refresh creates it"));
+            foreach ((string key, ProgressTargetComment entry) in state.Comments.Where(entry => entry.Value.Uncertain))
+                context.Output.WriteLine($"  uncertain comment {key} ({entry.Form} form, {entry.PayloadHash}) at {entry.PlaceUrl} through {entry.Adapter}. Check the original destination.");
         }
 
         return Clean;
@@ -214,6 +225,7 @@ internal sealed class ProgressTargetOperations(CommandContext context)
                 ["carried"] = new JsonArray([.. outcome.Carried.Select(r => (JsonNode)new JsonObject { ["type"] = r.Type, ["id"] = r.Id, ["hash"] = r.Hash })]),
                 ["leftOut"] = new JsonArray([.. outcome.LeftOut.Select(k => (JsonNode)JsonValue.Create(k))]),
             };
+            if (outcome.CommentKey is not null) node["commentKey"] = outcome.CommentKey;
             if (dryRun) node["text"] = outcome.Text;
             context.Output.WriteLine(node.ToJsonString());
             return;
