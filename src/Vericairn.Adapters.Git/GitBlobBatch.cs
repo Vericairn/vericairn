@@ -46,13 +46,13 @@ internal sealed class GitBlobBatch : IDisposable
         GitHardening hardening;
         try { hardening = GitHardening.Create(); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
-        ProcessStartInfo info = GitFileSource.StartInfo(clone, hardening, ["cat-file", "--batch"]);
-        info.RedirectStandardInput = true;
         try
         {
+            ProcessStartInfo info = GitFileSource.StartInfo(clone, hardening, ["cat-file", "--batch"]);
+            info.RedirectStandardInput = true;
             return new(GitFileSource.Start(info), hardening);
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException or Vericairn.Runtime.Providers.ProviderRefusedException)
         {
             hardening.Dispose();
             return null;

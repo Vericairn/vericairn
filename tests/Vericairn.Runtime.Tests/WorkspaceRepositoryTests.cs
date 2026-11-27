@@ -3,6 +3,7 @@
 
 using Vericairn.Packs.Software;
 using Vericairn.Protocol;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -20,8 +21,8 @@ public class WorkspaceRepositoryTests
         Assert.True(Directory.Exists(Path.Combine(workspace.Path, ".git")));
         Assert.Equal(HarnessWorkspace.Canonical(Path.Combine(workspace.Path, ".git")).Replace('\\', '/'),
             RunEstate.Git(workspace.Path, "rev-parse", "--path-format=absolute", "--git-common-dir"));
-        Assert.Equal(HarnessWorkspace.Canonical(Path.Combine(run.Clone, ".git", "objects")).Replace('\\', '/'),
-            File.ReadAllText(Path.Combine(workspace.Path, ".git", "objects", "info", "alternates")).Trim());
+        Assert.False(File.Exists(Path.Combine(workspace.Path, ".git", "objects", "info", "alternates")));
+        Assert.Equal(workspace.Commit, RunEstate.Git(workspace.Path, "rev-parse", "HEAD"));
         File.WriteAllText(Path.Combine(workspace.Path, "allowed.txt"), "an agent's commit\n");
         RunEstate.Git(workspace.Path, "add", "allowed.txt");
         RunEstate.Git(workspace.Path, "commit", "-q", "-m", "Permitted work");
@@ -71,7 +72,10 @@ public class WorkspaceRepositoryTests
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(hook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         RunEstate.Git(run.Clone, "config", "core.hooksPath", hooks);
         var provider = new GitWorktreeWorkspaces();
-        _ = provider.Prepare(run.Clone, "work/hook", null, Path.Combine(run.Scratch, "workspace"));
+        string workspace = Path.Combine(run.Scratch, "workspace");
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => provider.Prepare(run.Clone, "work/hook", null, workspace));
+        Assert.Contains("core.hookspath", refused.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(workspace));
         Assert.False(File.Exists(marker));
     }
 
@@ -102,7 +106,8 @@ public class WorkspaceRepositoryTests
         RunEstate.Git(workspace.Path, "config", "core.hooksPath", hooks);
         // A deliberately unreadable format proves even non-executing workspace configuration is not parsed.
         RunEstate.Git(workspace.Path, "config", "core.repositoryformatversion", "999");
-        Assert.True(provider.Prepare(run.Clone, workspace.Branch, null, workspace.Path).Reused);
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => provider.Prepare(run.Clone, workspace.Branch, null, workspace.Path));
+        Assert.Contains("signed review", refused.Message, StringComparison.Ordinal);
         RunScope scope = provider.CheckScope(workspace, baseline, ["widget/**"]);
         Assert.Null(scope.Problem);
         Assert.Contains("README.md", scope.Outside);
@@ -110,6 +115,75 @@ public class WorkspaceRepositoryTests
         Assert.Equal(head, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + workspace.Branch));
         Assert.False(File.Exists(marker));
         Assert.Equal(workspace.Commit, RunEstate.Git(run.Clone, "rev-parse", "HEAD"));
+    }
+
+    [Fact]
+    public void AWorkspaceFetchTakesTheNamedCommitWithoutSubmoduleAdministrationOrInstall()
+    {
+        using var run = new RunEstate();
+        string baseCommit = RunEstate.Git(run.Clone, "rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(run.Clone, ".gitmodules"),
+            "[submodule \"child\"]\n\tpath = child\n\turl = https://example.invalid/child\n");
+        File.WriteAllText(Path.Combine(run.Clone, "package.json"), """{"name":"workspace-fixture","scripts":{"install":"unused-fixture-entry"}}""");
+        RunEstate.Git(run.Clone, "add", ".gitmodules", "package.json");
+        RunEstate.Git(run.Clone, "update-index", "--add", "--cacheinfo", "160000," + baseCommit + ",child");
+        RunEstate.Git(run.Clone, "commit", "-qm", "Gitlink and inert install fixture");
+        string named = RunEstate.Git(run.Clone, "rev-parse", "HEAD");
+        RunEstate.Git(run.Clone, "tag", "extra-tag");
+        RunEstate.Git(run.Clone, "commit", "--allow-empty", "-qm", "Unrequested descendant");
+        string descendant = RunEstate.Git(run.Clone, "rev-parse", "HEAD");
+        string child = Path.Combine(run.Clone, "child");
+        Directory.CreateDirectory(child);
+        File.WriteAllText(Path.Combine(child, ".git"), "gitdir: unavailable-fixture\n");
+        using (FileStream large = File.Create(Path.Combine(child, "large"))) large.SetLength(AcquisitionWorkingTree.MaximumWorkingFileBytes + 1);
+        Assert.True(new GitCommandAdapter().Inspect(run.Clone).Clean);
+
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/named", named, Path.Combine(run.Scratch, "workspace"));
+
+        Assert.Equal(named, workspace.Commit);
+        Assert.False(Path.Exists(Path.Combine(workspace.Path, "child", ".git")));
+        Assert.False(Path.Exists(Path.Combine(workspace.Path, ".git", "modules")));
+        Assert.Empty(RunEstate.Git(workspace.Path, "tag", "--list"));
+        Assert.NotEqual(0, WorkspaceGitCommand.Run(workspace.Path, out _, "cat-file", "-e", descendant));
+        Assert.False(Path.Exists(Path.Combine(workspace.Path, "node_modules")));
+    }
+
+    [Fact]
+    public void AnIgnoredSettingRequiresReviewOfTheExactConfigurationBytes()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string config = Path.Combine(run.Clone, ".git", "config");
+        File.AppendAllText(config, "[future]\n\tsetting = inert-test-data\n");
+        var adapter = new GitCommandAdapter();
+        RepositoryObservation observation = adapter.Inspect(run.Clone);
+        Assert.Contains("future.setting", observation.IgnoredConfiguration);
+
+        string report = run.Report("prepare");
+        RunStartRequest request = PrepareOnlyWorkspaceTests.Request(run, report);
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() =>
+            provider.Prepare(run.Clone, "work/review", null, Path.Combine(run.Scratch, "workspace")));
+        Assert.Contains("future.setting", refused.Message, StringComparison.Ordinal);
+
+        string subject = $"resource:{run.Resource}:{run.Service.Record(run.Resource)!.Hash}";
+        System.Text.Json.JsonElement body = RunEstate.Json($$"""
+            {"independence":"self","outcome":"pass","summary":"Read the exact configuration.","findings":[],
+             "repositoryConfiguration":{"config":"{{observation.ConfigurationHash}}"} }
+            """);
+        WriteOutcome foreign = run.Service.NewRecord(new NewRecordRequest("review", run.Estate.BuilderId, body, subject));
+        Assert.False(foreign.Ok);
+        Assert.Contains(foreign.Problem!.Findings, finding => finding.Code == "review.repository-configuration");
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("review", run.Estate.OperatorId, body, subject)));
+        new FileKeyStore(VericairnHome.Path()).Remove(run.OperatorDevice);
+
+        RunResponse prepared = run.Service.RunPrepare(request);
+        Assert.True(prepared.Ok, prepared.Message);
+        Assert.False(File.Exists(report));
+        File.AppendAllText(config, "# changes the reviewed bytes without changing any setting\n");
+        RunResponse stale = run.Service.RunPrepare(request);
+        Assert.False(stale.Ok);
+        Assert.Contains("signed review", stale.Message, StringComparison.Ordinal);
     }
 
     [Theory]

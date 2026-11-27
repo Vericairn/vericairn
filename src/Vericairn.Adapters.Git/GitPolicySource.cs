@@ -9,6 +9,7 @@ using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Policies;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Adapters.Git;
 
@@ -44,16 +45,14 @@ internal sealed class GitPolicySource : IPolicyRepositorySource
             }
             else
             {
-                if (GitFileSource.RunIsolated(clone, out byte[] names, "ls-files", "--cached", "--others", "--exclude-standard", "-z") != 0) return Missing();
+                using GitHardening hardening = GitHardening.Create();
+                var start = GitFileSource.WorkingStartInfo(clone, hardening, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
+                if (GitFileSource.Run(start, out byte[] names) != 0) return Missing();
+                string mirror = start.WorkingDirectory;
                 foreach (string path in Encoding.UTF8.GetString(names).Split('\0', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
                 {
                     if (!PolicyInputs.Path(path)) return Missing();
-                    string full = clone;
-                    foreach (string component in path.Split('/'))
-                    {
-                        full = Path.Combine(full, component);
-                        if ((File.Exists(full) || Directory.Exists(full)) && (File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0) return Missing();
-                    }
+                    string full = Path.Combine(mirror, path);
                     if (!File.Exists(full)) continue;
                     byte[] bytes = File.ReadAllBytes(full);
                     files.Add(new(path, ContentHash.Sha256(bytes), [.. bytes]));
@@ -61,7 +60,7 @@ internal sealed class GitPolicySource : IPolicyRepositorySource
             }
             return new(identity, commit ?? "working-tree:" + PolicyBasis.Hash(files.Select(f => new { f.Path, f.Hash })), PolicyBasis.RepositoryContract, true, [.. files]);
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException) { return Missing(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or ProviderRefusedException) { return Missing(); }
     }
 
     public PolicyTreeComparison CompareTrees(EstateModel model, RecordEnvelope repository, string selectedCommit, PolicyTreeRequest request)
@@ -82,7 +81,7 @@ internal sealed class GitPolicySource : IPolicyRepositorySource
                 return GitFileSource.RunIsolated(clone, out byte[] tree, ["ls-tree", "-r", "-t", "-z", "--full-tree", commit, "--", .. request.Paths]) == 0 ? tree : null;
             }
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException) { return missing; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or ProviderRefusedException) { return missing; }
     }
 
     // Every regular file of an exact commit, in tree order, or null when an entry is refused or a blob cannot be read. A

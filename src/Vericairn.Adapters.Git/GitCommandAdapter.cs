@@ -48,45 +48,42 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         if (!Directory.Exists(path)) return false;
         using GitHardening hardening = Harden();
-        return Git(hardening, path, out _, "rev-parse", "--verify", "HEAD") == 0;
+        AcquisitionGitView view;
+        try { (view, _) = Acquire(hardening, path, null); }
+        catch (ProviderRefusedException) { return false; }
+        return Git(hardening, view.Directory, out _, "rev-parse", "--verify", "HEAD^{commit}") == 0;
     }
 
     /// <inheritdoc />
-    public RepositoryObservation Inspect(string path)
+    public RepositoryObservation Inspect(string path) => Inspect(path, null);
+
+    /// <inheritdoc />
+    public RepositoryObservation Inspect(string path, string? boundary)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        if (!Directory.Exists(path))
-        {
-            throw new ProviderRefusedException($"{path} does not exist.");
-        }
+        if (!Directory.Exists(path)) throw new ProviderRefusedException("The selected repository directory does not exist.");
 
-        // The repository is not one Vericairn created: every process runs hardened, so its own configuration starts no program.
         using GitHardening hardening = Harden();
-        string name = Path.GetFileName(Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar));
-        if (Git(hardening, path, null, out string inside, out string refusal, "rev-parse", "--is-inside-work-tree") != 0 || inside.Trim() != "true")
-        {
-            // Git's ownership check refuses a repository another account owns; the user's own safe.directory list is not read here.
-            throw new ProviderRefusedException(refusal.Contains("dubious ownership", StringComparison.Ordinal) || refusal.Contains("owned by someone else", StringComparison.Ordinal)
-                ? $"{name} is owned by another account, and git refuses to read it; inspect it as its owner or from a clone you own."
-                : $"{name} is not inside a git working tree.");
-        }
-
-        if (Git(hardening, path, out string head, "rev-parse", "--verify", "HEAD") != 0)
+        (AcquisitionGitView view, AcquisitionConfiguration settings) = Acquire(hardening, path, boundary);
+        string git = view.Directory;
+        if (Git(hardening, git, out string head, "rev-parse", "--verify", "HEAD^{commit}") != 0)
         {
             throw new ProviderRefusedException("The repository has no commits yet; make the first commit, then adopt it.");
         }
 
         string commit = head.Trim();
-        string? branch = Git(hardening, path, out string branchText, "symbolic-ref", "--short", "-q", "HEAD") == 0 ? branchText.Trim() : null;
-        string? remote = Git(hardening, path, out string remoteText, "remote", "get-url", "origin") == 0 ? remoteText.Trim() : null;
-        Git(hardening, path, out string roots, "rev-list", "--max-parents=0", "HEAD");
+        string? branch = Git(hardening, git, out string branchText, "symbolic-ref", "--short", "-q", "HEAD") == 0 ? branchText.Trim() : null;
+        string? remote = settings.Remote;
+        Git(hardening, git, out string roots, "rev-list", "--max-parents=0", "HEAD");
         string rootCommit = roots.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim()).Order(StringComparer.Ordinal).FirstOrDefault() ?? commit;
-        string status = Status(hardening, path, commit)
+        string status = view.Bare ? string.Empty : Status(hardening, view, settings)
             ?? throw new ProviderRefusedException("git could not read the working tree completely; repository observation is incomplete.");
         int modified = 0;
         int untracked = 0;
-        foreach (string line in status.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        string[] entries = status.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < entries.Length; i++)
         {
+            string line = entries[i];
             if (line.StartsWith("??", StringComparison.Ordinal))
             {
                 untracked++;
@@ -94,12 +91,13 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
             else
             {
                 modified++;
+                if (line.Length > 2 && (line[0] is 'R' or 'C' || line[1] is 'R' or 'C')) i++;
             }
         }
 
-        Git(hardening, path, out string tagText, "tag", "--list");
+        Git(hardening, git, out string tagText, "tag", "--list");
         List<string> tags = tagText.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(t => t.Trim()).Order(StringComparer.Ordinal).ToList();
-        Git(hardening, path, out string log, "log", "-n", "10", "--no-show-signature", "--format=%H%x1f%cI%x1f%s");
+        Git(hardening, git, out string log, "log", "-n", "10", "--no-show-signature", "--format=%H%x1f%cI%x1f%s");
         var recent = new List<RecentCommit>();
         foreach (string line in log.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -110,7 +108,13 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
             }
         }
 
-        return new RepositoryObservation(commit, branch, remote, rootCommit, modified == 0 && untracked == 0, modified, untracked, tags, recent, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+        return new RepositoryObservation(commit, branch, remote, rootCommit, modified == 0 && untracked == 0, modified, untracked, tags, recent, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow))
+        {
+            IgnoredConfiguration = settings.Findings,
+            ConfigurationHash = settings.ConfigurationHash,
+            WorktreeConfigurationHash = settings.WorktreeConfigurationHash,
+            GitRedirections = view.Redirections,
+        };
     }
 
     private static GitHardening Harden()
@@ -125,20 +129,66 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         }
     }
 
-    /// <summary>
-    /// The porcelain status of the working tree at <paramref name="path"/>, or null when git cannot read it completely. The status
-    /// process reads the working tree through a git directory Vericairn writes (<see cref="GitHardening.WorkingTree"/>), never the
-    /// repository's own configuration, so no filter driver, fsmonitor hook or other program it names can run, whatever an earlier
-    /// process read. A submodule's state is read from its checked-out commit alone: git starts no process inside it.
-    /// </summary>
-    private string? Status(GitHardening hardening, string path, string? head)
+    internal (AcquisitionGitView View, AcquisitionConfiguration Settings) Acquire(GitHardening hardening, string path, string? boundary)
     {
-        if (Git(hardening, path, out string layout, [.. GitHardening.LayoutScan]) != 0) return null;
-        int carried = Git(hardening, path, out string settings, [.. GitHardening.CarriedScan]);
-        if (carried is not (0 or 1) || hardening.WorkingTree(path, layout, head, carried == 0 ? settings : string.Empty) is not { } tree) return null;
-        // Git skips a directory it cannot open with a warning and still succeeds; its contents were not read, so neither is the tree.
-        return Git(hardening, path, tree, out string status, out string warnings, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=dirty") == 0
+        try
+        {
+            var view = new AcquisitionGitView(path, boundary, Path.Combine(hardening.Control, "repository"));
+            var settings = new AcquisitionConfiguration(view, configuration =>
+                Git(hardening, view.Directory, out string entries, "config", "--file", configuration, "--no-includes", "--null", "--list") == 0
+                    ? entries : throw new ProviderRefusedException("Git could not parse the repository's configuration as data."));
+            view.SetObjectFormat(settings.ObjectFormat);
+            return (view, settings);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            throw new ProviderRefusedException("Could not read the repository's Git metadata safely: " + error.Message, error);
+        }
+    }
+
+    // Status only compares copies of the working tree and the index. There is no Git process in the source working tree.
+    private string? Status(GitHardening hardening, AcquisitionGitView view, AcquisitionConfiguration settings)
+    {
+        GitWorkingTree tree;
+        try { tree = WorkingTree(hardening, view, settings); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            throw new ProviderRefusedException("Git could not read the working tree completely: " + error.Message, error);
+        }
+
+        // --ignore-submodules=all keeps Git from finding or reading any submodule's repository.
+        return Git(hardening, tree.TopLevel, tree, out string status, out string warnings, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all") == 0
             && !warnings.Contains("could not open directory", StringComparison.Ordinal) ? status : null;
+    }
+
+    internal static GitWorkingTree WorkingTree(GitHardening hardening, AcquisitionGitView view, AcquisitionConfiguration settings)
+    {
+        string mirror = Path.Combine(hardening.Control, "working-tree");
+        view.CopyIndex();
+        Directory.CreateDirectory(mirror);
+        List<string> options = ["--git-dir=" + view.Directory, "--work-tree=" + mirror, "-c", "core.bare=false"];
+        if (File.Exists(Path.Combine(view.Directory, "info", "sparse-checkout")))
+            options.AddRange(["-c", "core.sparseCheckout=true"]);
+        foreach (string setting in settings.Comparison)
+        {
+            options.Add("-c");
+            options.Add(setting);
+        }
+        var tree = new GitWorkingTree(mirror, Path.Combine(view.Directory, "index"), options);
+        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        hardening.Apply(info, tree, ["ls-files", "--stage", "-z"]);
+        ProcessResult index = BoundedProcess.Run(info, TimeSpan.FromSeconds(30));
+        if (index.Outcome != ProcessOutcome.Exited || index.ExitCode != 0)
+            throw new ProviderRefusedException("Git could not read the working tree completely: its copied index is unavailable.");
+        bool insensitive = OperatingSystem.IsWindows() || settings.Comparison.Contains("core.ignorecase=true", StringComparer.OrdinalIgnoreCase);
+        var submodules = new HashSet<string>(insensitive ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (string entry in index.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int tab = entry.IndexOf('\t', StringComparison.Ordinal);
+            if (tab >= 0 && entry.StartsWith("160000 ", StringComparison.Ordinal)) submodules.Add(entry[(tab + 1)..]);
+        }
+        view.CopyWorkingTree(mirror, submodules);
+        return tree;
     }
 
     private int Git(GitHardening hardening, string path, out string output, params string[] arguments) => Git(hardening, path, null, out output, out _, arguments);
@@ -146,7 +196,7 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
     private int Git(GitHardening hardening, string path, GitWorkingTree? tree, out string output, out string error, params string[] arguments)
     {
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = path };
-        if (tree is null) hardening.Apply(info, ["-c", "core.quotepath=off", .. arguments]);
+        if (tree is null) hardening.Apply(info, ["--git-dir=" + path, "-c", "core.quotepath=off", .. arguments]);
         else hardening.Apply(info, tree, ["-c", "core.quotepath=off", .. arguments]);
         ProcessResult result = run(info);
         if (result.Outcome != ProcessOutcome.Exited)

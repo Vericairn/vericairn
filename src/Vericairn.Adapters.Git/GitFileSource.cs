@@ -11,6 +11,7 @@ using Vericairn.Records.Model;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Processes;
 using Vericairn.Records.Types;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Adapters.Git;
 
@@ -97,7 +98,7 @@ public sealed partial class GitFileSource : IDocumentSource
     public string? Resolve(EstateModel model, RecordEnvelope declaration, string reference)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reference);
-        return clone(model, declaration) is string directory ? Text(directory, "rev-parse", "--verify", "--quiet", reference + "^{commit}") : null;
+        return clone(model, declaration) is string directory ? Text(directory, "rev-parse", "--verify", "--quiet", "--end-of-options", reference + "^{commit}") : null;
     }
 
     /// <inheritdoc />
@@ -165,8 +166,21 @@ public sealed partial class GitFileSource : IDocumentSource
     }
 
     /// <summary>Runs one hardened git process in the clone under the caller's <see cref="GitHardening"/>; -1 when git could not run.</summary>
-    internal static int RunIsolated(GitHardening hardening, string clone, out byte[] output, params string[] arguments) =>
-        Run(StartInfo(clone, hardening, arguments), out output);
+    internal static int RunIsolated(GitHardening hardening, string clone, out byte[] output, params string[] arguments)
+    {
+        try
+        {
+            ProcessStartInfo info = arguments[0] == "ls-files"
+                ? WorkingStartInfo(clone, hardening, arguments)
+                : StartInfo(clone, hardening, arguments);
+            return Run(info, out output);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ProviderRefusedException)
+        {
+            output = [];
+            return -1;
+        }
+    }
 
     /// <summary>
     /// Runs git as <see cref="StartInfo"/> prepared it, with the caller's additions, and reads its bounded output; -1 when git could not
@@ -207,8 +221,17 @@ public sealed partial class GitFileSource : IDocumentSource
     internal static ProcessStartInfo StartInfo(string clone, GitHardening hardening, IEnumerable<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(hardening);
-        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = clone };
-        hardening.Apply(info, ["--no-replace-objects", "-c", "core.quotepath=off", .. arguments]);
+        AcquisitionGitView view = hardening.Acquire(clone);
+        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = view.Directory };
+        hardening.Apply(info, ["--git-dir=" + view.Directory, "--no-replace-objects", "-c", "core.quotepath=off", .. arguments]);
+        return info;
+    }
+
+    internal static ProcessStartInfo WorkingStartInfo(string clone, GitHardening hardening, IEnumerable<string> arguments)
+    {
+        GitWorkingTree tree = hardening.AcquireWorkingTree(clone);
+        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        hardening.Apply(info, tree, ["--no-replace-objects", "-c", "core.quotepath=off", .. arguments]);
         return info;
     }
 
