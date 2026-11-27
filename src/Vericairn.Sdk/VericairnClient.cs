@@ -328,6 +328,10 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public IReadOnlyList<DeviceRow> Devices() => Get<List<DeviceRow>>("/v1/devices")!;
 
     /// <inheritdoc />
+    public DeviceRevocationReachReport? DeviceRevocationReach(string device) =>
+        Get<DeviceRevocationReachReport>("/v1/devices/" + Uri.EscapeDataString(device) + "/revocation-reach", allowNotFound: true);
+
+    /// <inheritdoc />
     public WriteOutcome DeviceCreate(DeviceCreateRequest request) => Post<DeviceCreateRequest, WriteOutcome>("/v1/devices", request)!;
 
     /// <inheritdoc />

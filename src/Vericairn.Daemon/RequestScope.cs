@@ -257,6 +257,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/standing/outputs"] = typeof(StandingOutputRequest),
         ["POST /v1/work/takeover"] = typeof(TakeoverRequest),
         ["GET /v1/devices"] = null,
+        ["GET /v1/devices/{id}/revocation-reach"] = null,
         ["POST /v1/devices"] = typeof(DeviceCreateRequest),
         ["POST /v1/devices/admit"] = typeof(AdmitRequest),
         ["POST /v1/devices/rename"] = typeof(DeviceRenameRequest),
@@ -371,12 +372,14 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     internal static bool Covers(string operation) => Operations.TryGetValue(operation, out Type? type) && (type is null || Covers(type));
 
     /// <summary>
-    /// The operations a device-signed request may ask only for an administrator: stopping the runtime and replacing its certificate or
-    /// identity. Over the local network they are refused before this, as operations on the runtime's own machine.
+    /// Stopping the runtime, replacing its certificate or identity, and inspecting revocation reach require an administrator.
+    /// The local-network profile also refuses shutdown and certificate or identity changes as operations on the runtime's own machine.
     /// </summary>
     private string? Refusal(string operation, AuthenticatedDevice device) =>
         !Covers(operation)
             ? $"{operation} has no request scope rule and is refused."
+            : operation == "GET /v1/devices/{id}/revocation-reach"
+            ? Administrator("Reading revocation reach", device)
             : operation is "POST /v1/shutdown" or "POST /v1/runtime/certificate" && !service.Administers(device.Principal)
             ? $"{operation} is an administrator's: device {device.Identity} acts for {device.Principal}, which is neither an operator nor holds the 'administer' scope. On the runtime's machine its operating-system user reaches it over the local socket."
             : null;
