@@ -87,8 +87,10 @@ public sealed class RuntimeIdentity
     }
 
     /// <summary>
-    /// Replaces a saved Secure Enclave identity whose key is missing or cannot be opened on this Mac. The caller holds the estate's
-    /// writer lock alone. The previous blob, if present, can still be used on the Mac that made it.
+    /// Replaces, by a person's explicit choice, a saved Secure Enclave identity that cannot be read here: its key blob is missing, the
+    /// helper cannot use it (exit 4), it does not match the record, or this machine offers no Secure Enclave (not a Mac, no helper, or
+    /// helper exit 3, where the new identity takes the custody the machine offers); or a record that cannot be read at all. The caller
+    /// holds the estate's writer lock alone. The saved record is kept beside it, and the previous blob, if present, is not removed.
     /// </summary>
     internal static RuntimeIdentity ReplaceUnreadable(string directory) =>
         Read(Path.Combine(directory, FileName), store: null, replaceUnreadable: true)!;
@@ -125,8 +127,12 @@ public sealed class RuntimeIdentity
         return new RuntimeIdentity(target, id, publicKey);
     }
 
+    // How a person chooses a new identity when the saved one cannot be read: every refusal that keeps the identity names it.
+    private const string Choose = " To choose a new identity here while the runtime is stopped, run 'vericairn runtime rotate --identity --replace-unreadable'. Every paired device must pair again.";
+
     private static RuntimeIdentity? Read(string path, IDeviceKeyStore? store, bool replaceUnreadable = false)
     {
+        string directory = Path.GetDirectoryName(path)!;
         // A failure reading or parsing the file cannot establish that the old identity is gone.
         const string InvalidRecord = "The saved runtime identity record could not be read. Restore it from a backup and retry.";
         JsonObject? node;
@@ -136,13 +142,13 @@ public sealed class RuntimeIdentity
         }
         catch (JsonException)
         {
-            throw new InvalidOperationException(InvalidRecord);
+            node = null;
         }
 
         if (node is null || node["custody"] is not JsonValue custodyValue || !custodyValue.TryGetValue(out string? custody) ||
             string.IsNullOrWhiteSpace(custody))
         {
-            throw new InvalidOperationException(InvalidRecord);
+            return replaceUnreadable ? ReplaceKeepingRecord(directory, store) : throw new InvalidOperationException(InvalidRecord + Choose);
         }
 
         bool enclave = custody is SecureEnclaveCustody.Kind or "secure-enclave";
@@ -150,22 +156,30 @@ public sealed class RuntimeIdentity
         {
             if (replaceUnreadable && !enclave)
             {
-                throw new InvalidOperationException("--replace-unreadable requires a saved Secure Enclave runtime identity.");
+                throw new InvalidOperationException("--replace-unreadable requires a saved Secure Enclave runtime identity, or a record that cannot be read.");
             }
 
             string? id = node["key"]?.GetValue<string>();
             string? publicKey = node["publicKey"]?.GetValue<string>();
             if (id is null || publicKey is null || !Ulid.IsValid(id))
             {
-                return enclave
-                    ? throw new InvalidOperationException("The saved Secure Enclave runtime identity record is incomplete. Restore it from a backup and retry.")
-                    : null;
+                if (!enclave) return null;
+                return replaceUnreadable ? ReplaceKeepingRecord(directory, store)
+                    : throw new InvalidOperationException("The saved Secure Enclave runtime identity record is incomplete. Restore it from a backup and retry." + Choose);
             }
 
             if (enclave)
             {
-                IDeviceKeyStore heldEnclave = store?.Kind == SecureEnclaveCustody.Kind ? store : EnclaveStore();
-                return ReadEnclave(id, publicKey, heldEnclave, replaceUnreadable ? Path.GetDirectoryName(path)! : null);
+                string? none = null;
+                IDeviceKeyStore? heldEnclave = store?.Kind == SecureEnclaveCustody.Kind ? store : EnclaveStore(out none);
+                if (heldEnclave is null)
+                {
+                    // No Secure Enclave can be used here: the explicit choice makes a new identity in the custody this machine offers.
+                    return replaceUnreadable ? ReplaceKeepingRecord(directory, store?.Kind == SecureEnclaveCustody.Kind ? null : store)
+                        : throw new InvalidOperationException(none + Choose);
+                }
+
+                return ReadEnclave(id, publicKey, heldEnclave, replaceUnreadable ? directory : null);
             }
 
             IDeviceKeyStore? held = store is not null && store.Kind == custody ? store : Named(custody);
@@ -180,25 +194,48 @@ public sealed class RuntimeIdentity
         }
     }
 
-    private static SecureEnclaveKeyStore EnclaveStore()
+    // The explicit replacement: the saved record is kept beside it as runtime-identity.json.replaced-<time>, and no key blob is removed.
+    private static RuntimeIdentity ReplaceKeepingRecord(string directory, IDeviceKeyStore? store)
     {
+        string path = Path.Combine(directory, FileName);
+        string kept = $"{path}.replaced-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}";
+        File.Copy(path, kept, overwrite: false);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(kept, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        return Create(directory, store, confirmKey: true);
+    }
+
+    // The Secure Enclave store, or null with why when this machine offers none: not a Mac, no helper, or the helper reports the enclave
+    // unavailable (exit 3). A helper that fails its availability check refuses, as FIX-175 has it.
+    private static SecureEnclaveKeyStore? EnclaveStore(out string? none)
+    {
+        none = null;
         if (!OperatingSystem.IsMacOS())
         {
-            throw new InvalidOperationException("This runtime identity uses macOS Secure Enclave custody. Use the Mac that holds the key.");
+            none = "This runtime identity uses macOS Secure Enclave custody, which this machine does not offer. Use the Mac that holds the key.";
+            return null;
         }
 
         string? helper = SecureEnclaveCustody.HelperPath();
         if (helper is null)
         {
-            throw new InvalidOperationException("The Secure Enclave helper is missing. Put the vericairn-enclave from this command line's release archive beside it and retry.");
+            none = "The Secure Enclave helper is missing. Put the vericairn-enclave from this command line's release archive beside it and retry.";
+            return null;
         }
 
-        return SecureEnclaveKeyStore.Probe(helper) switch
+        switch (SecureEnclaveKeyStore.Probe(helper))
         {
-            true => new SecureEnclaveKeyStore(VericairnHome.Path(), helper: helper),
-            false => throw SecureEnclaveKeyStore.EnclaveUnavailable(),
-            null => throw EnclaveHelperCheck.Refuse(EnclaveHelperReport.FailedAvailability.Description),
-        };
+            case true:
+                return new SecureEnclaveKeyStore(VericairnHome.Path(), helper: helper);
+            case false:
+                none = SecureEnclaveKeyStore.EnclaveUnavailable().Message;
+                return null;
+            default:
+                throw EnclaveHelperCheck.Refuse(EnclaveHelperReport.FailedAvailability.Description);
+        }
     }
 
     private static RuntimeIdentity ReadEnclave(string id, string publicKey, IDeviceKeyStore store, string? replacementDirectory)
@@ -212,22 +249,17 @@ public sealed class RuntimeIdentity
         }
         catch (EnclaveKeyUnavailableException)
         {
-            problem = "The Secure Enclave helper could not open the runtime identity key on this Mac (helper exit 4). Use the original Mac that holds the key.";
+            problem = "The Secure Enclave helper could not use the runtime identity key on this Mac (helper exit 4): the key was made on another Mac, or its blob is damaged. Use the Mac that holds the key, or restore the blob from a backup.";
+        }
+
+        if (problem is null && RecordSigning.EncodePublicKey(spki!) != publicKey)
+        {
+            problem = "The Secure Enclave key does not match the saved runtime identity. Restore the matching key blob and identity record from a backup and retry.";
         }
 
         if (problem is not null)
         {
-            if (replacementDirectory is not null)
-            {
-                return Create(replacementDirectory, store, confirmKey: true);
-            }
-
-            throw new InvalidOperationException(problem + " To choose a new identity here while the runtime is stopped, run 'vericairn runtime rotate --identity --replace-unreadable'. Every paired device must pair again.");
-        }
-
-        if (RecordSigning.EncodePublicKey(spki!) != publicKey)
-        {
-            throw new InvalidOperationException("The Secure Enclave key does not match the saved runtime identity. Restore the matching key blob and identity record from a backup and retry.");
+            return replacementDirectory is not null ? ReplaceKeepingRecord(replacementDirectory, store) : throw new InvalidOperationException(problem + Choose);
         }
 
         if (replacementDirectory is not null)

@@ -265,7 +265,7 @@ public sealed class EnclaveHelperCommandTests
     [InlineData("missing-helper", "Put the vericairn-enclave from this command line's release archive beside it")]
     [InlineData("availability-exit-3", "Secure Enclave is unavailable to this process (helper exit 3)")]
     [InlineData("public-exit-3", "Secure Enclave is unavailable to this process (helper exit 3)")]
-    [InlineData("public-exit-4", "could not open the runtime identity key on this Mac (helper exit 4)")]
+    [InlineData("public-exit-4", "could not use the runtime identity key on this Mac (helper exit 4): the key was made on another Mac, or its blob is damaged")]
     [InlineData("missing-blob", "could not find the runtime identity's key blob")]
     [InlineData("bad-base64", "did not return a valid P-256 public key")]
     [InlineData("empty", "did not return a valid P-256 public key")]
@@ -290,7 +290,8 @@ public sealed class EnclaveHelperCommandTests
         Assert.Contains(remedy, CliHarness.Unfold(error), StringComparison.Ordinal);
         Assert.DoesNotContain("no longer held", output + error, StringComparison.Ordinal);
         Assert.DoesNotContain(fixture.Home, output + error, StringComparison.Ordinal);
-        if (failure is "public-exit-4" or "missing-blob")
+        // Every refusal that is not the helper's own failure names the explicit way to a new identity.
+        if (failure is "missing-helper" or "availability-exit-3" or "public-exit-4" or "missing-blob" or "wrong-key" or "malformed-record")
         {
             Assert.Contains("vericairn runtime rotate --identity --replace-unreadable", CliHarness.Unfold(error), StringComparison.Ordinal);
         }
@@ -339,12 +340,38 @@ public sealed class EnclaveHelperCommandTests
     }
 
     [Theory]
-    [InlineData("missing-helper")]
-    [InlineData("availability-exit-3")]
+    [InlineData("missing-helper", "file-owner-only")]
+    [InlineData("availability-exit-3", "file-owner-only")]
+    [InlineData("wrong-key", SecureEnclaveCustody.Kind)]
+    [InlineData("malformed-record", SecureEnclaveCustody.Kind)]
+    [InlineData("public-exit-4", SecureEnclaveCustody.Kind)]
+    [InlineData("missing-blob", SecureEnclaveCustody.Kind)]
+    [SupportedOSPlatform("macos")]
+    public async Task TheExplicitReplacementCoversEveryIdentityThisMachineCannotReadAndKeepsTheRecord(string failure, string custody)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        using var fixture = await RuntimeIdentityFixture.Create(failure);
+        (int serve, _, _) = await fixture.Run("serve");
+        fixture.AssertPreserved();
+        Assert.Equal(2, serve);
+
+        (int code, string output, string error) = await fixture.Run("rotate", "--identity", "--replace-unreadable");
+        Assert.True(code == 0, error);
+        Assert.Contains($"custody: every paired device pairs again", output, StringComparison.Ordinal);
+        using JsonDocument replacement = JsonDocument.Parse(File.ReadAllBytes(fixture.Identity));
+        Assert.Equal(custody, replacement.RootElement.GetProperty("custody").GetString());
+        // The replaced record is kept byte for byte beside the new one, and the saved blob is never removed.
+        string kept = Assert.Single(Directory.EnumerateFiles(Path.GetDirectoryName(fixture.Identity)!, RuntimeIdentity.FileName + ".replaced-*"));
+        Assert.Equal(fixture.Before, File.ReadAllBytes(kept));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(kept));
+        fixture.AssertOriginalBlob();
+        Assert.Null(fixture.ReadFailure());
+    }
+
+    [Theory]
     [InlineData("public-exit-3")]
     [InlineData("bad-base64")]
     [InlineData("different-curve")]
-    [InlineData("wrong-key")]
     [InlineData("public-timeout")]
     [InlineData("healthy")]
     [SupportedOSPlatform("macos")]
@@ -379,6 +406,7 @@ public sealed class EnclaveHelperCommandTests
         internal string Home { get; }
         internal string Identity { get; private set; } = "";
         internal string ReplacementPublicKey { get; private set; } = "";
+        internal byte[] Before => before;
 
         internal static async Task<RuntimeIdentityFixture> Create(string failure)
         {

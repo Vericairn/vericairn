@@ -13,7 +13,7 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 49, November 27, 2026. The runtime preserves an unreadable Secure Enclave identity and names the recovery for each failure. `runtime rotate --identity --replace-unreadable` explicitly replaces a missing or unusable identity key on this Mac, in the development build.
+Revision 49, November 27, 2026. The runtime preserves an unreadable Secure Enclave identity and names the recovery for each failure. `runtime rotate --identity --replace-unreadable` explicitly replaces an identity that cannot be read here, keeping the replaced record, in the development build.
 
 Revision 48, November 27, 2026. A present `vericairn-enclave` helper must complete its availability check: one that cannot start, exits unexpectedly, is killed or times out makes `devices create` refuse before it makes a key and `doctor` mark the Secure Enclave default unavailable, while exit 3 and an absent helper keep file custody; a daemon that cannot read its Secure Enclave identity refuses to start and keeps the identity, in the development build.
 
@@ -1126,15 +1126,23 @@ and, as for any parse error, the usage help on standard output.
 
 ## Recovering a runtime identity (0.9.5)
 
-When startup of the local-network profile cannot read a saved Secure Enclave identity key, it refuses and keeps the identity.
-If the helper is absent, put the `vericairn-enclave` from this command line's release archive beside it and retry. If the helper answers exit 3, start the
-runtime in a context where the Secure Enclave on the Mac holding the key is available. An invalid P-256 public key from
-the helper or a public key that differs from the saved identity also refuses startup.
+When startup of the local-network profile cannot read a saved Secure Enclave identity, it refuses and keeps the identity byte for
+byte. If the helper is absent, put the `vericairn-enclave` from this command line's release archive beside it and retry. If the
+helper answers exit 3, start the runtime in a context where the Secure Enclave on the Mac holding the key is available. A helper
+that fails its availability check, answers anything but one P-256 public key, or exits otherwise also refuses startup; settle the
+helper first.
 
-If the helper cannot open the key on this Mac (exit 4), use the original Mac that holds it. If the key blob is missing,
-restore it on that Mac. To keep serving from this Mac with a new identity, stop the runtime if it is running, then run
-`vericairn runtime rotate --identity --replace-unreadable`. The command needs a working helper and makes a new Secure Enclave
-key that it reads back before replacing the saved identity. Start the runtime again after it succeeds. Every paired device must pair again.
+If the helper cannot use the key on this Mac (exit 4), the key was made on another Mac or its blob is damaged: use the Mac that
+holds it, or restore the blob from a backup. If the key blob is missing, restore it on that Mac. If the helper answers a different
+key from the saved record, or the record itself cannot be read, restore the matching record and blob from a backup.
+
+To keep serving from this machine with a new identity instead, stop the runtime if it is running, then run
+`vericairn runtime rotate --identity --replace-unreadable`. It replaces the identity in each case above where the identity cannot
+be read here: a missing, unusable or mismatched key, a record that cannot be read, or a machine that offers no Secure Enclave (not
+a Mac, no helper, or helper exit 3), where the new identity takes the custody the machine offers, such as an owner-only file. It
+refuses an identity that can be read and a helper that is failing, keeps the replaced record beside the new one as
+`runtime-identity.json.replaced-<time>`, removes no key blob, and reads a new key back before saving it. Start the runtime again
+after it succeeds. Every paired device must pair again.
 
 ## Presence prompts on standard error (0.9.3)
 

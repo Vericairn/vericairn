@@ -15,7 +15,7 @@ internal sealed class RuntimeRotateCommand : Command
         var identityOption = new Option<bool>("--identity") { Description = "The runtime identity's key may be known to someone else: replace the identity too; every paired device then pairs again." };
         var replaceUnreadableOption = new Option<bool>("--replace-unreadable")
         {
-            Description = "With --identity and the runtime stopped, make a new Secure Enclave identity when its blob is missing or cannot be opened on this Mac. Every paired device must pair again.",
+            Description = "With --identity and the runtime stopped, make a new identity when the saved Secure Enclave identity cannot be read here (its blob missing, unusable or not matching, or no Secure Enclave on this machine) or its record cannot be read. The replaced record is kept beside it. Every paired device must pair again.",
         };
         var reasonOption = new Option<string?>("--reason") { Description = "Why, for the runtime's log." };
         Options.Add(compromisedOption);

@@ -212,10 +212,10 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                         return context.Fail("Stop the runtime and let other commands finish before replacing an unreadable identity.");
                     }
 
-                    string replacement = RuntimeIdentity.ReplaceUnreadable(directory).Fingerprint;
+                    RuntimeIdentity replaced = RuntimeIdentity.ReplaceUnreadable(directory);
                     context.Output.WriteLine(json
-                        ? JsonSerializer.Serialize(new { identity = replacement, served = false }, ProtocolJson.Options)
-                        : $"runtime identity replaced by {replacement}: every paired device pairs again");
+                        ? JsonSerializer.Serialize(new { identity = replaced.Fingerprint, custody = replaced.Custody, served = false }, ProtocolJson.Options)
+                        : $"runtime identity replaced by {replaced.Fingerprint} in {replaced.Custody} custody: every paired device pairs again; the replaced record is kept beside it");
                     return Clean;
                 }
 
