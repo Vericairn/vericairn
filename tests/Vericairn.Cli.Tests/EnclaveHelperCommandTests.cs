@@ -337,6 +337,7 @@ public sealed class EnclaveHelperCommandTests
         fixture.AssertPreserved();
         Assert.Equal(2, code);
         Assert.Contains("The new Secure Enclave key could not be read back", CliHarness.Unfold(error), StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(fixture.Identity)!, RuntimeIdentity.FileName + ".replaced-*"));
     }
 
     [Theory]
@@ -369,6 +370,7 @@ public sealed class EnclaveHelperCommandTests
     }
 
     [Theory]
+    [InlineData("availability-exit-1")]
     [InlineData("public-exit-3")]
     [InlineData("bad-base64")]
     [InlineData("different-curve")]
@@ -384,6 +386,8 @@ public sealed class EnclaveHelperCommandTests
         fixture.AssertPreserved();
         Assert.Equal(2, code);
         Assert.DoesNotContain("Unrecognized command or argument", error, StringComparison.Ordinal);
+        // A refused replacement keeps no copy of the record.
+        Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(fixture.Identity)!, RuntimeIdentity.FileName + ".replaced-*"));
         if (failure == "healthy") Assert.Contains("already readable", CliHarness.Unfold(error), StringComparison.Ordinal);
     }
 
@@ -453,7 +457,7 @@ public sealed class EnclaveHelperCommandTests
                         "wrong-key" => "echo " + Convert.ToBase64String(next),
                         _ => "echo " + Convert.ToBase64String(spki),
                     };
-                    string available = failure == "availability-exit-3" ? "3" : "0";
+                    string available = failure switch { "availability-exit-3" => "3", "availability-exit-1" => "1", _ => "0" };
                     string writeBlob = failure == "public-exit-4-no-create-blob" ? ":" : """printf 'fixture blob' > "$2" """;
                     File.WriteAllText(fixture.helper, $$"""
                         #!/bin/sh

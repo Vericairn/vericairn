@@ -102,7 +102,7 @@ public sealed class RuntimeIdentity
         return new RuntimeIdentityProof(estate, PublicKey, certificate, client, nonce, Base64Url.EncodeToString(signature));
     }
 
-    private static RuntimeIdentity Create(string directory, IDeviceKeyStore? store, bool confirmKey = false)
+    private static RuntimeIdentity Create(string directory, IDeviceKeyStore? store, bool confirmKey = false, Action? beforeSaving = null)
     {
         Directory.CreateDirectory(directory);
         IDeviceKeyStore target = store ?? DeviceKeyStores.Default(presence: false);
@@ -114,6 +114,7 @@ public sealed class RuntimeIdentity
         }
 
         string publicKey = RecordSigning.EncodePublicKey(spki);
+        beforeSaving?.Invoke();
         var node = new JsonObject { ["format"] = Format, ["key"] = id, ["custody"] = target.Kind, ["publicKey"] = publicKey };
         string path = Path.Combine(directory, FileName);
         string temporary = path + ".tmp";
@@ -194,18 +195,21 @@ public sealed class RuntimeIdentity
         }
     }
 
-    // The explicit replacement: the saved record is kept beside it as runtime-identity.json.replaced-<time>, and no key blob is removed.
+    // The explicit replacement: once the new key is made and read back, the saved record is kept beside it as
+    // runtime-identity.json.replaced-<time>, then the new record replaces it; no key blob is removed. A refused replacement keeps no
+    // copy, and a stop between the copy and the new record leaves the saved record whole beside its copy.
     private static RuntimeIdentity ReplaceKeepingRecord(string directory, IDeviceKeyStore? store)
     {
         string path = Path.Combine(directory, FileName);
-        string kept = $"{path}.replaced-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}";
-        File.Copy(path, kept, overwrite: false);
-        if (!OperatingSystem.IsWindows())
+        return Create(directory, store, confirmKey: true, beforeSaving: () =>
         {
-            File.SetUnixFileMode(kept, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-
-        return Create(directory, store, confirmKey: true);
+            string kept = $"{path}.replaced-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}";
+            File.Copy(path, kept, overwrite: false);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(kept, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        });
     }
 
     // The Secure Enclave store, or null with why when this machine offers none: not a Mac, no helper, or the helper reports the enclave
