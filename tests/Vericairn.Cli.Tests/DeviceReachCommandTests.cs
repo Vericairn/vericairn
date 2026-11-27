@@ -3,11 +3,14 @@
 
 using System.Text.Json;
 using Vericairn.Daemon;
+using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
+using Vericairn.Records.History;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Events;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
@@ -15,6 +18,81 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class DeviceReachCommandTests
 {
+    private const string ClaimBody = """{"kind":"service","name":"Claim","role":"Test service","location":{"url":"https://example.invalid"},"visibility":"private"}""";
+
+    [Fact]
+    public void ReachIncludesBackdatedSignaturesFirstWitnessedByALaterCheckpoint()
+    {
+        using var estate = new TestEstate(3);
+        string operatorDevice = MakeDevice(estate, estate.OperatorId);
+        string device = MakeDevice(estate, estate.BuilderId);
+        CliHarness.Ok("--estate", estate.Root, "devices", "admit", operatorDevice, "--by", estate.OperatorId, "--note", "First authority.");
+        CliHarness.Ok("--estate", estate.Root, "devices", "admit", device, "--by", estate.OperatorId, "--note", "Builder authority.");
+        using EstateService service = EstateService.Open(estate.Root);
+        var keys = new FileKeyStore(VericairnHome.Path());
+        var signer = new StoreSigner(keys, device);
+        var operatorSigner = new StoreSigner(keys, operatorDevice);
+        estate.SetClock(estate.Load().OfType("admission").Max(r => r.AtTime));
+        RecordEnvelope earlier = Claim();
+        estate.SetClock(estate.Clock.AddSeconds(10));
+        RecordEnvelope adoption = Checkpoint(estate, service, operatorSigner, "adoption");
+        Assert.True(SignedHistory.Of(service.Session.Load()).IsWitnessed(earlier.Id));
+        DateTimeOffset cutoff = adoption.AtTime.AddSeconds(1);
+        estate.SetClock(earlier.AtTime);
+        RecordEnvelope later = Claim();
+        DateTimeOffset stated = estate.Clock;
+        estate.SetClock(cutoff.AddSeconds(-1));
+        RecordEnvelope checkpoint = Checkpoint(estate, service, operatorSigner, "manual");
+        estate.SetClock(stated);
+        RecordEnvelope unwitnessed = Claim();
+        Assert.True(SignedHistory.Of(service.Session.Load()).IsWitnessed(later.Id));
+
+        string[] args = ["--estate", estate.Root, "devices", "reach", device, "--since", checkpoint.At];
+        JsonElement[] records = CliHarness.Ok([.. args, "--json"]).Json.GetProperty("records").EnumerateArray().ToArray();
+        JsonElement row = Assert.Single(records, r => r.GetProperty("id").GetString() == later.Id);
+        Assert.Equal(later.At, row.GetProperty("at").GetString());
+        JsonElement witness = row.GetProperty("firstWitness");
+        Assert.Equal((checkpoint.Id, checkpoint.ComputedHash, checkpoint.At),
+            (witness.GetProperty("id").GetString(), witness.GetProperty("hash").GetString(), witness.GetProperty("at").GetString()));
+        Assert.DoesNotContain(records, r => r.GetProperty("id").GetString() == earlier.Id || r.GetProperty("id").GetString() == unwitnessed.Id);
+        string text = CliHarness.Ok(args).Out;
+        Assert.Contains($"stated at {later.At}", text, StringComparison.Ordinal);
+        Assert.Contains($"first witnessed by checkpoint {checkpoint.Id} at {checkpoint.At}", text, StringComparison.Ordinal);
+        Assert.Contains("Checkpoint times state when the witness was recorded", text, StringComparison.Ordinal);
+
+        RecordEnvelope Claim() => estate.Add("resource", estate.BuilderId, ClaimBody, signer: signer);
+    }
+
+    [Fact]
+    public void ReachIncludesBackdatedSignaturesOutsideTheSignedDeviceClosing()
+    {
+        using var estate = new TestEstate(3);
+        string operatorDevice = MakeDevice(estate, estate.OperatorId);
+        string device = MakeDevice(estate, estate.BuilderId);
+        CliHarness.Ok("--estate", estate.Root, "devices", "admit", operatorDevice, "--by", estate.OperatorId, "--note", "First authority.");
+        CliHarness.Ok("--estate", estate.Root, "devices", "admit", device, "--by", estate.OperatorId, "--note", "Builder authority.");
+        using EstateService service = EstateService.Open(estate.Root);
+        var keys = new FileKeyStore(VericairnHome.Path());
+        var signer = new StoreSigner(keys, device);
+        var operatorSigner = new StoreSigner(keys, operatorDevice);
+        estate.SetClock(estate.Load().OfType("admission").Max(r => r.AtTime));
+        RecordEnvelope earlier = estate.Add("resource", estate.BuilderId, ClaimBody, signer: signer);
+        estate.SetClock(estate.Clock.AddSeconds(10));
+        Checkpoint(estate, service, operatorSigner, "adoption");
+        RecordEnvelope closing = Checkpoint(estate, service, operatorSigner, "closing", ("device", device));
+        estate.SetClock(earlier.AtTime);
+        RecordEnvelope outside = estate.Add("resource", estate.BuilderId, ClaimBody, signer: signer);
+        Assert.Equal(closing.Id, Assert.Single(estate.Load().Trust.Closings).Record.Id);
+
+        JsonElement[] records = CliHarness.Ok("--estate", estate.Root, "--json", "devices", "reach", device, "--since", closing.At)
+            .Json.GetProperty("records").EnumerateArray().ToArray();
+        JsonElement row = Assert.Single(records, r => r.GetProperty("id").GetString() == outside.Id);
+        Assert.Equal(outside.At, row.GetProperty("at").GetString());
+        Assert.False(row.TryGetProperty("firstWitness", out _));
+        Assert.Equal(closing.Id, row.GetProperty("outsideClosing").GetProperty("id").GetString());
+        Assert.DoesNotContain(records, r => r.GetProperty("id").GetString() == earlier.Id);
+    }
+
     [Fact]
     public void ReachReportsVerifiedSignaturesByIdentityAndExactSessionEvidence()
     {
@@ -77,6 +155,66 @@ public sealed class DeviceReachCommandTests
     }
 
     [Fact]
+    public void ReachKeepsTheStatedTimeAndMatchesLaterLedgerTimesByExactHash()
+    {
+        using var estate = new TestEstate(3);
+        string device = MakeDevice(estate, estate.BuilderId);
+        var signer = new StoreSigner(new FileKeyStore(VericairnHome.Path()), device);
+        RecordEnvelope signed = estate.Add("resource", estate.BuilderId, ClaimBody, signer: signer);
+        RecordEnvelope unrelated = estate.Add("resource", estate.BuilderId, ClaimBody, signer: signer);
+        string wrongHash = estate.Builder.ComputedHash;
+        string directory = PresenceSessionLedger.DirectoryOf(estate.Root);
+        var ledger = new PresenceSessionLedger(directory);
+        const string session = "01J9Z3K4M5N6P7Q8R9S0T1V2W5";
+        string cutoff = RecordParser.FormatTimestamp(estate.Clock.AddMinutes(1));
+        ledger.Append(new(signed.At, session, "announced") { Device = device });
+        ledger.Append(new(cutoff, session, "signed") { Record = signed.Id, Type = signed.Type, Hash = signed.ComputedHash });
+        ledger.Append(new(cutoff, session, "signed") { Record = unrelated.Id, Type = unrelated.Type, Hash = wrongHash });
+
+        string[] args = ["--estate", estate.Root, "devices", "reach", device, "--since", cutoff];
+        JsonElement[] records = CliHarness.Ok([.. args, "--json"]).Json.GetProperty("records").EnumerateArray().ToArray();
+        JsonElement exact = Assert.Single(records, r => r.GetProperty("source").GetString() == "record-signature" && r.GetProperty("id").GetString() == signed.Id);
+        Assert.Equal(["at", "hash", "id", "ledgerSignedAt", "path", "sessions", "source", "type"], exact.EnumerateObject().Select(p => p.Name).Order());
+        Assert.Equal(signed.At, exact.GetProperty("at").GetString());
+        Assert.Equal(cutoff, Assert.Single(exact.GetProperty("ledgerSignedAt").EnumerateArray()).GetString());
+        JsonElement mismatch = Assert.Single(records, r => r.GetProperty("id").GetString() == unrelated.Id);
+        Assert.Equal(("presence-ledger", wrongHash, cutoff), (mismatch.GetProperty("source").GetString(), mismatch.GetProperty("hash").GetString(), mismatch.GetProperty("at").GetString()));
+        Assert.Contains($"ledger signing times {cutoff}", CliHarness.Ok(args).Out, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReachReportsOldAndNewKeysAndASignatureOnAnUnreadableLine()
+    {
+        using var estate = new TestEstate(3);
+        string device = MakeDevice(estate, estate.BuilderId);
+        string operatorDevice = MakeDevice(estate, estate.OperatorId);
+        CliHarness.Ok("--estate", estate.Root, "devices", "admit", operatorDevice, "--by", estate.OperatorId, "--note", "First authority.");
+        CliHarness.Ok("--estate", estate.Root, "devices", "admit", device, "--by", estate.OperatorId, "--note", "Builder authority.");
+        var keys = new FileKeyStore(VericairnHome.Path());
+        estate.SetClock(estate.Load().OfType("admission").Max(r => r.AtTime));
+        RecordEnvelope earlier = estate.Add("resource", estate.BuilderId, ClaimBody, signer: new StoreSigner(keys, device));
+        string rotation = Ulid.NewUlid(estate.Clock.AddSeconds(1)).Value;
+        string publicKey = RecordSigning.EncodePublicKey(keys.Create(rotation));
+        RecordEnvelope initial = estate.Load().ById[device];
+        string initialKey = initial.Body.GetProperty("publicKey").GetString()!;
+        RecordEnvelope rotated = estate.Add("device", estate.BuilderId, initial.Body.GetRawText().Replace(initialKey, publicKey, StringComparison.Ordinal),
+            id: rotation, supersedes: device, signers: [new StoreSigner(keys, device), new StoreSigner(keys, rotation, device)]);
+        Assert.Equal(2, rotated.Signatures.Count);
+        Assert.Contains(estate.Load().Trust.DeviceChain(device), r => r.Id == rotation);
+        RecordEnvelope later = estate.Add("resource", estate.BuilderId, ClaimBody,
+            signers: [new StoreSigner(keys, operatorDevice), new StoreSigner(keys, rotation, device)]);
+        string copy = later.ExpectedPath.Replace(".json", "-copy.json", StringComparison.Ordinal);
+        estate.WriteFile(copy, File.ReadAllText(Path.Combine(estate.Root, later.ExpectedPath)));
+        Assert.Contains(estate.Load().Unreadable, r => r.Id == later.Id);
+
+        JsonElement report = CliHarness.Ok("--estate", estate.Root, "--json", "devices", "reach", rotation, "--since", "2020-01-01T00:00:00Z").Json;
+        string?[] seen = report.GetProperty("records").EnumerateArray().Select(r => r.GetProperty("id").GetString()).ToArray();
+        Assert.Contains(earlier.Id, seen);
+        Assert.Contains(rotation, seen);
+        Assert.Contains(later.Id, seen);
+    }
+
+    [Fact]
     public void RevokeReportsTheWritingRuntimeAndReachReadsTheExactRevocation()
     {
         using var estate = new TestEstate(3);
@@ -90,12 +228,54 @@ public sealed class DeviceReachCommandTests
         JsonElement observed = Assert.Single(revoked.GetProperty("revocationReach").EnumerateArray());
         Assert.Equal(("runtime", "written"), (observed.GetProperty("kind").GetString(), observed.GetProperty("evidence").GetString()));
 
-        JsonElement read = Assert.Single(CliHarness.Ok("--estate", estate.Root, "--json", "devices", "reach", device,
-            "--since", "2020-01-01T00:00:00Z").Json.GetProperty("revocations").EnumerateArray());
+        string[] args = ["--estate", estate.Root, "devices", "reach", device, "--since", "2019-12-31T19:00:00-05:00"];
+        JsonElement report = CliHarness.Ok([.. args, "--json"]).Json;
+        Assert.Equal(["device", "records", "revocations", "sessions", "since"], report.EnumerateObject().Select(p => p.Name).Order());
+        Assert.Equal("2020-01-01T00:00:00Z", report.GetProperty("since").GetString());
+        JsonElement read = Assert.Single(report.GetProperty("revocations").EnumerateArray());
+        Assert.Equal(["at", "counts", "current", "hash", "id", "observations", "revokedAt"], read.EnumerateObject().Select(p => p.Name).Order());
         Assert.Equal((revocation, hash, true, true), (read.GetProperty("id").GetString(), read.GetProperty("hash").GetString(),
             read.GetProperty("counts").GetBoolean(), read.GetProperty("current").GetBoolean()));
         JsonElement observation = Assert.Single(read.GetProperty("observations").EnumerateArray());
         Assert.Equal(("runtime", "record-read"), (observation.GetProperty("kind").GetString(), observation.GetProperty("evidence").GetString()));
+        Assert.Equal(observed.GetProperty("identity").GetString(), observation.GetProperty("identity").GetString());
+        string text = CliHarness.Ok(args).Out;
+        Assert.Contains($"revocation {revocation}  {hash}", text, StringComparison.Ordinal);
+        Assert.Contains("counts  current admission revision", text, StringComparison.Ordinal);
+        Assert.Contains("Absence of an observation leaves that observer's status unknown", text, StringComparison.Ordinal);
+        RecordEnvelope rejected = estate.Add("admission", estate.OperatorId,
+            $$"""{"principal":"{{estate.BuilderId}}","status":"revoked","note":"Unsigned fixture."}""",
+            subject: estate.Load().ById[device].Reference, supersedes: revocation);
+        JsonElement ignored = Assert.Single(CliHarness.Ok([.. args, "--json"]).Json.GetProperty("revocations").EnumerateArray(),
+            r => r.GetProperty("id").GetString() == rejected.Id);
+        Assert.False(ignored.GetProperty("counts").GetBoolean());
+        Assert.False(ignored.GetProperty("current").GetBoolean());
+        Assert.Contains("does not count", CliHarness.Ok(args).Out, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RevokeTextNamesTheProcessThatWroteTheRecord()
+    {
+        using var estate = new TestEstate(3);
+        string device = MakeDevice(estate, estate.BuilderId);
+        string operatorDevice = MakeDevice(estate, estate.OperatorId);
+        CliHarness.Ok("--estate", estate.Root, "devices", "admit", operatorDevice, "--by", estate.OperatorId, "--note", "First authority.");
+        CliHarness.Ok("--estate", estate.Root, "devices", "admit", device, "--by", estate.OperatorId, "--note", "Builder authority.");
+        string output = CliHarness.Ok("--estate", estate.Root, "devices", "revoke", device, "--by", estate.OperatorId, "--reason", "Suspected compromise.").Out;
+        string runtime = Assert.Single(output.Split('\n'), line => line.StartsWith("  runtime ", StringComparison.Ordinal));
+        Assert.Contains("  written  ", runtime, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReachRefusesAnInvalidCutoffAndAnUnknownDevice()
+    {
+        using var estate = new TestEstate(3);
+        CliHarness.Outcome invalid = CliHarness.Run("--estate", estate.Root, "devices", "reach", estate.BuilderId, "--since", "2020-01-01");
+        Assert.Equal(2, invalid.Code);
+        Assert.Contains("--since requires an ISO 8601 timestamp with seconds", invalid.Err, StringComparison.Ordinal);
+        CliHarness.Outcome unknown = CliHarness.Run("--estate", estate.Root, "devices", "reach", estate.BuilderId, "--since", "2020-01-01T00:00:00Z");
+        Assert.Equal(2, unknown.Code);
+        Assert.Contains("is not a device of this estate", unknown.Err, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -106,19 +286,32 @@ public sealed class DeviceReachCommandTests
         string operatorDevice = MakeDevice(estate, estate.OperatorId);
         CliHarness.Ok("--estate", estate.Root, "devices", "admit", operatorDevice, "--by", estate.OperatorId, "--note", "First authority.");
         CliHarness.Ok("--estate", estate.Root, "devices", "admit", device, "--by", estate.OperatorId, "--note", "Builder authority.");
+        string directory = PresenceSessionLedger.DirectoryOf(estate.Root);
+        RecordWritten revocation;
         using (EstateService observer = EstateService.Open(estate.Root))
         {
-            observer.EnableEvents(PresenceSessionLedger.DirectoryOf(estate.Root));
+            observer.EnableEvents(directory);
             observer.DeriveEvents();
-            _ = CliHarness.RevokeAfterRecords(estate.Root, new(device, estate.OperatorId, "Suspected compromise."));
+            revocation = CliHarness.RevokeAfterRecords(estate.Root, new(device, estate.OperatorId, "Suspected compromise."));
             observer.DeriveEvents();
+            Assert.Equal(observer.RevocationJournalIdentity, ReadJournal().GetProperty("identity").GetString());
         }
 
-        JsonElement revoked = Assert.Single(CliHarness.Ok("--estate", estate.Root, "--json", "devices", "reach", device,
-            "--since", "2020-01-01T00:00:00Z").Json.GetProperty("revocations").EnumerateArray());
-        JsonElement journal = Assert.Single(revoked.GetProperty("observations").EnumerateArray(), o => o.GetProperty("kind").GetString() == "server");
-        Assert.Equal("journal-found", journal.GetProperty("evidence").GetString());
-        Assert.NotEmpty(journal.GetProperty("identity").GetString()!);
+        using (EventJournal journal = EventJournal.Open(Path.Combine(directory, EventJournal.FileName)))
+            journal.Commit("2026-01-01T00:00:00Z", [new(estate.Builder.ComputedHash, "record", "written",
+                new("admission", revocation.Id, estate.Builder.ComputedHash), [], null, null, false, [])], [], [], [], []);
+        string[] before = Directory.GetFiles(directory).Order().ToArray();
+        JsonElement found = ReadJournal();
+        Assert.Equal("journal-found", found.GetProperty("evidence").GetString());
+        Assert.NotEmpty(found.GetProperty("identity").GetString()!);
+        Assert.Equal(before, Directory.GetFiles(directory).Order());
+
+        JsonElement ReadJournal()
+        {
+            JsonElement revoked = Assert.Single(CliHarness.Ok("--estate", estate.Root, "--json", "devices", "reach", device,
+                "--since", "2020-01-01T00:00:00Z").Json.GetProperty("revocations").EnumerateArray());
+            return Assert.Single(revoked.GetProperty("observations").EnumerateArray(), o => o.GetProperty("kind").GetString() == "server");
+        }
     }
 
     [Fact]
@@ -131,14 +324,30 @@ public sealed class DeviceReachCommandTests
         CliHarness.Ok("--estate", estate.Root, "devices", "admit", operatorDevice, "--by", estate.OperatorId, "--note", "First authority.");
         CliHarness.Ok("--estate", estate.Root, "devices", "admit", device, "--by", estate.OperatorId, "--note", "Builder authority.");
         await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        host.Service.DeriveEvents();
 
         string[] args = ["--estate", estate.Root, "devices", "revoke", device, "--by", estate.OperatorId, "--reason", "Suspected compromise."];
         JsonElement[] observers = CliHarness.Ok([.. args, "--json"]).Json.GetProperty("revocationReach").EnumerateArray().ToArray();
         Assert.Equal(["runtime", "server"], observers.Select(o => o.GetProperty("kind").GetString()));
         Assert.Equal(["written", "write-served"], observers.Select(o => o.GetProperty("evidence").GetString()));
         Assert.NotEqual(observers[0].GetProperty("identity").GetString(), observers[1].GetProperty("identity").GetString());
+        host.Service.DeriveEvents();
+        JsonElement revocation = Assert.Single(CliHarness.Ok("--estate", estate.Root, "--json", "devices", "reach", device,
+            "--since", "2020-01-01T00:00:00Z").Json.GetProperty("revocations").EnumerateArray());
+        JsonElement retained = Assert.Single(revocation.GetProperty("observations").EnumerateArray(), o => o.GetProperty("kind").GetString() == "server");
+        Assert.Equal(observers[1].GetProperty("identity").GetString(), retained.GetProperty("identity").GetString());
     }
 
     private static string MakeDevice(TestEstate estate, string principal) =>
         CliHarness.Ok("--estate", estate.Root, "--json", "devices", "create", "--principal", principal, "--name", "Test device", "--custody", "file").Id;
+
+    private static RecordEnvelope Checkpoint(TestEstate estate, EstateService service, IRecordSigner signer, string trigger,
+        (string Kind, string Id)? closes = null)
+    {
+        var model = service.Session.Load();
+        var anchors = trigger == "adoption" ? SignedHistory.PlanAdoption(model).Anchored : [];
+        CheckpointDraft draft = SignedHistory.Prepare(model, trigger, anchors, closes: closes);
+        foreach (byte[] inventory in draft.Objects) service.Session.Objects.Put(inventory);
+        return estate.Add("history-checkpoint", estate.OperatorId, draft.Body.GetRawText(), signer: signer);
+    }
 }

@@ -78,31 +78,42 @@ internal sealed class DeviceOperations(CommandContext context)
                 return Clean;
             }
 
-            context.Output.WriteLine($"device {report.Device} since {Records.Model.RecordParser.FormatTimestamp(report.Since)}");
-            if (report.Records.Count == 0) context.Output.WriteLine("  no signatures in the available records or presence ledger");
+            context.Output.WriteLine($"device {report.Device} since {report.Since} (inclusive)");
+            context.Output.WriteLine("  Record times are the author's claims. Checkpoint times state when the witness was recorded. Ledger times come from this machine.");
+            context.Output.WriteLine("  A record outside a closing may have arrived from another copy. Its signing time remains unknown.");
+            if (report.Records.Count == 0) context.Output.WriteLine("  no matching signatures in the available records or presence ledger");
             foreach (DeviceSignatureReach record in report.Records)
             {
                 string sessions = record.Sessions.Count > 0 ? $"  sessions {string.Join(", ", record.Sessions)}" : string.Empty;
-                string line = $"  {record.At}  {record.Type} {record.Id}  {record.Hash}  {record.Source}{sessions}";
+                string at = record.Source == "presence-ledger" ? "ledger signed at" : "stated at";
+                string line = $"  {record.Type} {record.Id}  {record.Hash}  {record.Source}  {at} {record.At}{sessions}";
                 if (record.Source == "presence-ledger") WriteRuntime(context.Output, line);
                 else context.Output.WriteLine(line);
+                if (record.FirstWitness is { } witness)
+                    context.Output.WriteLine($"    first witnessed by checkpoint {witness.Id} at {witness.At}  {witness.Hash}");
+                if (record.OutsideClosing is { } closing)
+                    context.Output.WriteLine($"    outside closing {closing.Id} at {closing.At}  {closing.Hash}");
+                if (record.LedgerSignedAt.Count > 0)
+                    context.Output.WriteLine($"    ledger signing times {string.Join(", ", record.LedgerSignedAt)}");
             }
 
             foreach (PresenceSessionEntry session in report.Sessions)
             {
-                WriteRuntime(context.Output, $"{session.AnnouncedAt} session {session.Session} {session.Named ?? session.Action}");
+                WriteRuntime(context.Output, $"session {session.Session} announced at {session.AnnouncedAt} {session.Named ?? session.Action}");
                 if (session.Terms is { } terms) WriteRuntime(context.Output, $"  announced list {terms}");
             }
 
             if (report.PresenceProblem is { } presenceProblem) context.Output.WriteLine($"  presence evidence unavailable: {presenceProblem}");
             if (report.JournalProblem is { } journalProblem) context.Output.WriteLine($"  server evidence unavailable: {journalProblem}");
+            context.Output.WriteLine("  Revocation observations cover this process and this machine's retained journal. Absence of an observation leaves that observer's status unknown.");
             if (report.Revocations.Count == 0) context.Output.WriteLine("  no revocation records in this copy");
             foreach (DeviceRevocationReach revocation in report.Revocations)
             {
                 string current = revocation.Current ? "  current admission revision" : string.Empty;
-                context.Output.WriteLine($"  revocation {revocation.Id}  {revocation.Hash}  {revocation.At}  {(revocation.Counts ? "counts" : "does not count")}{current}");
+                context.Output.WriteLine($"  revocation {revocation.Id}  {revocation.Hash}  stated at {revocation.At}  {(revocation.Counts ? "counts" : "does not count")}{current}");
+                if (revocation.RevokedAt is { } revokedAt) WriteRuntime(context.Output, $"    stated effective time {revokedAt}");
                 foreach (RevocationObserver observation in revocation.Observations)
-                    context.Output.WriteLine($"    {observation.Kind} {observation.Identity}  {observation.Evidence}  {observation.At}");
+                    context.Output.WriteLine($"    {observation.Kind} {observation.Identity}  {observation.Evidence} at {observation.At}");
             }
 
             return Clean;

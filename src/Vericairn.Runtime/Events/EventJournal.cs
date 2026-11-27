@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Vericairn.Protocol;
+using Vericairn.Runtime.Store;
 
 namespace Vericairn.Runtime.Events;
 
@@ -277,15 +278,18 @@ internal sealed class EventJournal : IDisposable
         }
     }
 
-    /// <summary>Reads retained admission events without opening the journal as a writer or resetting its epoch.</summary>
+    /// <summary>Reads retained admission events from a snapshot without opening or modifying the live journal database.</summary>
     internal static (string? Epoch, IReadOnlyList<JournalEntry> Entries) ReadAdmissionObservations(string directory, IReadOnlyList<string> admissionIds)
     {
         string path = System.IO.Path.Combine(directory, FileName);
         if (!File.Exists(path) && new FileInfo(path).LinkTarget is null) return (null, []);
-        if (Records.Signing.OwnerOnlyState.IsOwnRegularFile(path) == false)
+        string wal = path + "-wal";
+        if (Records.Signing.OwnerOnlyState.IsOwnRegularFile(path) == false ||
+            ((File.Exists(wal) || new FileInfo(wal).LinkTarget is not null || Directory.Exists(wal)) && Records.Signing.OwnerOnlyState.IsOwnRegularFile(wal) == false))
             throw new IOException("The event journal is not a regular file kept by this user.");
 
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        using var snapshot = new SqliteReadSnapshot(path);
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = snapshot.Path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT value FROM meta WHERE key = 'epoch';";

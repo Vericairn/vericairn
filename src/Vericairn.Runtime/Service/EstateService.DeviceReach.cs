@@ -3,10 +3,12 @@
 
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.History;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
@@ -14,19 +16,31 @@ using Vericairn.Runtime.Events;
 
 namespace Vericairn.Runtime.Service;
 
-internal sealed record DeviceReachReport(string Device, DateTimeOffset Since, IReadOnlyList<DeviceSignatureReach> Records,
-    IReadOnlyList<PresenceSessionEntry> Sessions, IReadOnlyList<DeviceRevocationReach> Revocations, string? PresenceProblem, string? JournalProblem);
+internal sealed record DeviceReachReport(string Device, string Since, IReadOnlyList<DeviceSignatureReach> Records,
+    IReadOnlyList<PresenceSessionEntry> Sessions, IReadOnlyList<DeviceRevocationReach> Revocations,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PresenceProblem,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? JournalProblem);
 
-internal sealed record DeviceSignatureReach(string Id, string Hash, string? Type, string? Path, string At, string Source, IReadOnlyList<string> Sessions);
+internal sealed record DeviceSignatureReach(string Id, string Hash, string? Type, string? Path, string At, string Source,
+    IReadOnlyList<string> Sessions, IReadOnlyList<string> LedgerSignedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DeviceCheckpointEvidence? FirstWitness = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DeviceCheckpointEvidence? OutsideClosing = null);
+
+internal sealed record DeviceCheckpointEvidence(string Id, string Hash, string At)
+{
+    internal static DeviceCheckpointEvidence? From(RecordEnvelope? record) => record is null ? null : new(record.Id, record.ComputedHash, record.At);
+}
 
 internal sealed record DeviceRevocationReach(string Id, string Hash, string At, string? RevokedAt, bool Counts, bool Current, IReadOnlyList<RevocationObserver> Observations);
 
 public sealed partial class EstateService
 {
-    private readonly string revocationObserverIdentity = Guid.NewGuid().ToString("N");
+    private static readonly string RevocationObserverIdentity = Guid.NewGuid().ToString("N");
 
-    private RevocationObserver ObserveRevocation(string evidence) =>
-        new("runtime", revocationObserverIdentity, evidence, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+    internal string? RevocationJournalIdentity => journal?.Epoch;
+
+    private static RevocationObserver ObserveRevocation(string evidence) =>
+        new("runtime", RevocationObserverIdentity, evidence, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
 
     /// <summary>Read the local records and diagnostics for one device, without judging a signature's right to authorize a write.</summary>
     internal DeviceReachReport? DeviceReach(string device, DateTimeOffset since)
@@ -53,14 +67,21 @@ public sealed partial class EstateService
             .ToLookup(r => (r.Signature.Record, r.Signature.Hash));
         var records = new Dictionary<(string, string), DeviceSignatureReach>();
         string[] publicKeys = [.. keyHistory.Select(r => EstateModel.BodyString(r, "publicKey")).OfType<string>().Distinct(StringComparer.Ordinal)];
+        HistoryState history = SignedHistory.Of(model);
+        Closing[] closings = [.. model.Trust.Closings.Where(c => c.Kind == "device" && c.Identity == identity && c.Record.AtTime >= since)];
         foreach (RecordEnvelope record in model.Records.Concat(model.Unreadable))
         {
+            if (!record.Signatures.Any(s => revisionIds.Contains(s.Device))) continue;
             var key = (record.Id, record.ComputedHash);
             var entries = signedBySession[key];
-            if (record.AtTime < since && !entries.Any(e => AtOrAfter(e.Signature.At, since))) continue;
+            RecordEnvelope? witness = FirstWitness(model, history, record);
+            // A closing is positive evidence of a boundary, but absence from it could also be a late merge of older work.
+            RecordEnvelope? outside = closings.FirstOrDefault(c => !model.Trust.Witnesses(c, record))?.Record;
+            if (record.AtTime < since && !(witness?.AtTime >= since) && outside is null && !entries.Any(e => AtOrAfter(e.Signature.At, since))) continue;
             if (!VerifiesDeviceSignature(record, revisionIds, publicKeys)) continue;
             records.TryAdd(key, new(record.Id, record.ComputedHash, record.Type, record.ExpectedPath, record.At,
-                "record-signature", [.. entries.Select(e => e.Session).Distinct(StringComparer.Ordinal)]));
+                "record-signature", [.. entries.Select(e => e.Session).Distinct(StringComparer.Ordinal)],
+                LedgerTimes(entries.Select(e => e.Signature)), DeviceCheckpointEvidence.From(witness), DeviceCheckpointEvidence.From(outside)));
         }
 
         foreach (var entries in signedBySession)
@@ -68,7 +89,7 @@ public sealed partial class EstateService
             var local = entries.Where(e => AtOrAfter(e.Signature.At, since)).MinBy(e => e.Signature.At, StringComparer.Ordinal);
             if (local.Signature is not { Hash: string hash } signature) continue;
             records.TryAdd((signature.Record, hash), new(signature.Record, hash, signature.Type, null, signature.At,
-                "presence-ledger", [.. entries.Select(e => e.Session).Distinct(StringComparer.Ordinal)]));
+                "presence-ledger", [.. entries.Select(e => e.Session).Distinct(StringComparer.Ordinal)], LedgerTimes(entries.Select(e => e.Signature))));
         }
 
         var referenced = records.Values.SelectMany(r => r.Sessions).ToHashSet(StringComparer.Ordinal);
@@ -100,9 +121,19 @@ public sealed partial class EstateService
         DeviceRevocationReach[] reach = [.. revocations.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .Select(r => new DeviceRevocationReach(r.Id, r.ComputedHash, r.At, EstateModel.BodyString(r, "revokedAt"), model.Counts(r), r.Id == currentAdmission,
                 [observed, .. journalBySubject[(r.Id, r.ComputedHash)].Select(e => new RevocationObserver("server", journalIdentity!, "journal-" + e.Change, e.At))]))];
-        return new(identity, since, [.. records.Values.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
+        return new(identity, RecordParser.FormatTimestamp(since), [.. records.Values.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ThenBy(r => r.Hash, StringComparer.Ordinal)], announced, reach, presenceProblem, journalProblem);
     }
+
+    private static RecordEnvelope? FirstWitness(EstateModel model, HistoryState history, RecordEnvelope record)
+    {
+        if (!history.Entries.TryGetValue(record.Id, out WitnessedEntry? entry) || entry.Entry.Hash != record.ComputedHash) return null;
+        if (history.Listings.GetValueOrDefault(record.Id) is not { Count: > 1 } listings) return model.ById[entry.Checkpoint];
+        return listings.Select(id => model.ById[id]).OrderBy(checkpoint => checkpoint.AtTime).ThenBy(checkpoint => checkpoint.Id, StringComparer.Ordinal).First();
+    }
+
+    private static string[] LedgerTimes(IEnumerable<PresenceSessionSigned> entries) =>
+        [.. entries.Select(e => e.At).Where(RecordParser.IsTimestamp).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
 
     private static bool VerifiesDeviceSignature(RecordEnvelope record, HashSet<string> revisions, string[] publicKeys)
     {

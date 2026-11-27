@@ -1227,20 +1227,36 @@ vericairn devices reach <device> --since 2026-11-16T10:00:00Z
 vericairn devices reach <device> --since 2026-11-16T10:00:00Z --json
 ```
 
-The device may be named by its identity or a revision id. The report includes available records with signatures that verify
-under any key in the device's verified revision history, including superseded records and records that fail an admission or history check.
-A record qualifies when its stated timestamp or a matching local ledger's signing time is at or after `--since`. Use seconds
-and `Z` or an explicit UTC offset. `record-signature` means the available record verifies. `presence-ledger` means the local
-ledger logged a signature whose exact signed record could not be verified in this copy. This ledger is owner-only machine
-state. Its session links match the device, record id and hash, and each session carries its announced terms.
+The device may be named by its identity or a revision id. The report includes available signatures that name a revision of
+the device and verify under a key in its verified revision history. This includes superseded records and records that fail an
+admission or history check. Use seconds and `Z` or an explicit UTC offset for `--since`. The cutoff is inclusive.
 
-The report includes this copy's revocation records, which count in its history and which is the current admission revision. Each observation names the observer,
-time and evidence. `record-read` means this runtime read the exact record. `journal-found` or `journal-written` means this
-machine's daemon journal retains a matching record event and shows its epoch. When `devices revoke` writes the record,
-it reports the runtime that wrote it and, when served by a daemon, the server that handled the write. With `--json`, the
-write includes `revocationReach` alongside the record id and hash. The read returns `records`, `sessions` and `revocations`
-with their `observations`. Observation coverage depends on the journals kept on each machine. An observation shows the
-record that was seen. Request refusals and the standing of devices on another machine require evidence from that machine.
+- The record's stated time is its author's claim. A matching local ledger signing time is what this machine logged for the
+  exact device, record id and hash. A time at or after the cutoff in either source qualifies the row.
+- The first witness is the earliest-dated counting checkpoint whose inventory lists the exact id and hash in this copy. A
+  first witness at or after the cutoff also qualifies the row, even for a backdated record. The checkpoint time is the time
+  stated by its signer for that witness. It establishes that the checkpoint lists the record then, with no exact signing time.
+- A verified signature outside an applicable signed device closing also qualifies when the closing's stated time is at or
+  after the cutoff. The closing and the checkpoints it follows did not witness that version. Older records can arrive from
+  another copy after a closing. A backdated record with neither checkpoint nor ledger evidence can fall outside the report.
+
+The JSON report has `device` (the stable device id), `since` (the cutoff in UTC with `Z`), `records`, `sessions` and
+`revocations`. `presenceProblem` and `journalProblem` appear when the corresponding local diagnostic is unavailable.
+Each `records` row has `id`, `hash`, `type`, `path`, `at`, `source`, `sessions` (linked session ids) and `ledgerSignedAt`
+(the matching times in the ledger). For `source: record-signature`, `at` is the record's stated time. For `source: presence-ledger`,
+`at` is the first matching local signing time at or after the cutoff, `path` is null and the exact signed record could not be
+verified here. `firstWitness` and `outsideClosing`, where present, each give the checkpoint `id`, `hash` and stated `at`.
+`sessions` contains the linked entries and any sessions announced at or after the cutoff. Its `announcedAt`, `openedAt`,
+`endedAt` and each `signed` or `refused` entry's `at` are local ledger times. Each session carries the announced terms.
+
+Each `revocations` row has `id`, `hash`, `at` (the record's stated time), `revokedAt` (its stated effective time), `counts`,
+`current` and `observations`. The two booleans describe this copy's history and current admission. Each observation gives
+`kind`, `identity`, `evidence` and the observer's own clock time `at`. `record-read` names this runtime process. `journal-found`
+and `journal-written` name the epoch of this machine's daemon journal when it retains a matching event. `devices revoke`
+reports `written` for its runtime process and, when a daemon handles the write, `write-served` for its journal epoch. With
+`--json` the write includes these as `revocationReach` alongside the written record's id and hash. The presence ledger and
+journal are owner-only diagnostics. Initial journal baselines and expired events can leave no server observation. Absence
+leaves the observer's status unknown. Run the command against another machine's copy for evidence it keeps there.
 
 ## `vericairn work overlap` (0.9.4)
 
