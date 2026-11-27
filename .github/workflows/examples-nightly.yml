@@ -35,6 +35,9 @@ jobs:
         timeout-minutes: 10
         with:
           global-json-file: global.json
+      - name: Build the examples journey driver
+        timeout-minutes: 10
+        run: dotnet build tests/Vericairn.Cli.Tests -c Release -p:RestoreLockedMode=true
       - name: Build and check the nightly archive
         timeout-minutes: 10
         shell: bash

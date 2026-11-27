@@ -24,7 +24,7 @@ internal sealed record ExampleJourney(string Format, DateTimeOffset StartsAt, Jo
             ?? throw new InvalidDataException("The journey is empty.");
         if (journey.Format != "vericairn.example-journey/1" || journey.Steps.Length == 0 || journey.StartsAt == default)
             throw new InvalidDataException("A journey needs its format, a clock start and at least one step.");
-        var known = new HashSet<string>(StringComparer.Ordinal) { "scratch", "estate" };
+        var known = new HashSet<string>(StringComparer.Ordinal) { "scratch", "estate", "home" };
         var steps = new HashSet<string>(StringComparer.Ordinal);
         foreach (JourneyStep step in journey.Steps)
         {
@@ -35,6 +35,12 @@ internal sealed record ExampleJourney(string Format, DateTimeOffset StartsAt, Jo
                 throw new InvalidDataException($"Step {step.Id} needs a positive clock advance and a corresponding instant command.");
             if (step.Variant is not (null or "agents" or "people"))
                 throw new InvalidDataException($"Step {step.Id} has an unknown variant.");
+            if (step.Driver is not (null or "in-process" or "process")
+                || step.Context is not null && !ValidName(step.Context)
+                || step.Surface is not null && !ValidName(step.Surface))
+                throw new InvalidDataException($"Step {step.Id} has an invalid driver, context or surface.");
+            if (step.Files?.Keys.Any(path => !ValidFixturePath(path)) == true)
+                throw new InvalidDataException($"Step {step.Id} needs scratch-relative fixture paths.");
             if (step.Provider && !IsProvider(step.Arguments))
                 throw new InvalidDataException($"Step {step.Id} cannot use the fake provider for this command.");
             if (step.StandIn is not (null or "native-a" or "native-b")
@@ -89,24 +95,36 @@ internal sealed record ExampleJourney(string Format, DateTimeOffset StartsAt, Jo
 
     private static bool ValidName(string value) => Regex.IsMatch(value, "^[a-z][a-zA-Z0-9-]*$");
     private static bool ValidPath(string value) => value.StartsWith('/') && !Regex.IsMatch(value, "~(?![01])");
+    internal static bool ValidFixturePath(string path) => path.Split('/').All(part => Regex.IsMatch(part, @"^[A-Za-z0-9_-][A-Za-z0-9_.-]*$"));
     internal static IEnumerable<string> Placeholders(string argument) => Regex.Matches(argument, @"\$\{([a-z][a-zA-Z0-9-]*)\}").Select(match => match.Groups[1].Value);
     internal static string Expand(string argument, IReadOnlyDictionary<string, string> values) =>
         Regex.Replace(argument, @"\$\{([a-z][a-zA-Z0-9-]*)\}", match => values.TryGetValue(match.Groups[1].Value, out string? value) ? value
             : throw new InvalidDataException($"Capture '{match.Groups[1].Value}' is unavailable in this variant."));
+
+    internal static JsonNode? ExpandJson(JsonNode? node, IReadOnlyDictionary<string, string> values) => node switch
+    {
+        JsonObject obj => new JsonObject(obj.Select(field => KeyValuePair.Create(field.Key, ExpandJson(field.Value, values)))),
+        JsonArray array => new JsonArray(array.Select(item => ExpandJson(item, values)).ToArray()),
+        JsonValue scalar when scalar.TryGetValue(out string? value) => JsonValue.Create(Expand(value, values)),
+        _ => node?.DeepClone(),
+    };
 }
 
 internal sealed record JourneyStep(string Id, string Role, string[] Arguments, JourneyExpectation Expect,
     Dictionary<string, string>? Capture = null, bool Setup = false, int? Clock = null, string[]? InstantArguments = null,
-    string[]? ProcessArguments = null, JourneyExpectation? ProcessExpect = null, string? Variant = null, bool Provider = false, string? StandIn = null);
+    string[]? ProcessArguments = null, JourneyExpectation? ProcessExpect = null, string? Variant = null, bool Provider = false, string? StandIn = null,
+    Dictionary<string, JsonNode?>? Files = null, string? Context = null, string? Driver = null, string? Surface = null, bool Text = false);
 
 internal sealed record JourneyExpectation(int ExitCode, Dictionary<string, JsonNode?>? Fields = null, string? State = null, string? Refusal = null,
-    string? Verdict = null, string? ErrorContains = null)
+    string? Verdict = null, string? ErrorContains = null, string? OutputContains = null)
 {
-    internal void Assert(CliHarness.Outcome outcome)
+    internal void Assert(CliHarness.Outcome outcome, IReadOnlyDictionary<string, string> captures)
     {
         if (outcome.Code != ExitCode) throw new InvalidDataException($"Expected exit {ExitCode}, got {outcome.Code}. {outcome.Err} {outcome.Out}");
-        if (ErrorContains is not null && !outcome.Err.Contains(ErrorContains, StringComparison.Ordinal))
+        if (ErrorContains is not null && !outcome.Err.Contains(ExampleJourney.Expand(ErrorContains, captures), StringComparison.Ordinal))
             throw new InvalidDataException($"Expected diagnostic containing '{ErrorContains}'.");
+        if (OutputContains is not null && !outcome.Out.Contains(ExampleJourney.Expand(OutputContains, captures), StringComparison.Ordinal))
+            throw new InvalidDataException($"Expected output containing '{OutputContains}'.");
         if (Fields is null && State is null && Refusal is null && Verdict is null) return;
         JsonNode? output = JsonNode.Parse(outcome.Out);
         var assertions = Fields is null ? new Dictionary<string, JsonNode?>(StringComparer.Ordinal) : new(Fields, StringComparer.Ordinal);
@@ -114,8 +132,11 @@ internal sealed record JourneyExpectation(int ExitCode, Dictionary<string, JsonN
         if (State is not null) assertions.Add(scope + "/state", JsonValue.Create(State));
         if (Refusal is not null) assertions.Add(scope + "/problem/code", JsonValue.Create(Refusal));
         if (Verdict is not null) assertions.Add(scope + "/exposure/verdict", JsonValue.Create(Verdict));
-        foreach ((string path, JsonNode? value) in assertions)
+        foreach ((string path, JsonNode? template) in assertions)
+        {
+            JsonNode? value = ExampleJourney.ExpandJson(template, captures);
             if (!JsonNode.DeepEquals(value, ExampleJourney.At(output, path)))
                 throw new InvalidDataException($"Unexpected JSON field '{path}': expected {value?.ToJsonString() ?? "null"}.");
+        }
     }
 }

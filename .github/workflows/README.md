@@ -422,8 +422,9 @@ missing decisions-register directory that its README still links to.
 Tier 1 uses the ordinary test shares and the in-process driver, with a controllable flow clock. The guide-region test also runs in
 `docs-check`. Tier 2 uses the unpacked Linux archive after `package.yml` uploads the release artifact, and the macOS and Windows
 release archives in the same workflow's published CLI jobs. `examples-nightly.yml` builds and checks all three platform archives
-from main at 07:37 UTC. The Linux step has a three-minute timeout. On the CI-12 trial, its queue run must finish by the end of the
-slowest other queue job. Move the step to nightly if the trial misses that bound.
+from main at 07:37 UTC. Each job builds the Release journey driver in a separate ten-minute step before the smoke, which runs
+the driver against the archive. The Linux smoke step has a three-minute timeout. On the CI-12 trial, the queue run must finish by
+the end of the slowest other queue job. Move the step to nightly if the trial misses that bound.
 
 The report labels the driver for each step, its stand-ins and any use of the `instant` variant. A failed journey gets one retry from
 fresh state. An intermittent pass remains visible. Tier 2 previews agent steps with `goal step --check` and runs the people-only

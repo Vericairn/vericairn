@@ -16,8 +16,20 @@ internal sealed record ExampleJourneyRun(string Result, IReadOnlyList<ExampleJou
 internal sealed record ExampleJourneyAttempt(string Variant, IReadOnlyList<ExampleJourneyStep> Steps, string? Failure);
 internal sealed record ExampleJourneyStep(string Step, string Role, string Driver, string Timing, IReadOnlyList<string> StandIns, int? ExitCode = null);
 
+// A product-owned test adapter can seed fixture state or drive a surface such as MCP. The public example repositories supply no code.
+internal interface IExampleJourneySurface
+{
+    string Name { get; }
+    CliHarness.Outcome Run(ExampleJourneyRunner.ExampleCommand command, Func<ExampleJourneyRunner.ExampleCommand, CliHarness.Outcome> invoke);
+}
+
 internal static class ExampleJourneyRunner
 {
+    private static readonly Lazy<Dictionary<string, IExampleJourneySurface>> Surfaces = new(() => typeof(ExampleJourneyRunner).Assembly.GetTypes()
+        .Where(type => !type.IsAbstract && typeof(IExampleJourneySurface).IsAssignableFrom(type))
+        .Select(type => (IExampleJourneySurface)Activator.CreateInstance(type, nonPublic: true)!)
+        .ToDictionary(surface => surface.Name, StringComparer.Ordinal));
+
     internal static ExampleJourneyRun Run(ExampleJourney journey, string variant, string? executable = null,
         Func<ExampleCommand, CliHarness.Outcome>? run = null)
     {
@@ -26,23 +38,33 @@ internal static class ExampleJourneyRunner
         for (int attempt = 0; attempt < 2; attempt++)
         {
             string scratch = CliHarness.TempDirectory("example-journey");
-            string home = Path.Combine(scratch, "home");
-            string estate = Path.Combine(scratch, "estate");
-            Directory.CreateDirectory(estate);
-            Directory.CreateDirectory(home);
             string? original = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
             var steps = new List<ExampleJourneyStep>();
             try
             {
-                new ReleaseUpdateStore().Configure(false);
                 var clock = new ClientClock(journey.StartsAt);
                 var registry = new ProviderRegistry();
                 Composition.Register(registry);
                 registry.Register(new FakeReleaseProvider { Now = clock.GetUtcNow });
-                var captures = new Dictionary<string, string>(StringComparer.Ordinal) { ["scratch"] = scratch, ["estate"] = estate };
-                foreach (JourneyStep step in journey.Steps.Where(step => step.Variant is null || step.Variant == variant))
+                var captures = new Dictionary<string, string>(StringComparer.Ordinal) { ["scratch"] = scratch };
+                var homes = new HashSet<string>(StringComparer.Ordinal);
+                string driver = executable is null ? "in-process" : "process";
+                foreach (JourneyStep step in journey.Steps.Where(step => (step.Variant is null || step.Variant == variant)
+                    && (step.Driver is null || step.Driver == driver)))
                 {
+                    string context = step.Context is null ? scratch : Path.Combine(scratch, step.Context);
+                    string estate = Path.Combine(context, "estate");
+                    string home = Path.Combine(context, "home");
+                    Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
+                    if (homes.Add(home))
+                    {
+                        Directory.CreateDirectory(estate);
+                        Directory.CreateDirectory(home);
+                        new ReleaseUpdateStore().Configure(false);
+                    }
+                    captures["estate"] = estate;
+                    captures["home"] = home;
+                    if (step.Files is not null) WriteFixtures(scratch, step.Files, captures);
                     bool instant = executable is not null && step.Clock is not null;
                     if (!instant && step.Clock is int elapsed) clock.Elapse(TimeSpan.FromSeconds(elapsed));
                     string[] command = (instant ? step.InstantArguments! : step.Arguments).Select(arg => ExampleJourney.Expand(arg, captures)).ToArray();
@@ -55,7 +77,7 @@ internal static class ExampleJourneyRunner
                         expected = step.ProcessExpect!;
                     }
 
-                    var standIns = new List<string>(2);
+                    var standIns = new List<string>(3);
                     if (step.Provider)
                     {
                         if (!ExampleJourney.IsProvider(command)) throw new InvalidDataException("The substituted command is outside the fake release provider.");
@@ -69,19 +91,19 @@ internal static class ExampleJourneyRunner
                         command = [.. command, "--setting", "command=" + FakeHarness.Setting(scenario, report)];
                         standIns.Add(step.StandIn);
                     }
-                    var reportStep = new ExampleJourneyStep(step.Id, step.Role, binary is null ? "in-process" : "process",
+                    if (step.Surface is not null) standIns.Add(step.Surface);
+                    string stepDriver = step.Surface is not null ? "test surface" : binary is null ? "in-process" : "process";
+                    var reportStep = new ExampleJourneyStep(step.Id, step.Role, stepDriver,
                         instant ? "instant" : step.Clock is null ? "ordinary" : "injected clock", standIns);
                     steps.Add(reportStep);
-                    var invocation = new ExampleCommand(command, estate, scratch, home, clock, registry, binary);
+                    var invocation = new ExampleCommand(command, estate, scratch, home, clock, registry, binary, captures, variant, step.Text);
                     if (binary is not null && command is ["goal", "step", ..] && !ExampleJourney.AgentCheck(command))
-                    {
-                        if (variant != "people") throw new InvalidDataException("The shipped driver requires --check for agent goal steps.");
-                        string basis = PeopleBasis(invoke, invocation, step.Id);
-                        invocation = invocation with { Arguments = [.. command, "--basis", basis] };
-                    }
-                    CliHarness.Outcome outcome = invoke(invocation);
+                        invocation = CheckPeopleRoute(invoke, invocation, step.Id);
+                    CliHarness.Outcome outcome = step.Surface is null ? invoke(invocation)
+                        : Surfaces.Value.TryGetValue(step.Surface, out IExampleJourneySurface? surface) ? surface.Run(invocation, invoke)
+                        : throw new InvalidDataException($"Unknown journey test surface '{step.Surface}'.");
                     steps[^1] = reportStep with { ExitCode = outcome.Code };
-                    expected.Assert(outcome);
+                    expected.Assert(outcome, captures);
                     if (step.Capture is not null)
                     {
                         JsonNode? output = JsonNode.Parse(outcome.Out);
@@ -109,23 +131,37 @@ internal static class ExampleJourneyRunner
         return new("failed", attempts);
     }
 
-    private static string PeopleBasis(Func<ExampleCommand, CliHarness.Outcome> invoke, ExampleCommand command, string id)
+    private static void WriteFixtures(string scratch, Dictionary<string, JsonNode?> files, IReadOnlyDictionary<string, string> captures)
+    {
+        foreach ((string relative, JsonNode? template) in files)
+        {
+            if (!ExampleJourney.ValidFixturePath(relative)) throw new InvalidDataException("A fixture path must stay inside scratch.");
+            string path = Path.Combine(scratch, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            JsonNode? expanded = ExampleJourney.ExpandJson(template, captures);
+            File.WriteAllText(path, expanded is JsonValue scalar && scalar.TryGetValue(out string? text) ? text : expanded?.ToJsonString() ?? "null");
+        }
+    }
+
+    private static ExampleCommand CheckPeopleRoute(Func<ExampleCommand, CliHarness.Outcome> invoke, ExampleCommand command, string id)
     {
         CliHarness.Outcome preview = invoke(command with { Arguments = [.. command.Arguments, "--check"] });
         if (preview.Code != 0 || JsonNode.Parse(preview.Out) is not JsonObject response || response["step"] is not JsonObject step
             || step["ok"] is not JsonValue ok || !ok.TryGetValue(out bool mayStep) || !mayStep
             || step["route"] is not JsonValue route || !route.TryGetValue(out string? name)
-            || name is not ("person" or "reserved" or "rule" or "request" or "attention")
-            || step["basis"] is not JsonObject basis)
-            throw new InvalidDataException("The shipped driver requires a non-agent route and its check basis for a people-only step.");
+            || name is not ("person" or "reserved" or "rule" or "request" or "attention"))
+            throw new InvalidDataException("The shipped driver requires a checked non-agent route before taking a step.");
+        // The typed-path preview shipped before the CLI could return or consume a basis.
+        if (!step.TryGetPropertyValue("basis", out JsonNode? value)) return command;
+        if (value is not JsonObject basis) throw new InvalidDataException("The shipped driver received an invalid check basis.");
         string path = Path.Combine(command.Scratch, id + "-basis.json");
         File.WriteAllText(path, basis.ToJsonString());
-        return path;
+        return command with { Arguments = [.. command.Arguments, "--basis", path] };
     }
 
     private static CliHarness.Outcome Invoke(ExampleCommand command)
     {
-        string[] args = ["--estate", command.Estate, "--json", .. command.Arguments];
+        string[] args = command.Text ? ["--estate", command.Estate, .. command.Arguments] : ["--estate", command.Estate, "--json", .. command.Arguments];
         if (command.Executable is null)
         {
             if (!File.Exists(Path.Combine(command.Estate, "estate", "manifest.json"))) return CliHarness.Run(args);
@@ -164,5 +200,6 @@ internal static class ExampleJourneyRunner
         return new(process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
     }
 
-    internal sealed record ExampleCommand(string[] Arguments, string Estate, string Scratch, string Home, ClientClock Clock, ProviderRegistry Providers, string? Executable);
+    internal sealed record ExampleCommand(string[] Arguments, string Estate, string Scratch, string Home, ClientClock Clock,
+        ProviderRegistry Providers, string? Executable, IReadOnlyDictionary<string, string> Captures, string Variant, bool Text);
 }

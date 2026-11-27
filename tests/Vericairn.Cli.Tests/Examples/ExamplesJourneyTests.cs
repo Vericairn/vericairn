@@ -131,6 +131,76 @@ public sealed class ExamplesJourneyTests
     }
 
     [Theory]
+    [InlineData("agents", "agent", 0, "failed")]
+    [InlineData("agents", "person", 1, "passed")]
+    [InlineData("people", "person", 1, "passed")]
+    public void TheTypedPathPreviewCanConfirmAPeopleRouteBeforeBasisSupport(string variant, string route, int actions, string result)
+    {
+        ExampleJourney journey = Sample() with { Steps = [new("take-step", "operator", ["goal", "step"], new(0))] };
+        int dispatched = 0;
+        ExampleJourneyRun run = ExampleJourneyRunner.Run(journey, variant, CliHarness.BuiltExecutable, invocation =>
+        {
+            if (invocation.Arguments.Contains("--check"))
+                return new(0, JsonSerializer.Serialize(new { step = new { ok = true, route } }, JsonSerializerOptions.Web), "");
+            dispatched++;
+            Assert.Equal(["goal", "step"], invocation.Arguments);
+            return new(0, "{}", "");
+        });
+        Assert.Equal(result, run.Result);
+        Assert.Equal(actions, dispatched);
+    }
+
+    [Fact]
+    public void ASecondContextSharesCapturesAndFixturesWithItsOwnHome()
+    {
+        string directory = CliHarness.TempDirectory("journey-context-test");
+        try
+        {
+            string path = Path.Combine(directory, "journey.json");
+            File.WriteAllText(path, """
+                {
+                  "format": "vericairn.example-journey/1", "startsAt": "2026-11-01T00:00:00Z",
+                  "steps": [
+                    { "id": "initial", "role": "operator", "arguments": ["status"], "expect": { "exitCode": 0 }, "capture": { "value": "/record" } },
+                    { "id": "archive-only", "role": "operator", "driver": "process", "arguments": ["status"], "expect": { "exitCode": 42 } },
+                    { "id": "restored", "role": "operator", "arguments": ["status", "${home}"], "context": "restored", "surface": "test-restore", "text": true,
+                      "files": { "payload/record.json": { "records": ["${value}", "${estate}"] } },
+                      "expect": { "exitCode": 0, "fields": { "/records": ["${value}", "${estate}"] }, "outputContains": "${value}" } }
+                  ]
+                }
+                """);
+            string? original = null;
+            ExampleJourneyRun run = ExampleJourneyRunner.Run(ExampleJourney.Read(path), "agents", run: invocation =>
+            {
+                if (invocation.Arguments is ["status"])
+                {
+                    original = invocation.Home;
+                    return new(0, """{"record":"fixture-record"}""", "");
+                }
+                Assert.NotEqual(original, invocation.Home);
+                Assert.Equal(Path.Combine(invocation.Scratch, "restored", "home"), invocation.Home);
+                Assert.Equal(invocation.Home, invocation.Arguments[1]);
+                Assert.True(invocation.Text);
+                return new(0, File.ReadAllText(Path.Combine(invocation.Scratch, "payload", "record.json")), "");
+            });
+            ExampleJourneyAttempt attempt = Assert.Single(run.Attempts);
+            Assert.Null(attempt.Failure);
+            Assert.Equal(["initial", "restored"], attempt.Steps.Select(step => step.Step).ToArray());
+            Assert.Equal("test surface", attempt.Steps[1].Driver);
+            Assert.Equal(["test-restore"], attempt.Steps[1].StandIns);
+        }
+        finally { CliHarness.Delete(directory); }
+    }
+
+    private sealed class TestRestoreSurface : IExampleJourneySurface
+    {
+        public string Name => "test-restore";
+
+        public CliHarness.Outcome Run(ExampleJourneyRunner.ExampleCommand command, Func<ExampleJourneyRunner.ExampleCommand, CliHarness.Outcome> invoke)
+            => invoke(command);
+    }
+
+    [Theory]
     [InlineData("native-codex")]
     [InlineData("native-claude")]
     public void StandInsRunAsExecutablesOnThisPlatform(string scenario)

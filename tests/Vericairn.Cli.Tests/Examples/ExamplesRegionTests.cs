@@ -4,11 +4,14 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Vericairn.Cli.Tests;
 
 public sealed class ExamplesRegionTests
 {
+    private static readonly Regex Fence = new(@"^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})(.*)$");
+
     [Fact]
     public void J163_RegisteredGuideRegionsMatchTheirJourney()
     {
@@ -45,6 +48,17 @@ public sealed class ExamplesRegionTests
         Assert.Throws<InvalidDataException>(() => CheckRegion("E1", guide, ExampleJourney.Guide(changed)));
     }
 
+    [Fact]
+    public void J163_TheWorkedSectionCannotAddAnUntestedCommandBlock()
+    {
+        const string block = "```sh\nvericairn status\n```\n";
+        string guide = "## Previous section\n" + block + "## Worked section\n<!-- example:E1 -->\n" + block + "<!-- /example:E1 -->\n";
+        CheckRegion("E1", guide + "## Next section\n" + block, block);
+        Assert.Throws<InvalidDataException>(() => CheckRegion("E1", guide + "### Continued\n" + block, block));
+        string additional = "```sh\n# An ordinary shell comment\nvericairn doctor\n```\n";
+        Assert.Throws<InvalidDataException>(() => CheckRegion("E1", guide.Replace("<!-- example:E1 -->", additional + "<!-- example:E1 -->", StringComparison.Ordinal), block));
+    }
+
     private static void CheckRegion(string key, string guide, string expected)
     {
         guide = guide.ReplaceLineEndings("\n");
@@ -55,6 +69,36 @@ public sealed class ExamplesRegionTests
         if (first < 0 || last < first + opening.Length || first != guide.LastIndexOf(opening, StringComparison.Ordinal)
             || last != guide.LastIndexOf(closing, StringComparison.Ordinal) || guide[(first + opening.Length)..last] != expected)
             throw new InvalidDataException($"The guide region for {key} differs from the journey. Regenerate the region with the journey change.");
+
+        int afterRegion = last + closing.Length;
+        int level = 0;
+        bool extra = false;
+        string? openFence = null;
+        foreach (Match line in Regex.Matches(guide, "^.*$", RegexOptions.Multiline))
+        {
+            Match fence = Fence.Match(line.Value);
+            if (fence.Success)
+            {
+                string delimiter = fence.Groups[1].Value;
+                if (openFence is null)
+                {
+                    openFence = delimiter;
+                    extra |= line.Index < first || line.Index >= afterRegion;
+                }
+                else if (delimiter[0] == openFence[0] && delimiter.Length >= openFence.Length && string.IsNullOrWhiteSpace(fence.Groups[2].Value))
+                    openFence = null;
+            }
+            if (openFence is not null) continue;
+            Match heading = Regex.Match(line.Value, @"^ {0,3}(#{1,6})[ \t]+\S");
+            if (!heading.Success) continue;
+            int depth = heading.Groups[1].Length;
+            if (line.Index >= afterRegion && depth <= level) break;
+            if (line.Index >= first) continue;
+            level = depth;
+            extra = false;
+        }
+        if (extra)
+            throw new InvalidDataException($"The worked guide section for {key} has a fenced block outside its checked region.");
     }
 
     private static string RepositoryRoot()

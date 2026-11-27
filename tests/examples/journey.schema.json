@@ -25,7 +25,8 @@
         "state": { "type": "string" },
         "refusal": { "type": "string" },
         "verdict": { "type": "string" },
-        "errorContains": { "type": "string" }
+        "errorContains": { "type": "string" },
+        "outputContains": { "type": "string" }
       }
     },
     "step": {
@@ -51,7 +52,12 @@
         "processExpect": { "$ref": "#/$defs/expectation" },
         "variant": { "enum": ["agents", "people"] },
         "provider": { "type": "boolean" },
-        "standIn": { "enum": ["native-a", "native-b"] }
+        "standIn": { "enum": ["native-a", "native-b"] },
+        "files": { "type": "object", "propertyNames": { "pattern": "^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$" } },
+        "context": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9-]*$" },
+        "driver": { "enum": ["in-process", "process"] },
+        "surface": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9-]*$" },
+        "text": { "type": "boolean" }
       }
     }
   }
