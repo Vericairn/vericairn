@@ -1,0 +1,47 @@
+name: examples-nightly
+
+on:
+  schedule:
+    - cron: '37 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AVALONIA_TELEMETRY_OPTOUT: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  examples:
+    name: Examples smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: windows-latest
+            rid: win-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        timeout-minutes: 10
+        with:
+          global-json-file: global.json
+      - name: Build and check the nightly archive
+        timeout-minutes: 10
+        shell: bash
+        env:
+          COMMIT: ${{ github.sha }}
+          RID: ${{ matrix.rid }}
+        run: |
+          set -eu
+          python -B tools/examples/nightly_archive.py --rid "$RID" --commit "$COMMIT" \
+            --report "artifacts/examples/nightly-$RID.json"

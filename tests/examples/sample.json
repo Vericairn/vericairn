@@ -1,0 +1,28 @@
+{
+  "format": "vericairn.example-journey/1",
+  "startsAt": "2026-11-26T12:00:00Z",
+  "steps": [
+    {
+      "id": "init",
+      "role": "operator",
+      "arguments": ["estate", "init", "--name", "Smoke sample", "--slug", "smoke-sample", "--purpose", "Exercise the example drivers.", "--operator-name", "Operator", "--organization", "Example", "--commit", "0123456789abcdef0123456789abcdef01234567"],
+      "expect": { "exitCode": 0, "fields": { "/manifest": "estate/manifest.json" } },
+      "capture": { "operator": "/operator" },
+      "setup": true
+    },
+    {
+      "id": "status",
+      "role": "operator",
+      "arguments": ["status"],
+      "expect": { "exitCode": 0, "fields": { "/estate/name": "Smoke sample" } }
+    },
+    {
+      "id": "clock",
+      "role": "operator",
+      "arguments": ["status"],
+      "instantArguments": ["estate", "check"],
+      "clock": 60,
+      "expect": { "exitCode": 0 }
+    }
+  ]
+}

@@ -322,6 +322,15 @@ jobs:
       - name: Verify every package against SHA256SUMS
         # The same check nuget.yml runs before it pushes the published files.
         run: python3 .github/scripts/verify-packages.py dist
+      - name: Examples smoke from the Linux archive
+        timeout-minutes: 3
+        shell: bash
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -eu
+          python3 -B tools/examples/smoke.py --dist dist --version "$VERSION" --rid linux-x64 \
+            --commit "$COMMIT" --report artifacts/examples/read-linux.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vericairn-${{ steps.version.outputs.version }}
@@ -379,3 +388,20 @@ jobs:
           $doctor = & ./smoke/bin/vericairn.exe doctor | Out-String
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($doctor -notmatch '(?m)^search +keyword index .* with FTS5\r?$') { Write-Error "The single-file build lacks SQLite's full-text module: $doctor"; exit 1 }
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        if: inputs.release
+        timeout-minutes: 10
+        with:
+          global-json-file: global.json
+      - name: Examples smoke from the release archive
+        if: inputs.release
+        timeout-minutes: 10
+        shell: bash
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+          RID: ${{ matrix.rid }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -eu
+          python -B tools/examples/smoke.py --dist dist --version "$VERSION" --rid "$RID" \
+            --commit "$COMMIT" --report "artifacts/examples/read-$RID.json"

@@ -1,0 +1,25 @@
+{
+  "estate": "01M6C3K49V7R6YXHJE04YRZ2MN",
+  "firstAuthority": "01M6C3MH55WTGQ96QJBSACQMY6",
+  "format": "vericairn.estate-manifest/1",
+  "profile": "repository-synced",
+  "recordFormat": 3,
+  "vericairn": {
+    "artifacts": {
+      "linux-arm64": "sha256:2a436567eb748ed5740ac31c6509943e0f2f427871d6b7958f58d6966a6d1514",
+      "linux-x64": "sha256:d22385960671e76565cbe90c2150cb7e2667c871984e7a2e8cbf110a63e570a4",
+      "osx-arm64": "sha256:d14e3eb6d59c1dcedd220f9f787615dfeccf0a7f721168cce38b1a21407e770d",
+      "osx-x64": "sha256:1b69528a6df7d181231897a458e82221632647d05b7965f1dfc88e5b5423cecc",
+      "win-arm64": "sha256:be3256440ce8ce9d5ea3a03900151478fd64a940f22fc3c5d229d48c1e74b825",
+      "win-x64": "sha256:4ab5da1cc29726276c77334bad52b5a69676199ea04841f0a264de1111eb63ba"
+    },
+    "mode": "release",
+    "release": {
+      "hash": "sha256:19a3165bb6d3dd052e8b6dcd121c9acacd1c732b207b9edcb1cf5d10bc2b46f7",
+      "id": "01M7D863B6ETN70H7H695HXP8S",
+      "type": "observation"
+    },
+    "repository": "Vericairn/vericairn",
+    "version": "0.9.3"
+  }
+}

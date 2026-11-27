@@ -406,3 +406,29 @@ check keeps its empty source list and fresh package folder. gitleaks, CycloneDX 
 iOS and Android workloads are installed afresh by pinned version. A workload install
 takes 15 to 30 seconds, and a cache would have to restore packs and installation
 records into the SDK's own directory, where the SDK trusts whatever it finds.
+
+## Examples smoke
+
+The product-owned manifest under `tests/examples/examples.json` pins the public example estates to full commits. Only a reviewed
+change moves a pin or adds an expected finding. The read leg fetches the pins anonymously in scratch Git repositories, with hooks
+and credential helpers disabled. It treats README links, manifests, records and registers as data. Its only executable from another
+archive is this run's checksummed, published Vericairn command line. That command line runs `estate check`, `status` and
+`estate upgrade --check` against those records. The upgrade gets the platform archive and `SHA256SUMS` through `--from`, with an
+offline stand-in release snapshot confined to scratch. Each README names the release its estate pins and links to paths that the
+pinned commit contains. Any unexpected finding or changed tree fails the leg. The first pin has one listed finding for the
+missing decisions-register directory that its README still links to.
+
+Tier 1 uses the ordinary test shares and the in-process driver, with a controllable flow clock. The guide-region test also runs in
+`docs-check`. Tier 2 uses the unpacked archive after the Linux single-file smoke in `package.yml`, and the macOS and Windows
+release archives in the same workflow's published CLI jobs. `examples-nightly.yml` builds and checks all three platform archives
+from main at 07:37 UTC. The Linux step has a three-minute timeout. On the CI-12 trial, its queue run must finish by the end of the
+slowest other queue job. Move the step to nightly if the trial misses that bound.
+
+The report labels the driver for each step, its stand-ins and any use of the `instant` variant. A failed journey gets one retry from
+fresh state. An intermittent pass remains visible. Tier 2 previews agent steps with `goal step --check` and runs the people-only
+variant, with each goal step bound to a preview that confirms its non-agent route. Tier 1 tests agent dispatch and settlement using
+executable stand-ins. The CI runners cannot make a presence cut, so tier 2
+does not dispatch an agent from the archive. The first live run from a shipped build belongs to the release preparation procedure.
+
+The first manifest entry runs the read leg over the public example estate. Its instructional journey and guide regions will join
+the manifest with that guide's work.

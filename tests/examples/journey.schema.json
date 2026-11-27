@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Vericairn example journey",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "startsAt", "steps"],
+  "properties": {
+    "format": { "const": "vericairn.example-journey/1" },
+    "startsAt": { "type": "string", "format": "date-time" },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "arguments": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exitCode"],
+      "properties": {
+        "exitCode": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "fields": { "type": "object", "propertyNames": { "pattern": "^/" } },
+        "state": { "type": "string" },
+        "refusal": { "type": "string" },
+        "verdict": { "type": "string" },
+        "errorContains": { "type": "string" }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "arguments", "expect"],
+      "dependentRequired": {
+        "clock": ["instantArguments"],
+        "instantArguments": ["clock"],
+        "processArguments": ["processExpect"],
+        "processExpect": ["processArguments"]
+      },
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9-]*$" },
+        "role": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9-]*$" },
+        "arguments": { "$ref": "#/$defs/arguments" },
+        "expect": { "$ref": "#/$defs/expectation" },
+        "capture": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^/" } },
+        "setup": { "type": "boolean" },
+        "clock": { "type": "integer", "minimum": 1 },
+        "instantArguments": { "$ref": "#/$defs/arguments" },
+        "processArguments": { "$ref": "#/$defs/arguments" },
+        "processExpect": { "$ref": "#/$defs/expectation" },
+        "variant": { "enum": ["agents", "people"] },
+        "provider": { "type": "boolean" },
+        "standIn": { "enum": ["native-a", "native-b"] }
+      }
+    }
+  }
+}
