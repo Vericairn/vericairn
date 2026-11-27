@@ -49,7 +49,7 @@ internal static partial class AcquisitionWorkingTree
             string detail = error is UnauthorizedAccessException or FileNotFoundException or DirectoryNotFoundException
                 ? "the entry is unavailable." : error.Message;
             if (!workingTree && error is HardLinkedFileException)
-                detail += " Make an independent clone with git clone --no-hardlinks and retry.";
+                detail += " Its files are shared through hard links with another local clone, made from it or it from another: remove that clone, or replace this one with an independent clone made with git clone --no-hardlinks, and retry.";
             throw new ProviderRefusedException($"Could not read the {kind} at {Display(current)}: {detail}", error);
         }
 

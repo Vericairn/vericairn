@@ -49,7 +49,7 @@ public sealed class UnregisteredWorkspaceRefusalTests
 
         Assert.False(refused.Ok);
         Assert.Contains("The registered clone is not a git repository that could be acquired safely.", refused.Message, StringComparison.Ordinal);
-        Assert.Contains("hard links are refused. Make an independent clone with git clone --no-hardlinks and retry.", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("hard links are refused. Its files are shared through hard links with another local clone, made from it or it from another: remove that clone, or replace this one with an independent clone made with git clone --no-hardlinks, and retry.", refused.Message, StringComparison.Ordinal);
         Assert.Equal(records, run.Estate.Load().ById.Count);
     }
 
