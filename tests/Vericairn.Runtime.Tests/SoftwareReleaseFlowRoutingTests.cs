@@ -138,6 +138,7 @@ public class SoftwareReleaseFlowRoutingTests
                 ["flow"] = new JsonObject
                 {
                     ["pin"] = FlowFixture.Pin(SoftwareFlows.ReleaseFlow),
+                    ["paths"] = new JsonArray("docs"),
                     ["subject"] = new JsonObject
                     {
                         ["carrier"] = new JsonObject { ["type"] = "work-order", ["id"] = carrier.Id }, ["product"] = new JsonObject { ["type"] = "product", ["id"] = product.Id },

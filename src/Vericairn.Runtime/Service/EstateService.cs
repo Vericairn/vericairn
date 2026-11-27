@@ -15,6 +15,7 @@ using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Objects;
@@ -1358,7 +1359,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return Refuse(string.Join(" ", refusals.Select(r => r.Message)));
             }
 
-            return WriteLocked(new RecordDraft("goal", request.By, request.Body, null, request.Supersedes), model);
+            var draft = new RecordDraft("goal", request.By, request.Body, null, request.Supersedes);
+            if (TJson.Object(TJson.Object(request.Body, "plan"), "flow").ValueKind == JsonValueKind.Object)
+            {
+                // Derive against the unsigned goal before asking for any signature.
+                var candidate = new RecordEnvelope("goal", Ulid.NewUlid().Value, RecordParser.FormatTimestamp(FlowClock.GetUtcNow()),
+                    request.By, null, request.Supersedes, request.Body, string.Empty, string.Empty, [], model.Manifest?.RecordFormat ?? RecordFormats.Current);
+                if (FlowPathRefusal(model, candidate) is Problem paths)
+                {
+                    return WriteOutcome.Fail(paths);
+                }
+            }
+
+            return WriteLocked(draft, model);
         }
     }
 
@@ -1665,6 +1678,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 if (refusals.Count > 0)
                 {
                     return Refuse(string.Join(" ", refusals.Select(r => r.Message)));
+                }
+
+                if (FlowPathRefusal(model, current) is Problem paths)
+                {
+                    return WriteOutcome.Fail(paths);
                 }
             }
             else if (request.By != sponsor && !GoalRules.AccepterOf(model, current).Decides(model, request.By))

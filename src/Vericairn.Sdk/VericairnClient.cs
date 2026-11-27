@@ -419,7 +419,7 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public OverlapResponse WorkOverlapPreview(OverlapPreviewRequest request) => Post<OverlapPreviewRequest, OverlapResponse>("/v1/overlaps/preview", request)!;
 
     /// <inheritdoc />
-    public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => Post<GoalStepRequest, GoalStepResponse>(GoalPath(goal, "step"), request)!;
+    public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => Post<GoalStepRequest, GoalStepResponse>(GoalStepPath(goal, request), request)!;
 
     /// <inheritdoc />
     public TakeoverResponse WorkTakeover(TakeoverRequest request) => Post<TakeoverRequest, TakeoverResponse>("/v1/work/takeover", request)!;
@@ -597,6 +597,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
         string suffix = string.Join('&', query.Where(p => p.Value is not null).Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value!)));
         return suffix.Length == 0 ? string.Empty : "?" + suffix;
     }
+
+    // The preview has its own route so an older runtime cannot ignore the flag and dispatch the step.
+    private static string GoalStepPath(string goal, GoalStepRequest? request) => GoalPath(goal, request is { Check: true } ? "step/check" : "step");
 
     private static string GoalPath(string goal, string action) => "/v1/goals/" + Uri.EscapeDataString(goal) + "/" + action;
 

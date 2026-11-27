@@ -131,11 +131,15 @@ public static class RecordSigning
         }
 
         byte[] subjectPublicKeyInfo = Base64Url.DecodeFromChars(encoded);
-        if (!IsNamedP256(subjectPublicKeyInfo))
-        {
-            return false;
-        }
+        return IsNamedP256(subjectPublicKeyInfo) && CanImportPublicKey(subjectPublicKeyInfo);
+    }
 
+    /// <summary>Whether a helper answered with exactly one usable P-256 SubjectPublicKeyInfo.</summary>
+    internal static bool IsExactPublicKey(byte[] subjectPublicKeyInfo) =>
+        IsP256Structure(subjectPublicKeyInfo, exact: true) && CanImportPublicKey(subjectPublicKeyInfo);
+
+    private static bool CanImportPublicKey(byte[] subjectPublicKeyInfo)
+    {
         try
         {
             using ECDsa key = ECDsa.Create();
@@ -148,21 +152,25 @@ public static class RecordSigning
         }
     }
 
+    private static bool IsNamedP256(byte[] subjectPublicKeyInfo) => IsP256Structure(subjectPublicKeyInfo, exact: false);
+
     /// <summary>
     /// Whether the bytes begin with the only form of SubjectPublicKeyInfo a usable key takes, read as DER: the algorithm
     /// id-ecPublicKey with the named curve P-256 as its only parameter, and an uncompressed point of 65 bytes. Every key Vericairn
     /// makes has this form. Read before any import, so a key in another form (explicit curve parameters, another named curve, a
     /// compressed point, another algorithm) is refused the same way on every platform, without asking the platform or the framework's
-    /// own reader, whose answers and errors for such keys differ. Bytes after the structure, and the bit string's count of unused bits,
-    /// are not read, as the platform's import does not read them, so such a key reads as it did before. The runtime identity
+    /// own reader, whose answers and errors for such keys differ. Record validation continues to allow bytes after the structure and
+    /// an unused-bit count. The exact check for helper answers requires one complete structure and zero unused bits. The runtime identity
     /// (Vericairn.Protocol's RuntimeIdentityScheme) keeps its own copy of this check, written to the same rules; a test holds the two
     /// to the same answers, so a change here is made there too.
     /// </summary>
-    private static bool IsNamedP256(byte[] subjectPublicKeyInfo)
+    private static bool IsP256Structure(byte[] subjectPublicKeyInfo, bool exact)
     {
         try
         {
-            AsnReader info = new AsnReader(subjectPublicKeyInfo, AsnEncodingRules.DER).ReadSequence();
+            var reader = new AsnReader(subjectPublicKeyInfo, AsnEncodingRules.DER);
+            AsnReader info = reader.ReadSequence();
+            if (exact) reader.ThrowIfNotEmpty();
             AsnReader algorithm = info.ReadSequence();
             if (algorithm.ReadObjectIdentifier() != EcPublicKeyOid || algorithm.ReadObjectIdentifier() != NamedP256Oid)
             {
@@ -170,9 +178,9 @@ public static class RecordSigning
             }
 
             algorithm.ThrowIfNotEmpty();
-            byte[] point = info.ReadBitString(out _);
+            byte[] point = info.ReadBitString(out int unusedBits);
             info.ThrowIfNotEmpty();
-            return point.Length == 65 && point[0] == 0x04;
+            return point.Length == 65 && point[0] == 0x04 && (!exact || unusedBits == 0);
         }
         catch (Exception exception) when (Refused(exception))
         {

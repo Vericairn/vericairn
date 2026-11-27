@@ -360,7 +360,7 @@ public sealed partial class VericairnClient
 
     /// <summary>The cancellable GoalStep operation, with a deadline covering the complete response.</summary>
     public Task<GoalStepResponse> GoalStepAsync(string goal, GoalStepRequest request, CancellationToken cancellationToken = default) =>
-        RunOperationAsync<GoalStepResponse>(nameof(GoalStep), async token => (await PostAsync<GoalStepRequest, GoalStepResponse>(GoalPath(goal, "step"), request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(GoalStep)), cancellationToken);
+        RunOperationAsync<GoalStepResponse>(nameof(GoalStep), async token => (await PostAsync<GoalStepRequest, GoalStepResponse>(GoalStepPath(goal, request), request, cancellationToken: token).ConfigureAwait(false))!, request is not { Check: true }, OperationTimeout?.Invoke(nameof(GoalStep)), cancellationToken);
 
     /// <summary>The cancellable WorkTakeover operation, with a deadline covering the complete response.</summary>
     public Task<TakeoverResponse> WorkTakeoverAsync(TakeoverRequest request, CancellationToken cancellationToken = default) =>

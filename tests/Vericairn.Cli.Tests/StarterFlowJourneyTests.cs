@@ -58,7 +58,7 @@ public class StarterFlowJourneyTests
             // A run of the starter flow for the request, proposed and activated by its sponsor.
             string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Appointment for SR-0001", "--objective", "Turn the sample service request into an approved appointment.",
                 "--done", """{"type":"work-order","fields":{"key":"SR-0001"}}""", "--work-order", order.Id, "--budget", "wallMinutes=30", "--budget", "attemptsPerStep=2",
-                "--flow", Flow + "@1.0.0", "--subject", "request=" + Request).Id;
+                "--flow", Flow + "@1.0.0", "--subject", "request=" + Request, "--flow-path", "appointments/**").Id;
             CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
             string position = CliHarness.Ok("--estate", root, "goal", "show", goal).Out;
             Assert.Contains($"Flow: {Flow} 1.0.0 ({hash}), 0 of 2 steps done", position, StringComparison.Ordinal);

@@ -155,6 +155,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/overlaps", (string? repository) => Results.Json(service.WorkOverlap(string.IsNullOrWhiteSpace(repository) ? null : repository), ProtocolJson.Options));
         app.MapPost($"{v}/overlaps/preview", (OverlapPreviewRequest request) => Results.Json(service.WorkOverlapPreview(request), ProtocolJson.Options));
         app.MapPost($"{v}/goals/{{id}}/step", (string id, GoalStepRequest request) => Results.Json(service.GoalStep(id, request), ProtocolJson.Options));
+        app.MapPost($"{v}/goals/{{id}}/step/check", (string id, GoalStepRequest request) => Results.Json(service.GoalStep(id, request with { Check = true }), ProtocolJson.Options));
         app.MapPost($"{v}/goals/{{id}}/activate", (string id, GoalActionRequest request) => Outcome(service.GoalActivate(id, request)));
         app.MapPost($"{v}/goals/{{id}}/pause", (string id, GoalActionRequest request) => Outcome(service.GoalPause(id, request)));
         app.MapPost($"{v}/goals/{{id}}/resume", (string id, GoalActionRequest request) => Outcome(service.GoalResume(id, request)));
