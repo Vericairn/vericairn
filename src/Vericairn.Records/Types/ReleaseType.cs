@@ -163,7 +163,7 @@ public sealed class ReleaseType : IRecordType
 
         if (status != "candidate" && (artifacts is null || artifacts.Count == 0))
         {
-            context.Error("release.artifacts", "A published or withdrawn release names its artifacts.");
+            context.BodyError("release.artifacts", "A published or withdrawn release names its artifacts.");
         }
 
         if (status == "published")

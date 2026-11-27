@@ -1062,11 +1062,11 @@ internal static partial class StandingOutputs
 
             if (context.Find(id) is not { Type: "possibility" } named || named.ComputedHash != hash)
             {
-                link.Error("possibility.link", "possibility", $"A link names a possibility at its exact hash; {id} at {hash} is not one.");
+                link.RelationshipError("possibility.link", "possibility", $"A link names a possibility at its exact hash; {id} at {hash} is not one.");
             }
             else if (context.Model.ById.ContainsKey(context.Record.Id) ? context.Model.Chain(context.Model.Latest(named)).Intersect(context.Model.Chain(context.Model.Latest(context.Record))).Any() : context.Record.Supersedes is string s && context.Model.Chain(context.Model.Latest(named)).Contains(s))
             {
-                link.Error("possibility.link", "possibility", "A possibility links to another possibility, never to a revision of itself.");
+                link.RelationshipError("possibility.link", "possibility", "A possibility links to another possibility, never to a revision of itself.");
             }
         }
     }

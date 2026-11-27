@@ -121,6 +121,10 @@ public sealed class RecordAuthorshipWriteTests
             RecordPrepareResponse foreign = service.PrepareRecord(new("resource", Ulid.NewUlid().Value, Json(ResourceBody)));
             Assert.False(foreign.Ok);
             Assert.Null(foreign.Prepared);
+            RecordPrepareResponse malformed = service.PrepareRecord(new("resource", estate.BuilderId, Json("{}")));
+            Assert.False(malformed.Ok);
+            Assert.Null(malformed.Prepared);
+            Assert.Contains(malformed.Problem!.Findings, f => f.Code == "body.missing");
             RecordPrepareResponse own = service.PrepareRecord(new("resource", estate.BuilderId, Json(ResourceBody)));
             Assert.True(own.Ok, own.Problem?.Message);
             string signature = new StoreSigner(new FileKeyStore(VericairnHome.Path()), builderDevice).Sign(RecordSigning.Digest(own.Prepared!.Hash)).Signature;

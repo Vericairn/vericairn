@@ -559,7 +559,7 @@ public static class FlowRuns
             subject.Allow(bound.Name);
             if (!resolved.SubjectFields.ContainsKey(bound.Name))
             {
-                subject.Error("flow.subject", bound.Name, $"Flow {resolved.Pin.Id}'s subject has no field '{bound.Name}'.");
+                subject.RelationshipError("flow.subject", bound.Name, $"Flow {resolved.Pin.Id}'s subject has no field '{bound.Name}'.");
             }
         }
 
@@ -630,7 +630,7 @@ public static class FlowRuns
     {
         if (!subject.Has(name))
         {
-            subject.Error("flow.subject", name, $"The run binds every field of its flow's subject; '{name}' is missing.");
+            subject.RelationshipError("flow.subject", name, $"The run binds every field of its flow's subject; '{name}' is missing.");
             return;
         }
 
@@ -648,11 +648,11 @@ public static class FlowRuns
             reference.NoOtherKeys();
             if (named != recordType)
             {
-                reference.Error("flow.subject", "type", $"Subject field '{name}' is a {recordType} record.");
+                reference.RelationshipError("flow.subject", "type", $"Subject field '{name}' is a {recordType} record.");
             }
             else if (context.RequireReference($"plan.flow.subject.{name}", id, recordType!) is RecordEnvelope target && hash is not null && target.ComputedHash != hash)
             {
-                reference.Error("flow.subject", "hash", "The pinned hash does not match the record.");
+                reference.RelationshipError("flow.subject", "hash", "The pinned hash does not match the record.");
             }
         }
         else if (type == "text")

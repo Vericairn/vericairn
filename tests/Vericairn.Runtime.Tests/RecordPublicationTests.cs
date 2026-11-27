@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Identity;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
 
@@ -27,8 +28,9 @@ public class RecordPublicationTests
         using var estate = new TestEstate();
         using EstateService service = Open(estate, localOnly);
         JsonObject body = JsonNode.Parse(Order)!.AsObject();
-        if (contentFailure) body["password"] = "a placeholder, never a credential";
-        else body.Remove("key");
+        // Both drafts pass the body check so the rejection still exercises the full publication judgment.
+        if (contentFailure) body["intent"] = "A synthetic credential-shaped value: sk-" + new string('x', 36);
+        else body["inputs"] = JsonSerializer.SerializeToNode(new[] { new { type = "resource", id = Ulid.NewUlid().Value } });
 
         AuthoredRecord? proposed = null;
         bool publishedDuringJudgment = false;
@@ -42,7 +44,7 @@ public class RecordPublicationTests
         Assert.NotNull(proposed);
         Assert.False(outcome.Ok);
         Assert.Equal("rejected", outcome.Problem!.Code);
-        if (contentFailure) Assert.Contains(outcome.Problem.Findings, finding => finding.Code == "secrets.key");
+        Assert.Contains(outcome.Problem.Findings, finding => finding.Code == (contentFailure ? "secrets.pattern" : "body.reference"));
         Assert.False(Published(service, proposed));
         using EstateService reopened = EstateService.Open(estate.Root);
         Assert.Null(reopened.Record(proposed.Envelope.Id));

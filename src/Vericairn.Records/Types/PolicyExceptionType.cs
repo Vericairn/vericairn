@@ -49,7 +49,7 @@ public sealed class PolicyExceptionType : IRecordType
         if (basis is not null)
         {
             RecordEnvelope? decision = PolicyRecords.Reference(context, basis.Nested("decision", true), true, "decision");
-            if (decision is not null && !SignatureChecks.IsAuthentic(context.Model, decision)) basis.Error("policy.basis", "decision", "The decision basis must be signed by an admitted device.");
+            if (decision is not null && !SignatureChecks.IsAuthentic(context.Model, decision)) basis.RelationshipError("policy.basis", "decision", "The decision basis must be signed by an admitted device.");
             authority = basis.Nested("authority", false);
             basis.NoOtherKeys();
         }
@@ -59,17 +59,16 @@ public sealed class PolicyExceptionType : IRecordType
         if (previous is not null && (EstateModel.BodyString(previous, "state") != "granted" || state != "revoked" || previous.Subject != context.Record.Subject || !PolicyRecords.SameFields(previous, context.Record, "rule", "targets", "expiresAt"))) context.Error("exception.lifecycle", "Only a signed revocation can succeed a grant; its policy, rule, targets and expiry stay fixed. Renewal is a new grant.");
         if (policy is null) return;
         JsonElement definition = DutyRecords.Rule(policy, rule);
-        if (definition.ValueKind == JsonValueKind.Undefined) body.Error("exception.rule", "rule", "The exact policy has no such rule.");
+        if (definition.ValueKind == JsonValueKind.Undefined) body.RelationshipError("exception.rule", "rule", "The exact policy has no such rule.");
         if (state == "granted" && (EstateModel.BodyString(policy, "state") != "active" || string.CompareOrdinal(policy.At, context.Record.At) > 0 || context.Model.OfType("estate-policy").Any(p => p.Supersedes == policy.Id && string.CompareOrdinal(p.At, context.Record.At) <= 0))) context.Error("exception.policy", "A grant names an active policy revision current when it is authored.");
+        RecordEnvelope first = context.Find(PolicyRecords.Identity(context.Model, context.Record)) ?? context.Record;
         if (DutyRecords.Time(expires) is { } expiry)
         {
-            RecordEnvelope first = context.Model.ById[PolicyRecords.Identity(context.Model, context.Record)];
-            if (!PolicyRecords.Property(policy.Body, "maxExceptionDays").TryGetInt64Safe(out long maximum) || maximum is < 1 or > 36500 || expiry <= first.AtTime || expiry - first.AtTime > TimeSpan.FromDays(maximum)) body.Error("exception.expiry", "expiresAt", "Expiry must follow the grant and fit the policy's maximum duration.");
+            if (!PolicyRecords.Property(policy.Body, "maxExceptionDays").TryGetInt64Safe(out long maximum) || maximum is < 1 or > 36500 || expiry <= first.AtTime || expiry - first.AtTime > TimeSpan.FromDays(maximum)) body.RelationshipError("exception.expiry", "expiresAt", "Expiry must follow the grant and fit the policy's maximum duration.");
         }
         PolicyAuthority.Grant(context, authority, Scopes.GrantPolicyExceptions, state == "revoked" ? "revoke" : "grant", policy);
         if (!PolicyAuthority.OperatorAt(context.Model, context.Record))
         {
-            RecordEnvelope first = context.Model.ById[PolicyRecords.Identity(context.Model, context.Record)];
             if (state == "revoked" && context.Record.By != first.By) context.Error("exception.revoker", "Only the operator or the still-authorized original grantor revokes an exception.");
             if (EstateModel.BodyString(policy, "owner") == context.Record.By || PolicyRecords.Items(PolicyRecords.Property(body.Element, "targets")).Any(t => OwnTarget(context, t))) context.Error("exception.self", "A delegate cannot except its own work or a condition imposed on it; the operator decides that case.");
         }
@@ -116,7 +115,7 @@ public sealed class PolicyExceptionType : IRecordType
                     if (origin is not null)
                     {
                         DutyRecords.Occurrence(context, occurrence, origin, targetRule, subject);
-                        if (policy is not null && (!context.Model.Chain(policy).Contains(origin.Id, StringComparer.Ordinal) || targetRule != rule)) target.Error("exception.occurrence", "policy", "The occurrence belongs to this policy lineage and rule.");
+                        if (policy is not null && (!context.Model.Chain(policy).Contains(origin.Id, StringComparer.Ordinal) || targetRule != rule)) target.RelationshipError("exception.occurrence", "policy", "The occurrence belongs to this policy lineage and rule.");
                     }
                     break;
             }
@@ -125,7 +124,7 @@ public sealed class PolicyExceptionType : IRecordType
                 RecordEnvelope? release = PolicyRecords.Reference(context, submission.Nested("release", true), true, "release");
                 RecordEnvelope? product = PolicyRecords.IdentityField(context, submission, "product", "product");
                 string? version = submission.Text("version", true, 100, Patterns.SemanticVersion);
-                if (release is not null && (release.Subject?.Id != product?.Id || EstateModel.BodyString(release, "version") != version)) submission.Error("exception.submission", "release", "Submission product and exact version must agree with its pinned release.");
+                if (release is not null && (release.Subject?.Id != product?.Id || EstateModel.BodyString(release, "version") != version)) submission.RelationshipError("exception.submission", "release", "Submission product and exact version must agree with its pinned release.");
                 submission.NoOtherKeys();
             }
             target.NoOtherKeys();

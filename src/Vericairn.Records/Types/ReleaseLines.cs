@@ -38,14 +38,14 @@ public static partial class ReleaseLines
             .Where(r => PolicyRecords.ReleaseMatchesProduct(context.Model, r, product.Id) && Line(r.Body) == line).ToArray();
         JsonElement declared = Declarations(product).FirstOrDefault(d => PolicyRecords.Text(d, "name") == line);
         if (product.Body.TryGetProperty("lines", out _) && declared.ValueKind == JsonValueKind.Undefined)
-            body.Error("release.line", "line", "This line is not declared by the release's product revision.");
+            body.RelationshipError("release.line", "line", "This line is not declared by the release's product revision.");
         string[] fixedChannels = releases.Select(r => Channel(r.Body)).Where(c => c != "prerelease")
             .Concat(ProductHistory(context, product).SelectMany(Declarations).Where(d => PolicyRecords.Text(d, "name") == line)
                 .Select(d => PolicyRecords.Text(d, "channel")).OfType<string>()).Distinct(StringComparer.Ordinal).ToArray();
         if (channel == "nightly" && releases.Any(r => Channel(r.Body) == "prerelease")
             || fixedChannels.Length > 1 || fixedChannels.Length == 1 && channel != fixedChannels[0]
             && !(channel == "prerelease" && fixedChannels[0] is "stable" or "lts"))
-            body.Error("release.line-channel", "channel", "A line keeps its channel; only stable and lts lines may also carry prereleases of their next version.");
+            body.RelationshipError("release.line-channel", "channel", "A line keeps its channel; only stable and lts lines may also carry prereleases of their next version.");
 
         if (channel == "prerelease" && fixedChannels.Any(c => c is "stable" or "lts"))
         {
@@ -53,13 +53,13 @@ public static partial class ReleaseLines
             if (version is null || !version.Contains('-', StringComparison.Ordinal)
                 || releases.Any(r => r.AtTime < context.Record.AtTime && EstateModel.BodyString(r, "status") == "published"
                     && Channel(r.Body) is "stable" or "lts" && CompareVersionCore(version, EstateModel.BodyString(r, "version")) <= 0))
-                body.Error("release.prerelease-version", "version", "A prerelease in a stable or lts line names a prerelease of a version newer than that line's earlier publications.");
+                body.RelationshipError("release.prerelease-version", "version", "A prerelease in a stable or lts line names a prerelease of a version newer than that line's earlier publications.");
         }
 
         if (EstateModel.BodyString(context.Record, "status") == "published"
             && context.Model.OfType("release").Any(r => r.Id != context.Record.Id && PolicyRecords.ReleaseMatchesProduct(context.Model, r, product.Id)
                 && EstateModel.BodyString(r, "status") == "published" && EstateModel.BodyString(r, "version") == EstateModel.BodyString(context.Record, "version") && Line(r.Body) != line))
-            body.Error("release.version-line", "line", "A published version belongs to only one line of a product.");
+            body.RelationshipError("release.version-line", "line", "A published version belongs to only one line of a product.");
     }
 
     internal static void ValidateProduct(ValidationContext context)

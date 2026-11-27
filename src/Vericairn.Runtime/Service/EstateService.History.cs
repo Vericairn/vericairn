@@ -657,6 +657,12 @@ public sealed partial class EstateService
             return StoreAuthoredLocked(alone, current);
         }
 
+        (AuthoredRecord? unsigned, Problem? bodyProblem) = AuthorCheckedLocked(draft, current, []);
+        if (unsigned is null)
+        {
+            return WriteOutcome.Fail(bodyProblem!);
+        }
+
         (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(current, "manual", draft.By);
         (AuthoredRecord? record, string? why) = AuthorLocked(draft, current);
         if (record is null)

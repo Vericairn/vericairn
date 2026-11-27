@@ -80,6 +80,14 @@ public static class EstateLoader
         return Load(root, files, null, manifestBytes);
     }
 
+    /// <summary>Checks the proposed record's body using the same type validator as the full estate judgment.</summary>
+    internal static FindingList CheckRecordBody(EstateModel model, RecordEnvelope record)
+    {
+        var bodyFindings = new FindingList();
+        FindType(record, bodyFindings)?.Validate(new ValidationContext(model, record, new FindingList(), bodyFindings));
+        return bodyFindings;
+    }
+
     /// <summary>
     /// The records of a file set as identities only: each parsed record with its id, hash and body, supersession and the manifest,
     /// with parse findings alone. No record type, reference, authority, signature or admission is judged, no clock is read, and no
@@ -246,19 +254,7 @@ public static class EstateLoader
 
         foreach (RecordEnvelope record in records)
         {
-            IRecordType? type = RecordTypeRegistry.Find(record.Type);
-            if (type is null)
-            {
-                string hint = RecordTypeRegistry.Reserved.IndexOf(record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
-                findings.Error("record.unknown-type", record.ExpectedPath, $"Unknown record type '{record.Type}'.{hint}");
-                continue;
-            }
-
-            if (record.Format < type.SinceFormat)
-            {
-                findings.Error("record.type-format", record.ExpectedPath, $"Type '{record.Type}' belongs to record format {type.SinceFormat}, and this record states format {record.Format}.");
-                continue;
-            }
+            if (FindType(record, findings) is not IRecordType type) continue;
 
             if (removedBeforeHistory.TryGetValue(record.Id, out IReadOnlyList<RecordEnvelope>? losses))
             {
@@ -611,6 +607,25 @@ public static class EstateLoader
         }
 
         return supersededBy;
+    }
+
+    private static IRecordType? FindType(RecordEnvelope record, FindingList findings)
+    {
+        IRecordType? type = RecordTypeRegistry.Find(record.Type);
+        if (type is null)
+        {
+            string hint = RecordTypeRegistry.Reserved.IndexOf(record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
+            findings.Error("record.unknown-type", record.ExpectedPath, $"Unknown record type '{record.Type}'.{hint}");
+            return null;
+        }
+
+        if (record.Format < type.SinceFormat)
+        {
+            findings.Error("record.type-format", record.ExpectedPath, $"Type '{record.Type}' belongs to record format {type.SinceFormat}, and this record states format {record.Format}.");
+            return null;
+        }
+
+        return type;
     }
 
     private static void ValidateSubject(EstateModel model, RecordEnvelope record, IRecordType type, FindingList findings)

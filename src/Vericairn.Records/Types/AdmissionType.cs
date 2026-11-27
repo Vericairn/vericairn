@@ -62,7 +62,7 @@ public sealed class AdmissionType : IRecordType
 
         if (status == "revoked" && context.Record.Supersedes is null)
         {
-            context.Error("admission.revoke", "A revocation supersedes the admission it ends.");
+            context.BodyError("admission.revoke", "A revocation supersedes the admission it ends.");
         }
     }
 }

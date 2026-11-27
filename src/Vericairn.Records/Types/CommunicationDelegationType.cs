@@ -52,7 +52,7 @@ public sealed class CommunicationDelegationType : IRecordType
 
         if (scope != "assignment" && assignment is not null)
         {
-            context.Error("communication.scope", "Only assignment delegations name an assignment.");
+            context.BodyError("communication.scope", "Only assignment delegations name an assignment.");
         }
 
         if (expires is not null && string.CompareOrdinal(expires, context.Record.At) <= 0)

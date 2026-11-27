@@ -136,7 +136,7 @@ public sealed class GoalType : IRecordType
 
         foreach (BodyReader input in inputs ?? [])
         {
-            RecordReference? reference = RecordParser.ParseReference(input.Element, input.Location, context.Findings);
+            RecordReference? reference = RecordParser.ParseReference(input.Element, input.Location, context.BodyFindings);
             if (reference is not null)
             {
                 context.RequireReference("inputs", reference.Id, reference.Type);
@@ -169,7 +169,7 @@ public sealed class GoalType : IRecordType
         IReadOnlyList<string> reserved = GoalRules.ReservedActions(context.Model, context.Record, context.Record);
         if (delegated == sponsor)
         {
-            context.Error("goal.delegate", "The sponsor accepts the goal itself; a delegate is another principal.");
+            context.BodyError("goal.delegate", "The sponsor accepts the goal itself; a delegate is another principal.");
         }
         else if (!GoalRules.IsPerson(context.Model, sponsor))
         {

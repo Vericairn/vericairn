@@ -2717,10 +2717,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return UnderWriteLock(() => StoreRemovalLocked(draft, signers), WriteOutcome.Fail);
         }
 
-        (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
+        (AuthoredRecord? record, Problem? problem) = AuthorCheckedLocked(draft, current, signers);
         if (record is null)
         {
-            return Refuse(refusal!);
+            return WriteOutcome.Fail(problem!);
         }
 
         // In an estate that has adopted, a revocation, key rotation or narrowing grant revision is stored after its closing, in the same
@@ -2855,11 +2855,20 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        (AuthoredRecord? record, Problem? problem) = AuthorCheckedLocked(draft, current, signers);
+        string? refusal = problem is { Findings.Count: > 0 }
+            ? $"{problem.Message} {string.Join(" ", problem.Findings.Select(f => f.Message))}"
+            : problem?.Message;
+        return (record, refusal);
+    }
+
+    private (AuthoredRecord? Record, Problem? Problem) AuthorCheckedLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers)
+    {
         // From 0.9.4 (FIX-159): every signature made on this machine, and every record prepared unsigned, passes here; none is made while
         // the estate leaves records unread.
         if (ActingRefusal.BeforeSigning(current, "signing the " + draft.Type + " record") is Problem unread)
         {
-            return (null, unread.Message);
+            return Refused(unread.Message);
         }
 
         // From 0.9.2 (MCP-03): under device signing nothing on this machine signs. A record authored without signers is a candidate
@@ -2872,43 +2881,32 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
             else if (signers.Any(s => s is not PresignedSigner presigned || presigned.DeviceId != requesting.Device || presigned.Hash != signing.Authorized))
             {
-                return (null, "A device-signed request is signed by its own device only; nothing on the runtime's machine signs its record.");
+                return Refused("A device-signed request is signed by its own device only; nothing on the runtime's machine signs its record.");
             }
         }
 
-        if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
+        if (PromptWriteRefusal(draft, current) is string promptRefusal) return Refused(promptRefusal);
         // From 0.9.4 (OPS-16): a decision naming an operator's act answers the current ask with the recommendation the act showed.
-        if (ActWriteRefusal(draft, current) is string actRefusal) return (null, actRefusal);
+        if (ActWriteRefusal(draft, current) is string actRefusal) return Refused(actRefusal);
         // From 0.9.4 (OPS-22): a request pins only files the estate's objects hold.
-        if (RequestFileRefusal(draft) is string fileRefusal) return (null, fileRefusal);
+        if (RequestFileRefusal(draft) is string fileRefusal) return Refused(fileRefusal);
         if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
-            return (null, templateRefusal);
+            return Refused(templateRefusal);
         if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)
         {
-            return (null, communicationRefusal);
+            return Refused(communicationRefusal);
         }
 
         // From 0.9.4 (ID-11): only the step's current holder acts, whatever time its record states, and only a person hands a held step on.
         if ((DisplacedWriteRefusal(draft, current) ?? AssignmentTakesNothingRefusal(draft, current)) is string displacedRefusal)
         {
-            return (null, displacedRefusal);
+            return Refused(displacedRefusal);
         }
 
-        if (BlockedTermRefusal(draft, current) is string blockedRefusal) return (null, blockedRefusal);
+        if (BlockedTermRefusal(draft, current) is string blockedRefusal) return Refused(blockedRefusal);
         // A history checkpoint follows every head of this copy and lists exactly what no head witnesses (design/signed-history.md § 5).
         if (draft.Type == "history-checkpoint" && global::Vericairn.Records.History.SignedHistory.AuthoringRefusal(current, draft.Body) is string historyRefusal)
-            return (null, "Not written: " + historyRefusal);
-
-        if (signers is null)
-        {
-            string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
-            if (refusal is not null)
-            {
-                return (null, refusal);
-            }
-
-            signers = signer is null ? [] : [signer];
-        }
+            return Refused("Not written: " + historyRefusal);
 
         // A record is written in its estate's format, never in one this build does not write.
         if (draft.Format is null)
@@ -2922,6 +2920,36 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             draft = draft with { At = predecessor.AtTime };
         }
 
+        AuthoredRecord unsigned;
+        try
+        {
+            unsigned = RecordAuthor.Create(draft);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
+        {
+            return Refused(exception.Message);
+        }
+
+        // FIX-158: refuse deterministic body errors before the signing boundary. The full estate is still judged under the write lock.
+        if (CheckRecordBody(current, unsigned) is Problem rejected)
+        {
+            return (null, rejected);
+        }
+
+        if (signers is null)
+        {
+            string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
+            if (refusal is not null)
+            {
+                return Refused(refusal);
+            }
+
+            signers = signer is null ? [] : [signer];
+        }
+
+        if (signers.Count == 0) return (unsigned, null);
+        draft = draft with { At = unsigned.Envelope.AtTime, Id = unsigned.Envelope.Id };
+
         // A signing failure is described by its kind and type, never by its message, which may name a path on this machine and reaches
         // refusals and a checkpoint's skip reason. The record's own refusals name its fields and values, and keep their message, as does
         // a presigned signature's, which is fixed text.
@@ -2930,11 +2958,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         List<IRecordSigner> watched = [.. signers.Select(s => s is PresignedSigner ? s : new WatchedSigner(s, this, signed, current))];
         try
         {
-            if (signers.Count > 0) BeforeSigningRecord?.Invoke();
+            BeforeSigningRecord?.Invoke();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return (null, SigningFailure(exception));
+            return Refused(SigningFailure(exception));
         }
 
         try
@@ -2943,8 +2971,32 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return (null, watched.Any(s => s is WatchedSigner { Failed: true }) ? SigningFailure(exception) : exception.Message);
+            return Refused(watched.Any(s => s is WatchedSigner { Failed: true }) ? SigningFailure(exception) : exception.Message);
         }
+
+        static (AuthoredRecord?, Problem?) Refused(string message) => (null, new Problem("refused", message, []));
+    }
+
+    private static Problem? CheckRecordBody(EstateModel model, AuthoredRecord record)
+    {
+        var errors = new FindingList();
+        foreach (Finding finding in EstateLoader.CheckRecordBody(model, record.Envelope).Where(f => f.Severity == Severity.Error))
+        {
+            errors.Add(finding);
+        }
+
+        // These two rules warn on stored records and reject a new one. Both depend only on the proposed record.
+        RecordEnvelope proposed = record.Envelope;
+        Finding? authoredWarning = proposed.Type switch
+        {
+            "decision" => DecisionType.RecordTimeFinding(EstateModel.BodyString(proposed, "decidedAt"), proposed.At, record.RelativePath),
+            "result" => ResultType.OutputSchemeFinding(proposed, record.RelativePath),
+            _ => null,
+        };
+        if (authoredWarning is not null) errors.Add(authoredWarning with { Severity = Severity.Error });
+        return errors.HasErrors
+            ? new Problem("rejected", $"Not written: the estate would be invalid with this record ({errors.Errors} {(errors.Errors == 1 ? "error" : "errors")}).", ToFindings(errors, "rejected").Findings)
+            : null;
     }
 
     /// <summary>

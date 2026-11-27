@@ -15,14 +15,21 @@ public sealed class BodyReader
     private readonly JsonElement element;
     private readonly string location;
     private readonly FindingList findings;
+    private readonly FindingList relationshipFindings;
     private readonly HashSet<string> declared = new(StringComparer.Ordinal);
 
     /// <summary>Creates a reader over an object element of a record written in the given format.</summary>
     public BodyReader(JsonElement element, string location, FindingList findings, long format = RecordFormats.First)
+        : this(element, location, findings, format, findings)
+    {
+    }
+
+    internal BodyReader(JsonElement element, string location, FindingList findings, long format, FindingList relationshipFindings)
     {
         this.element = element;
         this.location = location;
         this.findings = findings ?? throw new ArgumentNullException(nameof(findings));
+        this.relationshipFindings = relationshipFindings;
         Format = format;
     }
 
@@ -232,7 +239,7 @@ public sealed class BodyReader
     public BodyReader? Nested(string name, bool required)
     {
         JsonElement? value = Get(name, required, JsonValueKind.Object);
-        return value is null ? null : new BodyReader(value.Value, Field(name), findings, Format);
+        return value is null ? null : new BodyReader(value.Value, Field(name), findings, Format, relationshipFindings);
     }
 
     /// <summary>Reads an array of objects as readers.</summary>
@@ -255,7 +262,7 @@ public sealed class BodyReader
                 continue;
             }
 
-            readers.Add(new BodyReader(item, itemLocation, findings, Format));
+            readers.Add(new BodyReader(item, itemLocation, findings, Format, relationshipFindings));
         }
 
         if (!allowEmpty && readers.Count == 0)
@@ -307,8 +314,11 @@ public sealed class BodyReader
         }
     }
 
-    /// <summary>Adds an error about a field.</summary>
+    /// <summary>Adds an error about a field whose rule reads only this record's content.</summary>
     public void Error(string code, string name, string message) => findings.Error(code, Field(name), message);
+
+    /// <summary>Reports a field error that depends on estate state or on the record's signatures.</summary>
+    internal void RelationshipError(string code, string name, string message) => relationshipFindings.Error(code, Field(name), message);
 
     /// <summary>Adds a warning about a field.</summary>
     public void Warning(string code, string name, string message) => findings.Warning(code, Field(name), message);

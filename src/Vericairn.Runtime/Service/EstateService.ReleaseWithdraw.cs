@@ -51,8 +51,8 @@ public sealed partial class EstateService
             var withdrawing = Fixed(new RecordDraft("release", request.By, Element(body), candidate.Subject, candidate.Id, at), at);
             // The withdrawal is authored completely, unsigned, before the first signature, so the draft-deletion intent that names it at its
             // exact hash is too, and a presence session lists both by exact hash (ID-16).
-            (AuthoredRecord? unsignedWithdrawal, string? refusal) = AuthorUnsignedLocked(withdrawing, model);
-            if (unsignedWithdrawal is null) return Failed("refused", refusal!);
+            (AuthoredRecord? unsignedWithdrawal, Problem? refusal) = AuthorCheckedLocked(withdrawing, model, []);
+            if (unsignedWithdrawal is null) return FailedProblem(refusal!);
             var intent = new JsonObject
             {
                 ["provider"] = request.Provider, ["action"] = ReleaseFlow.DeleteDraftAction, ["identity"] = identity,
@@ -65,11 +65,11 @@ public sealed partial class EstateService
             using IDisposable counted = SessionAction("release withdraw " + version, SignsWithPresence(model, request.By)
                 ? [DescribeRecord(withdrawing, model), OperationSignature(ReleaseFlow.DeleteDraftAction, "not-started", "release " + version)] : null,
                 ExactSession("release withdraw", "release withdraw:" + candidate.Id, [withdrawing, deleting], redatable: false));
-            (AuthoredRecord? withdrawn, refusal) = AuthorLocked(SessionDraft(withdrawing), model);
-            if (withdrawn is null) return Failed("refused", refusal!);
+            (AuthoredRecord? withdrawn, refusal) = AuthorCheckedLocked(SessionDraft(withdrawing), model, null);
+            if (withdrawn is null) return FailedProblem(refusal!);
             if (withdrawn.Envelope.ComputedHash != unsignedWithdrawal.Envelope.ComputedHash) return Failed("refused", "The withdrawal changed while it was signed; nothing was written.");
-            (AuthoredRecord? operation, refusal) = AuthorLocked(SessionDraft(deleting), model);
-            if (operation is null) return Failed("refused", refusal!);
+            (AuthoredRecord? operation, refusal) = AuthorCheckedLocked(SessionDraft(deleting), model, null);
+            if (operation is null) return FailedProblem(refusal!);
             var stored = StoreTogetherLocked([withdrawn, operation], "Withdraw a candidate and record its draft-deletion intent.", null);
             RecordWritten? release = stored.Written.FirstOrDefault(r => r.Id == withdrawn.Envelope.Id);
             RecordWritten? deletion = stored.Written.FirstOrDefault(r => r.Id == operation.Envelope.Id);
@@ -78,6 +78,7 @@ public sealed partial class EstateService
                 stored.Problem is null, Operation: deletion, Release: release, ReleaseId: release?.Id, Problem: stored.Problem);
         }
 
-        ReleaseResponse Failed(string code, string message) => new(request.Release, "not-started", message, false, Problem: new(code, message, []));
+        ReleaseResponse Failed(string code, string message) => FailedProblem(new Problem(code, message, []));
+        ReleaseResponse FailedProblem(Problem problem) => new(request.Release, "not-started", problem.Message, false, Problem: problem);
     }
 }

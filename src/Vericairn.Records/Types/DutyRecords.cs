@@ -27,7 +27,7 @@ internal static partial class DutyRecords
             {
                 string? product = PolicyRecords.Text(selection.Element, "product");
                 bool related = subject.Type == "product" && subject.Id == product || subject.Type == "resource" && subject.Subject is { Type: "product" } relation && relation.Id == product;
-                if (!related) parameters.Error("duty.selection", "subject", "A product duty names that product or a resource explicitly related to it.");
+                if (!related) parameters.RelationshipError("duty.selection", "subject", "A product duty names that product or a resource explicitly related to it.");
             }
         }
         long? grace = parameters.Number("graceDays", true, 0, 36500);
@@ -46,7 +46,7 @@ internal static partial class DutyRecords
                     break;
                 case "release":
                     RecordEnvelope? product = PolicyRecords.IdentityField(context, schedule, "product", "product");
-                    if (selection is not null && PolicyRecords.Text(selection.Element, "kind") == "product" && product?.Id != PolicyRecords.Text(selection.Element, "product")) schedule.Error("duty.selection", "product", "The release schedule belongs to the selected product.");
+                    if (selection is not null && PolicyRecords.Text(selection.Element, "kind") == "product" && product?.Id != PolicyRecords.Text(selection.Element, "product")) schedule.RelationshipError("duty.selection", "product", "The release schedule belongs to the selected product.");
                     break;
                 case "date":
                     string? at = schedule.Timestamp("at", true);
@@ -70,14 +70,14 @@ internal static partial class DutyRecords
         {
             case "credential-rotate-by":
                 RecordEnvelope? credential = PolicyRecords.Reference(context, source.Nested("record", true), true, "credential-reference");
-                if (credential is not null && EstateModel.BodyString(credential, "rotateBy") != at) source.Error("duty.date-source", "record", "The declared date must equal the credential's typed rotateBy.");
-                if (credential is not null && subject is not null && PolicyRecords.Identity(context.Model, credential) != subject.Id) source.Error("duty.date-source", "record", "A credential date source belongs to the selected credential identity.");
+                if (credential is not null && EstateModel.BodyString(credential, "rotateBy") != at) source.RelationshipError("duty.date-source", "record", "The declared date must equal the credential's typed rotateBy.");
+                if (credential is not null && subject is not null && PolicyRecords.Identity(context.Model, credential) != subject.Id) source.RelationshipError("duty.date-source", "record", "A credential date source belongs to the selected credential identity.");
                 break;
             case "reviewed-report":
                 RecordEnvelope? result = PolicyRecords.Reference(context, source.Nested("result", true), true, "result");
                 RecordEnvelope? review = PolicyRecords.Reference(context, source.Nested("review", true), true, "review");
                 if (result is not null && review is not null && (review.Subject != result.Reference || review.By == result.By || EstateModel.BodyString(review, "outcome") != "pass" || !SignatureChecks.IsAuthentic(context.Model, result) || !SignatureChecks.IsAuthentic(context.Model, review)))
-                    source.Error("duty.date-source", "review", "A report date cites an admitted-device signed result and an exact, signed, independent passing review.");
+                    source.RelationshipError("duty.date-source", "review", "A report date cites an admitted-device signed result and an exact, signed, independent passing review.");
                 if (result is not null && !PolicyRecords.Items(PolicyRecords.Property(result.Body, "outputs")).Any()) source.Error("duty.date-source", "result", "A source report retains its bytes in hashed outputs.");
                 break;
         }
@@ -194,14 +194,14 @@ internal static partial class DutyRecords
     {
         if (occurrence is null) return null;
         JsonElement rule = Rule(policy, key);
-        if (!IsDuty(rule)) { occurrence.Error("duty.rule", "kind", "The exact policy revision must contain this recurring-duty rule."); return null; }
-        if (Origin(context.Model, policy, key).Id != policy.Id) occurrence.Error("duty.origin", "kind", "An occurrence pins its originating schedule revision, not an editorial revision.");
+        if (!IsDuty(rule)) { occurrence.RelationshipError("duty.rule", "kind", "The exact policy revision must contain this recurring-duty rule."); return null; }
+        if (Origin(context.Model, policy, key).Id != policy.Id) occurrence.RelationshipError("duty.origin", "kind", "An occurrence pins its originating schedule revision, not an editorial revision.");
         JsonElement parameters = PolicyRecords.Property(rule, "parameters");
         JsonElement declaredSubject = PolicyRecords.Property(parameters, "subject");
-        if (subject is not null && (subject.Type != PolicyRecords.Text(declaredSubject, "type") || PolicyRecords.Identity(context.Model, subject) != PolicyRecords.Text(declaredSubject, "id"))) occurrence.Error("duty.subject", "kind", "The evidence belongs to this duty's selected subject identity.");
+        if (subject is not null && (subject.Type != PolicyRecords.Text(declaredSubject, "type") || PolicyRecords.Identity(context.Model, subject) != PolicyRecords.Text(declaredSubject, "id"))) occurrence.RelationshipError("duty.subject", "kind", "The evidence belongs to this duty's selected subject identity.");
         JsonElement schedule = PolicyRecords.Property(parameters, "schedule");
         string? kind = occurrence.Enum("kind", true, "interval", "release", "date");
-        if (kind != PolicyRecords.Text(schedule, "kind")) occurrence.Error("duty.occurrence", "kind", "The occurrence tag must match the declared schedule.");
+        if (kind != PolicyRecords.Text(schedule, "kind")) occurrence.RelationshipError("duty.occurrence", "kind", "The occurrence tag must match the declared schedule.");
         DateTimeOffset? due = null;
         switch (kind)
         {
@@ -212,14 +212,14 @@ internal static partial class DutyRecords
                 break;
             case "date":
                 string? at = occurrence.Timestamp("at", true);
-                if (at != PolicyRecords.Text(schedule, "at")) occurrence.Error("duty.occurrence", "at", "The occurrence pins the declared deadline.");
+                if (at != PolicyRecords.Text(schedule, "at")) occurrence.RelationshipError("duty.occurrence", "at", "The occurrence pins the declared deadline.");
                 due = DateDue(schedule);
                 break;
             case "release":
                 RecordEnvelope? release = PolicyRecords.Reference(context, occurrence.Nested("publication", true), true, "release");
                 if (release is not null)
                 {
-                    if (EstateModel.BodyString(release, "status") != "published" || !PolicyRecords.ReleaseMatchesProduct(context.Model, release, PolicyRecords.Text(schedule, "product")) || context.Model.Chain(release).SkipLast(1).Select(id => context.Model.ById[id]).Any(r => EstateModel.BodyString(r, "status") == "published")) occurrence.Error("duty.publication", "publication", "Use the first observed publication of the declared product.");
+                    if (EstateModel.BodyString(release, "status") != "published" || !PolicyRecords.ReleaseMatchesProduct(context.Model, release, PolicyRecords.Text(schedule, "product")) || context.Model.Chain(release).SkipLast(1).Select(id => context.Model.ById[id]).Any(r => EstateModel.BodyString(r, "status") == "published")) occurrence.RelationshipError("duty.publication", "publication", "Use the first observed publication of the declared product.");
                     due = release.AtTime;
                 }
                 break;
@@ -229,11 +229,11 @@ internal static partial class DutyRecords
         if (due is { } instant)
         {
             bool changed = policy.Supersedes is not null;
-            if ((changed && instant <= policy.AtTime) || (!changed && kind != "date" && instant < activation)) occurrence.Error("duty.occurrence", "kind", "This occurrence predates its schedule's activation boundary.");
+            if ((changed && instant <= policy.AtTime) || (!changed && kind != "date" && instant < activation)) occurrence.RelationshipError("duty.occurrence", "kind", "This occurrence predates its schedule's activation boundary.");
             RecordEnvelope? boundary = context.Model.OfType("estate-policy").Where(p => context.Model.Chain(p).Contains(policy.Id, StringComparer.Ordinal) && p.Id != policy.Id &&
                 (EstateModel.BodyString(p, "state") == "retired" || !IsDuty(Rule(p, key)) || Origin(context.Model, p, key).Id != policy.Id)).OrderBy(p => p.At, StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal).FirstOrDefault();
-            if (boundary is not null && instant > boundary.AtTime) occurrence.Error("duty.occurrence", "kind", "An unopened occurrence was replaced at the next schedule boundary.");
-            if (instant > context.Record.AtTime || activation > context.Record.AtTime) occurrence.Error("duty.future", "kind", "Only already-due occurrences can be named.");
+            if (boundary is not null && instant > boundary.AtTime) occurrence.RelationshipError("duty.occurrence", "kind", "An unopened occurrence was replaced at the next schedule boundary.");
+            if (instant > context.Record.AtTime || activation > context.Record.AtTime) occurrence.RelationshipError("duty.future", "kind", "Only already-due occurrences can be named.");
         }
         return due;
     }

@@ -56,9 +56,9 @@ internal static class PolicyRequirements
             }
             entry.NoOtherKeys();
             if (decision is null) continue;
-            if (!SignatureChecks.IsAuthentic(context.Model, decision)) entry.Error("policy.basis", "decision", "The decision basis must be signed by an admitted device.");
+            if (!SignatureChecks.IsAuthentic(context.Model, decision)) entry.RelationshipError("policy.basis", "decision", "The decision basis must be signed by an admitted device.");
             JsonElement requirement = PolicyRecords.Items(PolicyRecords.Property(decision.Body, "policies")).FirstOrDefault(r => PolicyRecords.Text(r, "key") == key);
-            if (key is not null && requirement.ValueKind == JsonValueKind.Undefined) entry.Error("policy.requirement", "requirement", "The exact decision has no such requirement.");
+            if (key is not null && requirement.ValueKind == JsonValueKind.Undefined) entry.RelationshipError("policy.requirement", "requirement", "The exact decision has no such requirement.");
             bool matches = PolicyRecords.Text(requirement, "action") == action &&
                 PolicyRecords.Text(requirement, "policy") == (previous is null ? EstateModel.BodyString(context.Record, "key") : PolicyRecords.Identity(context.Model, previous)) &&
                 PolicyRecords.Text(requirement, "priorHash") == previous?.ComputedHash && PolicyRecords.Text(requirement, "definitionHash") == DefinitionHash(context.Record.Body);

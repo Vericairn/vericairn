@@ -84,9 +84,9 @@ public sealed class HistoryCheckpointType : IRecordType
         if (trigger is not null && (closes is not null) != (trigger == "closing"))
             body.Error("history.checkpoint-invalid", "closes", "A closing checkpoint names what it closes, and only a closing checkpoint does.");
         if (context.Record.Subject is not null)
-            context.Error("record.subject", "A history checkpoint has no subject.");
+            context.BodyError("record.subject", "A history checkpoint has no subject.");
         if (context.Record.Supersedes is not null)
-            context.Error("history.checkpoint-invalid", "A history checkpoint supersedes nothing; it names the checkpoints it follows in previous.");
+            context.BodyError("history.checkpoint-invalid", "A history checkpoint supersedes nothing; it names the checkpoints it follows in previous.");
     }
 
     private static void Pins(BodyReader body, IReadOnlyList<BodyReader>? entries, string field, string self, bool reason)

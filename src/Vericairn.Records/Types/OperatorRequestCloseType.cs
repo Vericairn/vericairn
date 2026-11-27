@@ -36,7 +36,7 @@ public sealed class OperatorRequestCloseType : IRecordType
         string? outcome = context.Body.Enum("outcome", true, "done", "dismissed");
         string? reason = context.Body.Text("reason", outcome == "dismissed");
         if (outcome == "dismissed" && reason is not null && string.IsNullOrWhiteSpace(reason))
-            context.Error("operator-request.reason", "A dismissal needs the operator's reason, not blank text.");
+            context.BodyError("operator-request.reason", "A dismissal needs the operator's reason, not blank text.");
         RecordEnvelope? request = context.Find(context.Record.Subject?.Id);
         context.Body.Text("link", outcome == "done" && request is not null && EstateModel.BodyString(request, "kind") == "publication", 2000);
         foreach (BodyReader evidence in context.Body.NestedArray("evidence", false, allowEmpty: false) ?? [])
@@ -55,7 +55,7 @@ public sealed class OperatorRequestCloseType : IRecordType
             string? statement = words.Text("statement", true, 20000);
             string? source = words.Text("source", true, 2000);
             if (statement is not null && string.IsNullOrWhiteSpace(statement) || source is not null && string.IsNullOrWhiteSpace(source))
-                context.Error("operator-request.words", "The operator's words and their citation cannot be blank.");
+                context.BodyError("operator-request.words", "The operator's words and their citation cannot be blank.");
             string? at = words.Timestamp("at", true);
             if (at is not null && (string.CompareOrdinal(at, context.Record.At) > 0 || request is not null && string.CompareOrdinal(at, request.At) < 0))
                 context.Error("operator-request.words", "The operator's words follow the exact request and precede their recording.");
@@ -76,7 +76,7 @@ internal static class OperatorRequestRules
         if (request is not { Type: "operator-request" } || context.Record.Subject != request.Reference || !context.Model.IsCurrent(request))
             context.Error("operator-request.target", "A close pins the current exact request revision.");
         if (context.Record.Supersedes is not null)
-            context.Error("operator-request.close-revision", "A request's outcome is retained; a closure cannot be superseded.");
+            context.BodyError("operator-request.close-revision", "A request's outcome is retained; a closure cannot be superseded.");
         if (request is not null)
         {
             if (string.CompareOrdinal(context.Record.At, request.At) < 0)
