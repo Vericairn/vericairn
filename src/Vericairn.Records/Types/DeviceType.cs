@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
+using System.Text.Json;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -13,7 +14,7 @@ namespace Vericairn.Records.Types;
 public sealed class DeviceType : IRecordType
 {
     /// <summary>Connectivity profiles a device may be permitted.</summary>
-    public static readonly ImmutableArray<string> Profiles = ["embedded", "local-socket", "loopback", "local-network", "relay"];
+    public static readonly ImmutableArray<string> Profiles = ["embedded", "local-socket", "loopback", "local-network", "relay", "token"];
 
     /// <summary>Platforms.</summary>
     public static readonly ImmutableArray<string> Platforms = ["windows", "linux", "macos", "ios", "android", "other"];
@@ -45,7 +46,7 @@ public sealed class DeviceType : IRecordType
         new("custody", string.Join('|', DeviceKeyStores.Format2Kinds), true, "How the private key is held; recorded strength, never assumed. From record format 2, macos-secure-enclave, offline for a recovery device's exported key, and from 0.9.0 a phone's ios-secure-enclave or android-keystore."),
         new("algorithm", RecordSigning.Algorithm, true, "Signature algorithm."),
         new("publicKey", "string", true, "Base64url SubjectPublicKeyInfo of the P-256 public key."),
-        new("profiles", "string[]", true, "Permitted connectivity profiles: embedded, local-socket, loopback, local-network, relay."),
+        new("profiles", "string[]", true, "Permitted connectivity profiles: embedded, local-socket, loopback, local-network, relay, token (from record format 3)."),
         new("presence", string.Join('|', Presences), true, "Whether each signature needs the owner's presence, or the device only declared that it does. Required or declared only for a person's device.", 2),
         new("presenceVerification", DeviceRecords.AndroidKeyAttestation, false, "How the runtime verified that a paired presence key requires per-use hardware authentication.", 2),
         new("purpose", string.Join('|', Purposes), true, "signing for ordinary work; recovery for the operator's offline recovery device.", 2),
@@ -77,6 +78,12 @@ public sealed class DeviceType : IRecordType
             body.Error("body.enum", "profiles", $"Unknown profile '{profile}'. Known: {string.Join(", ", Profiles)}.");
         }
 
+        bool token = profiles?.Contains("token", StringComparer.Ordinal) == true;
+        if (token && (context.Format < 3 || profiles!.Count != 1 || presence != "none" || purpose != "signing"))
+        {
+            body.Error("device.token-profile", "profiles", "A token device requires record format 3, unattended signing and the token profile alone.");
+        }
+
         if (principal is null)
         {
             return;
@@ -86,6 +93,11 @@ public sealed class DeviceType : IRecordType
         if (owner is null)
         {
             context.Error("device.principal", $"Principal {principal} has no principal record.");
+        }
+
+        if (token && owner is not null && EstateModel.BodyString(owner, "kind") is not ("agent" or "service"))
+        {
+            context.Error("device.token-profile", "A token device belongs to an agent or a service.");
         }
 
         // Custody never claims presence it cannot enforce, and an agent's or a service's device signs unattended.
@@ -122,6 +134,12 @@ public sealed class DeviceType : IRecordType
 
         RecordEnvelope? previous = context.Record.Supersedes is null ? null : context.Find(context.Record.Supersedes);
         bool revision = previous is not null && previous.Type == Name;
+        if (revision && token != (previous!.Body.TryGetProperty("profiles", out var oldProfiles)
+            && oldProfiles.ValueKind == JsonValueKind.Array && oldProfiles.EnumerateArray().Any(p => p.ValueKind == JsonValueKind.String && p.GetString() == "token")))
+        {
+            context.Error("device.token-profile", "A device revision keeps its token profile; a different profile needs a different device.");
+        }
+
         bool keyChanged = revision && EstateModel.BodyString(previous!, "publicKey") != publicKey;
         if (context.Format >= 2 && revision)
         {

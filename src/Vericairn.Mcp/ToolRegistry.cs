@@ -130,7 +130,7 @@ public sealed partial class ToolRegistry
         {
             // Section 8's set over the network: the device's admission is checked on every request, and the runtime judges each call.
             cancellationToken.ThrowIfCancellationRequested();
-            return tools.Where(OfferedOverNetwork).ToList();
+            return tools.Where(t => OfferedOverNetwork(t) && (!t.Writes || network.Contribute)).ToList();
         }
 
         bool writes = await WritesVisibleAsync(cancellationToken).ConfigureAwait(false);

@@ -26,11 +26,24 @@ internal static class DaemonRoutes
     public static void Map(IEndpointRouteBuilder app, DaemonHost host)
     {
         string v = ApiVersion.Prefix;
+        app.MapPost($"{v}/runtime/mcp/authorize", (HttpContext context, McpAuthorizeRequest request) => AuthorizeMcp(host, context, request));
         app.MapPost($"{v}/pairings", (PairingIssueRequest request) => Issue(host, request));
         app.MapPost($"{v}/pairing/hello", (HttpContext context, PairingHello hello) => Hello(host, context, hello));
         app.MapPost($"{v}/pairing/confirm", (HttpContext context, PairingConfirm confirm) => Confirm(host, context, confirm));
         app.MapGet(RuntimeIdentityScheme.Path, (HttpContext context, string? nonce) => Prove(host, context, nonce));
         app.MapPost($"{v}/runtime/certificate", (HttpContext context, CertificateRotateRequest request) => Rotate(host, context, request));
+    }
+
+    private static IResult AuthorizeMcp(DaemonHost host, HttpContext context, McpAuthorizeRequest request)
+    {
+        if (!DaemonHost.OverLocalSocket(context.Features.Get<Microsoft.AspNetCore.Connections.Features.IConnectionItemsFeature>()?.Items))
+            return Problem(StatusCodes.Status401Unauthorized, "denied", "MCP approval is issued only over the runtime's local socket.");
+        if (host.OAuth is not { } authorization)
+            return Problem(StatusCodes.Status409Conflict, "refused", "Enable MCP and configure a public endpoint on this runtime before issuing an approval.");
+
+        context.Response.Headers.CacheControl = "no-store";
+        (McpApprovalIssued? issued, string? refused) = authorization.Issue(request.Principal, request.By, request.Scope, request.Days, request.Renew);
+        return issued is null ? Problem(StatusCodes.Status422UnprocessableEntity, "refused", refused!) : Results.Json(issued, ProtocolJson.Options);
     }
 
     /// <summary>Issues a pairing code under an administrator's authority, for a principal and the profiles it will be permitted.</summary>
@@ -47,6 +60,11 @@ internal static class DaemonRoutes
         }
 
         IReadOnlyList<string> profiles = request.Profiles is { Count: > 0 } ? request.Profiles.Distinct(StringComparer.Ordinal).ToList() : host.Relay is null ? [RequestAuthenticator.LocalNetworkProfile] : [RequestAuthenticator.LocalNetworkProfile, RequestAuthenticator.RelayProfile];
+        if (profiles.Contains("token", StringComparer.Ordinal))
+        {
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "Token devices are made by an approved MCP authorization.");
+        }
+
         (PairingAuthority? issuer, string? refusal) = host.Service.PairingIssuer(request.Principal, request.By, profiles);
         if (issuer is null)
         {

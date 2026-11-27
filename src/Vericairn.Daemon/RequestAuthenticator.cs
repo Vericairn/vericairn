@@ -28,6 +28,8 @@ namespace Vericairn.Daemon;
 internal sealed record AuthenticatedDevice(string Identity, string Principal, string PublicKey, bool LocalNetwork)
 {
     internal string? NetworkProfile { get; init; } = LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null;
+
+    internal McpTokenRequest? Token { get; init; }
 }
 
 /// <summary>
@@ -83,6 +85,7 @@ internal sealed class RequestAuthenticator
         "POST /v1/devices/recovery",
         "POST /v1/estate/export",
         "POST /v1/pairings",
+        "POST /v1/runtime/mcp/authorize",
         "POST /v1/runtime/certificate",
         "POST /v1/releases/submit",
         "POST /v1/releases/observe",
@@ -161,7 +164,7 @@ internal sealed class RequestAuthenticator
 
         // Read from the model kept for the records as they are now: a request that has proved nothing yet does not reload the estate.
         DeviceStanding? admitted = service.Standing(device);
-        if (admitted is null || admitted.Admission != "admitted")
+        if (admitted is null || admitted.Admission != "admitted" || admitted.Profiles.Contains(McpOAuth.Profile, StringComparer.Ordinal))
         {
             return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
         }
@@ -191,7 +194,7 @@ internal sealed class RequestAuthenticator
             }
 
             DeviceStanding? standing = service.Standing(device);
-            if (standing is null || standing.Admission != "admitted")
+            if (standing is null || standing.Admission != "admitted" || standing.Profiles.Contains(McpOAuth.Profile, StringComparer.Ordinal))
             {
                 return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
             }

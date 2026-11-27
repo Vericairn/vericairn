@@ -77,7 +77,7 @@ internal sealed class McpEndpoint
 
     /// <summary>Whether a request is for /mcp, on a listener that serves it.</summary>
     internal bool Serves(HttpContext context) =>
-        Enabled && context.Request.Path.Equals(Path, StringComparison.OrdinalIgnoreCase) && DaemonHost.OnSignedProfile(context);
+        Enabled && context.Request.Path.Equals(Path, StringComparison.OrdinalIgnoreCase) && (DaemonHost.OnSignedProfile(context) || DaemonHost.OnPublicMcp(context));
 
     /// <summary>The routes the tools reach, read from the daemon's mapped routes when first needed.</summary>
     private McpOperations Operations => operations ??= new McpOperations(host.RouteEndpoints());
@@ -89,7 +89,7 @@ internal sealed class McpEndpoint
     /// </summary>
     internal (int Status, Problem Problem)? Screen(HttpContext context)
     {
-        if (!Serves(context))
+        if (!Serves(context) || DaemonHost.OnPublicMcp(context))
         {
             return null;
         }
@@ -99,17 +99,16 @@ internal sealed class McpEndpoint
             return (StatusCodes.Status403Forbidden, new Problem("denied", "The request's Host does not name this runtime's listener: address the runtime by the IP address and port it listens on.", []));
         }
 
-        if (context.Request.Headers.TryGetValue(HeaderNames.Origin, out StringValues origin) && origin.Count > 0)
+        if (context.Request.Headers.TryGetValue(HeaderNames.Origin, out StringValues origin) && !OriginAllowed(origin))
         {
-            string named = origin.ToString();
-            if (origin.Count > 1 || !RuntimeSettings.TryNormalizeOrigin(named, out string? normalized, out _) || !origins.Contains(normalized!))
-            {
-                return (StatusCodes.Status403Forbidden, new Problem("denied", "The request's Origin is not one the operator allowed for /mcp; the allowed origins are set with 'vericairn runtime configure --mcp-origin'.", []));
-            }
+            return (StatusCodes.Status403Forbidden, new Problem("denied", "The request's Origin is not one the operator allowed for /mcp; the allowed origins are set with 'vericairn runtime configure --mcp-origin'.", []));
         }
 
         return null;
     }
+
+    internal bool OriginAllowed(StringValues origin) => origin.Count == 1
+        && RuntimeSettings.TryNormalizeOrigin(origin[0], out string? normalized, out _) && origins.Contains(normalized!);
 
     /// <summary>Serves /mcp after the request was authenticated; any other request goes on.</summary>
     internal async Task InvokeAsync(HttpContext context, RequestDelegate next)
@@ -134,9 +133,10 @@ internal sealed class McpEndpoint
             Sessions.Sweep(read);
         }
 
-        string profile = device.NetworkProfile ?? RequestScope.LoopbackProfile;
+        string profile = device.Token is not null ? McpOAuth.Profile : device.NetworkProfile ?? RequestScope.LoopbackProfile;
         if (Refusal(device, profile, read) is (int status, Problem refused))
         {
+            if (device.Token is not null && status == StatusCodes.Status401Unauthorized) host.OAuth?.Challenge(context, "invalid_token");
             await Problem(context, status, refused).ConfigureAwait(false);
             return;
         }
@@ -213,6 +213,13 @@ internal sealed class McpEndpoint
         catch (JsonException exception)
         {
             await Rpc(context, StatusCodes.Status400BadRequest, Error(null, -32700, "Parse error: " + exception.Message)).ConfigureAwait(false);
+            return;
+        }
+
+        if (TokenRefusal(device) is not null)
+        {
+            host.OAuth?.Challenge(context, "invalid_token");
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
 
@@ -346,7 +353,7 @@ internal sealed class McpEndpoint
     /// </summary>
     private async Task<JsonObject> RespondAsync(HttpContext context, AuthenticatedDevice device, McpSession mcp, JsonNode id, string method, JsonNode? parameters, CancellationToken observing)
     {
-        var session = new NetworkSession(device.Principal);
+        var session = new NetworkSession(device);
         using VericairnClient client = OpenClient(context, device, session, presence: false, observing);
         return await Server(client, session, mcp.Watch).RespondAsync(id, method, parameters, observing).ConfigureAwait(false);
     }
@@ -360,7 +367,9 @@ internal sealed class McpEndpoint
         new(ToolRegistry.ForNetwork(client, session), EstateService.Version)
         {
             ProtocolVersions = Versions,
-            Instructions = McpServer.NetworkDescription,
+            Instructions = session.RuntimeSigns
+                ? McpServer.Description + " This connection acts for the approved token device's principal. The runtime signs each permitted record with that device's key."
+                : McpServer.NetworkDescription,
             Subscriptions = watch,
             ListenSubscriptions = listen,
         };
@@ -402,7 +411,7 @@ internal sealed class McpEndpoint
         }
 
         using var end = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, host.Stopping);
-        var session = new NetworkSession(device.Principal);
+        var session = new NetworkSession(device);
         using VericairnClient client = OpenClient(context, device, session, presence: false, end.Token);
         JsonObject result = await Server(client, session, listen: () =>
                 new McpResourceWatch(new McpSessionEvents(host.Service, device.Identity, device.PublicKey, profile, device.Principal)))
@@ -416,9 +425,9 @@ internal sealed class McpEndpoint
 
     private async Task ListenAsync(HttpContext context, AuthenticatedDevice device, string profile, JsonNode id, JsonNode? parameters)
     {
-        using var limit = new CancellationTokenSource(StreamLimit, host.Time);
+        using var limit = new CancellationTokenSource(StreamDuration(device), host.Time);
         using var end = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, host.Stopping, limit.Token);
-        var identity = new NetworkSession(device.Principal);
+        var identity = new NetworkSession(device);
         var events = new McpSessionEvents(host.Service, device.Identity, device.PublicKey, profile, device.Principal);
         using VericairnClient client = OpenClient(context, device, identity, presence: false, end.Token);
         McpServer server = Server(client, identity, listen: () => new McpResourceWatch(events));
@@ -523,7 +532,7 @@ internal sealed class McpEndpoint
                 }
             }
 
-            string? Denied() => subscription.Refusal() ?? StandingRefusal(device.Identity, device.PublicKey, device.Principal, profile);
+            string? Denied() => TokenRefusal(device) ?? subscription.Refusal() ?? StandingRefusal(device.Identity, device.PublicKey, device.Principal, profile);
 
             JsonObject answer;
             try
@@ -606,7 +615,7 @@ internal sealed class McpEndpoint
             try
             {
                 using IDisposable listening = subscription.Listen();
-                await StreamAsync(context, session, subscription).ConfigureAwait(false);
+                await StreamAsync(context, session, device, subscription).ConfigureAwait(false);
             }
             finally
             {
@@ -619,14 +628,14 @@ internal sealed class McpEndpoint
         }
     }
 
-    private async Task StreamAsync(HttpContext context, McpSession session, EventSubscription subscription)
+    private async Task StreamAsync(HttpContext context, McpSession session, AuthenticatedDevice device, EventSubscription subscription)
     {
         HttpResponse response = context.Response;
         response.StatusCode = StatusCodes.Status200OK;
         response.ContentType = EventVocabulary.StreamMediaType + "; charset=utf-8";
         response.Headers.CacheControl = "no-cache, no-store";
         context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
-        using var limit = new CancellationTokenSource(StreamLimit, host.Time);
+        using var limit = new CancellationTokenSource(StreamDuration(device), host.Time);
         using var end = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, host.Stopping, session.Ended, limit.Token);
         try
         {
@@ -648,9 +657,9 @@ internal sealed class McpEndpoint
                     return;
                 }
 
-                if (batch.Refusal is not null)
+                if ((TokenRefusal(device) ?? batch.Refusal) is string inactive)
                 {
-                    host.Log($"closed an MCP server stream of device {session.Device}: {batch.Refusal}");
+                    host.Log($"closed an MCP server stream of device {session.Device}: {inactive}");
                     Sessions.End(session);
                     return;
                 }
@@ -666,7 +675,7 @@ internal sealed class McpEndpoint
                 // key or a withdrawn profile ends the stream before any of them, including a notification that waited for its interval.
                 // Its standing is read afresh from the records as the runtime holds them now, not from what the last derivation pass
                 // published, so a revocation written since that pass already counts.
-                if (session.Outbox.Reader.Count > 0 && (subscription.Refusal() ?? StandingRefusal(session.Device, session.PublicKey, session.Principal, session.Profile)) is string withdrawn)
+                if (session.Outbox.Reader.Count > 0 && (TokenRefusal(device) ?? subscription.Refusal() ?? StandingRefusal(session.Device, session.PublicKey, session.Principal, session.Profile)) is string withdrawn)
                 {
                     host.Log($"closed an MCP server stream of device {session.Device}: {withdrawn}");
                     Sessions.End(session);
@@ -705,7 +714,7 @@ internal sealed class McpEndpoint
                     break;
                 }
 
-                if (subscription.Refusal() is string refusal)
+                if ((TokenRefusal(device) ?? subscription.Refusal()) is string refusal)
                 {
                     host.Log($"closed an MCP server stream of device {session.Device}: {refusal}");
                     Sessions.End(session);
@@ -744,6 +753,16 @@ internal sealed class McpEndpoint
             : !string.Equals(standing.Principal, principal, StringComparison.Ordinal) ? $"Device {device} no longer acts for {principal}."
             : !standing.Profiles.Contains(profile, StringComparer.Ordinal) ? $"Device {device} is no longer permitted the {profile} profile."
             : null;
+    }
+
+    private static string? TokenRefusal(AuthenticatedDevice device) =>
+        device.Token is { } token && !token.Current() ? "The MCP access token is no longer valid." : null;
+
+    private TimeSpan StreamDuration(AuthenticatedDevice device)
+    {
+        if (device.Token is not { } token) return StreamLimit;
+        TimeSpan remaining = token.ExpiresAt - host.Time.GetUtcNow();
+        return remaining <= TimeSpan.Zero ? TimeSpan.Zero : remaining < StreamLimit ? remaining : StreamLimit;
     }
 
     /// <summary>Queues notifications for the session's stream, which sends them once it has checked the device still stands.</summary>
@@ -874,11 +893,13 @@ internal sealed class McpEndpoint
     /// The network session one request's tools run in: the device's principal, and the signing rule of the call in flight, which the
     /// in-process routes give each operation they run.
     /// </summary>
-    private sealed class NetworkSession(string principal) : IMcpNetworkSession
+    private sealed class NetworkSession(AuthenticatedDevice device) : IMcpNetworkSession
     {
         private readonly AsyncLocal<DeviceSigning?> current = new();
 
-        public string Principal => principal;
+        public string Principal => device.Principal;
+        public bool RuntimeSigns => device.Token is not null;
+        public bool Contribute => device.Token is null || device.Token.Scope == "contribute";
 
         /// <summary>The rule of the call in flight; a read when none was set, so no operation ever signs on this machine.</summary>
         internal DeviceSigning Current() => current.Value ?? DeviceSigning.Read();
@@ -886,6 +907,20 @@ internal sealed class McpEndpoint
         public async Task<(T Result, RecordPrepared? Prepared)> RunAsync<T>(McpSigning signing, string? plan, string? signature, Func<Task<T>> operation)
         {
             ArgumentNullException.ThrowIfNull(operation);
+            if (signing == McpSigning.Managed)
+            {
+                if (device.Token is not { Scope: "contribute" } token)
+                    throw new InvalidOperationException("This request cannot sign an MCP token device's record.");
+
+                DeviceSigning prepare = DeviceSigning.Prepare();
+                current.Value = prepare;
+                T prepared = await operation().ConfigureAwait(false);
+                if (prepare.Prepared is not { } record || !token.Current()) return (prepared, null);
+
+                current.Value = DeviceSigning.Sign(record.Plan, token.Sign(record.Hash));
+                return (await operation().ConfigureAwait(false), null);
+            }
+
             DeviceSigning rule = signing switch
             {
                 McpSigning.Prepare => DeviceSigning.Prepare(),

@@ -744,6 +744,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("The principal must be a ULID.");
         }
 
+        if (request.Profiles?.Contains("token", StringComparer.Ordinal) == true)
+        {
+            return Refuse("Token devices are made by an approved MCP authorization.");
+        }
+
         lock (gate)
         {
             // Presence and the Secure Enclave are named in device records from record format 2: an older estate refuses them, and its
@@ -2870,6 +2875,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Judges an authored record against the tree's current files and stores it with its companions. Caller holds the gate and the write lock.</summary>
     private WriteOutcome StoreAuthoredLocked(AuthoredRecord record, EstateModel current)
     {
+        if (requestDevice.Value is { Closed: false } && RequestDeviceRefusal(session.Load()) is Problem denied)
+            return WriteOutcome.Fail(denied);
+
         if (JudgeProposedLocked([record]) is Problem rejected)
         {
             return WriteOutcome.Fail(rejected);
@@ -3510,7 +3518,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         bool requiresPresence = draft.Type == "history-checkpoint" && HistoryCheckpointType.HasGitRemovals(draft.Body);
         List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => model.Chain(d)[0], StringComparer.Ordinal).ToList();
         // Keys are held under a device's identity, its first record, which signatures name across renames and rotations.
-        foreach (string identity in devices.Where(d => SignatureChecks.IsAdmitted(model, d)).Select(d => model.Chain(d)[0]))
+        foreach (string identity in devices.Where(d => !ProfilesOf(d).Contains("token", StringComparer.Ordinal) && SignatureChecks.IsAdmitted(model, d)).Select(d => model.Chain(d)[0]))
         {
             IDeviceKeyStore? store = stores.FirstOrDefault(s => s.Has(identity));
             if (store is not null)

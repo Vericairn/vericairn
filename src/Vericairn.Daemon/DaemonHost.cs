@@ -69,6 +69,14 @@ public sealed record DaemonOptions
     /// <summary>From 0.9.2 (MCP-03): the origins a request to /mcp may name; when null, the runtime settings say, and none by default.</summary>
     public IReadOnlyList<string>? McpAllowedOrigins { get; init; }
 
+    /// <summary>The separate OAuth listener, overriding its persisted settings when specified.</summary>
+    public McpPublicEndpoint? PublicMcp { get; init; }
+
+    /// <summary>The token device store override. With no override, the runtime selects the strongest unattended custody.</summary>
+    internal IDeviceKeyStore? McpTokenStore { get; init; }
+
+    internal Func<string, CancellationToken, Task<McpClientMetadata?>>? McpClientMetadata { get; init; }
+
     /// <summary>How often the event journal derives what time changed while a reader listens (0.9.2); tests shorten it.</summary>
     internal TimeSpan EventTick { get; init; } = TimeSpan.FromSeconds(10);
 
@@ -97,6 +105,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private static readonly object LocalSocketMarker = new();
     private static readonly object LocalNetworkMarker = new();
     private static readonly object RelayMarker = new();
+    private static readonly object PublicMcpMarker = new();
     private static readonly object CertificateMarker = new();
     private static readonly object TlsEstablishedMarker = new();
     private static readonly TimeSpan ScheduleCheck = TimeSpan.FromHours(1);
@@ -118,6 +127,9 @@ public sealed class DaemonHost : IAsyncDisposable
     private Task? registration;
     private ListenOptions? loopbackListener;
     private ListenOptions? localNetworkListener;
+    private X509Certificate2? publicMcpCertificate;
+    private X509Certificate2Collection? publicMcpChain;
+    private int publicConnections;
 
     private DaemonHost(EstateService service, string endpointFile, string directory, DaemonOptions options, RuntimeCertificates? certificates, RuntimeIdentity? identity)
     {
@@ -156,6 +168,8 @@ public sealed class DaemonHost : IAsyncDisposable
 
     /// <summary>Network MCP at /mcp (MCP-03): served when the operator turned it on, on the loopback and local-network listeners.</summary>
     internal McpEndpoint Mcp { get; private set; } = null!;
+
+    internal McpOAuth? OAuth { get; private set; }
 
     /// <summary>The services of the running application, for the routes network MCP runs in this process.</summary>
     internal IServiceProvider Services => App.Services;
@@ -262,6 +276,10 @@ public sealed class DaemonHost : IAsyncDisposable
         IPEndPoint? localNetwork;
         RuntimeSettings settings;
         Uri? relayUrl;
+        McpPublicEndpoint? publicMcp;
+        IPEndPoint? publicBind;
+        X509Certificate2? publicCertificate = null;
+        X509Certificate2Collection? publicChain = null;
         try
         {
             settings = RuntimeSettings.Load(directory);
@@ -269,10 +287,16 @@ public sealed class DaemonHost : IAsyncDisposable
             relayUrl = options.RelayUrl ?? (settings.Relay is null ? null : new Uri(settings.Relay));
             bool paired = localNetwork is not null || relayUrl is not null;
             identity = paired ? RuntimeIdentity.LoadOrCreate(directory, options.IdentityStore, options.Log) : null;
+            publicMcp = (options.Mcp ?? settings.Mcp) ? options.PublicMcp ?? settings.PublicEndpoint : null;
+            publicBind = publicMcp?.BindAddress();
+            publicCertificate = publicMcp?.LoadCertificate((options.Time ?? TimeProvider.System).GetUtcNow());
+            if (publicCertificate is not null) publicChain = publicMcp!.LoadChain(publicCertificate);
             certificates = loopback || paired ? new RuntimeCertificates(directory) : null;
         }
         catch
         {
+            DisposeChain(publicChain);
+            publicCertificate?.Dispose();
             certificates?.Dispose();
             service.Dispose();
             throw;
@@ -280,6 +304,12 @@ public sealed class DaemonHost : IAsyncDisposable
 
         var host = new DaemonHost(service, file, directory, options, certificates, identity);
         host.Mcp = new McpEndpoint(host, options.Mcp ?? settings.Mcp, options.McpAllowedOrigins ?? settings.AllowedOrigins);
+        host.publicMcpCertificate = publicCertificate;
+        host.publicMcpChain = publicChain;
+        if (publicMcp is not null)
+        {
+            host.OAuth = new McpOAuth(host, publicMcp, directory, options.McpTokenStore, options.McpClientMetadata);
+        }
         try
         {
             // The event journal is machine state beside the live store, in the directory just made owner-only.
@@ -288,6 +318,8 @@ public sealed class DaemonHost : IAsyncDisposable
         }
         catch
         {
+            DisposeChain(publicChain);
+            publicCertificate?.Dispose();
             certificates?.Dispose();
             service.Dispose();
             throw;
@@ -405,6 +437,23 @@ public sealed class DaemonHost : IAsyncDisposable
 
                 listen.Use(TlsEstablished);
             }
+
+            if (publicBind is not null && publicCertificate is not null)
+            {
+                kestrel.Listen(publicBind, listen =>
+                {
+                    listen.Protocols = HttpProtocols.Http1;
+                    listen.Use(host.TrackPublic);
+                    listen.UseHttps(new HttpsConnectionAdapterOptions
+                    {
+                        ServerCertificate = publicCertificate,
+                        ServerCertificateChain = publicChain,
+                        SslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                        HandshakeTimeout = TimeSpan.FromSeconds(10),
+                    });
+                    listen.Use(TlsEstablished);
+                });
+            }
         });
         WebApplication app = builder.Build();
         host.app = app;
@@ -436,6 +485,8 @@ public sealed class DaemonHost : IAsyncDisposable
         catch
         {
             await app.DisposeAsync().ConfigureAwait(false);
+            DisposeChain(publicChain);
+            publicCertificate?.Dispose();
             certificates?.Dispose();
             service.Dispose();
             host.schedule.Dispose();
@@ -457,6 +508,8 @@ public sealed class DaemonHost : IAsyncDisposable
         host.Publish(new DaemonEndpoint(pipe ? "pipe" : "unix", address, Environment.ProcessId, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), root, ApiVersion.Current, loopbackEndpoint, localNetworkEndpoint)
         {
             Mcp = host.Mcp.Enabled && (loopbackEndpoint is not null || localNetworkEndpoint is not null) ? McpEndpoint.Path : null,
+            PublicMcp = host.OAuth is null || publicCertificate is null ? null
+                : new PublicMcpEndpoint(host.OAuth.Resource, RecordParser.FormatTimestamp(publicCertificate.NotAfter.ToUniversalTime())),
         });
         if (certificates is not null)
         {
@@ -540,7 +593,15 @@ public sealed class DaemonHost : IAsyncDisposable
         await StopAsync().ConfigureAwait(false);
         await App.DisposeAsync().ConfigureAwait(false);
         Certificates?.Dispose();
+        DisposeChain(publicMcpChain);
+        publicMcpCertificate?.Dispose();
         schedule.Dispose();
+    }
+
+    private static void DisposeChain(X509Certificate2Collection? chain)
+    {
+        if (chain is null) return;
+        foreach (X509Certificate2 certificate in chain) certificate.Dispose();
     }
 
     internal CertificateRotated RotateCertificate(bool compromised, string? reason, bool identity, string? keep)
@@ -591,6 +652,8 @@ public sealed class DaemonHost : IAsyncDisposable
             return new CertificateRotated(fingerprint, previous, RecordParser.FormatTimestamp(new DateTimeOffset(next.NotAfter.ToUniversalTime())), close, closed, identity ? Identity!.Fingerprint : null);
         }
     }
+
+    internal static bool OnPublicMcp(HttpContext context) => context.Features.Get<IConnectionItemsFeature>()?.Items.ContainsKey(PublicMcpMarker) == true;
 
     /// <summary>Whether a request came over the local-network profile.</summary>
     internal static bool OnLocalNetwork(HttpContext context) => context.Features.Get<IConnectionItemsFeature>()?.Items.ContainsKey(LocalNetworkMarker) == true;
@@ -665,7 +728,11 @@ public sealed class DaemonHost : IAsyncDisposable
         }
 
         // A network MCP message is smaller still (MCP-03): one JSON-RPC message, refused beyond its limit before authentication.
-        if (Mcp.Serves(context))
+        if (OnPublicMcp(context) && !context.Request.Path.Equals(McpEndpoint.Path, StringComparison.Ordinal))
+        {
+            maximum = Math.Min(maximum ?? long.MaxValue, McpOAuth.BodyLimit);
+        }
+        else if (Mcp.Serves(context))
         {
             maximum = Math.Min(maximum ?? long.MaxValue, McpEndpoint.BodyLimit);
         }
@@ -691,7 +758,8 @@ public sealed class DaemonHost : IAsyncDisposable
         });
         try
         {
-            if (context.Request.ContentLength is long length && maximum is long bound && length > bound)
+            if (context.Request.ContentLength is long length && maximum is long bound && length > bound
+                && (!OnPublicMcp(context) || McpOAuth.ServesPath(context.Request.Path.Value)))
             {
                 await WriteProblemAsync(context, StatusCodes.Status413PayloadTooLarge, new Problem("refused", $"The request body exceeds its limit of {bound} bytes.", []), close: true).ConfigureAwait(false);
             }
@@ -714,6 +782,20 @@ public sealed class DaemonHost : IAsyncDisposable
     /// <summary>Authenticates every request by the profile it came over: device-signed on loopback; on the local network a paired device by its certificate and its signature; the local socket by operating-system identity.</summary>
     private async Task AuthenticateAsync(HttpContext context, RequestDelegate next)
     {
+        if (OnPublicMcp(context))
+        {
+            if (OAuth is not null)
+            {
+                await OAuth.InvokeAsync(context, request => Mcp.InvokeAsync(request, _ => Task.CompletedTask)).ConfigureAwait(false);
+            }
+            else
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+            }
+
+            return;
+        }
+
         // Network MCP's Host and Origin are judged before anything is authenticated, so a rebinding page runs nothing (MCP-03).
         if (Mcp.Screen(context) is (int status, Problem screened))
         {
@@ -759,7 +841,7 @@ public sealed class DaemonHost : IAsyncDisposable
 
     /// <summary>Whether a connection was accepted by the daemon's local socket or named pipe listener, and by no other.</summary>
     internal static bool OverLocalSocket(IDictionary<object, object?>? items) =>
-        items?.ContainsKey(LocalSocketMarker) == true && !items.ContainsKey(LoopbackMarker) && !items.ContainsKey(LocalNetworkMarker) && !items.ContainsKey(RelayMarker);
+        items?.ContainsKey(LocalSocketMarker) == true && !items.ContainsKey(LoopbackMarker) && !items.ContainsKey(LocalNetworkMarker) && !items.ContainsKey(RelayMarker) && !items.ContainsKey(PublicMcpMarker);
 
     // The local socket's and named pipe's listener names each connection it accepts.
     private static ConnectionDelegate MarkLocalSocket(ConnectionDelegate next) => connection =>
@@ -874,6 +956,26 @@ public sealed class DaemonHost : IAsyncDisposable
         finally
         {
             open.TryRemove(connection.ConnectionId, out _);
+        }
+    };
+
+    private ConnectionDelegate TrackPublic(ConnectionDelegate next) => async connection =>
+    {
+        int count = Interlocked.Increment(ref publicConnections);
+        try
+        {
+            if (count > 12)
+            {
+                connection.Abort(new ConnectionAbortedException("The public MCP listener is at its connection limit."));
+                return;
+            }
+
+            connection.Items[PublicMcpMarker] = true;
+            await next(connection).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref publicConnections);
         }
     };
 

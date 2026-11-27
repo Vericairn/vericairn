@@ -35,4 +35,11 @@ public sealed record DaemonEndpoint(string Kind, string Address, int ProcessId, 
     /// listeners, /mcp, when the operator turned it on; null when it is off. Older daemons omit it.
     /// </summary>
     public string? Mcp { get; init; }
+
+    /// <summary>The live public token listener and its certificate's expiry, when configured.</summary>
+    public PublicMcpEndpoint? PublicMcp { get; init; }
 }
+
+
+/// <summary>The HTTPS MCP URL and its certificate's expiry.</summary>
+public sealed record PublicMcpEndpoint(string Url, string CertificateExpiresAt);

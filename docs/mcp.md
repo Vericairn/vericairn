@@ -617,7 +617,7 @@ listeners once the operator turns it on with `vericairn runtime configure --mcp 
 starts again. It is off by default and never served on the local socket, where the operating-system
 user acts for any principal. `vericairn runtime status` shows `/mcp` while a daemon serves it.
 
-**Who may connect.** Every request on `/mcp` is signed by one device, as the API's requests are: the
+**Signed mode.** Each request on a signed listener is signed by one device, as the API's requests are: the
 loopback scheme `vericairn-request/1`, or on the local network mutual TLS and `vericairn-request/2`,
 with the same freshness and replay rules; a message holds at most 1 MiB, refused before it is authenticated. The device must be admitted now, permitted the
 profile it arrived on (`loopback` or `local-network`) and belong to an agent or service principal; a
@@ -628,6 +628,14 @@ closes. Before anything is authenticated, the request's `Host` must name the lis
 IP address and port (or `localhost` on loopback), and an `Origin` it names must be one the operator
 allowed with `--mcp-origin`; none is allowed by default. A name an attacker's DNS points at the
 runtime therefore reaches nothing.
+
+**OAuth token mode (0.9.5).** A separately configured HTTPS listener accepts bearer access tokens for approved token
+devices under either revision. It serves only MCP, OAuth discovery and authorization. Discovery advertises S256, Client ID
+Metadata Documents, dynamic registration as a fallback and issuer identification in authorization responses. An administrator
+issues one approval code for an agent or service principal. Read scope exposes the read tools. Contribute scope also exposes
+the network contributor tools, whose records the runtime signs with that token device's key. A token is scoped to the listener's
+`/mcp` resource and lasts up to fifteen minutes. Refresh tokens rotate and reuse ends the family. Every request rechecks device
+standing, and revocation stops access. See [OAuth clients over public MCP](cli.md#oauth-clients-over-public-mcp-095).
 
 **Session-based transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
 request is answered with one JSON body; a notification or a response gets `202` and no body. Batches

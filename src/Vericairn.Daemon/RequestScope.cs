@@ -57,7 +57,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         // Network MCP's requests (MCP-03) are signed by their own device only, and on loopback need the loopback profile as well.
         DeviceSigning? signing = context.HttpContext.Items.TryGetValue(SigningItem, out object? rule) ? rule as DeviceSigning : null;
-        string? profile = device.NetworkProfile ?? (signing is not null ? LoopbackProfile : null);
+        string? profile = device.Token is not null ? McpOAuth.Profile : device.NetworkProfile ?? (signing is not null ? LoopbackProfile : null);
 
         // These reads carry their input in a POST body, with no signing key or write ledger needed; nor does a write that only
         // prepares its record for its device's signature, which writes nothing.
@@ -82,7 +82,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/search/replay", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
-            using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing);
+            using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing, device.Token?.Current);
             return await next(context).ConfigureAwait(false);
         }
 
@@ -134,7 +134,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// <summary>Carries the verified device and key to each write, where the service rechecks them under its gate.</summary>
     private async ValueTask<object?> WriteAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next, AuthenticatedDevice device, string? profile, DeviceSigning? signing)
     {
-        using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing);
+        using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing, device.Token?.Current);
         beforeWrite?.Invoke();
         object? result = await next(context).ConfigureAwait(false);
         return request.Refusal is Problem denied ? Denied(context.HttpContext, device, denied.Message) : result;
@@ -361,6 +361,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/objects/{hash}"] = null,
         ["POST /v1/shutdown"] = null,
         ["POST /v1/pairings"] = typeof(PairingIssueRequest),
+        ["POST /v1/runtime/mcp/authorize"] = null, // Its route admits only the positively identified local socket.
         ["POST /v1/pairing/hello"] = typeof(PairingHello),
         ["POST /v1/pairing/confirm"] = typeof(PairingConfirm),
         ["GET /v1/runtime/identity"] = null,

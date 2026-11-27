@@ -16,12 +16,22 @@ internal sealed class RuntimeConfigureCommand : Command
         var mcpOption = new Option<string?>("--mcp") { Description = "From 0.9.2: 'on' serves network MCP at /mcp on the loopback and local-network listeners from the runtime's next start, to agents' and services' devices whose every request is signed; 'off' stops it. Off unless set." };
         var originOption = new Option<string[]>("--mcp-origin") { Description = "From 0.9.2: an origin (scheme://host[:port]) a request to /mcp may name, repeated for more; replaces the list, and 'none' empties it. A request naming any other origin is refused before authentication; none is allowed unless set.", AllowMultipleArgumentsPerToken = false };
         var relayOption = new Option<string?>("--relay") { Description = "The HTTPS relay URL used from the runtime's next start; 'off' stops registration. Off unless set." };
+
+        var endpointOption = new Option<string?>("--public-endpoint") { Description = "The HTTPS MCP host and port the certificate names. 'off' removes the listener." };
+        var bindOption = new Option<string?>("--public-bind") { Description = "The local IP address and matching port to bind for public MCP, including an address on a private overlay." };
+        var certificateOption = new Option<string?>("--public-certificate") { Description = "The PEM certificate (or full chain) for the configured public MCP host." };
+        var keyOption = new Option<string?>("--public-key") { Description = "The PEM private key file for the configured public MCP certificate." };
+        Options.Add(endpointOption);
+        Options.Add(bindOption);
+        Options.Add(certificateOption);
+        Options.Add(keyOption);
         Options.Add(localNetworkOption);
         Options.Add(allowPublicOption);
         Options.Add(mcpOption);
         Options.Add(originOption);
         Options.Add(relayOption);
         SetAction(parseResult => operations.RuntimeConfigure(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(localNetworkOption), parseResult.GetValue(allowPublicOption), parseResult.GetValue(context.JsonOption),
-            parseResult.GetValue(mcpOption), parseResult.GetValue(originOption), parseResult.GetValue(relayOption)));
+            parseResult.GetValue(mcpOption), parseResult.GetValue(originOption), parseResult.GetValue(relayOption), parseResult.GetValue(endpointOption),
+            parseResult.GetValue(bindOption), parseResult.GetValue(certificateOption), parseResult.GetValue(keyOption)));
     }
 }
