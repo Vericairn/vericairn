@@ -260,9 +260,10 @@ public sealed class GoalPresentation
         view.Proposed = Items(goal, "proposed").Select(p => new ProposedRow(Str(p, "key") ?? "?", Str(p, "title") ?? "?", Str(p, "id") ?? "?", Str(p, "byName") ?? Str(p, "by") ?? "?", Str(p, "approve"))).ToList();
         string? current = Str(Obj(goal, "evaluation"), "id");
         view.Evaluations = Items(goal, "evaluations").Select(e => new EvaluationRow(Str(e, "id") ?? "?", Str(e, "byName") ?? Str(e, "by") ?? "?", Str(e, "at") ?? "?", Str(e, "outcome") ?? "?", Str(e, "summary") ?? string.Empty, Str(e, "id") == current)).ToList();
+        string pathRefusals = string.Concat(Items(Obj(goal, "flow"), "pathRefusals").Select(refusal => $"\n{Str(refusal, "code")} — {Str(refusal, "message")}"));
         if (next.ValueKind != JsonValueKind.Object || Str(next, "format") != "vericairn.next/1")
         {
-            view.Next = "unavailable: the runtime gave no routed steps";
+            view.Next = "unavailable: the runtime gave no routed steps" + pathRefusals;
             view.Steps = Items(goal, "steps").Select(s => new StepRow(Str(s, "key") ?? "?", Str(s, "title") ?? "?", Str(s, "status") ?? "?", "?", null, null, "Routes unavailable.")).ToList();
             return view;
         }
@@ -281,6 +282,7 @@ public sealed class GoalPresentation
         }).ToList();
         string? nextKey = Str(next, "next");
         view.Next = nextKey is null ? "Next: nothing to dispatch; every eligible step is held, or none is eligible." : $"Next: {nextKey}, taken by vericairn goal step.";
+        view.Next += pathRefusals;
         JsonElement budget = Obj(next, "budget");
         var spend = Items(budget, "units").Select(u => new SpendRow(Str(u, "unit") ?? "?", $"{Long(u, "spent")} of {Long(u, "budget")}{(Str(u, "currency") is string unit ? " minor units of " + unit : string.Empty)} charged, {Long(u, "remaining")} remain")).ToList();
         spend.Add(new SpendRow("runs", $"{Long(budget, "inFlight")} of {Long(budget, "concurrency")} in flight; {Long(budget, "attemptsPerStep")} attempts per step"));

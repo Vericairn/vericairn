@@ -115,6 +115,9 @@ public sealed partial class EstateService
         foreach (JsonElement finding in AttentionRows(document, "reconcile"))
             Add("incident", AttentionString(finding, "location"), AttentionString(finding, "message"), AttentionString(finding, "code"),
                 "Inspect reconciliation in Workbench or the command line.", "reconciliation", AttentionString(finding, "location") + ":" + AttentionString(finding, "code"));
+        foreach (JsonElement goal in AttentionRows(document, "flowPathRefusals"))
+            Add("failed check", AttentionString(goal, "title"), string.Join(" ", AttentionRows(goal, "refusals").Select(refusal => AttentionString(refusal, "message"))),
+                FlowPermissions.Code, "Review the run's permitted paths in Workbench or with vericairn goal show.", "goal", AttentionString(goal, "goal"));
         RunsResponse? observedRuns = null;
         RunsResponse ReadRuns() => observedRuns ??= Runs(model);
         foreach (CommunicationAttention item in RequiredAttention(model, () => progress, recipient: principal, runs: ReadRuns))
@@ -126,7 +129,7 @@ public sealed partial class EstateService
             {
                 reporting.Claim, reporting.Request, reporting.Source, reporting.Freshness, reporting.Closed, reporting.WorkerObserved, reporting.Liveness,
             }, ProtocolJson.Options);
-            if (item is { Kind: "incident", RecordType: "operation", Record: { } operation } && AgentRuns.Find(model, operation) is { } run &&
+            if (item is { Kind: "incident" or "information", RecordType: "operation", Record: { } operation } && AgentRuns.Find(model, operation) is { } run &&
                 ReadRuns().Runs.FirstOrDefault(r => r.Run == run.Id) is { } observation)
                 basis = JsonSerializer.Serialize(new { item.Text, observation.Signals, observation.Scope, observation.Stop }, ProtocolJson.Options);
             Add(item.Kind, item.Record ?? "Required attention", item.Text, item.State ?? "unknown", item.Command ?? "vericairn status",

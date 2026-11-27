@@ -51,6 +51,10 @@ public static class EstateStatus
     /// <summary>A work order's derived status, as <see cref="WorkItems"/> gives it, for one work order's current revision.</summary>
     internal static string StatusOf(EstateModel model, RecordEnvelope order) => Reading(model, order).Status;
 
+    /// <summary>The acceptance that settles the current work order, including an accepted current result or a placement-only move.</summary>
+    internal static RecordEnvelope? CurrentAcceptance(EstateModel model, RecordEnvelope order) =>
+        Reading(model, order) is ("accepted", { Type: "acceptance" } acceptance) ? acceptance : null;
+
     /// <summary>
     /// A work order's derived status and the record it rests on. It is accepted when the latest acceptance of its revisions names its
     /// current revision, or one that differs from it only in placement, or, for ordinary work, when an acceptance names its current
@@ -501,6 +505,28 @@ public static class EstateStatus
         if (runs.Count > 0)
         {
             status["runs"] = FlowStops.RunsJson(model, runs);
+        }
+
+        var paths = new JsonArray();
+        IEnumerable<FlowPosition.Position> proposedRuns = model.Current("goal").Where(goal => FlowRuns.IsRun(goal) && GoalRules.Status(model, goal) == "proposed")
+            .Select(goal => FlowPosition.Derive(model, goal, recorded));
+        foreach (FlowPosition.Position position in runs.Concat(proposedRuns).OrderBy(position => position.Goal.Id, StringComparer.Ordinal))
+        {
+            JsonArray refusals = FlowPosition.PathRefusalsJson(model, position);
+            if (refusals.Count > 0)
+            {
+                paths.Add(new JsonObject
+                {
+                    ["goal"] = position.Goal.Id,
+                    ["title"] = EstateModel.BodyString(position.Goal, "title"),
+                    ["refusals"] = refusals,
+                });
+            }
+        }
+
+        if (paths.Count > 0)
+        {
+            status["flowPathRefusals"] = paths;
         }
 
         // From 0.9.4 (GOAL-07): each standing agent as of the estate's newest record, so canonical status never depends on when it is read;
