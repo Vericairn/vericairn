@@ -759,6 +759,9 @@ internal sealed partial class EstateTrust
     /// <summary>How many times which admissions count was judged, for a mode and what a set of closings reads (<see cref="AdmissionKey"/>).</summary>
     internal long AdmissionJudgments { get; private set; }
 
+    /// <summary>How many level passes strict authority readings took to reach a fixed point, including the final pass that adds no one.</summary>
+    internal long StrictLevelPasses { get; private set; }
+
     /// <summary>How many kept judgments of which admissions count a test's audit judged afresh (<see cref="AuditAdmissionsForTests"/>).</summary>
     internal long AdmissionAudits { get; private set; }
 
@@ -1741,6 +1744,7 @@ internal sealed partial class EstateTrust
             bool[] followed = new bool[count];
             while (true)
             {
+                StrictLevelPasses++;
                 foreach (List<int> h in heads) h.Clear();
                 Array.Clear(followed);
                 for (int i = 0; i < count; i++)

@@ -158,10 +158,10 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     /// The cost of how the strongest acts read principal lines (FIX-108): a chain of 800 appointments, each appointee holding a device and
     /// appointing the next, and a flat set of 1,600 appointments by one operator, each loaded while that operator stands and after the root
     /// operator removes its role. From 0.9.5 (FIX-170), fresh judgment contexts count parses, signature verifications and key imports;
-    /// trust counts the verifications against sets of admissions, judgments of which admissions count and steps joining them. Each
-    /// count and the allocated bytes stay within twice the equivalent root-written estate's. The estates are loaded in turn three
-    /// times each. Their fastest times have a separate bound of twice the root-written load plus 50 ms, which also covers work in the
-    /// level-by-level reads that does not allocate or show up in the counts.
+    /// trust counts verifications against sets of admissions, judgments of which admissions count, steps joining them, and the level
+    /// passes of strict authority readings (CODE-112). The existing counts and allocated bytes stay within twice the equivalent
+    /// root-written estate's. The level-pass budget follows the depth of each estate's appointments and its two strict views.
+    /// The estates are loaded in turn three times each to keep the least allocation and log the fastest time.
     /// </summary>
     [Theory]
     [InlineData(800, true)]
@@ -179,8 +179,16 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         output.WriteLine($"strict authority reads, {count:N0} appointments {(chain ? "in a chain" : "by one operator")}:");
         output.WriteLine($"  standing: {standing}; when the root operator wrote them: {rootStanding}");
         output.WriteLine($"  after its base is removed: {removed}; when the root operator wrote them: {rootRemoved}");
+        // Each fixture can read two views. Root-written appointments all land on the first level. The second operator adds
+        // a level, and a chain then adds one per appointee. A final pass in each view confirms that no one else stands.
+        const int Views = 2;
+        int standingPassesPerView = chain ? count + 2 : 3;
         WithinTwice("Standing", standing, rootStanding);
         WithinTwice("Removed", removed, rootRemoved);
+        WithinLevelBudget("Standing", standing, Views * standingPassesPerView);
+        WithinLevelBudget("Removed", removed, Views);
+        WithinLevelBudget("Standing, root-written", rootStanding, Views * 2);
+        WithinLevelBudget("Removed, root-written", rootRemoved, Views * 2);
 
         (LoadWork Root, LoadWork Second) MeasurePair(bool secondStands)
         {
@@ -197,18 +205,20 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         static void Demote(HistoryFixture f, string second) => f.Estate.Add("principal", f.Estate.OperatorId,
             """{"kind":"human","name":"Second operator","roles":["reviewer"]}""", supersedes: second, signer: f.OperatorSigner);
 
+        static void WithinLevelBudget(string when, LoadWork work, int limit) =>
+            Assert.True(work.StrictLevelPasses >= 1 && work.StrictLevelPasses <= limit,
+                $"{when}: {work.StrictLevelPasses:N0} strict authority level passes, expected between 1 and {limit:N0}.");
+
         static void WithinTwice(string when, LoadWork work, LoadWork root)
         {
             foreach (((string what, long counted), (_, long byRoot)) in work.Counts.Zip(root.Counts))
                 Assert.True(counted <= 2 * byRoot, $"{when}: {counted:N0} {what} against {byRoot:N0} when the root operator wrote the appointments.");
-            Assert.True(work.Elapsed <= 2 * root.Elapsed + TimeSpan.FromMilliseconds(50),
-                $"{when}: fastest load {work.Elapsed.TotalMilliseconds:N0} ms against {root.Elapsed.TotalMilliseconds:N0} ms when the root operator wrote the appointments.");
         }
     }
 
     /// <summary>The last load's work counts, and the least allocation and shortest elapsed time across the loads of that estate.</summary>
     private sealed record LoadWork(long Parses, long Verifications, long KeyImports, long SetVerifications, long AdmissionJudgments, long JoinSteps,
-        long Allocated, TimeSpan Elapsed)
+        long StrictLevelPasses, long Allocated, TimeSpan Elapsed)
     {
         /// <summary>Each count, with what it counts.</summary>
         public (string What, long Count)[] Counts =>
@@ -220,6 +230,7 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
 
         public override string ToString() =>
             string.Join(", ", Counts.Select(c => c.Count.ToString("N0", CultureInfo.InvariantCulture) + " " + c.What))
+            + ", " + StrictLevelPasses.ToString("N0", CultureInfo.InvariantCulture) + " strict authority level passes"
             + " in " + Elapsed.TotalMilliseconds.ToString("N0", CultureInfo.InvariantCulture) + " ms";
     }
 
@@ -262,7 +273,7 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         Assert.Equal(secondActs, model.Trust.Closings.Any(c => c.Record.Id == closings.BySecond));
         Assert.Equal(lastActs, model.Trust.Closings.Any(c => c.Record.Id == closings.ByLast));
         var work = new LoadWork(context.Parses, context.Verifications, context.KeyImports, model.Trust.SetVerifications,
-            model.Trust.AdmissionJudgments, model.Trust.JoinSteps, allocated, watch.Elapsed);
+            model.Trust.AdmissionJudgments, model.Trust.JoinSteps, model.Trust.StrictLevelPasses, allocated, watch.Elapsed);
         return least is null ? work : work with
         {
             Allocated = Math.Min(least.Allocated, allocated),
