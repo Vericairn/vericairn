@@ -7,7 +7,9 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Mcp;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -706,6 +708,16 @@ internal static class FakeHarness
                 return Mcp(scenario["mcp:".Length..], arguments);
             case "mcp":
                 return Mcp(null, arguments);
+            case "mcp-tool":
+                return Mcp(null, arguments, JsonNode.Parse(File.ReadAllText(report + ".call"))!.AsObject());
+            case "mcp-server":
+                using (var service = EstateService.Open(arguments[Array.IndexOf(arguments, "--estate") + 1]))
+                {
+                    var tools = new ToolRegistry(service, arguments[Array.IndexOf(arguments, "--as") + 1]);
+                    new McpServer(tools, "test").Run(Console.In, Console.Out);
+                }
+
+                return 0;
             default:
                 Console.Error.WriteLine($"stand-in harness: no scenario {scenario} for {string.Join(' ', arguments)}");
                 return 64;
@@ -716,8 +728,9 @@ internal static class FakeHarness
     /// Does what a coding agent does with the worker's MCP configuration: starts the server it names, records an attempt on the
     /// assignment and then its result through the server's tools, and reports done the way Claude Code's stream does. Without an
     /// assignment named, it takes the latest one of its own principal from the brief the worker exported, as an agent reads its brief.
+    /// When a tool call is supplied, sends it with that assignment in place of the usual attempt and result.
     /// </summary>
-    private static int Mcp(string? assignment, string[] arguments)
+    private static int Mcp(string? assignment, string[] arguments, JsonObject? toolCall = null)
     {
         string configuration = arguments[Array.IndexOf(arguments, "--mcp-config") + 1];
         JsonObject server = JsonNode.Parse(File.ReadAllText(configuration))!["mcpServers"]!["vericairn"]!.AsObject();
@@ -752,6 +765,27 @@ internal static class FakeHarness
         }
 
         Call("initialize", new JsonObject { ["protocolVersion"] = "2025-06-18", ["capabilities"] = new JsonObject(), ["clientInfo"] = new JsonObject { ["name"] = "stand-in", ["version"] = "1" } });
+        if (toolCall is not null)
+        {
+            toolCall["arguments"]!["assignment"] = assignment;
+            JsonObject reply = Call("tools/call", toolCall);
+            mcp.StandardInput.Close();
+            if (!mcp.WaitForExit(TestTiming.HangTimeoutMilliseconds))
+            {
+                mcp.Kill(entireProcessTree: true);
+                throw new IOException("The MCP server did not exit after its input closed.");
+            }
+
+            if (reply["result"]?["isError"]?.GetValue<bool>() != false)
+            {
+                Console.Error.WriteLine("stand-in harness: the tool call failed: " + Text(reply));
+                return 1;
+            }
+
+            Emit("""{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Done."}""");
+            return 0;
+        }
+
         JsonObject attempt = Call("tools/call", new JsonObject { ["name"] = "work_attempt", ["arguments"] = new JsonObject { ["assignment"] = assignment, ["workspace"] = "widget, branch work/w-1", ["note"] = "Build the widget toward the exit question." } });
         string attempted = Text(attempt);
         string id = JsonNode.Parse(attempted)!["written"]?["id"]?.GetValue<string>() ?? throw new IOException("No attempt was recorded: " + attempted);

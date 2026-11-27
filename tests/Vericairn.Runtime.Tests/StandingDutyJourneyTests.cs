@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
 using Vericairn.Records.Types;
@@ -30,6 +32,8 @@ public class StandingDutyJourneyTests
         Assert.Equal((key, "due"), Occurrence(run, goal, key));
         Assert.DoesNotContain(run.Estate.Load().OfType("assignment"), a => StandingAgents.KeyOf(a) == key);
 
+        // Concurrent goal steps through the same runtime leave one run and one assignment. The record validator's
+        // standing.duplicate refusal is tested separately by StandingRoleTests.ADutyCarrierCarriesTheDutyOccurrencesOwnKeyAndLeavesReservedActionsToTheOperator.
         using var start = new Barrier(2);
         CancellationToken cancellation = TestContext.Current.CancellationToken;
         GoalStepResponse[] arrivals = await Task.WhenAll(Enumerable.Range(0, 2).Select(index =>
@@ -39,6 +43,7 @@ public class StandingDutyJourneyTests
                 return StandingAgentRoutingTests.Step(run, goal, $"duty-delivery-{index}", key, "ack-stop");
             }, cancellation, TaskCreationOptions.LongRunning, TaskScheduler.Default)));
         GoalStepResponse dispatched = Assert.Single(arrivals, response => response.Outcome == "run");
+        Assert.Single(AgentRuns.All(run.Estate.Load()), candidate => candidate.Goal == goal);
         Assert.Equal(key, dispatched.Step);
         string assignment = Assert.Single(run.Estate.Load().OfType("assignment"), a => StandingAgents.KeyOf(a) == key).Id;
         Assert.Equal(assignment, dispatched.Assignment!.Id);
@@ -92,6 +97,61 @@ public class StandingDutyJourneyTests
 
         DutyFindingDto Duty() => Assert.Single(run.Service.Policy("maintenance")!.Findings, f => f.Duty?.Occurrence.GetProperty("number").GetInt64() == 0).Duty!;
         void AssertOwed() => Assert.False(Duty().Completed);
+    }
+
+    // D07-B: a reserved publication reached by the duty carrier becomes an operator request.
+    [Fact]
+    [Trait("Journey", "D07-B")]
+    public void ACommunityDutyCarrierAsksTheOperatorToPublishItsDraft()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        RecordEnvelope policy = DeclareDuty(run);
+        string goal = StandingAgentRoutingTests.Standing(run, triggers: new JsonArray(DutyTrigger(policy)), role: "duty-carrier");
+        StandingAgentRoutingTests.AllowStandInWithFixtureKey(run, goal);
+
+        const string report = "duty-publication";
+        const string destination = "the estate's monthly notes";
+        const string text = "This month's inventory was checked.";
+        File.WriteAllText(run.Report(report) + ".call", new JsonObject
+        {
+            ["name"] = "standing_publication",
+            ["arguments"] = new JsonObject
+            {
+                ["body"] = new JsonObject
+                {
+                    ["destination"] = destination, ["text"] = text, ["why"] = "The inventory report is public.",
+                    ["recommendation"] = "Publish the draft.", ["consequence"] = "The draft waits for the operator.",
+                },
+            },
+        }.ToJsonString());
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            Vericairn = FakeHarness.Command("mcp-server", run.Report("duty-mcp")),
+        };
+        Assert.Empty(run.Estate.Load().OfType("operator-request"));
+
+        string key = $"duty/{policy.Id}:{run.Estate.Estate.Id}:{{\"kind\":\"interval\",\"number\":0}}";
+        GoalStepResponse step = StandingAgentRoutingTests.Step(run, goal, report, key, "mcp-tool");
+        Assert.True(step.Ok, step.Message);
+        Assert.Equal("run", step.Outcome);
+        string assignment = step.Assignment!.Id;
+        string running = step.Run!.Run;
+        Assert.Equal("observed-success", run.Settled(running).Status);
+
+        EstateModel model = run.Estate.Load();
+        RecordEnvelope request = Assert.Single(model.OfType("operator-request"));
+        Assert.Equal(new StandingOutputs.RaisedBy(goal, key, assignment, running), StandingOutputs.Of(request));
+        Assert.Equal(model.ById[assignment].Subject, request.Subject);
+        Assert.Equal(run.Estate.BuilderId, request.By);
+        Assert.Equal((run.Estate.OperatorId, run.Estate.BuilderId, "publication", destination),
+            (EstateModel.BodyString(request, "to"), EstateModel.BodyString(request, "askedBy"),
+                EstateModel.BodyString(request, "kind"), EstateModel.BodyString(request, "destination")));
+        JsonElement content = Assert.Single(request.Body.GetProperty("content").EnumerateArray());
+        Assert.Equal(("text", text, ContentHash.Sha256(Encoding.UTF8.GetBytes(text))),
+            (content.GetProperty("kind").GetString(), content.GetProperty("text").GetString(), content.GetProperty("hash").GetString()));
+        JsonElement delivered = Assert.Single(run.Service.OperatorRequests(run.Estate.OperatorId).Json.GetProperty("delivered").EnumerateArray());
+        Assert.Equal(request.Id, delivered.GetProperty("revision").GetString());
+        Assert.Equal(0, run.Service.Check().Errors);
     }
 
     internal static (string? Key, string? State) Occurrence(RunEstate run, string goal, string key)
