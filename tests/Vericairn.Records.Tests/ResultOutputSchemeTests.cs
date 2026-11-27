@@ -125,6 +125,33 @@ public sealed class ResultOutputSchemeTests
         Assert.StartsWith(earlier.ExpectedPath + "#", finding.Location, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OnlyTheUpgradeCheckpointOrItsAncestorsMakeSchemeLocationsHistorical(bool adoptionAtUpgrade)
+    {
+        using var history = new HistoryFixture();
+        TestEstate estate = history.Estate;
+        RecordEnvelope first = estate.Add("result", estate.BuilderId, Body(GitHubLocation), StartAttempt(estate).Reference, signer: history.BuilderSigner);
+        RecordEnvelope? earlier = adoptionAtUpgrade ? null : history.Adopt();
+        RecordEnvelope migration = estate.Add("migration", estate.OperatorId,
+            """{"fromPin":"release 0.9.1","toPin":"release 0.9.2","fromFormat":3,"toFormat":3,"migrations":[],"changes":[]}""", signer: history.OperatorSigner);
+        RecordEnvelope upgrade = adoptionAtUpgrade ? history.Adopt() : history.Checkpoint(trigger: "upgrade");
+        estate.SetClock(first.AtTime.AddSeconds(-1));
+        RecordEnvelope backdated = estate.Add("result", estate.BuilderId, Body(GitHubLocation), first.Subject, supersedes: first.Id, signer: history.BuilderSigner);
+        estate.SetClock(upgrade.AtTime.AddMinutes(1));
+        history.Checkpoint();
+
+        EstateModel model = estate.Load();
+        Finding historical = Assert.Single(model.Findings, f => f.Code == Code && f.Location.StartsWith(first.ExpectedPath + "#", StringComparison.Ordinal));
+        Finding unproved = Assert.Single(model.Findings, f => f.Code == Code && f.Location.StartsWith(backdated.ExpectedPath + "#", StringComparison.Ordinal));
+        Assert.Equal(Severity.Info, historical.Severity);
+        Assert.Contains(upgrade.Id, historical.Message, StringComparison.Ordinal);
+        Assert.Contains(migration.Id, historical.Message, StringComparison.Ordinal);
+        Assert.Contains((earlier ?? upgrade).Id, historical.Message, StringComparison.Ordinal);
+        Assert.Equal(Severity.Warning, unproved.Severity);
+    }
+
     /// <summary>An ordinary work order assigned to the builder and the builder's attempt at it.</summary>
     public static RecordEnvelope StartAttempt(TestEstate estate)
     {

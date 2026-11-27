@@ -38,7 +38,7 @@ public static class CommunicationPresentation
     public static bool ShouldDeliver(string? frequency, string boundary, IReadOnlyList<CommunicationAttention> attention, bool onDemand = false)
     {
         ArgumentNullException.ThrowIfNull(attention);
-        return onDemand || attention.Count > 0 || frequency switch
+        return onDemand || attention.Any(a => a.Kind != "information") || frequency switch
         {
             "none" => false,
             "completion-and-need" => boundary == "completion",
@@ -196,9 +196,19 @@ public static class CommunicationPresentation
         }, token), false, cancellationToken: cancellationToken);
     }
 
-    /// <summary>Render every attention item, independent of any frequency or depth.</summary>
-    public static string RenderAttention(IReadOnlyList<CommunicationAttention> attention) => attention.Count == 0 ? string.Empty :
-        "\nRequired attention (every frequency):\n" + string.Join('\n', attention.Select(a => a.Kind + ": " + a.Text));
+    /// <summary>Render every item, keeping settled information separate from required attention.</summary>
+    public static string RenderAttention(IReadOnlyList<CommunicationAttention> attention)
+    {
+        IEnumerable<string> required = attention.Where(a => a.Kind != "information").Select(a => a.Kind + ": " + a.Text);
+        IEnumerable<string> information = attention.Where(a => a.Kind == "information").Select(a => a.Text);
+        return Section("Required attention (every frequency)", required) + Section("Information", information);
+
+        static string Section(string title, IEnumerable<string> items)
+        {
+            string text = string.Join('\n', items);
+            return text.Length == 0 ? string.Empty : $"\n{title}:\n{text}";
+        }
+    }
 
     /// <summary>A conflict or unavailable setting uses full presentation and is labeled by the lead.</summary>
     public static string Depth(CommunicationProfile profile, string kind) =>

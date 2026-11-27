@@ -126,7 +126,7 @@ public sealed partial class EstateService
             {
                 reporting.Claim, reporting.Request, reporting.Source, reporting.Freshness, reporting.Closed, reporting.WorkerObserved, reporting.Liveness,
             }, ProtocolJson.Options);
-            if (item is { Kind: "incident", RecordType: "operation", Record: { } operation } && AgentRuns.Find(model, operation) is { } run &&
+            if (item is { Kind: "incident" or "information", RecordType: "operation", Record: { } operation } && AgentRuns.Find(model, operation) is { } run &&
                 ReadRuns().Runs.FirstOrDefault(r => r.Run == run.Id) is { } observation)
                 basis = JsonSerializer.Serialize(new { item.Text, observation.Signals, observation.Scope, observation.Stop }, ProtocolJson.Options);
             Add(item.Kind, item.Record ?? "Required attention", item.Text, item.State ?? "unknown", item.Command ?? "vericairn status",
