@@ -9,6 +9,7 @@ public sealed partial class VericairnClient
 {
     private const string DesktopHandoffsPath = "/v1/handoff/desktop";
     private const string DesktopHandoffOpenPath = DesktopHandoffsPath + "/open";
+    private const string DesktopHandoffRemovePath = DesktopHandoffsPath + "/remove";
 
     /// <inheritdoc />
     public DesktopHandoffsResponse DesktopHandoffs(string principal) =>
@@ -21,6 +22,10 @@ public sealed partial class VericairnClient
     /// <inheritdoc />
     public DesktopHandoffResponse OpenDesktopHandoff(DesktopHandoffOpenRequest request) =>
         Post<DesktopHandoffOpenRequest, DesktopHandoffResponse>(DesktopHandoffOpenPath, request)!;
+
+    /// <inheritdoc />
+    public DesktopHandoffRemoveResponse RemoveDesktopHandoff(DesktopHandoffRemoveRequest request) =>
+        Post<DesktopHandoffRemoveRequest, DesktopHandoffRemoveResponse>(DesktopHandoffRemovePath, request)!;
 
     /// <inheritdoc />
     public Task<DesktopHandoffsResponse> DesktopHandoffsAsync(string principal, CancellationToken cancellationToken = default) =>
@@ -39,4 +44,10 @@ public sealed partial class VericairnClient
         RunOperationAsync(nameof(OpenDesktopHandoff), async token =>
             (await PostAsync<DesktopHandoffOpenRequest, DesktopHandoffResponse>(DesktopHandoffOpenPath, request, cancellationToken: token).ConfigureAwait(false))!,
             true, OperationTimeout?.Invoke(nameof(OpenDesktopHandoff)), cancellationToken);
+
+    /// <inheritdoc />
+    public Task<DesktopHandoffRemoveResponse> RemoveDesktopHandoffAsync(DesktopHandoffRemoveRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync(nameof(RemoveDesktopHandoff), async token =>
+            (await PostAsync<DesktopHandoffRemoveRequest, DesktopHandoffRemoveResponse>(DesktopHandoffRemovePath, request, cancellationToken: token).ConfigureAwait(false))!,
+            true, OperationTimeout?.Invoke(nameof(RemoveDesktopHandoff)), cancellationToken);
 }

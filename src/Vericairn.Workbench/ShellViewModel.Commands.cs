@@ -430,6 +430,10 @@ public sealed partial class ShellViewModel
     public Task OpenRemoteHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
         DocumentCommandAsync(page, "Open handoff from Remote", token => page!.OpenRemoteHandoffAsync(token), false, cancellationToken: cancellationToken, submission: true);
 
+    /// <summary>Removes the selected Remote handoff from this runtime.</summary>
+    public Task RemoveRemoteHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
+        DocumentCommandAsync(page, "Remove handoff from Remote", token => page!.RemoveRemoteHandoffAsync(token), false, cancellationToken: cancellationToken, submission: true);
+
     /// <summary>Compares the retained package without replacing its original basis.</summary>
     public Task CompareHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
         DocumentCommandAsync(page, "Compare hand-over", token => page!.CompareAsync(token), false, cancellationToken: cancellationToken);

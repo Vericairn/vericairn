@@ -56,6 +56,7 @@ public static class OpenApiDocument
         ("GET", "/v1/handoff/desktop"),
         ("POST", "/v1/handoff/desktop"),
         ("POST", "/v1/handoff/desktop/open"),
+        ("POST", "/v1/handoff/desktop/remove"),
         ("POST", "/v1/resume"),
         ("GET", "/v1/context/work/{key}"),
         ("GET", "/v1/context/work/{key}/brief"),
@@ -532,9 +533,10 @@ public static class OpenApiDocument
             responses["200"] = new JsonObject { ["description"] = "Principal-scoped presentation state only. Acknowledgment signs no record, never resolves or hides an item, and requires the current notice revision. A paired write is kept in the local-network ledger without requiring a presence-free signer.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } } };
         }
-        else if (path is "/v1/handoff/desktop" or "/v1/handoff/desktop/open")
+        else if (path is "/v1/handoff/desktop" or "/v1/handoff/desktop/open" or "/v1/handoff/desktop/remove")
         {
-            string schema = method == "GET" ? "DesktopHandoffsResponse" : "DesktopHandoffResponse";
+            string schema = path == "/v1/handoff/desktop/remove" ? "DesktopHandoffRemoveResponse"
+                : method == "GET" ? "DesktopHandoffsResponse" : "DesktopHandoffResponse";
             responses["200"] = new JsonObject { ["description"] = Summary(method, path),
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } } };
         }
@@ -1087,7 +1089,9 @@ public static class OpenApiDocument
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["DesktopHandoffRequest"] = Object(("by", "string"), ("requestId", "string"), ("subject", "object"), ("task", "string"), ("reason", "string"), ("draft", "string"), ("evidence", "array")),
             ["DesktopHandoffOpenRequest"] = Object(("by", "string"), ("id", "string")),
-            ["DesktopHandoff"] = Object(("id", "string"), ("estate", "string"), ("node", "string"), ("by", "string"), ("subject", "object"), ("task", "string"), ("reason", "string"), ("draft", "string"), ("evidence", "array"), ("preparedAt", "string"), ("openedAt", "string"), ("subjectState", "string"), ("subjectStatus", "string")),
+            ["DesktopHandoffRemoveRequest"] = Object(("by", "string"), ("id", "string")),
+            ["DesktopHandoffRemoveResponse"] = Object(("removed", "boolean"), ("problem", "object")),
+            ["DesktopHandoff"] = Object(("id", "string"), ("estate", "string"), ("node", "string"), ("by", "string"), ("subject", "object"), ("task", "string"), ("reason", "string"), ("draft", "string"), ("evidence", "array"), ("preparedAt", "string"), ("openedAt", "string"), ("subjectState", "string"), ("subjectStatus", "string"), ("expiresAt", "string")),
             ["DesktopHandoffsResponse"] = Object(("handoffs", "array"), ("problem", "object")),
             ["DesktopHandoffResponse"] = Object(("handoff", "object"), ("problem", "object")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
@@ -1345,6 +1349,7 @@ public static class OpenApiDocument
         "/v1/status/observations" => "EstateObserveRequest",
         "/v1/handoff/desktop" => "DesktopHandoffRequest",
         "/v1/handoff/desktop/open" => "DesktopHandoffOpenRequest",
+        "/v1/handoff/desktop/remove" => "DesktopHandoffRemoveRequest",
         "/v1/resume" => "HandoffPackage",
         "/v1/records" => "NewRecordRequest",
         "/v1/records/prepare" => "NewRecordRequest",
@@ -1472,6 +1477,7 @@ public static class OpenApiDocument
         ("GET", "/v1/handoff/desktop") => "DesktopHandoffsResponse: desktop handoffs prepared for this person, with observations of opening and current revision.",
         ("POST", "/v1/handoff/desktop") => "DesktopHandoffResponse: retain exact context idempotently for Workbench without granting authority.",
         ("POST", "/v1/handoff/desktop/open") => "DesktopHandoffResponse: observe a Workbench opening, independently of the underlying task's outcome.",
+        ("POST", "/v1/handoff/desktop/remove") => "DesktopHandoffRemoveResponse: remove the retained handoff and its opening from Workbench.",
         ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",
         ("GET", "/v1/context/work/{key}/brief") => "BriefResponse: measured agent brief; mandatory originals inline, named optional sources withheld unless a context allocation is given and they fit. Writes nothing.",
         ("GET", "/v1/context/work/{key}") => "ContextResponse: compute a deterministic work context package and exact originals; writes nothing.",

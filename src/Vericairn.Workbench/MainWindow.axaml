@@ -321,6 +321,7 @@
                         <StackPanel Orientation="Horizontal" Spacing="6">
                           <Button MinHeight="28" Content="Refresh handoffs" Click="OnReadRemoteHandoffs" />
                           <Button MinHeight="28" Content="Open selected handoff" IsEnabled="{Binding CanOpenRemoteHandoff}" Click="OnOpenRemoteHandoff" />
+                          <Button MinHeight="28" Content="Remove selected handoff" IsEnabled="{Binding CanOpenRemoteHandoff}" Click="OnRemoveRemoteHandoff" />
                         </StackPanel>
                         <TextBlock Grid.Row="1" Text="{Binding RemoteNote}" TextWrapping="Wrap" Margin="0,4" />
                         <ListBox Grid.Row="2" ItemsSource="{Binding RemoteHandoffs}" SelectedItem="{Binding SelectedRemoteHandoff}" AutomationProperties.Name="Handoffs from Remote">

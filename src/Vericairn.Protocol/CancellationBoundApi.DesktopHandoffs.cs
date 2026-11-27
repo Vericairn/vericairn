@@ -11,6 +11,8 @@ public sealed partial class CancellationBoundApi
     public DesktopHandoffResponse PrepareDesktopHandoff(DesktopHandoffRequest request) => inner.PrepareDesktopHandoffAsync(request, cancellationToken).GetAwaiter().GetResult();
     /// <inheritdoc />
     public DesktopHandoffResponse OpenDesktopHandoff(DesktopHandoffOpenRequest request) => inner.OpenDesktopHandoffAsync(request, cancellationToken).GetAwaiter().GetResult();
+    /// <inheritdoc />
+    public DesktopHandoffRemoveResponse RemoveDesktopHandoff(DesktopHandoffRemoveRequest request) => inner.RemoveDesktopHandoffAsync(request, cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />
     public Task<DesktopHandoffsResponse> DesktopHandoffsAsync(string principal, CancellationToken cancellationToken = default) =>
@@ -21,4 +23,7 @@ public sealed partial class CancellationBoundApi
     /// <inheritdoc />
     public Task<DesktopHandoffResponse> OpenDesktopHandoffAsync(DesktopHandoffOpenRequest request, CancellationToken cancellationToken = default) =>
         ForwardAsync(token => inner.OpenDesktopHandoffAsync(request, token), cancellationToken);
+    /// <inheritdoc />
+    public Task<DesktopHandoffRemoveResponse> RemoveDesktopHandoffAsync(DesktopHandoffRemoveRequest request, CancellationToken cancellationToken = default) =>
+        ForwardAsync(token => inner.RemoveDesktopHandoffAsync(request, token), cancellationToken);
 }

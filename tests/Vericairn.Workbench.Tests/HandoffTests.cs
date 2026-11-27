@@ -108,6 +108,15 @@ public class HandoffTests(HeadlessFixture fixture)
         Assert.Empty(page.RemoteHandoffs);
         Assert.Empty(page.RemoteText);
         Assert.Null(page.SelectedRemoteHandoff);
+
+        acting = person;
+        await page.ReadRemoteHandoffsAsync(TestContext.Current.CancellationToken);
+        page.SelectedRemoteHandoff = Assert.Single(page.RemoteHandoffs);
+        await page.RemoveRemoteHandoffAsync(TestContext.Current.CancellationToken);
+        Assert.Empty(page.RemoteHandoffs);
+        Assert.Null(page.SelectedRemoteHandoff);
+        Assert.Contains("removed", page.RemoteNote, StringComparison.Ordinal);
+        Assert.Empty(api.DesktopHandoffs(person).Handoffs);
     }
 
     [Fact]

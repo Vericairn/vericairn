@@ -53,5 +53,55 @@ public sealed class DesktopHandoffTests
         Assert.Equal(records, fixture.Estate.Load().Records.Count);
     }
 
+    [Fact]
+    public void ExpiredHandoffsAndOpeningsAreRemoved()
+    {
+        using var fixture = new ProgressFixture();
+        using EstateService service = EstateService.Open(fixture.Estate.Root);
+        var clock = new WorkerClock(fixture.Estate.Clock);
+        service.WorkerOptions = service.WorkerOptions with { Clock = clock };
+        var request = Request(fixture);
+        DesktopHandoff prepared = Assert.IsType<DesktopHandoff>(service.PrepareDesktopHandoff(request).Handoff);
+        Assert.NotNull(service.OpenDesktopHandoff(new(request.By, prepared.Id)).Handoff?.OpenedAt);
+        string directory = Path.Combine(Path.GetDirectoryName(service.Session.Live.Path)!, "desktop-handoffs", request.By);
+        clock.Advance(TimeSpan.FromDays(30) - TimeSpan.FromSeconds(1));
+        Assert.Equal(RecordParser.FormatTimestamp(fixture.Estate.Clock.AddDays(30)), Assert.Single(service.DesktopHandoffs(request.By).Handoffs).ExpiresAt);
+        Assert.Single(Directory.EnumerateFiles(directory, "*.opened"));
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        Assert.Empty(service.DesktopHandoffs(request.By).Handoffs);
+        Assert.Equal("unknown", service.OpenDesktopHandoff(new(request.By, prepared.Id)).Problem?.Code);
+        Assert.Empty(Directory.EnumerateFiles(directory, "*.prepared"));
+        Assert.Empty(Directory.EnumerateFiles(directory, "*.opened"));
+    }
+
+    [Fact]
+    public void KeepsOriginalAtTheCapAndRemovalMakesRoom()
+    {
+        using var fixture = new ProgressFixture();
+        using EstateService service = EstateService.Open(fixture.Estate.Root);
+        DesktopHandoffRequest first = Request(fixture);
+        Assert.NotNull(service.PrepareDesktopHandoff(first).Handoff);
+        for (int index = 1; index < 32; index++)
+            Assert.NotNull(service.PrepareDesktopHandoff(Request(fixture)).Handoff);
+
+        DesktopHandoffRequest next = Request(fixture);
+        Assert.Equal("limit", service.PrepareDesktopHandoff(next).Problem?.Code);
+        Assert.Equal(first.RequestId, service.PrepareDesktopHandoff(first).Handoff?.Id);
+        Assert.NotNull(service.OpenDesktopHandoff(new(first.By, first.RequestId)).Handoff?.OpenedAt);
+        Assert.True(service.RemoveDesktopHandoff(new(first.By, first.RequestId)).Removed);
+        Assert.True(service.RemoveDesktopHandoff(new(first.By, first.RequestId)).Removed);
+        Assert.Equal("unknown", service.OpenDesktopHandoff(new(first.By, first.RequestId)).Problem?.Code);
+        Assert.NotNull(service.PrepareDesktopHandoff(next).Handoff);
+        Assert.Equal(32, service.DesktopHandoffs(first.By).Handoffs.Count);
+        string directory = Path.Combine(Path.GetDirectoryName(service.Session.Live.Path)!, "desktop-handoffs", first.By);
+        Assert.False(File.Exists(Path.Combine(directory, first.RequestId + ".prepared")));
+        Assert.False(File.Exists(Path.Combine(directory, first.RequestId + ".opened")));
+    }
+
+    private static DesktopHandoffRequest Request(ProgressFixture fixture) =>
+        new(fixture.Estate.OperatorId, Guid.NewGuid().ToString("N"), Pin(fixture.Goal), "Review on the desktop", "Full review needed", "A draft.");
+
     private static AttentionReference Pin(RecordEnvelope record) => new(record.Type, record.Id, record.ComputedHash);
 }

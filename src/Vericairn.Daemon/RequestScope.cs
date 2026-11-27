@@ -231,6 +231,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/handoff/desktop"] = null,
         ["POST /v1/handoff/desktop"] = typeof(DesktopHandoffRequest),
         ["POST /v1/handoff/desktop/open"] = typeof(DesktopHandoffOpenRequest),
+        ["POST /v1/handoff/desktop/remove"] = typeof(DesktopHandoffRemoveRequest),
         ["POST /v1/resume"] = typeof(HandoffPackage),
         ["GET /v1/context/work/{key}"] = null,
         ["GET /v1/context/work/{key}/brief"] = null,
@@ -388,6 +389,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             ? $"{operation} has no request scope rule and is refused."
             : operation == "POST /v1/handoff/desktop/open"
             ? "Open the handoff from Workbench on the runtime's machine."
+            : operation == "POST /v1/handoff/desktop/remove"
+            ? "Remove the handoff from Workbench on the runtime's machine."
             : operation == "GET /v1/devices/{id}/revocation-reach"
             ? Administrator("Reading revocation reach", device)
             : operation is "POST /v1/shutdown" or "POST /v1/runtime/certificate" && !service.Administers(device.Principal)
@@ -410,6 +413,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(HandoffPackage)] = (_, _, _) => null,
         [typeof(DesktopHandoffRequest)] = (_, r, d) => Acting(((DesktopHandoffRequest)r).By, d),
         [typeof(DesktopHandoffOpenRequest)] = (_, r, d) => Acting(((DesktopHandoffOpenRequest)r).By, d),
+        [typeof(DesktopHandoffRemoveRequest)] = (_, r, d) => Acting(((DesktopHandoffRemoveRequest)r).By, d),
         [typeof(CommunicationSetRequest)] = (_, r, d) => Acting(((CommunicationSetRequest)r).By, d),
         [typeof(AttentionAcknowledgeRequest)] = (_, r, d) => Acting(((AttentionAcknowledgeRequest)r).By, d),
         [typeof(PromptSaveRequest)] = (_, r, d) => Acting(((PromptSaveRequest)r).By, d),

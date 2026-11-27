@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
@@ -11,6 +12,9 @@ namespace Vericairn.Runtime.Service;
 
 public sealed partial class EstateService
 {
+    private const int MaximumHandoffsPerPerson = 32;
+    private static readonly TimeSpan HandoffRetention = TimeSpan.FromDays(30);
+
     /// <summary>The fingerprint of the identity this host presents to paired devices, when it serves them.</summary>
     public string? DesktopHandoffNode { get; set; }
 
@@ -25,8 +29,8 @@ public sealed partial class EstateService
             {
                 string directory = HandoffDirectory(principal);
                 if (!Directory.Exists(directory)) return new([]);
-                DesktopHandoff[] handoffs = Directory.EnumerateFiles(directory, "*.prepared")
-                    .Select(path => ReadHandoff(path) ?? throw new IOException("Missing prepared handoff."))
+                using FileStream? store = session.IsReadOnly ? null : LockHandoffs(principal);
+                DesktopHandoff[] handoffs = ActiveHandoffs(directory)
                     .Select(kept => ObserveHandoff(model, directory, kept))
                     .OrderByDescending(item => item.PreparedAt, StringComparer.Ordinal)
                     .ThenBy(item => item.Id, StringComparer.Ordinal).ToArray();
@@ -60,9 +64,13 @@ public sealed partial class EstateService
             string path = Path.Combine(directory, key + ".prepared");
             try
             {
-                DesktopHandoff? kept = ReadHandoff(path);
+                using FileStream store = LockHandoffs(request.By);
+                List<DesktopHandoff> active = ActiveHandoffs(directory);
+                DesktopHandoff? kept = active.FirstOrDefault(item => item.Id == key);
                 if (kept is null)
                 {
+                    if (active.Count >= MaximumHandoffsPerPerson)
+                        return new(null, new("limit", $"This person already has {MaximumHandoffsPerPerson} retained desktop handoffs. Remove a handoff in Workbench and try again.", []));
                     if (ExactHandoffRecord(model, request.Subject) is null ||
                         evidence.Any(pin => ExactHandoffRecord(model, pin) is null))
                         return new(null, new("conflict", "The exact subject or an evidence reference could not be checked. Refresh the subject and review it before preparing a handoff.", []));
@@ -101,8 +109,15 @@ public sealed partial class EstateService
             string directory = HandoffDirectory(request.By);
             try
             {
+                if (!Directory.Exists(directory)) return new(null, UnknownHandoff());
+                using FileStream store = LockHandoffs(request.By);
                 if (ReadHandoff(Path.Combine(directory, id.ToString("N") + ".prepared")) is not { } kept)
-                    return new(null, new("unknown", "No handoff with that identity is available for this person.", []));
+                    return new(null, UnknownHandoff());
+                if (HandoffExpiry(kept) <= WorkerOptions.Clock.GetUtcNow())
+                {
+                    DeleteHandoff(directory, kept.Id);
+                    return new(null, UnknownHandoff());
+                }
                 string path = HandoffOpenedPath(directory, kept.Id);
                 if (!File.Exists(path))
                     StoreHandoffObservation(directory, path, System.Text.Encoding.UTF8.GetBytes(RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow())));
@@ -115,6 +130,69 @@ public sealed partial class EstateService
         }
     }
 
+    /// <inheritdoc />
+    public DesktopHandoffRemoveResponse RemoveDesktopHandoff(DesktopHandoffRemoveRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            if (HandoffPrincipalRefusal(model, request.By) is { } problem) return new(false, problem);
+            if (session.IsReadOnly || requestDevice.Value is { Closed: false })
+                return new(false, new("denied", "Remove the handoff from Workbench on the runtime's machine.", []));
+            if (!Guid.TryParseExact(request.Id, "N", out Guid id) || id == Guid.Empty)
+                return new(false, UnknownHandoff());
+
+            string directory = HandoffDirectory(request.By);
+            try
+            {
+                if (!Directory.Exists(directory)) return new(true);
+                using FileStream store = LockHandoffs(request.By);
+                DeleteHandoff(directory, id.ToString("N"));
+                return new(true);
+            }
+            catch (Exception exception) when (HandoffStorageFailure(exception))
+            {
+                return new(false, HandoffUnavailable());
+            }
+        }
+    }
+
+    private List<DesktopHandoff> ActiveHandoffs(string directory)
+    {
+        var active = new List<DesktopHandoff>();
+        DateTimeOffset now = WorkerOptions.Clock.GetUtcNow();
+        foreach (string path in Directory.EnumerateFiles(directory, "*.prepared"))
+        {
+            if (ReadHandoff(path) is not { } kept) continue;
+            if (HandoffExpiry(kept) > now) active.Add(kept);
+            else if (!session.IsReadOnly) DeleteHandoff(directory, kept.Id);
+        }
+        return active;
+    }
+
+    private static DateTimeOffset HandoffExpiry(DesktopHandoff handoff) =>
+        DateTimeOffset.Parse(handoff.PreparedAt, CultureInfo.InvariantCulture).Add(HandoffRetention);
+
+    private static void DeleteHandoff(string directory, string id)
+    {
+        File.Delete(HandoffOpenedPath(directory, id));
+        File.Delete(Path.Combine(directory, id + ".prepared"));
+    }
+
+    // All operations on a person's store share this lock across processes, including the cap check and expiry.
+    private FileStream LockHandoffs(string principal)
+    {
+        OwnerOnlyState.CreateDirectory(HandoffRoot);
+        string directory = HandoffDirectory(principal);
+        OwnerOnlyState.CreateDirectory(directory);
+        var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = OwnerOnlyState.FileMode;
+        return new FileStream(Path.Combine(directory, "handoffs.lock"), options);
+    }
+
+    private static Problem UnknownHandoff() => new("unknown", "No handoff with that identity is available for this person.", []);
+
     private Problem? HandoffPrincipalRefusal(EstateModel model, string principal)
     {
         if (AttentionPrincipalRefusal(model, principal) is { } denied) return denied;
@@ -122,9 +200,11 @@ public sealed partial class EstateService
             ? null : new("denied", "Desktop handoffs are personal.", []);
     }
 
-    private string HandoffDirectory(string principal) => Path.Combine(Path.GetDirectoryName(session.Live.Path)!, "desktop-handoffs", principal);
+    private string HandoffRoot => Path.Combine(Path.GetDirectoryName(session.Live.Path)!, "desktop-handoffs");
 
-    private static bool HandoffStorageFailure(Exception exception) => exception is IOException or UnauthorizedAccessException or JsonException;
+    private string HandoffDirectory(string principal) => Path.Combine(HandoffRoot, principal);
+
+    private static bool HandoffStorageFailure(Exception exception) => exception is IOException or UnauthorizedAccessException or JsonException or FormatException;
 
     private static Problem HandoffUnavailable() => new("unavailable", "The runtime could not read or retain the handoff. Refresh Handoffs to reconcile this request.", []);
 
@@ -157,7 +237,7 @@ public sealed partial class EstateService
             "operation" => EstateModel.BodyString(record, "status"),
             _ => null,
         };
-        return kept with { OpenedAt = openedAt, SubjectState = state, SubjectStatus = status };
+        return kept with { OpenedAt = openedAt, SubjectState = state, SubjectStatus = status, ExpiresAt = RecordParser.FormatTimestamp(HandoffExpiry(kept)) };
     }
 
     private static void StoreHandoffObservation(string directory, string path, byte[] bytes)

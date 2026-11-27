@@ -490,6 +490,8 @@ public partial class MainWindow : Window
 
     private async void OnOpenRemoteHandoff(object? sender, RoutedEventArgs e) => await shell.OpenRemoteHandoffAsync(DocumentOf<HandoffDocument>(sender)).ConfigureAwait(true);
 
+    private async void OnRemoveRemoteHandoff(object? sender, RoutedEventArgs e) => await shell.RemoveRemoteHandoffAsync(DocumentOf<HandoffDocument>(sender)).ConfigureAwait(true);
+
     private async void OnResumeHandoff(object? sender, RoutedEventArgs e) => await shell.CompareHandoffAsync(DocumentOf<HandoffDocument>(sender)).ConfigureAwait(true);
 
     private void OnObserveEstate(object? sender, RoutedEventArgs e) => _ = shell.ObserveEstateAsync();

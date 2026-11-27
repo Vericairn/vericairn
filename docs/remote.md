@@ -97,9 +97,11 @@ context and its evidence references for your principal on the paired runtime. An
 preparation response is lost, **Refresh handoffs** checks for the original task.
 
 In Workbench on the serving runtime's machine, use **Hand-over and resume** as the same principal and open the task from
-**Desktop handoffs**. Check the pinned revision and evidence, plus any missing originals or newer subject state, before
+**From Remote**. Check the pinned revision and evidence, plus any missing originals or newer subject state, before
 continuing. On the phone, **Refresh handoffs** reads the opening time and the independently observed subject state. The
-prepared context grants no authority. Opening records a view of that context.
+prepared context grants no authority. Opening records a view of that context. A task expires after 30 days, and the
+runtime keeps up to 32 tasks per person. **Remove selected handoff** in Workbench removes the retained task and its
+opening information.
 
 ## Decisions and acceptances
 

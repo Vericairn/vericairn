@@ -78,6 +78,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/handoff/desktop", (string principal) => Results.Json(service.DesktopHandoffs(principal), ProtocolJson.Options));
         app.MapPost($"{v}/handoff/desktop", (DesktopHandoffRequest request) => Results.Json(service.PrepareDesktopHandoff(request), ProtocolJson.Options));
         app.MapPost($"{v}/handoff/desktop/open", (DesktopHandoffOpenRequest request) => Results.Json(service.OpenDesktopHandoff(request), ProtocolJson.Options));
+        app.MapPost($"{v}/handoff/desktop/remove", (DesktopHandoffRemoveRequest request) => Results.Json(service.RemoveDesktopHandoff(request), ProtocolJson.Options));
         app.MapPost($"{v}/resume", (HandoffPackage package) => Results.Json(service.ResumeHandoff(package), ProtocolJson.Options));
         app.MapGet($"{v}/context/work/{{key}}/brief", (string key, long? maxBytes, string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) => service.BriefContext(key, maxBytes, recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)) is { } brief ? Results.Json(brief, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/context/work/{{key}}", (string key, long? maxBytes) => Results.Json(service.Context(key, maxBytes), ProtocolJson.Options));

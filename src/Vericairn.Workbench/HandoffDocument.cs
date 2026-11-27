@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Globalization;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -59,7 +60,15 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
         remotePrincipal = person;
         await ReadAsync(async _ =>
         {
-            DesktopHandoffsResponse response = await estate.DesktopHandoffsAsync(person, cancellationToken).ConfigureAwait(true);
+            DesktopHandoffsResponse response;
+            try
+            {
+                response = await estate.DesktopHandoffsAsync(person, cancellationToken).ConfigureAwait(true);
+            }
+            catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+            {
+                response = new([], new("unsupported", "This runtime does not support desktop handoffs.", []));
+            }
             if (person != acting?.Invoke() || !ReferenceEquals(estate, api())) return;
             string? selected = SelectedRemoteHandoff?.Id;
             RemoteHandoffs = response.Handoffs;
@@ -96,11 +105,33 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             }
 
             RemoteNote = $"Opened in Workbench at {handoff.OpenedAt}.";
-            RemoteText = $"{handoff.Task}\n\nReason for handoff\n{handoff.Reason}\n\nEstate {handoff.Estate} · Runtime {handoff.Node ?? "identity unavailable"}\nPrepared at {handoff.PreparedAt}\nSubject revision: {handoff.SubjectState}\nObserved work status: {handoff.SubjectStatus ?? "unavailable here"}\nThe chosen task still needs its own review and completion.\n"
+            RemoteText = $"{handoff.Task}\n\nReason for handoff\n{handoff.Reason}\n\nEstate {handoff.Estate} · Runtime {handoff.Node ?? "identity unavailable"}\nPrepared at {handoff.PreparedAt}\n{(handoff.ExpiresAt is { } expiry ? $"Expires at {expiry}\n" : "")}Subject revision: {handoff.SubjectState}\nObserved work status: {handoff.SubjectStatus ?? "unavailable here"}\nThe chosen task still needs its own review and completion.\n"
                 + (handoff.Draft is null ? string.Empty : "\nDraft from Remote\n" + handoff.Draft + "\n")
                 + "\nOriginals\n" + originals;
             RemoteHandoffs = RemoteHandoffs.Select(item => item.Id == handoff.Id ? handoff : item).ToArray();
             SelectedRemoteHandoff = handoff;
+        }).ConfigureAwait(true);
+    }
+
+    /// <summary>Remove the selected handoff and its private draft from this runtime.</summary>
+    public async Task RemoveRemoteHandoffAsync(CancellationToken cancellationToken = default)
+    {
+        if (SelectedRemoteHandoff is not { } selected || acting?.Invoke() is not { } person ||
+            selected.By != person || api() is not { } estate) return;
+        await ReadAsync(async _ =>
+        {
+            DesktopHandoffRemoveResponse response = await estate.RemoveDesktopHandoffAsync(new(person, selected.Id), cancellationToken).ConfigureAwait(true);
+            if (person != acting?.Invoke() || !ReferenceEquals(estate, api())) return;
+            if (!response.Removed)
+            {
+                RemoteNote = response.Problem?.Message ?? "Removal has not been observed. Refresh Handoffs before retrying.";
+                return;
+            }
+
+            RemoteHandoffs = RemoteHandoffs.Where(item => item.Id != selected.Id).ToArray();
+            SelectedRemoteHandoff = null;
+            RemoteText = string.Empty;
+            RemoteNote = "The selected handoff was removed.";
         }).ConfigureAwait(true);
     }
 
