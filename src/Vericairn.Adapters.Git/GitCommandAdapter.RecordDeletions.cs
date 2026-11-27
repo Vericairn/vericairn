@@ -72,10 +72,14 @@ public sealed partial class GitCommandAdapter
                     return false;
 
                 string[] commits = line.Split(' ');
+                // The listing names only the newest deleting commit, so a merge's parents alone cannot tell the acknowledged deletion
+                // carried through from a later one: no commit between the named one and this one may add the path back.
                 return commits.Length >= 3 && commits[0] == commit && commits[1..].Any(parent =>
                     IsFullObjectId(parent) && Run(out _, "merge-base", "--is-ancestor", ancestor, parent) == 0 &&
                     Run(out byte[] tree, "ls-tree", "-z", "--full-tree", parent, "--", ":(literal)" + path) == 0 &&
-                    tree.Length == 0);
+                    tree.Length == 0) &&
+                    Run(out byte[] added, "log", "-m", "--no-renames", "--no-ext-diff", "--no-textconv", "--diff-filter=A", "--format=%H",
+                        ancestor + ".." + commit, "--", ":(literal)" + path) == 0 && added.Length == 0;
             }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or DecoderFallbackException)

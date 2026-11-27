@@ -215,9 +215,10 @@ public class HistoryCheckpointServiceTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void AnAcknowledgmentDoesNotSettleALaterDeletionOfTheSameBytes(bool deleteInMerge)
+    [InlineData("plain")]
+    [InlineData("side-branch")]
+    [InlineData("merge-reaching-the-acknowledged-deletion")]
+    public void AnAcknowledgmentDoesNotSettleALaterDeletionOfTheSameBytes(string how)
     {
         TestPrerequisites.RequireGit();
         using var f = new Fixture();
@@ -232,7 +233,17 @@ public class HistoryCheckpointServiceTests
         Git(root, [.. GitIdentity, "commit", "-q", "-m", "Restore the same record"]);
         Assert.DoesNotContain(f.Api.Check().Findings, x => x.Code == "history.deleted-in-git" && x.Location == record.ExpectedPath);
 
-        if (deleteInMerge)
+        if (how == "merge-reaching-the-acknowledged-deletion")
+        {
+            // A merge whose other parent reaches the acknowledged deletion, the restored record removed in the merge itself.
+            Git(root, "switch", "-q", "-c", "side", firstDeletion);
+            Git(root, [.. GitIdentity, "commit", "-q", "--allow-empty", "-m", "An empty commit after the acknowledged deletion"]);
+            Git(root, "switch", "-q", "main");
+            Git(root, [.. GitIdentity, "merge", "--no-ff", "--no-commit", "side"]);
+            Git(root, "rm", "-q", record.ExpectedPath);
+            Git(root, [.. GitIdentity, "commit", "-q", "-m", "Merge and delete the restored record"]);
+        }
+        else if (how == "side-branch")
         {
             // This parent has its own deletion, while the parent that reaches the acknowledged deletion holds the restored record.
             Git(root, "switch", "-q", "-c", "side", firstDeletion + "^");
