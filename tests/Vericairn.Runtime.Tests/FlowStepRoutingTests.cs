@@ -211,6 +211,73 @@ public class FlowStepRoutingTests
     }
 
     [Fact]
+    public void AStepAPersonCarriesWithoutATypedPathIsTakenAndItsBriefCarriesNoPattern()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        TemplateDefinition installed = FlowFixture.Install(run.Estate, FlowFixture.Song());
+        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":["song", "produce the song"],"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}""")))).Id;
+        JsonObject body = Body(run, (order, installed), op);
+        // The operator carries the writer's role, so no agent carries any step and no typed path is needed.
+        body["roles"]!.AsArray()[0] = FlowFixture.Role("writer", op);
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
+
+        GoalStepResponse check = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource) { Check = true });
+        Assert.True(check.Ok, check.Message);
+        Assert.Equal(["produce the song"], check.PermittedChanges);
+        GoalStepResponse taken = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
+        Assert.True(taken.Ok, taken.Message);
+        RecordEnvelope assignment = run.Estate.Load().ById[taken.Assignment!.Id];
+        string[] permitted = [.. assignment.Body.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray().Select(e => e.GetString()!)];
+        // The bare word "song" could be read as a pattern, so it is left out; the prose is kept.
+        Assert.Equal(["produce the song"], permitted);
+        Assert.All(permitted, entry => Assert.Null(PathPatterns.Pattern(entry)));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ARevisionOfTheWorkOrderAfterProposalNarrowsTheRunsPathsAndNeverWidensThem()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Run(run, scope: """["path:song/lyrics/**"]""");
+        string named = run.Estate.Load().ById[goal].Body.GetProperty("plan").GetProperty("workOrders")[0].GetString()!;
+
+        // Widened by a later revision, the run still reads the revision its goal names.
+        string widened = Revise(run, """["path:**"]""", named);
+        GoalStepResponse check = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource) { Check = true });
+        Assert.True(check.Ok, check.Message);
+        Assert.Equal(["path:song/lyrics/**"], check.PermittedChanges);
+
+        // Narrowed by a later revision, the run takes the narrower paths.
+        Revise(run, """["path:song/lyrics/verse/**"]""", widened);
+        GoalStepResponse step = Step(run, goal, "narrowed-after");
+        Assert.True(step.Ok, step.Message);
+        Assert.Equal("path:song/lyrics/verse/**", Assert.Single(run.Estate.Load().ById[step.Assignment!.Id].Body.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray()).GetString());
+    }
+
+    [Fact]
+    public void AHeldAssignmentStartedDirectlyAfterItsPathsNarrowIsRefused()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Run(run);
+        string named = run.Estate.Load().ById[goal].Body.GetProperty("plan").GetProperty("workOrders")[0].GetString()!;
+        GoalStepResponse first = Step(run, goal, "held-first");
+        Assert.True(first.Ok, first.Message);
+        string held = first.Assignment!.Id;
+
+        Revise(run, """["path:song/lyrics/**"]""", named);
+        RunResponse direct = run.Service.RunStart(new RunStartRequest(held, "claude-code", run.Estate.BuilderId, op, run.Resource, goal, WallMinutes: 30, Settings: Command(run, "held-direct")));
+        Assert.False(direct.Ok);
+        Assert.Contains("flow.permitted-paths", direct.Message, StringComparison.Ordinal);
+    }
+
+    private static string Revise(RunEstate run, string scope, string supersedes) =>
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId, RunEstate.Json($$"""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":{{scope}},"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}"""), Supersedes: supersedes))).Id;
+
+    [Fact]
     public void AnItemsToolIsTheLauncherOfTheRunThatProducedIt()
     {
         foreach ((string tool, string state) in new[] { ("claude-code", "satisfied"), ("codex", "unproven") })

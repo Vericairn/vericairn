@@ -26,16 +26,24 @@ internal static class FlowPermissions
         }
     }
 
-    internal static IReadOnlyList<string> For(RecordEnvelope goal, RecordEnvelope order, FlowStep step)
+    /// <summary>
+    /// The patterns a routed step may change: those every typed source permits. The work order's <c>path:</c> entries are read from the
+    /// revision the goal's plan names and from every later revision of it, each a source of its own, so a revision written after the
+    /// run was proposed can narrow them and never widen them; to widen them, the goal names the new revision.
+    /// </summary>
+    internal static IReadOnlyList<string> For(EstateModel model, RecordEnvelope goal, RecordEnvelope order, FlowStep step)
     {
         var sources = new List<string[]>();
         AddDeclared(step.Element);
         AddDeclared(FlowRuns.Plan(goal));
 
-        List<string> scoped = TJson.Strings(order.Body, "scope").Where(entry => entry.StartsWith(Prefix, StringComparison.Ordinal)).ToList();
-        if (scoped.Count > 0)
+        foreach (RecordEnvelope revision in Revisions(model, goal, order))
         {
-            sources.Add(Patterns(scoped.Select(entry => entry[Prefix.Length..])));
+            List<string> scoped = TJson.Strings(revision.Body, "scope").Where(entry => entry.StartsWith(Prefix, StringComparison.Ordinal)).ToList();
+            if (scoped.Count > 0)
+            {
+                sources.Add(Patterns(scoped.Select(entry => entry[Prefix.Length..])));
+            }
         }
 
         // A brief can express a list of patterns. Keep a supplied pattern only when every source permits all the paths it matches.
@@ -62,6 +70,26 @@ internal static class FlowPermissions
         }
     }
 
+    // The work order's revisions from the one the goal's plan names to the latest, earliest first; the latest alone when the plan names
+    // none of its chain.
+    private static IReadOnlyList<RecordEnvelope> Revisions(EstateModel model, RecordEnvelope goal, RecordEnvelope order)
+    {
+        string? named = TJson.Strings(TJson.Object(goal.Body, "plan"), "workOrders").FirstOrDefault();
+        List<string> chain = [.. model.Chain(order)];
+        int from = named is null ? -1 : chain.IndexOf(named);
+        return from < 0 ? [order] : [.. chain.Skip(from).Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>()];
+    }
+
+    /// <summary>
+    /// What a step's brief carries where no typed source gives it a pattern, which only a step no agent carries reaches: the work order's
+    /// prose, each entry kept only when it cannot be read as a pattern, or a sentence saying so. Never a pattern.
+    /// </summary>
+    internal static IReadOnlyList<string> Prose(RecordEnvelope order)
+    {
+        List<string> prose = [.. TJson.Strings(order.Body, "scope").Where(entry => PathPatterns.Pattern(entry) is null)];
+        return prose.Count > 0 ? prose : ["the work the step's work order describes; no typed path declaration covers it"];
+    }
+
     internal static IReadOnlyList<string>? Carried(IReadOnlyList<string> permitted, RecordEnvelope assignment)
     {
         string[] bounds = Patterns(permitted.Select(entry => entry[Prefix.Length..]));
@@ -78,7 +106,7 @@ internal static class FlowPermissions
         return [.. flow.Steps.Where(step => step.IsRouted && step.Reserved is null && Routing.ReservedAction(step.Role) is null
             && !configuration.Off.ContainsKey(step.Key) && (step.Each is null || FlowRuns.Items(goal, step.Each).Count > 0)
             && (MayRouteToAgent(step) || HasAgentReview(step))
-            && For(goal, order, step).Count == 0)];
+            && For(model, goal, order, step).Count == 0)];
 
         bool MayRouteToAgent(FlowStep step) =>
             (!step.Decides || (step.Transition is { PersonOnly: false } && configuration.Decider(step) != "rule"))

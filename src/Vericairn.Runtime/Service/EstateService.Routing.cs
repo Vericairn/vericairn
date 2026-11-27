@@ -51,7 +51,7 @@ public sealed partial class EstateService
             {
                 NextEligible.FlowRunRoutes flow = NextEligible.FlowRoutes(model, current, Machine(model));
                 (string runOverlaps, JsonArray runJson) = GoalOverlaps(model, flow.Position.Work is { } work ? [work] : [],
-                    flow.Position.Work is { } order && flow.Next is NextEligible.FlowStepRoute { Route.Assignment: null } step ? (order, step.Name, FlowPermissions.For(current, order, step.Step.Step)) : null);
+                    flow.Position.Work is { } order && flow.Next is NextEligible.FlowStepRoute { Route.Assignment: null } step ? (order, step.Name, FlowPermissions.For(model, current, order, step.Step.Step)) : null);
                 return new NextResponse(NextEligible.RenderText(model, flow) + runOverlaps, WithOverlaps(NextEligible.RenderJson(model, flow), runJson));
             }
 
@@ -207,7 +207,7 @@ public sealed partial class EstateService
             key = taken.Key;
             if (taken.Step is { } routedStep && route.State is not ("rule" or "request" or "attention"))
             {
-                IReadOnlyList<string> paths = FlowPermissions.For(current, taken.Order, routedStep.Step);
+                IReadOnlyList<string> paths = FlowPermissions.For(model, current, taken.Order, routedStep.Step);
                 if (route.State == "agent")
                 {
                     if (paths.Count == 0)
@@ -228,7 +228,9 @@ public sealed partial class EstateService
 
                 if (request.Check)
                 {
-                    return new GoalStepResponse(goalId, "check", route.Reason, true, key, route.State, route.Principal) { PermittedChanges = paths };
+                    // The brief's permitted changes as routing would write them: a step no agent carries may carry the work order's prose.
+                    return new GoalStepResponse(goalId, "check", route.Reason, true, key, route.State, route.Principal)
+                        { PermittedChanges = paths.Count > 0 ? paths : FlowPermissions.Prose(taken.Order) };
                 }
             }
 

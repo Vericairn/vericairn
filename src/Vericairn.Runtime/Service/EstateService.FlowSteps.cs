@@ -42,7 +42,12 @@ public sealed partial class EstateService
         return new Problem(FlowPermissions.Code, string.Join(" ", findings.Select(finding => finding.Message)), findings);
     }
 
-    private static JsonArray PathArray(IReadOnlyList<string> paths) => new([.. paths.Select(path => (JsonNode)path)]);
+    private static JsonArray PathArray(IReadOnlyList<string> paths) => new([.. paths.Select(path => (JsonNode)Clip(path, 2000))]);
+
+    // A routed step's permitted changes: the typed sources' patterns. Routing refuses an agent's step without one before this is written,
+    // so a step a person carries, or a reserved one, is the only one that reaches the prose, which is never a pattern.
+    private static IReadOnlyList<string> Permitted(EstateModel model, RecordEnvelope goal, RecordEnvelope order, FlowStep step) =>
+        FlowPermissions.For(model, goal, order, step) is { Count: > 0 } paths ? paths : FlowPermissions.Prose(order);
 
     /// <summary>The assignment routing writes for the step it takes: a work order's, or a run's flow step's.</summary>
     private static JsonObject Routed(EstateModel model, RecordEnvelope goal, Taken taken, string workspace, string routedWith) =>
@@ -140,7 +145,7 @@ public sealed partial class EstateService
         {
             ["outcome"] = Clip($"{instance.Name} {step.Title}: the {step.Kind} step of flow {flow.Pin.Id} {flow.Pin.Version} that goal {EstateModel.BodyString(goal, "title")} runs, carried as its {step.Role}.{(step.Action is null ? string.Empty : " " + step.Action)}{inputs}{role}", 4000),
             ["sources"] = sources,
-            ["permittedChanges"] = PathArray(FlowPermissions.For(goal, order, step)),
+            ["permittedChanges"] = PathArray(Permitted(model, goal, order, step)),
             ["prohibitedEffects"] = new JsonArray(constraints.Select(c => (JsonNode)Clip(c, 2000)).ToArray()),
             ["workspace"] = new JsonArray(Clip(workspace, 500)),
             ["limits"] = new JsonArray(Clip($"within the budget goal {goal.Id} grants: {granted}", 2000)),
@@ -212,7 +217,7 @@ public sealed partial class EstateService
         {
             ["outcome"] = Clip($"{instance.Name} review: review {review.What} at {review.Hash}, from step {instance.Name} {step.Title} of flow {flow.Pin.Id} {flow.Pin.Version} that goal {EstateModel.BodyString(goal, "title")} runs, before it is handed on. It takes {independence}, carried as its {review.Role}.{role}", 4000),
             ["sources"] = sources,
-            ["permittedChanges"] = PathArray(FlowPermissions.For(goal, order, step)),
+            ["permittedChanges"] = PathArray(Permitted(model, goal, order, step)),
             ["prohibitedEffects"] = new JsonArray(constraints.Select(c => (JsonNode)Clip(c, 2000)).ToArray()),
             ["workspace"] = new JsonArray(Clip(workspace, 500)),
             ["limits"] = new JsonArray(Clip($"within the budget goal {goal.Id} grants: {granted}", 2000)),

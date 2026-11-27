@@ -545,6 +545,13 @@ the run. Repeat `--flow-path` for each pattern. Routing derives each step's assi
 constrains the result. If an agent work step has no interpretable pattern covered by all its supplied lists, `goal propose`
 and `goal activate` refuse with `flow.permitted-paths`. Choose compatible lists and declare a narrower pattern where they overlap.
 
+The work order's `path:` entries are read from the revision the goal's plan names and from every later revision of it, each a list
+of its own, so a revision written after proposal can narrow a run's paths and never widen them; to widen them, revise the goal to
+name the new revision. A step a person carries, or a reserved one, needs no pattern: its brief carries the work order's prose
+entries that cannot be read as a pattern, never a pattern. `worker run` on a step's held assignment refuses with
+`flow.permitted-paths` unless the assignment's brief is within the step's current paths, as `goal step` does; a standing agent's
+steps keep their own briefs.
+
 `goal step <goal> --by <principal> --check` previews a flow run's next eligible step and its permitted changes without
 signing, recording or dispatching. With `--json`, the preview includes `step.permittedChanges` for the routed assignment.
 
