@@ -548,7 +548,8 @@ and `goal activate` refuse with `flow.permitted-paths`. Choose compatible lists 
 The work order's `path:` entries are read from the revision the goal's plan names and from every later revision of it, each a list
 of its own, so a revision written after proposal can narrow a run's paths and never widen them. When the named revision has no
 `path:` entry, a later revision's entries grant nothing. To widen them, or to give them first, revise the goal to name the new
-revision. A step a person carries, or a reserved one, needs no pattern: its brief carries the work order's prose
+revision. A later revision that drops every `path:` entry withdraws nothing: the run keeps the named revision's paths until the
+goal names another. A step a person carries, or a reserved one, needs no pattern: its brief carries the work order's prose
 entries that cannot be read as a pattern, never a pattern. `worker run` on a step's held assignment refuses with
 `flow.permitted-paths` unless the assignment's brief is within the step's current paths, as `goal step` does; a standing agent's
 steps keep their own briefs.
