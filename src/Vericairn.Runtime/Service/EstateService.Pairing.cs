@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
@@ -18,8 +19,14 @@ public sealed partial class EstateService
     // Tests provide isolated trust anchors and a recorded status list, never platform keys or a network call.
     internal AndroidKeyAttestation PairingAttestation { get; set; } = AndroidKeyAttestation.Google;
 
-    private string? PairingPresenceRefusal(PairingPlan plan, PairingDevice device)
+    private const string PairingEvidenceOnly = "Android attestation evidence is recorded only by a verified pairing.";
+
+    private static bool SuppliesPairingEvidence(string type, JsonElement body) => type == "admission"
+        && body.ValueKind == JsonValueKind.Object && body.TryGetProperty(AndroidAttestationEvidence.Field, out _);
+
+    private string? PairingPresenceRefusal(PairingPlan plan, PairingDevice device, DateTimeOffset at, out AndroidAttestationEvidence? evidence)
     {
+        evidence = null;
         if (device.AndroidAttestation is not { } chain)
         {
             return device.Presence == "required" || device.Presence == "declared" && device.Custody == DeviceKeyStores.AndroidKeystoreKind
@@ -27,7 +34,8 @@ public sealed partial class EstateService
                 : null;
         }
         if (plan.Format < 2 || device.Presence != "required" || device.Platform != "android" || device.Custody != DeviceKeyStores.AndroidKeystoreKind
-            || !PairingAttestation.Verify(chain, plan.RuntimeNonce, device.PublicKey))
+            || ParseAt(plan.At) is not { } plannedAt || plannedAt > at
+            || (evidence = PairingAttestation.Verify(chain, plan.RuntimeNonce, device.PublicKey, at)) is null)
         {
             return "Android key attestation did not verify per-use hardware authentication for this key and pairing. Nothing was recorded.";
         }
@@ -41,36 +49,57 @@ public sealed partial class EstateService
         return body;
     }
 
-    private const string AndroidPresenceReceipt = "The runtime verified Android hardware key attestation for this device record.";
+    private static JsonObject PairedAdmissionBody(PairingPlan plan, string note, AndroidAttestationEvidence? evidence)
+    {
+        var body = new JsonObject { ["principal"] = plan.Principal, ["status"] = "admitted", ["note"] = note };
+        if (evidence is not null) body[AndroidAttestationEvidence.Field] = JsonNode.Parse(evidence.ToElement().GetRawText());
+        return body;
+    }
 
-    private static string? ReportedPresence(EstateModel model, RecordEnvelope device)
+    private string? ReportedPresence(EstateModel model, RecordEnvelope device)
     {
         string? presence = EstateModel.BodyString(device, "presence");
         if (presence != "required") return presence;
         string? custody = EstateModel.BodyString(device, "custody");
+        string? platform = EstateModel.BodyString(device, "platform");
         RecordEnvelope initial = model.ById[model.Chain(device)[0]];
-        if (custody == DeviceKeyStores.AndroidKeystoreKind && EstateModel.BodyString(device, "platform") == "android"
-            && EstateModel.BodyString(device, "presenceVerification") == DeviceRecords.AndroidKeyAttestation)
+        if (custody == DeviceKeyStores.AndroidKeystoreKind && platform == "android"
+            && EstateModel.BodyString(device, "presenceVerification") == DeviceRecords.AndroidKeyAttestation
+            && EstateModel.BodyString(device, "publicKey") is { } key
+            && HasVerifiedAndroidPresence(model, initial, key)) return "required";
+
+        // Earlier phone pairings were declarations. A rotation retains the original device identity.
+        return IsPhone(device) || IsPhone(initial) ? "declared" : presence;
+    }
+
+    private static bool IsPhone(RecordEnvelope device) => EstateModel.BodyString(device, "platform") is "android" or "ios"
+        || EstateModel.BodyString(device, "custody") is DeviceKeyStores.AndroidKeystoreKind or DeviceKeyStores.IosSecureEnclaveKind;
+
+    private bool HasVerifiedAndroidPresence(EstateModel model, RecordEnvelope initial, string key)
+    {
+        if (EstateModel.BodyString(initial, "publicKey") != key || EstateModel.BodyString(initial, "platform") != "android"
+            || EstateModel.BodyString(initial, "custody") != DeviceKeyStores.AndroidKeystoreKind
+            || EstateModel.BodyString(initial, "presence") != "required"
+            || EstateModel.BodyString(initial, "presenceVerification") != DeviceRecords.AndroidKeyAttestation) return false;
+
+        foreach (RecordEnvelope admission in model.About(initial.Id, "admission"))
         {
-            // The phone's signature covers the marker. The verified administrator's admission covers that very record.
-            bool sameAttestedKey = EstateModel.BodyString(initial, "publicKey") == EstateModel.BodyString(device, "publicKey")
-                && EstateModel.BodyString(initial, "platform") == "android"
-                && EstateModel.BodyString(initial, "custody") == DeviceKeyStores.AndroidKeystoreKind
-                && EstateModel.BodyString(initial, "presence") == "required"
-                && EstateModel.BodyString(initial, "presenceVerification") == DeviceRecords.AndroidKeyAttestation;
-            bool verified = sameAttestedKey && model.About(initial.Id, "admission").Any(admission =>
-                admission.Subject?.Hash == initial.ComputedHash && admission.Signatures.Count > 0
-                && EstateModel.BodyString(admission, "status") == "admitted"
-                && EstateModel.BodyString(admission, "note")?.EndsWith(AndroidPresenceReceipt, StringComparison.Ordinal) == true
-                && SignatureChecks.Counts(model, admission));
-            return verified ? "required" : "declared";
+            if (admission.Subject?.Hash != initial.ComputedHash || admission.Signatures.Count == 0 || admission.Format < 2
+                || admission.Supersedes is not null || admission.AtTime < initial.AtTime
+                || EstateModel.BodyString(admission, "status") != "admitted"
+                || !admission.Body.TryGetProperty(AndroidAttestationEvidence.Field, out JsonElement evidence) || evidence.ValueKind != JsonValueKind.Object
+                || !evidence.TryGetProperty("certificates", out JsonElement certificates) || certificates.ValueKind != JsonValueKind.Array
+                || certificates.GetArrayLength() is < 1 or > AndroidAttestationEvidence.MaxCertificates
+                || !evidence.TryGetProperty("challenge", out JsonElement challenge) || challenge.ValueKind != JsonValueKind.String
+                || !SignatureChecks.Counts(model, admission)) continue;
+
+            string[] supplied = certificates.EnumerateArray().Select(cert => cert.ValueKind == JsonValueKind.String ? cert.GetString()! : "").ToArray();
+            // Certificate validity is judged at admission. Current Google status and all attested facts are checked again.
+            AndroidAttestationEvidence? verified = PairingAttestation.Verify(supplied, challenge.GetString()!, key, admission.AtTime);
+            if (verified is not null && JsonElement.DeepEquals(evidence, verified.ToElement())) return true;
         }
-        bool wasPaired = model.About(initial.Id, "admission").Any(admission =>
-            EstateModel.BodyString(admission, "note") is string note
-            && (note.StartsWith("Paired over the local network with a pairing code ", StringComparison.Ordinal) || note.EndsWith(AndroidPresenceReceipt, StringComparison.Ordinal))
-            && SignatureChecks.Counts(model, admission));
-        // Signed historical records remain intact. Earlier pairings did not independently establish presence.
-        return wasPaired || custody is DeviceKeyStores.AndroidKeystoreKind or DeviceKeyStores.IosSecureEnclaveKind ? "declared" : presence;
+
+        return false;
     }
 
     /// <summary>Checks issuance and pins its requesting device (or local admission signer) and the authority it uses.</summary>

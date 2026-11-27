@@ -31,6 +31,7 @@ public sealed partial class EstateService
         ArgumentNullException.ThrowIfNull(request);
         if (requestDevice.Value is not RequestDeviceScope device || device.Closed)
             return Unprepared("refused", "A record is prepared for the device whose request asks for it, so only a device-signed request can prepare one.");
+        if (SuppliesPairingEvidence(request.Type, request.Body)) return Unprepared("refused", PairingEvidenceOnly);
         if (RecordTypeRegistry.Find(request.Type) is null) return Unprepared("refused", $"Unknown record type '{request.Type}'.");
         if (!Ulid.IsValid(request.By)) return Unprepared("refused", "The authoring principal must be a ULID.");
         if (request.At is not null || request.Id is not null) return Unprepared("refused", "The runtime fixes a prepared record's id and time.");

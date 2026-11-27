@@ -390,6 +390,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public WriteOutcome NewRecord(NewRecordRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (SuppliesPairingEvidence(request.Type, request.Body)) return Refuse(PairingEvidenceOnly);
         if (RecordTypeRegistry.Find(request.Type) is null)
         {
             return Refuse($"Unknown record type '{request.Type}'.");
@@ -2357,7 +2358,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// Records a paired device and, from 0.9.0 (REMOTE-11), the presence device the same phone presented with it: a second key of the
-    /// same principal, stating presence required, with the same profiles, admitted under the same issuer's authority. Both devices'
+    /// same principal, with verified or declared presence, the same profiles and the same issuer's authority. Both devices'
     /// signatures are verified before anything is written; the four records are judged together and stored as one batch, so a refused
     /// presence device records neither. Without a presence device this is the pairing of one device, as before.
     /// </summary>
@@ -2378,7 +2379,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return (Refuse("The device presented no usable P-256 public key."), null, null, null);
         }
 
-        if (PairingPresenceRefusal(plan, device) is string invalidPresence)
+        DateTimeOffset admittedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        if (PairingPresenceRefusal(plan, device, admittedAt, out AndroidAttestationEvidence? evidence) is string invalidPresence)
         {
             return (Refuse(invalidPresence), null, null, null);
         }
@@ -2416,9 +2418,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (written, null, null, null);
             }
 
-            var admission = new JsonObject { ["principal"] = plan.Principal, ["status"] = "admitted", ["note"] = device.AndroidAttestation is null ? note : note + " " + AndroidPresenceReceipt };
+            JsonObject admission = PairedAdmissionBody(plan, note, evidence);
             using JsonDocument document = JsonDocument.Parse(admission.ToJsonString());
-            WriteOutcome admitted = WriteLocked(new RecordDraft("admission", issuer.Principal, document.RootElement, new RecordReference("device", plan.Record, written.Written!.Hash)), session.Load());
+            WriteOutcome admitted = WriteLocked(new RecordDraft("admission", issuer.Principal, document.RootElement,
+                new RecordReference("device", plan.Record, written.Written!.Hash), At: evidence is null ? null : admittedAt), session.Load());
             if (!admitted.Ok)
             {
                 session.Discard(RecordAuthor.Create(draft, [signer]));
@@ -2448,8 +2451,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refused("refused", "The presence device is a second key; it never repeats the paired device's key. Nothing was recorded.");
         if (presence.Presence is not ("required" or "declared") || device.Presence is "required" or "declared")
             return Refused("refused", "The presence device states a presence requirement and the paired device that signs requests does not. Nothing was recorded.");
-        if ((PairingPresenceRefusal(plan, device) ?? PairingPresenceRefusal(plan, presence)) is string invalidPresence)
-            return Refused("refused", invalidPresence);
+        DateTimeOffset admittedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        if (PairingPresenceRefusal(plan, device, admittedAt, out _) is string requestRefusal)
+            return Refused("refused", requestRefusal);
+        if (PairingPresenceRefusal(plan, presence, admittedAt, out AndroidAttestationEvidence? evidence) is string presenceRefusal)
+            return Refused("refused", presenceRefusal);
 
         lock (gate)
         {
@@ -2486,18 +2492,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             var records = new List<AuthoredRecord>();
-            foreach ((RecordDraft deviceDraft, string deviceHash, string deviceSignature, string admissionNote) in new[]
+            foreach ((RecordDraft deviceDraft, string deviceHash, string deviceSignature, string admissionNote, AndroidAttestationEvidence? attestation) in new[]
             {
-                (draft, hash, signature, note),
-                (presenceDraft, presenceHash, presenceSignature, note + $" It is the presence device of device {plan.Record}, a second key presented for record signing in the same exchange."
-                    + (presence.AndroidAttestation is null ? "" : " " + AndroidPresenceReceipt)),
+                (draft, hash, signature, note, null),
+                (presenceDraft, presenceHash, presenceSignature, note + $" It is the presence device of device {plan.Record}, a second key presented for record signing in the same exchange.", evidence),
             })
             {
                 (AuthoredRecord? deviceRecord, string? deviceRefusal) = AuthorLocked(deviceDraft, model, [new PresignedSigner(deviceDraft.Id!, deviceHash, deviceSignature)]);
                 if (deviceRecord is null) return Refused("refused", deviceRefusal! + " Nothing was recorded.");
-                using JsonDocument admission = JsonDocument.Parse(new JsonObject { ["principal"] = plan.Principal, ["status"] = "admitted", ["note"] = admissionNote }.ToJsonString());
+                using JsonDocument admission = JsonDocument.Parse(PairedAdmissionBody(plan, admissionNote, attestation).ToJsonString());
                 (AuthoredRecord? admitted, string? admissionRefusal) = AuthorLocked(new RecordDraft("admission", issuer.Principal, admission.RootElement.Clone(),
-                    new RecordReference("device", deviceDraft.Id!, deviceRecord.Envelope.ComputedHash)), model);
+                    new RecordReference("device", deviceDraft.Id!, deviceRecord.Envelope.ComputedHash), At: attestation is null ? null : admittedAt), model);
                 if (admitted is null) return Refused("refused", "Nothing was recorded: a device's admission was refused. " + admissionRefusal);
                 records.Add(deviceRecord);
                 records.Add(admitted);

@@ -12,6 +12,10 @@ format. Exact content hashes, signed outcomes, agent citations and carry-over
 links are described in [Operator requests](operator-requests.md). Existing record
 bytes and their validation remain unchanged; no format migration is needed.
 
+From 0.9.5, devices and admissions in formats 2 and 3 can carry
+[Android presence evidence](record-format-v2.md#android-presence-evidence-095). This addition needs no format migration.
+Readers need 0.9.5 before the estate writes the new presence fields or values.
+
 Record format 3 adds attributable policy definitions, bounded exceptions and recurring-duty evidence. It is
 the POLICY-01 record and migration contract for 0.8.0. A manifest at format 3 makes a
 format-2 reader refuse the estate before opening a writable runtime. Each older record retains its original

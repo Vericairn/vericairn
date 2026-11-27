@@ -28,6 +28,7 @@
     <Compile Include="../TestSupport/RecordedNuGetHandler.cs" Link="TestSupport/RecordedNuGetHandler.cs" />
     <None Include="../TestSupport/NuGetFixtures/*.json" Link="NuGetFixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/android-attestation/*.der" Link="AndroidAttestation/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/android-attestation/*.pem" Link="AndroidAttestation/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../fixtures/template-adoption/*.md" Link="TemplateAdoption/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

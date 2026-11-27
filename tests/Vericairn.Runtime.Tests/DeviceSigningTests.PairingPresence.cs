@@ -10,6 +10,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
@@ -22,26 +23,26 @@ public sealed partial class DeviceSigningTests
 {
     private static readonly string[] Profiles = ["local-network"];
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void RecordedAttestationFixturesDistinguishPerUseFromTimedAuthentication(bool nativeTrust)
+    [Fact]
+    public void RecordedAttestationFixturesDistinguishPerUseFromTimedAuthentication()
     {
+        SyntheticAndroidAttestation.RequireNativeTrust();
         string directory = Path.Combine(AppContext.BaseDirectory, "AndroidAttestation");
         using X509Certificate2 root = X509CertificateLoader.LoadCertificateFromFile(Path.Combine(directory, "root.der"));
-        var verifier = new AndroidKeyAttestation(new X509Certificate2Collection(root), new FixtureClock(), () => new HashSet<string>(), nativeTrust ? null : SyntheticAndroidAttestation.CheckFixtureChain);
+        var verifier = new AndroidKeyAttestation(new X509Certificate2Collection(root), new FixtureClock(), () => new HashSet<string>());
         string nonce = Base64Url.EncodeToString(Enumerable.Range(0, 32).Select(value => (byte)value).ToArray());
         foreach ((string fixture, bool expected) in new[] { ("per-use.der", true), ("timed.der", false) })
         {
             using X509Certificate2 leaf = X509CertificateLoader.LoadCertificateFromFile(Path.Combine(directory, fixture));
             using ECDsa key = leaf.GetECDsaPublicKey()!;
-            Assert.Equal(expected, verifier.Verify([Base64Url.EncodeToString(leaf.RawData), Base64Url.EncodeToString(root.RawData)], nonce, Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo())));
+            Assert.Equal(expected, verifier.Verify([Base64Url.EncodeToString(leaf.RawData), Base64Url.EncodeToString(root.RawData)], nonce, Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo())) is not null);
         }
     }
 
     [Fact]
     public void AndroidRecordsRequiredAndItsMethodOnlyAfterVerification()
     {
+        SyntheticAndroidAttestation.RequireNativeTrust();
         using var estate = new TestEstate(3);
         using EstateService service = EstateService.Open(estate.Root);
         PairingAuthority authority = Authority(estate, service);
@@ -62,6 +63,16 @@ public sealed partial class DeviceSigningTests
         Assert.Equal("required", EstateModel.BodyString(record, "presence"));
         Assert.Equal(DeviceRecords.AndroidKeyAttestation, EstateModel.BodyString(record, "presenceVerification"));
         Assert.False(record.Body.TryGetProperty("androidAttestation", out _));
+        RecordEnvelope admission = estate.Load().ById[result.PresenceAdmission!.Written!.Id];
+        Assert.Equal(record.Reference, admission.Subject);
+        Assert.False(estate.Load().ById[result.Admission!.Written!.Id].Body.TryGetProperty("androidAttestation", out _));
+        JsonElement retained = admission.Body.GetProperty("androidAttestation");
+        Assert.Equal(ContentHash.Sha256(Base64Url.DecodeFromChars(second.AndroidAttestation![0])), retained.GetProperty("leafDigest").GetString());
+        Assert.Equal(plan.RuntimeNonce, retained.GetProperty("challenge").GetString());
+        Assert.Equal(3, retained.GetProperty("userAuthType").GetInt32());
+        Assert.True(retained.GetProperty("perUse").GetBoolean());
+        Assert.True(retained.GetProperty("deviceLocked").GetBoolean());
+        Assert.Equal("verified", retained.GetProperty("verifiedBootState").GetString());
         Assert.Equal("required", Assert.Single(service.Devices(), device => device.Id == record.Id).Presence);
 
         // Retaining the marker in a revision cannot make the issued evidence stand for another key.
@@ -76,6 +87,48 @@ public sealed partial class DeviceSigningTests
         RecordAuthor.Write(estate.Root, invalidRotation);
         Assert.Contains(estate.Load().Findings, finding => finding.Code == "device.presence-verification" && finding.Location == invalidRotation.Envelope.ExpectedPath);
         Assert.Equal("declared", Assert.Single(service.Devices(), device => device.Id == record.Id).Presence);
+    }
+
+    [Fact]
+    public void DeviceListAndAlternateSignerRecheckAndroidRevocation()
+    {
+        SyntheticAndroidAttestation.RequireNativeTrust();
+        using var estate = new TestEstate(3);
+        using EstateService service = EstateService.Open(estate.Root);
+        PairingAuthority authority = Authority(estate, service);
+        using var attestation = new SyntheticAndroidAttestation();
+        var revocations = new HashSet<string>();
+        service.PairingAttestation = attestation.Verifier(() => revocations);
+        PairingPlan plan = service.PairingPlan(estate.OperatorId);
+        using ECDsa phoneKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        PairingDevice phone = Device(phoneKey, "android", DeviceKeyStores.AndroidKeystoreKind, "required") with
+        {
+            AndroidAttestation = attestation.Issue(phoneKey.ExportSubjectPublicKeyInfo(), Base64Url.DecodeFromChars(plan.RuntimeNonce)),
+        };
+        (WriteOutcome written, WriteOutcome? admission) = service.PairDevice(plan, Profiles, phone, Sign(plan, plan.Record, phone, phoneKey), authority, "Presence upgrade.");
+        Assert.True(written.Ok, written.Problem?.Message);
+        Assert.True(admission?.Ok, admission?.Problem?.Message);
+        Assert.Equal("required", Assert.Single(service.Devices(), row => row.Id == plan.Record).Presence);
+
+        string requesterKey = EstateModel.BodyString(estate.Load().ById[authority.Device], "publicKey")!;
+        using JsonDocument order = JsonDocument.Parse(ResultOutputSchemeTests.OrderBody);
+        using (service.ForDeviceRequest(authority.Device, requesterKey, null))
+        {
+            RecordPrepareResponse prepared = service.PrepareRecord(new("work-order", estate.OperatorId, order.RootElement.Clone()));
+            Assert.True(prepared.Ok, prepared.Problem?.Message);
+
+            // Change only Google's status since pairing, between preparation and the alternate signature.
+            revocations.Add("2");
+            var signed = new SignedRecordRequest(prepared.Prepared!.Plan,
+                Base64Url.EncodeToString(phoneKey.SignHash(RecordSigning.Digest(prepared.Prepared.Hash)))) { Device = plan.Record };
+            WriteOutcome refused = service.NewSignedRecord(signed);
+            Assert.False(refused.Ok);
+            Assert.Contains("no verified per-signature presence", refused.Problem?.Message, StringComparison.Ordinal);
+        }
+
+        using EstateService reopened = EstateService.Open(estate.Root);
+        reopened.PairingAttestation = attestation.Verifier(() => revocations);
+        Assert.Equal("declared", Assert.Single(reopened.Devices(), row => row.Id == plan.Record).Presence);
     }
 
     [Theory]
@@ -93,6 +146,7 @@ public sealed partial class DeviceSigningTests
     [InlineData("status-unavailable")]
     public void AnUnverifiedAndroidKeyLeavesNoDeviceOrAdmission(string reason)
     {
+        if (reason is not ("missing" or "malformed")) SyntheticAndroidAttestation.RequireNativeTrust();
         using var estate = new TestEstate(3);
         using EstateService service = EstateService.Open(estate.Root);
         PairingAuthority authority = Authority(estate, service);

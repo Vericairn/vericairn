@@ -38,7 +38,8 @@ internal static class AndroidAttestationStatus
                 var serials = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (JsonProperty entry in entries.EnumerateObject())
                 {
-                    if (!serials.Add(entry.Name.TrimStart('0'))) return null;
+                    if (entry.Name.Length == 0 || !entry.Name.All(char.IsAsciiHexDigit)
+                        || !serials.Add(entry.Name.TrimStart('0'))) return null;
                 }
                 TimeSpan advertised = response.Headers.CacheControl?.MaxAge ?? TimeSpan.Zero;
                 TimeSpan age = response.Headers.Age ?? TimeSpan.Zero;

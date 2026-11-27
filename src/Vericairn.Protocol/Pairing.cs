@@ -39,7 +39,8 @@ public sealed record PairingHello(string Nonce, string Mac)
 {
     /// <summary>
     /// From 0.9.0 (REMOTE-11): true when the device will also present its presence device, a second key of the same phone whose every
-    /// signature needs its owner's presence. A runtime that offers one names its record in the challenge; an earlier runtime ignores it.
+    /// signature needs its owner's presence. From 0.9.5 the runtime offers a second record only when the hello also announces
+    /// <see cref="PresenceAttestation"/>. Older clients can still pair their request key.
     /// </summary>
     public bool? Presence { get; init; }
 

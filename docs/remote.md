@@ -106,10 +106,11 @@ record's identity, and only then sends the signature. A change at either check l
 draft beside the new revision; another review is required. A declined or failed presence prompt signs and sends nothing, and
 your words stay a draft for another review.
 
-Only a verified presence key signs a decision or an acceptance on a runtime from 0.9.5. The phone's request key, which signs every request without asking,
-never does. A phone without a presence key for the estate cannot sign a decision: the review says so and offers **Add presence
-key**, described under [Pairing a phone](#pairing-a-phone). The runtime records the presence key's signature, and its local-network
-write ledger names the request device that sent it.
+Remote prepares these records with the phone's request key and submits them with its separate presence key. From 0.9.5,
+the runtime accepts that second signature only from a device whose presence requirement it recognizes as `required`.
+The recorded signature names the presence device, and the local-network write ledger names the request device that sent it.
+See [Keys and custody](#keys-and-custody) for what an older pairing or an iPhone can still do. A phone without a presence key
+can use **Add presence key** as described under [Pairing a phone](#pairing-a-phone).
 
 **Defer** acknowledges only the original notice's attention state. It answers or accepts nothing. **Request changes** explains
 the desktop route; this phone flow has no suitable change-request record and sends no substitute. Preparing handoffs for these
@@ -134,7 +135,7 @@ how many of how many were written, and an ask once answered is never answered ag
 `act.count`, and its synthesis, say how many asks the act set out to answer, the ones you chose before its first signature; after a
 stop, fewer decisions name the act than its count, and those that do are the ones written. The act's
 outcome is shown until the app closes; unlike a single decision's draft it is not kept in app storage, and the asks the act
-answered no longer wait on you. A phone without its presence key signs no act.
+answered no longer wait on you. The act uses the same presence device and runtime verification as a single decision.
 
 ## Ready items in one reviewed act (0.9.4)
 
@@ -254,9 +255,10 @@ Remote may use the local network. The runtime proves its identity and its knowle
 key and, where its custody can require presence, its presence key, and the phone asks for your presence once, so the presence
 key can sign its own device record. The runtime records both devices for the same person and profiles, and admits both under
 the authority of the administrator who issued the code. The presence device's record says whether the runtime verified the
-requirement, and its admission names the request device it pairs with. If the runtime refuses either device, it records neither. If the phone cannot make the
-presence key (an iPhone without a passcode, an Android phone without a secure lock screen) or you decline the prompt, the phone
-pairs with its request key alone and can add the presence key later. The connection pins the runtime's identity.
+requirement, and its admission names the request device it pairs with. If the runtime refuses either device, it records neither.
+If the phone cannot make the presence key (an iPhone without a passcode, an Android phone without a secure lock screen) or you
+decline the prompt, the phone pairs with its request key alone. A 0.9.5 runtime offers Remote 0.9.0 through 0.9.4 only a request
+key, even if the phone has a secure lock screen. The connection pins the runtime's identity.
 
 From 0.9.5 (FIX-164), Remote pairs on Android. Before, it closed when **Pair** was tapped: .NET's TLS on Android ends the
 process when it is given the local network's list of cipher suites, so an Android phone now offers none, the runtime chooses
@@ -265,16 +267,16 @@ key or the presence key, could sign on Android either, which would have ended ev
 fails says why on the form, as does a code that is not one; an error Remote does not expect is shown on the form, or under the
 connection line on the home, and Remote stays open.
 
-A phone paired before it had a presence key, or one whose runtime did not offer one, adds it later: open a decision, and under
-**Add presence key** enter a new code the administrator issued for the same person with the same command. The runtime must
+A phone paired without a presence key can add one with an updated client. Open a decision and under **Add presence key**
+enter a new code the administrator issued for the same person with the same command. The runtime must
 prove the same identity and name the same estate and person before the phone makes the key; it then records and admits the
 presence key as one more device of yours, under that code's authority. A code for anyone else is refused, and nothing is
 recorded.
 
 ## Keys and custody
 
-A paired phone holds two keys, each recorded as its own device of the same person. Neither leaves the phone, and each device
-record says how its key is held and whether it needs its owner's presence:
+A paired phone holds a request key and, where supported, a presence key. Each key stays on the phone, with its own device
+record for the same person describing custody and presence.
 
 | Where | Request key | Presence key |
 | --- | --- | --- |
@@ -284,17 +286,30 @@ record says how its key is held and whether it needs its owner's presence:
 | iOS simulator | `file-owner-only`, presence `none`: the simulator has no Secure Enclave, so the key is an owner-only file in the app's storage. | None: an owner-only file cannot require presence, so a simulator build claims none and signs no decision. |
 
 The request key signs requests and connection certificates without prompting. Starting in 0.9.5 (REMOTE-12), the runtime
-verifies Android presence keys during pairing. It checks the certificate chain against Google's Android attestation roots and
-certificate status list, matches the leaf public key and the exchange's fresh challenge, and checks that the hardware requires
-authentication for each use. A status-list request goes from the runtime to Google without a phone or estate identifier. A
-failed check refuses the pairing, and the estate keeps the verification method and the administrator's signed admission.
-The certificate chain stays out of the device record.
+verifies Android presence keys during pairing. It validates the certificate chain with Google's pinned attestation root keys
+and certificate status list. It matches the leaf public key and the exchange's fresh challenge, and checks for hardware-backed
+per-use authentication, a locked bootloader and verified boot. It checks the `com.vericairn.remote` package name, requires
+the package's signer digests and checks the OS version and patch dates reported by the platform.
+A failed check refuses the pairing. The estate keeps the verification method on the device record and typed evidence,
+including the certificate chain, in the administrator's signed admission. The runtime rechecks that evidence and revocation
+status when it lists devices and before a different device signs a prepared record. If the runtime cannot obtain a fresh
+certificate status list, it does not report or authorize verified presence. A status-list request goes from the runtime to
+Google without a phone or estate identifier.
 
 On iOS, App Attest can establish app integrity and bind data to an app assertion. Apple provides no attestation for the
-per-use access controls of the separate Secure Enclave signing key Remote uses. Its access-control claim is therefore
-`declared`. The runtime reports previously paired phone keys without verification as declared and requires verified presence
-before a paired phone key can sign a plan another device prepared. Use a verified Android presence key or the desktop for
-those decisions. Simulator and CI builds observe no phone prompt.
+per-use access controls of the separate Secure Enclave signing key Remote uses, so the runtime reports the key as `declared`.
+The runtime reports previously paired Android and iOS presence keys without verification the same way. Both kinds of phone
+can still use their admitted request keys for authorized requests. The API continues to accept a requesting device's
+signature on its own prepared record when that write is otherwise authorized. Remote uses a separate presence device for
+decisions, acceptances and reviewed acts, which the runtime refuses for a `declared` key. A locally held `declared` key may
+still prompt you before the runtime refuses the submission. Complete the review and sign on the desktop in Workbench or
+use an eligible Android pairing. Simulator and CI builds observe no phone prompt.
+
+To replace an older Android pairing, update Remote, obtain a new pairing code for the same principal and choose **Add**
+on the Remote home screen. Enter the same runtime address and the new code, then choose **Pair**. The new connection replaces
+the saved connection for that estate and principal. Confirm the new presence device is listed as `required` on the runtime,
+then revoke the two old device ids. Check drafts tied to the old connection before replacing it. On an iPhone or iPad,
+use the desktop signing route and keep the phone's request key for continued access.
 
 Remote's connections are excluded from backups: a replacement phone pairs again instead of inheriting access. To retire a lost
 phone, revoke both of its devices with `vericairn devices revoke <device>`. That erases no estate history. Enrolling a new
