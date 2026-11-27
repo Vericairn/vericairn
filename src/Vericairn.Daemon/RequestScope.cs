@@ -361,7 +361,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/objects/{hash}"] = null,
         ["POST /v1/shutdown"] = null,
         ["POST /v1/pairings"] = typeof(PairingIssueRequest),
-        ["POST /v1/runtime/mcp/authorize"] = null, // Its route admits only the positively identified local socket.
+        ["POST /v1/runtime/mcp/authorize"] = typeof(McpAuthorizeRequest), // The route also requires the local socket.
         ["POST /v1/pairing/hello"] = typeof(PairingHello),
         ["POST /v1/pairing/confirm"] = typeof(PairingConfirm),
         ["GET /v1/runtime/identity"] = null,
@@ -494,6 +494,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(StopDrillRequest)] = (_, _, _) => "The stop drill starts a scratch run on the runtime's machine and signs its verification with a device held there; run it over the local socket on that machine.",
         [typeof(RunSettleRequest)] = (_, r, d) => Acting(((RunSettleRequest)r).By, d),
         [typeof(PairingIssueRequest)] = (_, r, d) => Acting(((PairingIssueRequest)r).By, d),
+        [typeof(McpAuthorizeRequest)] = (_, r, d) => Acting(((McpAuthorizeRequest)r).By, d),
 
         // No principal acts in these: the rotation's authority is the operation's, and the pairing exchange is the code's.
         [typeof(CertificateRotateRequest)] = (_, _, _) => null,
