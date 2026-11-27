@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
 
@@ -198,7 +199,7 @@ public sealed class RunSupervisor
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception)
         {
             process.Detach();
-            throw new RunLaunchException(launchedAt, exception);
+            throw new RunLaunchException(launchedAt, exception, process.WhenClosed);
         }
     }
 
@@ -476,7 +477,14 @@ public sealed class RunSupervisor
         {
             while (reader.ReadLine() is string line)
             {
-                Log(errors ? "[stderr] " + line : line);
+                string safe = line;
+                if (launcher.Launcher == "claude-code")
+                {
+                    safe = SecretShapes.HasEscapedClaudeSetupToken(line)
+                        ? "<secret-bearing harness line withheld>"
+                        : SecretShapes.Secret().Replace(line, "<secret>");
+                }
+                Log(errors ? "[stderr] " + safe : safe);
                 if (errors)
                 {
                     continue;
@@ -488,6 +496,9 @@ public sealed class RunSupervisor
                     state.Liveness = state.Liveness! with { LastEventAt = RecordParser.FormatTimestamp(options.Clock.GetUtcNow()) };
                     options.AfterEvent?.Invoke();
                 }
+
+                // Retained execution and retrieval evidence requires the original event.
+                if (safe != line) continue;
 
                 if (IsAcknowledgment(line))
                 {

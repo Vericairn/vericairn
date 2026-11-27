@@ -104,17 +104,14 @@ public sealed class CodexLauncher : IAgentLauncher
         }
 
         File.WriteAllText(Path.Combine(home, "config.toml"), CodexInventory.Configuration(context));
-        string? original = context.Environment.GetValueOrDefault("CODEX_HOME");
-        if (original is null && (context.Environment.GetValueOrDefault("HOME") ?? context.Environment.GetValueOrDefault("USERPROFILE")) is string user)
-        {
-            original = Path.Combine(user, ".codex");
-        }
+        HarnessPlatformProfile profile = HarnessPlatformProfile.Codex;
+        string? original = profile.ProvisionedConfiguration(context.Environment);
 
         // Import only Codex's explicitly provisioned harness login, never configuration, MCP OAuth stores, plugins or hooks.
-        if (original is not null && File.Exists(Path.Combine(original, "auth.json")))
+        if (original is not null && File.Exists(Path.Combine(original, profile.CredentialFile)))
         {
-            string login = Path.Combine(home, "auth.json");
-            File.Copy(Path.Combine(original, "auth.json"), login, overwrite: false);
+            string login = Path.Combine(home, profile.CredentialFile);
+            File.Copy(Path.Combine(original, profile.CredentialFile), login, overwrite: false);
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(login, UnixFileMode.UserRead | UnixFileMode.UserWrite);

@@ -23,6 +23,10 @@ public sealed record LaunchContext(string Workspace, string Condition, string Br
     /// <summary>The worker-owned loopback hook, absent for direct runs. Never supplied by a brief, header or run setting.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Uri? AdapterAddress { get; init; }
+
+    /// <summary>Non-secret facts about the sign-in staged by the launcher, for its local probes.</summary>
+    [JsonIgnore]
+    internal HarnessSignIn? SignIn { get; init; }
 }
 
 /// <summary>What one line of a harness's output told the worker; a field left null told nothing.</summary>
@@ -121,6 +125,9 @@ public interface IAgentLauncher
 
     /// <summary>Runs the same read-only probes without admitting a version. The worker must establish baseline or recorded qualification before dispatch.</summary>
     RunPreflight Probe(LaunchContext context) => Preflight(context);
+
+    /// <summary>Reads the exact installed version without importing a sign-in or starting an agent, when supported.</summary>
+    HarnessVersionObservation? ProbeVersion(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => null;
 
     /// <summary>Reported execution facts, without inferring them from usage, prose or the requested values.</summary>
     HarnessExecution? ReadExecution(string line) => null;

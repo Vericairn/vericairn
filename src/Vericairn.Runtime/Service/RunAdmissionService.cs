@@ -163,12 +163,18 @@ internal sealed class RunAdmissionService(
         string brief;
         string? configuredRoot;
         EfficiencyRun? efficiency = null;
+        RunDirectory? runDirectory = null;
         WorkspaceSetupResult? setup = null;
         WorkspacePreparation? prepared = null;
         var preparation = new WorkspacePreparation(plan.Estate, plan.RepositoryIds[0], plan.Branch);
         RunResponse Refused(RunResponse response)
         {
             efficiency?.Dispose();
+            if (runDirectory?.RemoveHarnessConfiguration(launcher.Launcher) is string cleanup)
+            {
+                string failure = response.Message + " " + cleanup;
+                response = response with { Message = failure, Problem = response.Problem is null ? null : response.Problem with { Message = failure } };
+            }
             if (workspace is null) return response;
             string? retained;
             if (setup is not null)
@@ -265,6 +271,7 @@ internal sealed class RunAdmissionService(
 
         string run = Ulid.NewUlid().Value;
         var directory = new RunDirectory(plan.Estate, run);
+        runDirectory = directory;
         // --run lets the server keep the searches it serves this run's agent, which settlement records.
         IReadOnlyList<string> server = [.. WorkerOptions.VericairnCommand(), "--estate", session.Root, "mcp", "serve", "--as", plan.Agent, "--run", run];
         var serverEnvironment = WorkerEnvironment.McpServer.Where(environment.ContainsKey).ToDictionary(n => n, n => environment[n], StringComparer.Ordinal);

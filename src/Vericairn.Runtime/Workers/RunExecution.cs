@@ -84,7 +84,18 @@ public sealed record RunEnvironmentPolicy(string Id, IReadOnlyList<RunComponent>
 /// <param name="ModelRevision">Observable resolution of the requested model selector; null means unknown.</param>
 /// <param name="LocalBindingHash">Optional digest of local command, file and environment bindings for the dispatch recheck; never copied into a record.</param>
 /// <param name="Probes">Optional native qualification evidence; does not by itself admit a version.</param>
-public sealed record RunPreflight(IReadOnlyList<RunComponent> Components, bool Complete, bool InheritsEnvironment, string HarnessVersion = "unknown", string? ModelRevision = null, string? LocalBindingHash = null, HarnessProbeEvidence? Probes = null);
+public sealed record RunPreflight(IReadOnlyList<RunComponent> Components, bool Complete, bool InheritsEnvironment, string HarnessVersion = "unknown", string? ModelRevision = null, string? LocalBindingHash = null, HarnessProbeEvidence? Probes = null)
+{
+    /// <summary>Non-secret sign-in facts established by the local probes.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public HarnessSignIn? SignIn { get; init; }
+}
+
+/// <summary>A provisioned sign-in's form, unmanaged account type, and who supplied that account type.</summary>
+public sealed record HarnessSignIn(string Form, string AccountType, string AccountTypeSource);
+
+/// <summary>An installed harness version and the exact baseline shipped with its launcher.</summary>
+public sealed record HarnessVersionObservation(string InstalledVersion, string ShippedVersion);
 
 /// <summary>The launcher's shipped baseline and digests of its successful local probes; no raw output or authority.</summary>
 /// <param name="BaselineVersion">The one exact version shipped as this launcher's baseline.</param>

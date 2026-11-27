@@ -83,17 +83,18 @@ public sealed partial class WorkerConfigurationStore
         WriteFile(path, configuration);
     }
 
-    private static void WriteFile<T>(string path, T configuration)
+    private static void WriteFile<T>(string path, T configuration, bool requireOwnerOnly = false)
     {
         RefuseLink(path);
         string parent = Path.GetDirectoryName(path)!;
         CreateOwnerDirectory(parent);
+        if (requireOwnerOnly) RequireOwnerOnly(parent, isDirectory: true);
         string temporary = Path.Combine(parent, Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
             var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
             if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-            using (var stream = new FileStream(temporary, options))
+            using (FileStream stream = requireOwnerOnly ? CreateOwnerFile(temporary) : new FileStream(temporary, options))
             {
                 JsonSerializer.Serialize(stream, configuration, Json);
                 stream.Flush(flushToDisk: true);
@@ -106,7 +107,7 @@ public sealed partial class WorkerConfigurationStore
         }
     }
 
-    private static void CreateOwnerDirectory(string path)
+    internal static void CreateOwnerDirectory(string path)
     {
         if (OperatingSystem.IsWindows())
         {

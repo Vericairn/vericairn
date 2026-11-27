@@ -18,9 +18,7 @@ internal static class HarnessAdmission
     {
         if (observed.Probes is not { } probes) return null; // Existing non-native launcher contracts stay additive.
         if (model.Findings.HasErrors) throw new ProviderRefusedException("Harness admission requires a valid estate.");
-        if (!observed.Complete || !observed.InheritsEnvironment || !HarnessQualificationType.ExactVersion(observed.HarnessVersion)
-            || probes.Digests.Count != HarnessQualificationType.ProbeNames.Length
-            || HarnessQualificationType.ProbeNames.Any(n => !probes.Digests.TryGetValue(n, out string? value) || !ContentHash.IsValid(value)))
+        if (!CompleteProbes(observed, probes))
             throw new ProviderRefusedException("The native harness did not establish all qualification probe digests.");
 
         var admission = new JsonObject
@@ -29,9 +27,7 @@ internal static class HarnessAdmission
             ["probes"] = JsonSerializer.SerializeToNode(probes.Digests),
         };
         if (observed.HarnessVersion == probes.BaselineVersion) return admission;
-        RecordEnvelope[] candidates = model.Current("harness-qualification").Where(r => EstateModel.BodyString(r, "launcher") == launcher
-            && EstateModel.BodyString(r, "version") == observed.HarnessVersion && EstateModel.BodyString(r, "status") == "qualified"
-            && r.AtTime <= DateTimeOffset.UtcNow).OrderBy(r => r.Id, StringComparer.Ordinal).ToArray();
+        RecordEnvelope[] candidates = Qualifications(model, launcher).Where(r => EstateModel.BodyString(r, "version") == observed.HarnessVersion).ToArray();
         RecordEnvelope? qualification = candidates.FirstOrDefault(r => HarnessQualificationType.ProbeNames.All(n =>
             r.Body.GetProperty("probes").GetProperty(n).GetString() == probes.Digests[n]));
         if (qualification is null)
@@ -46,9 +42,31 @@ internal static class HarnessAdmission
         return admission;
     }
 
+    internal static bool CompleteProbes(RunPreflight observed, HarnessProbeEvidence probes) =>
+        observed.Complete && observed.InheritsEnvironment && HarnessQualificationType.ExactVersion(observed.HarnessVersion)
+        && probes.Digests.Count == HarnessQualificationType.ProbeNames.Length
+        && HarnessQualificationType.ProbeNames.All(n => probes.Digests.TryGetValue(n, out string? value) && ContentHash.IsValid(value));
+
+    private static IEnumerable<RecordEnvelope> Qualifications(EstateModel model, string launcher) =>
+        model.Current("harness-qualification").Where(r => EstateModel.BodyString(r, "launcher") == launcher
+            && EstateModel.BodyString(r, "status") == "qualified" && r.AtTime <= DateTimeOffset.UtcNow)
+            .OrderBy(r => r.Id, StringComparer.Ordinal);
+
+    internal static HarnessVersionComparison CompareVersions(EstateModel? model, string launcher, string installed, string baseline)
+    {
+        string[] qualifications = model is null ? [] : Qualifications(model, launcher)
+            .OrderByDescending(r => r.AtTime).ThenByDescending(r => r.Id, StringComparer.Ordinal)
+            .Select(r => EstateModel.BodyString(r, "version")!).ToArray();
+        bool matches = installed == baseline || qualifications.Contains(installed, StringComparer.Ordinal);
+        return new(installed, matches ? installed : qualifications.FirstOrDefault() ?? baseline, matches);
+    }
+
     public static bool StillCurrent(EstateModel model, string launcher, RunPreflight observed, JsonNode? admitted)
     {
         try { return JsonNode.DeepEquals(admitted, Admit(model, launcher, observed)); }
         catch (ProviderRefusedException) { return false; }
     }
 }
+
+/// <summary>Version comparison alone; where the version matches, run admission still needs the matching probes.</summary>
+internal sealed record HarnessVersionComparison(string Installed, string Qualified, bool Matches);

@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using Vericairn.Daemon;
 using Vericairn.Protocol;
@@ -373,39 +372,13 @@ internal sealed class DeviceOperations(CommandContext context)
             return null;
         }
 
-        string first = ReadHidden("Passphrase: ");
-        if (confirm && ReadHidden("Passphrase again: ") != first)
+        string first = context.ReadHidden("Passphrase: ");
+        if (confirm && context.ReadHidden("Passphrase again: ") != first)
         {
             context.Error.WriteLine("The two passphrases differ; nothing was made.");
             return null;
         }
 
         return first;
-    }
-
-    private string ReadHidden(string prompt)
-    {
-        context.Error.Write(prompt);
-        var text = new StringBuilder();
-        while (true)
-        {
-            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Enter)
-            {
-                break;
-            }
-
-            if (key.Key == ConsoleKey.Backspace)
-            {
-                text.Length = Math.Max(0, text.Length - 1);
-            }
-            else if (!char.IsControl(key.KeyChar))
-            {
-                text.Append(key.KeyChar);
-            }
-        }
-
-        context.Error.WriteLine();
-        return text.ToString();
     }
 }

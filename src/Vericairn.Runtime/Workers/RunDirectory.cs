@@ -187,6 +187,43 @@ public sealed class RunDirectory
     /// <summary>The MCP configuration the harness was given.</summary>
     public string McpConfiguration => System.IO.Path.Combine(Path, "mcp.json");
 
+    /// <summary>The disposable configuration in which Claude Code receives its copy of the worker's sign-in.</summary>
+    internal const string ClaudeConfigurationDirectoryName = "claude";
+
+    internal static string ClaudeConfigurationDirectory(string mcpConfiguration) =>
+        System.IO.Path.Combine(System.IO.Path.GetDirectoryName(mcpConfiguration)!, ClaudeConfigurationDirectoryName);
+
+    // This can also run during recovery, before the host registers its launcher providers.
+    internal string? RemoveHarnessConfiguration(string? launcher)
+    {
+        if (launcher != "claude-code") return null;
+        try
+        {
+            if (File.GetAttributes(Path).HasFlag(FileAttributes.ReparsePoint)) throw new IOException();
+            bool configurationRemoved = DeleteDisposable(ClaudeConfigurationDirectory(McpConfiguration));
+            bool temporaryRemoved = DeleteDisposable(Temporary);
+            if (configurationRemoved && temporaryRemoved) return null;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        return "The worker could not remove the run's Claude Code configuration or temporary files. Remove the run's sign-in before releasing its reservation.";
+
+        static bool DeleteDisposable(string path)
+        {
+            try
+            {
+                if (File.GetAttributes(path).HasFlag(FileAttributes.Directory)) WorkspaceCleanup.Delete(path);
+                else File.Delete(path);
+                return true;
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException) { return true; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return false; }
+        }
+    }
+
     /// <summary>The searches the run's MCP server served its agent, one selection per line, which settlement records.</summary>
     public string SearchesFile => System.IO.Path.Combine(Path, "searches.jsonl");
 

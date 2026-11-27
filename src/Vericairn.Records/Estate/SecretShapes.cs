@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Vericairn.Records.Estate;
@@ -11,13 +12,27 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 internal static partial class SecretShapes
 {
+    private const string ClaudeSetupTokenPattern = "sk-ant-" + "oat01[A-Za-z0-9_-]{32,}";
+
     /// <summary>The start of an absolute machine path on macOS, Linux or Windows.</summary>
     [GeneratedRegex(@"(?<![A-Za-z0-9_./-])(?:/Users/|/home/[A-Za-z0-9_-]+/|/Volumes/|/private/var/|/mnt/[a-z]/|[A-Za-z]:\\)")]
     internal static partial Regex AbsolutePath();
 
     /// <summary>A credential in one of the formats the estate check knows.</summary>
-    [GeneratedRegex(@"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}|\bsk-[A-Za-z0-9_-]{32,}|AIza[0-9A-Za-z_-]{35}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}")]
+    [GeneratedRegex(@"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}|" + ClaudeSetupTokenPattern + @"|\bsk-[A-Za-z0-9_-]{32,}|AIza[0-9A-Za-z_-]{35}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}")]
     internal static partial Regex Secret();
+
+    /// <summary>A setup-token sign-in even when adjacent to ordinary text in event or diagnostic output.</summary>
+    [GeneratedRegex(ClaudeSetupTokenPattern)]
+    internal static partial Regex ClaudeSetupToken();
+
+    // Setup-token characters are ASCII. A JSON event can escape them before the stream reader sees them.
+    internal static bool HasEscapedClaudeSetupToken(string text) => text.Contains(@"\u00", StringComparison.Ordinal)
+        && ClaudeSetupToken().IsMatch(AsciiJsonEscape().Replace(text, static match =>
+            ((char)int.Parse(match.ValueSpan[4..], NumberStyles.HexNumber, CultureInfo.InvariantCulture)).ToString()));
+
+    [GeneratedRegex(@"\\u00[0-7][a-fA-F0-9]")]
+    private static partial Regex AsciiJsonEscape();
 
     /// <summary>
     /// One element of inline data on a line, a data: URI from its scheme to the end of its data (FIX-172): a credential-shaped match is

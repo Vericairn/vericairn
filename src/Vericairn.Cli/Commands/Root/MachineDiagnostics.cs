@@ -10,6 +10,9 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Processes;
 using Vericairn.Records.Signing;
+using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Workers;
 using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
 
@@ -20,7 +23,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
     /// <summary>One probe's finding: its state (present, missing, unavailable or not-applicable), its value and the rest of its report line.</summary>
     internal sealed record Probe(string State, string? Value, string? Detail);
 
-    public int Doctor(string root, bool json = false)
+    public int Doctor(string root, bool json, IReadOnlyDictionary<string, string> launcherSettings)
     {
         string version = CommandContext.VersionText();
         string? git = Tool("git", "--version");
@@ -51,6 +54,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
                 ? $"default custody unavailable until the {SecureEnclaveCustody.HelperName} from this command line's release archive is beside it"
                 : "default on this platform";
         Probe presence = Presence(root, estate);
+        Probe claudeCode = ClaudeVersion(root, estate, launcherSettings);
         string records = string.Join(", ", RecordFormats.Reads);
         string writes = $"writes an estate's own format, at most {RecordFormats.Current}";
         (string? sqlite, string? searchProblem) = Vericairn.Runtime.Search.SearchEngine.Probe();
@@ -76,6 +80,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
                 ["enclave"] = enclave,
                 ["helper"] = helper,
                 ["presence"] = presence,
+                ["claudeCode"] = claudeCode,
                 ["records"] = new Probe("present", records, writes),
                 ["search"] = searchProblem is null ? new Probe("present", search, null) : new Probe("unavailable", null, searchProblem),
                 ["daemon"] = !estate ? new Probe("not-applicable", null, null)
@@ -111,7 +116,41 @@ internal sealed class MachineDiagnostics(CommandContext context)
             context.Output.WriteLine(serving ? $"daemon    process {endpoint!.ProcessId} {daemonDetail}" : "daemon    none; commands run the embedded runtime");
         }
 
+        if (claudeCode.State != "not-applicable")
+            context.Output.WriteLine("claude    " + claudeCode.Detail);
         return Clean;
+    }
+
+    private static Probe ClaudeVersion(string root, bool estate, IReadOnlyDictionary<string, string> settings)
+    {
+        const string name = "claude-code";
+        IAgentLauncher? launcher = ProviderRegistry.Current.Launcher(name);
+        if (launcher is null) return new("not-applicable", null, null);
+        try
+        {
+            var worker = new WorkerConfigurationStore();
+            if (settings.Count == 0 && worker.Read(launcher) is null && !worker.HasClaudeSetupToken())
+                return new("not-applicable", null, "Claude Code worker is unconfigured");
+            var environment = WorkerEnvironment.Build(WorkerEnvironment.Current(), launcher.EnvironmentNames);
+            if (launcher.ProbeVersion(settings, environment) is not { } observation)
+                return new("unavailable", null, "the Claude Code version could not be established");
+
+            using EstateService? reader = estate ? EstateService.OpenReadOnly(root) : null;
+            HarnessVersionComparison version = reader is null
+                ? HarnessAdmission.CompareVersions(null, name, observation.InstalledVersion, observation.ShippedVersion)
+                : reader.CompareHarnessVersion(name, observation);
+            string detail = $"installed version {version.Installed}, qualified version {version.Qualified}";
+            if (!version.Matches)
+            {
+                detail += ". Run " + WorkerQualifyCommand.RecordCommand(name);
+                if (settings.ContainsKey("command")) detail += " with the same --setting command override.";
+            }
+            return new(version.Matches ? "present" : "unavailable", version.Installed, detail);
+        }
+        catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return new("unavailable", null, "the Claude Code version check could not be completed");
+        }
     }
 
     /// <summary>

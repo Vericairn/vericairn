@@ -15,6 +15,48 @@ internal sealed class WorkerSettings(CommandContext context)
     // A command is shown as it would be typed back, without escaping quotes or plus signs.
     private static readonly JsonSerializerOptions Shown = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
+    public int ImportSetupToken(string? launcher, bool import, string? accountType, bool stdin, bool otherChoices, bool json)
+    {
+        if (Environment.GetEnvironmentVariable("VERICAIRN_RUN") is not null)
+            return context.Fail("Only an operator outside a worker run may import a Claude Code setup token.");
+        if (launcher != "claude-code" || !import || otherChoices)
+            return context.Fail("Use --launcher claude-code --import-setup-token separately from other worker settings.");
+        if (!WorkerConfigurationStore.IsClaudeAccountType(accountType))
+            return context.Fail("State an unmanaged Claude Code account type with --account-type pro or --account-type max.");
+        if (stdin != Console.IsInputRedirected)
+            return context.Fail("Enter the Claude Code setup token at the hidden terminal prompt or use --token-stdin with redirected standard input.");
+
+        try
+        {
+            string token = stdin ? ReadSetupToken(Console.In) : context.ReadHidden("Claude Code setup token: ", WorkerConfigurationStore.ClaudeSetupTokenLength);
+            new WorkerConfigurationStore().ImportClaudeSetupToken(token, accountType!);
+            if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { launcher, signInForm = "setup-token", accountType, accountTypeSource = "operator-statement" }, ProtocolJson.Options));
+            else context.Output.WriteLine($"Provisioned a Claude Code setup token for an operator-stated {accountType} account.");
+            return Clean;
+        }
+        catch (ProviderRefusedException exception)
+        {
+            return context.Fail(exception.Message);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            return context.Fail("Could not import the Claude Code setup token into the owner-only worker file.");
+        }
+    }
+
+    private static string ReadSetupToken(TextReader input)
+    {
+        // Read at most one token and a line ending, plus one character to detect extra content.
+        Span<char> characters = stackalloc char[WorkerConfigurationStore.ClaudeSetupTokenLength + 3];
+        int length = input.ReadBlock(characters);
+        if (length > 0 && characters[length - 1] == '\n')
+        {
+            length--;
+            if (length > 0 && characters[length - 1] == '\r') length--;
+        }
+        return new string(characters[..length]);
+    }
+
     public int Adapter(string? adapter, string[] launchers, bool otherChoices, bool json)
     {
         if (Environment.GetEnvironmentVariable("VERICAIRN_RUN") is not null)

@@ -138,6 +138,8 @@ internal sealed partial class RunDispatchService
     private RunSettleResponse RecordSettlement(AgentRuns.Run run, string by, RunDirectory directory, RunObservedState observed, DateTimeOffset launchedAt,
         Action<JsonObject> settle, Func<string, string> settledMessage)
     {
+        if (directory.RemoveHarnessConfiguration(run.Launcher) is string cleanup)
+            return UnresolvedSettlement(run, cleanup);
         WriteOutcome settled;
         string? status = null;
         try

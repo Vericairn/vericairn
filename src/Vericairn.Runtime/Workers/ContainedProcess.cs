@@ -563,8 +563,9 @@ internal sealed class ContainedProcess
         }
         catch (Exception exception) when (created)
         {
-            new ContainedProcess(pid, StreamReader.Null, StreamReader.Null).Detach();
-            throw new RunLaunchException(DateTimeOffset.UtcNow, exception);
+            var owner = new ContainedProcess(pid, StreamReader.Null, StreamReader.Null);
+            owner.Detach();
+            throw new RunLaunchException(DateTimeOffset.UtcNow, exception, owner.WhenClosed);
         }
         finally
         {
@@ -778,7 +779,8 @@ internal sealed class ContainedProcess
 }
 
 /// <summary>A failure after process creation: dispatch is uncertain and the allowance remains reserved.</summary>
-internal sealed class RunLaunchException(DateTimeOffset launchedAt, Exception inner) : Exception("Observation failed after process creation.", inner)
+internal sealed class RunLaunchException(DateTimeOffset launchedAt, Exception inner, Task? boundaryClosed = null) : Exception("Observation failed after process creation.", inner)
 {
     public DateTimeOffset LaunchedAt { get; } = launchedAt;
+    public Task? BoundaryClosed { get; } = boundaryClosed;
 }

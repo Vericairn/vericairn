@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Processes;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
@@ -30,7 +31,8 @@ internal static class HarnessInventory
     {
         (int code, string output, _) = HarnessProcess.Run([.. HarnessProcess.Command(context.Settings, executable), .. arguments],
             context.Environment, TimeSpan.FromSeconds(30), context.Workspace);
-        if (code != 0 || string.IsNullOrWhiteSpace(output) || output.Length > 1024 * 1024)
+        if (code != 0 || string.IsNullOrWhiteSpace(output) || output.Length > 1024 * 1024
+            || (executable == "claude" && (SecretShapes.ClaudeSetupToken().IsMatch(output) || SecretShapes.HasEscapedClaudeSetupToken(output))))
         {
             // Probe output can contain local configuration and credentials. Never repeat it in a refusal or record.
             throw new ProviderRefusedException($"The {executable} {string.Join(' ', arguments.Where(a => a.StartsWith("--", StringComparison.Ordinal)))} inventory probe failed or returned no bounded evidence.");
@@ -45,8 +47,9 @@ internal static class HarnessInventory
         {
             throw new ProviderRefusedException($"The {executable} harness version is not qualified; only {version} is qualified by this launcher.");
         }
-        string prefix = executable == "codex" ? "codex-cli " : "";
-        string suffix = executable == "claude" ? " (Claude Code)" : "";
+        HarnessPlatformProfile profile = executable == "claude" ? HarnessPlatformProfile.ClaudeCode : HarnessPlatformProfile.Codex;
+        string prefix = profile.VersionPrefix;
+        string suffix = profile.VersionSuffix;
         if (!output.StartsWith(prefix, StringComparison.Ordinal) || !output.EndsWith(suffix, StringComparison.Ordinal)
             || output.Length <= prefix.Length + suffix.Length || !HarnessQualificationType.ExactVersion(output[prefix.Length..(output.Length - suffix.Length)]))
         {
@@ -68,8 +71,6 @@ internal static class HarnessInventory
         method, server = "vericairn", transport = "stdio", binary = Binary(context, context.McpServer),
         environment = context.McpEnvironment.Keys.Order(StringComparer.Ordinal).ToArray(), authority = "acting-principal", count = 1,
     });
-
-    public static string Platform => System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier;
 
     public static void Flags(string executable, string help, params string[] required)
     {

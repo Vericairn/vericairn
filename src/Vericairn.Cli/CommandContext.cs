@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Daemon;
@@ -372,6 +373,30 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
     {
         Error.WriteLine("error: " + message);
         return Failed;
+    }
+
+    internal string ReadHidden(string prompt, int maxLength = int.MaxValue)
+    {
+        Error.Write(prompt);
+        var text = new StringBuilder();
+        int excess = 0;
+        while (true)
+        {
+            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter) break;
+            if (key.Key == ConsoleKey.Backspace)
+            {
+                if (excess > 0) excess--;
+                else text.Length = Math.Max(0, text.Length - 1);
+            }
+            else if (!char.IsControl(key.KeyChar))
+            {
+                if (text.Length < maxLength) text.Append(key.KeyChar);
+                else if (excess < int.MaxValue) excess++;
+            }
+        }
+        Error.WriteLine();
+        return excess == 0 ? text.ToString() : "";
     }
 
     public static EstateModel LoadCopy(string root)

@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Workers;
 using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
@@ -62,6 +63,55 @@ internal sealed class WorkerOperations(CommandContext context)
     {
         Dictionary<string, string>? settings = CommandSettings.Parse(options, out string? problem);
         return settings is null ? context.Fail(problem!) : context.WithApi(root, api => context.ReportOutcome(api.QualifyHarness(new(launcher, by, settings)), json));
+    }
+
+    /// <summary>Reads the estate locally and runs the full native probes without touching its writable runtime.</summary>
+    public int WorkerQualifyCheck(string root, string launcher, string[] options, bool json)
+    {
+        Dictionary<string, string>? settings = CommandSettings.Parse(options, out string? problem);
+        if (settings is null) return context.Fail(problem!);
+        if (!IsEstate(root)) return context.Fail(NotAnEstate(root));
+        HarnessQualificationCheck check;
+        try
+        {
+            // A writable runtime can recover interrupted settlements as it opens. Open only canonical records and probe this
+            // machine even if the estate happens to have a daemon.
+            using var reader = EstateService.OpenReadOnly(root);
+            check = reader.CheckHarness(launcher, settings);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return context.Fail("The local estate could not be read for the harness check.");
+        }
+
+        string? qualify = (check.InventoryEstablished && !check.Qualified || check.Version is { Matches: false }) ? WorkerQualifyCommand.RecordCommand(launcher) : null;
+        if (json)
+        {
+            context.Output.WriteLine(JsonSerializer.Serialize(new
+            {
+                check.Launcher, check.InventoryEstablished, check.SignIn, check.Version, check.Model, check.ModelStatus,
+                check.Qualified, check.Problem, qualification = qualify,
+            }, ProtocolJson.Options));
+        }
+        else
+        {
+            context.Output.WriteLine($"{launcher} inventory: {(check.InventoryEstablished ? "established" : "unavailable")}");
+            context.Output.WriteLine(check.SignIn is { } signIn
+                ? $"  sign-in: {signIn.Form}, {signIn.AccountType} ({signIn.AccountTypeSource})"
+                : "  sign-in: unavailable");
+            if (check.Version is { } version)
+                context.Output.WriteLine($"  installed version {version.Installed}, qualified version {version.Qualified}");
+            context.Output.WriteLine(check.Model is null ? "  model setting: unconfigured"
+                : $"  model setting: {check.Model} ({(check.ModelStatus == "blocked" ? "matches an estate blocked term" : "clear of estate blocked terms")})");
+            if (check.Problem is not null) context.Output.WriteLine("  " + check.Problem);
+            if (qualify is not null)
+            {
+                context.Output.WriteLine("  Run " + qualify);
+                if (settings.ContainsKey("command")) context.Output.WriteLine("  Reuse the same --setting command override.");
+            }
+        }
+
+        return check.Qualified && check.ModelStatus == "clear" ? Clean : HasErrors;
     }
 
     /// <summary>

@@ -4,6 +4,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Win32;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 using Vericairn.Records.Representation;
@@ -17,6 +18,8 @@ namespace Vericairn.Packs.Software;
 /// </summary>
 public sealed class ClaudeCodeLauncher : IAgentLauncher
 {
+    private static readonly string[] SetupTokenScopes = ["user:inference"];
+
     /// <inheritdoc />
     public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["low", "medium", "high", "max"], ["anthropic"], ["anthropic-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true) { Adapters = [RepresentationContract.LocalLossless] };
 
@@ -68,7 +71,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         ["launch", "observe-usage"],
         [
             "Runs claude -p \"/goal <condition>\" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's configuration> --strict-mcp-config in the workspace: Claude Code's own /goal, with the vericairn MCP server as its only MCP server.",
-            "Imports only a provisioned pro or max OAuth login into a fresh run configuration; implicit keychain login, managed accounts and environment credentials are not qualified.",
+            "Stages an operator-provisioned pro or max sign-in in a fresh configuration for each run and qualification. Accepts the setup-token form with the operator's account type statement, or a provisioned OAuth credentials file.",
             "Watches provisional per-message tokens and settles tokens from the stream's complete final result; it reads no price, so a cap in currency is charged in full.",
             "Excludes user, project and local setting sources and repository customizations; preserves and inventories the built-in goal evaluator. Selects nine built-in tools explicitly and refuses detected managed settings.",
             "From 0.9.4 (RUN-04), a run whose brief permits retrieval adds WebFetch and WebSearch, allowed explicitly and admitted with the public-web route, and the worker retains each result as an untrusted original; no other run gets a web tool.",
@@ -77,7 +80,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array with positional entry arguments; leading option flags are not qualified.", false, "claude")]);
 
     /// <inheritdoc />
-    public IReadOnlyList<string> EnvironmentNames => ["CLAUDE_CONFIG_DIR"];
+    public IReadOnlyList<string> EnvironmentNames => [HarnessPlatformProfile.ClaudeCode.ConfigurationEnvironment];
 
     /// <inheritdoc />
     public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => HarnessProcess.Problem(settings, "claude");
@@ -87,48 +90,85 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     {
         ArgumentNullException.ThrowIfNull(context);
         RefuseManagedSettings();
-        string home = Path.Combine(Path.GetDirectoryName(context.McpConfiguration)!, "claude");
+        HarnessPlatformProfile profile = HarnessPlatformProfile.ClaudeCode;
+        string home = RunDirectory.ClaudeConfigurationDirectory(context.McpConfiguration);
         HarnessInventory.FreshHome(home);
-        Directory.CreateDirectory(home);
-        if (!OperatingSystem.IsWindows())
+        WorkerConfigurationStore.CreateOwnerDirectory(home);
+        HarnessSignIn? signIn = StageSignIn(context, profile, Path.Combine(home, profile.CredentialFile));
+        return context with
         {
-            File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { [profile.ConfigurationEnvironment] = home },
+            SignIn = signIn,
+        };
+    }
+
+    private static HarnessSignIn? StageSignIn(LaunchContext context, HarnessPlatformProfile profile, string destination)
+    {
+        var store = new WorkerConfigurationStore(context.Environment.GetValueOrDefault(VericairnHome.EnvironmentVariable));
+        if (store.ReadClaudeSetupToken(context.Environment) is { } provision)
+        {
+            WriteLogin(destination, new { claudeAiOauth = new
+            {
+                accessToken = provision.AccessToken, refreshToken = (string?)null, expiresAt = provision.ExpiresAt,
+                scopes = SetupTokenScopes, subscriptionType = (string?)null,
+            } });
+            return new("setup-token", provision.AccountType, "operator-statement");
         }
 
-        string? original = context.Environment.GetValueOrDefault("CLAUDE_CONFIG_DIR");
-        if (original is null && (context.Environment.GetValueOrDefault("HOME") ?? context.Environment.GetValueOrDefault("USERPROFILE")) is string user)
+        string? original = profile.ProvisionedConfiguration(context.Environment);
+
+        // The existing file import copies only the harness login. Settings, plugins and MCP credentials stay behind.
+        if (original is null || !File.Exists(Path.Combine(original, profile.CredentialFile))) return null;
+        try
         {
-            original = Path.Combine(user, ".claude");
-        }
+            using FileStream source = File.OpenRead(Path.Combine(original, profile.CredentialFile));
+            using JsonDocument credentials = JsonDocument.Parse(source);
+            if (!credentials.RootElement.TryGetProperty("claudeAiOauth", out JsonElement oauth)) return null;
+            string? accountType = oauth.TryGetProperty("subscriptionType", out JsonElement subscription) ? subscription.GetString() : null;
+            if (accountType is "team" or "enterprise")
+            {
+                throw new ProviderRefusedException("Claude Code organization logins can load remote managed settings that this launcher cannot verify; use an unmanaged worker login.");
+            }
 
-        // Only the explicitly provisioned harness login is imported. Settings, plugins and hook files stay behind.
-        if (original is not null && File.Exists(Path.Combine(original, ".credentials.json")))
+            WriteLogin(destination, new { claudeAiOauth = oauth });
+            return accountType is "pro" or "max" ? new("credentials-file", accountType, "credentials-file") : null;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
-            string login = Path.Combine(home, ".credentials.json");
-            try
-            {
-                using JsonDocument credentials = JsonDocument.Parse(File.ReadAllText(Path.Combine(original, ".credentials.json")));
-                if (credentials.RootElement.TryGetProperty("claudeAiOauth", out JsonElement oauth))
-                {
-                    if (oauth.TryGetProperty("subscriptionType", out JsonElement subscription) && subscription.GetString() is "team" or "enterprise")
-                    {
-                        throw new ProviderRefusedException("Claude Code organization logins can load remote managed settings that this launcher cannot verify; use an unmanaged worker login.");
-                    }
-
-                    File.WriteAllText(login, JsonSerializer.Serialize(new Dictionary<string, JsonElement>(StringComparer.Ordinal) { ["claudeAiOauth"] = oauth }));
-                }
-            }
-            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
-            {
-                throw new ProviderRefusedException("Claude Code's provisioned login could not be read.", exception);
-            }
-            if (!OperatingSystem.IsWindows() && File.Exists(login))
-            {
-                File.SetUnixFileMode(login, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
+            throw new ProviderRefusedException("Claude Code's provisioned login could not be read.");
         }
+    }
 
-        return context with { Environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { ["CLAUDE_CONFIG_DIR"] = home } };
+    private static void WriteLogin<T>(string path, T login)
+    {
+        using Stream stream = WorkerConfigurationStore.CreateOwnerFile(path);
+        JsonSerializer.Serialize(stream, login);
+    }
+
+    /// <inheritdoc />
+    public HarnessVersionObservation ProbeVersion(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(environment);
+        RefuseManagedSettings();
+        HarnessPlatformProfile profile = HarnessPlatformProfile.ClaudeCode;
+        string scratch = Directory.CreateTempSubdirectory("vericairn-claude-version-").FullName;
+        try
+        {
+            WorkerConfigurationStore.CreateOwnerDirectory(scratch);
+            string home = Path.Combine(scratch, RunDirectory.ClaudeConfigurationDirectoryName);
+            WorkerConfigurationStore.CreateOwnerDirectory(home);
+            Dictionary<string, string> isolated = WorkerEnvironment.Build(environment);
+            isolated[profile.ConfigurationEnvironment] = home;
+            foreach (string name in RunDirectory.TemporaryVariables) isolated[name] = scratch;
+            var context = new LaunchContext(scratch, "", "", "", [], new Dictionary<string, string>(StringComparer.Ordinal), settings, isolated);
+            HarnessInventory.CommandPrefix(context, "claude");
+            return new(ClaudeCodeInventory.InstalledVersion(context, qualifying: true), ClaudeCodeInventory.Version);
+        }
+        finally
+        {
+            WorkspaceCleanup.Delete(scratch);
+        }
     }
 
     /// <inheritdoc />

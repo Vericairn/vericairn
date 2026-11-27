@@ -5,10 +5,12 @@ using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -29,6 +31,12 @@ internal static class FakeHarness
     public const string Marker = "--vericairn-stand-in-harness";
     internal const string NativeMarker = "vericairn-native-stand-in";
     internal const string ReachReport = "--vericairn-stand-in-reach-report=";
+
+    internal static string NewClaudeSetupToken()
+    {
+        string prefix = "sk-ant-" + "oat01-";
+        return prefix + RandomNumberGenerator.GetHexString(WorkerConfigurationStore.ClaudeSetupTokenLength - prefix.Length);
+    }
 
     /// <summary>The command line that starts the stand-in for a scenario, writing what it was given to the report.</summary>
     public static List<string> Command(string scenario, string report)
@@ -140,6 +148,11 @@ internal static class FakeHarness
         }
         if (arguments.Contains("--help"))
         {
+            if (!codex && behavior["setupToken"] is not null)
+            {
+                if (ClaudeSetupSignIn() is null) return 2;
+                File.WriteAllText(report + ".probed-sign-in", Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")!);
+            }
             string[] flags = codex
                 ? ["-c", "--config <key=value>", "--enable <FEATURE>", "--disable <FEATURE>", "--json", "--cd <DIR>", "--sandbox <SANDBOX_MODE>", "--model <MODEL>", "--ignore-rules"]
                 : ["-p", "--print", "--output-format <format>", "--verbose", "--permission-mode <mode>", "--mcp-config <configs...>", "--strict-mcp-config", "--setting-sources <sources>", "--settings <file-or-json>", "--tools <tools...>", "--model <model>", "--effort <level>", "--max-budget-usd <amount>"];
@@ -217,6 +230,28 @@ internal static class FakeHarness
             return 0;
         }
         File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (!codex && behavior["setupToken"]?.GetValue<string>() is string setup)
+        {
+            if (ClaudeSetupSignIn() is not string token) return 2;
+            File.WriteAllText(report + ".signed-in", Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")!);
+            if (setup == "echo")
+            {
+                Console.WriteLine("stand-in output:x" + token);
+                Console.Error.WriteLine("stand-in error: " + token);
+                Console.WriteLine("""{"type":"diagnostic","message":"stand-in escaped:\u0073""" + token[1..] + "\"}");
+            }
+            if (setup == "rewrite")
+            {
+                string home = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")!;
+                File.Copy(Path.Combine(home, ".credentials.json"), Path.Combine(home, "local-copy.json"));
+                string temporary = Environment.GetEnvironmentVariable("TMPDIR")!;
+                File.Copy(Path.Combine(home, ".credentials.json"), Path.Combine(temporary, "local-copy.json"));
+                JsonNode login = JsonNode.Parse(File.ReadAllText(Path.Combine(home, ".credentials.json")))!;
+                login["claudeAiOauth"]!["accessToken"] = NewClaudeSetupToken();
+                File.WriteAllText(Path.Combine(home, ".credentials.json"), login.ToJsonString());
+            }
+            if (setup == "failure") return 2;
+        }
         if (!codex && behavior["retrieval"]?.GetValue<string>() is string retrieval)
         {
             // A retrieval run's web tools, as Claude Code's stream reports them: each invocation, then the result given to the agent.
@@ -300,6 +335,25 @@ internal static class FakeHarness
         }
         Console.WriteLine("{\"type\":\"result\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}");
         return 0;
+    }
+
+    private static string? ClaudeSetupSignIn()
+    {
+        if (Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is not string home
+            || Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") is not null
+            || Environment.GetEnvironmentVariable("CLAUDE_CODE_OAUTH_TOKEN") is not null)
+            return null;
+        string login = Path.Combine(home, ".credentials.json");
+        if (!File.Exists(login)) return null;
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(login));
+        JsonElement oauth = document.RootElement.GetProperty("claudeAiOauth");
+        string? token = oauth.GetProperty("accessToken").GetString();
+        return WorkerConfigurationStore.IsClaudeSetupToken(token)
+            && oauth.GetProperty("refreshToken").ValueKind == JsonValueKind.Null
+            && oauth.GetProperty("subscriptionType").ValueKind == JsonValueKind.Null
+            && oauth.GetProperty("expiresAt").GetInt64() > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            && oauth.GetProperty("scopes").EnumerateArray().Select(scope => scope.GetString()).SequenceEqual(["user:inference"])
+            ? token : null;
     }
 
     private static readonly string[] DisabledCodexFeatures =
@@ -416,6 +470,15 @@ internal static class FakeHarness
             ["process"] = Environment.ProcessId,
             ["group"] = OperatingSystem.IsWindows() ? 0 : getpgid(0),
         };
+        if (scenario == "claude" && Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is string claudeHome)
+        {
+            string credentials = Path.Combine(claudeHome, ".credentials.json");
+            if (File.Exists(credentials))
+            {
+                using JsonDocument login = JsonDocument.Parse(File.ReadAllText(credentials));
+                line["oauthOnly"] = login.RootElement.EnumerateObject().Select(entry => entry.Name).SequenceEqual(["claudeAiOauth"]);
+            }
+        }
         using PosixSignalRegistration? terminate = scenario.StartsWith("watch-", StringComparison.Ordinal) || scenario is "codex-spender" or "codex-headroom" or "ignore-stop" or "ack-stop" or "silent-ignore" or "child-survives-root" ? HoldTerminate() : null;
         // Publish the complete report atomically, after installing the stop handler. Existence is a readiness barrier.
         if (scenario != "child-survives-root")

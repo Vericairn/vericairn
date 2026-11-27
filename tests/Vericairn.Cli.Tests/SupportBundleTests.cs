@@ -58,6 +58,32 @@ public sealed class SupportBundleTests
     }
 
     [Fact]
+    public void TheBundleRedactsSetupTokensBeforeClippingAndWhenAdjacentToText()
+    {
+        string token = "sk-ant-" + "oat01-" + new string('a', 202);
+        string scratch = CliHarness.TempDirectory("support-bundle-setup-token");
+        using var estate = new TestEstate(2);
+        string log = DaemonLifecycle.DaemonLogPath(estate.Root);
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        File.WriteAllLines(log, [
+            "error: prefix" + token,
+            "error: " + new string('x', 281) + token,
+            @"error: escaped \u0073" + token[1..],
+        ]);
+        try
+        {
+            CliHarness.Outcome bundle = CliHarness.Run("--estate", estate.Root, "support", "bundle");
+            Assert.Equal(0, bundle.Code);
+            Assert.DoesNotContain(token[..12], bundle.Out, StringComparison.Ordinal);
+            JsonArray errors = JsonNode.Parse(bundle.Out)!["recentErrors"]!.AsArray();
+            Assert.Equal("error: prefix<secret>", errors[0]?.GetValue<string>());
+            Assert.EndsWith("<secret>", errors[1]!.GetValue<string>(), StringComparison.Ordinal);
+            Assert.Equal("<secret>", errors[2]?.GetValue<string>());
+        }
+        finally { CliHarness.Delete(scratch); }
+    }
+
+    [Fact]
     public void AnExistingFileIsNeverReplacedAndOutsideAnEstateOnlyTheVersionAndPlatformAreGathered()
     {
         string scratch = CliHarness.TempDirectory("support-bundle-existing");

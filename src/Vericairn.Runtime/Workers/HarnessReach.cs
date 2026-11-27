@@ -160,7 +160,7 @@ internal static class HarnessReach
 
     /// <summary>
     /// The secret-bearing paths the user can open for reading: conventional locations under the harness's home, the harness logins its
-    /// launcher imported for the run, and the device keys of the Vericairn home. Opening is the only test; no byte is read.
+    /// launcher imported for the run, and the worker sign-in and device keys in the Vericairn home. Opening is the only test; no byte is read.
     /// </summary>
     internal static IReadOnlyList<SecretPath> SecretPaths(IReadOnlyDictionary<string, string> environment, out bool complete)
     {
@@ -188,6 +188,7 @@ internal static class HarnessReach
         }
 
         string vericairn = environment.GetValueOrDefault(VericairnHome.EnvironmentVariable) is string named && Path.IsPathFullyQualified(named) ? named : VericairnHome.Path();
+        complete &= Add("harness-login", Path.Combine(vericairn, "worker", WorkerConfigurationStore.ClaudeSetupTokenFile), null);
         complete &= Add("device-key", Path.Combine(vericairn, "keys"), _ => true);
         if (found.Count > MaxPaths)
         {

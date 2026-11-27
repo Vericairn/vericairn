@@ -63,6 +63,14 @@ internal static partial class SupportBundle
     {
         var redactor = new Redactor(KnownDirectories());
         JsonNode redacted = redactor.Redact(bundle)!;
+        if (redacted["recentErrors"] is JsonArray errors)
+        {
+            for (int i = 0; i < errors.Count; i++)
+            {
+                // Limit output after redaction so clipping cannot leave a credential fragment behind.
+                if (errors[i]?.GetValue<string>() is { Length: > 300 } line) errors[i] = line[..300] + "…";
+            }
+        }
         redacted["redacted"] = new JsonObject { ["secrets"] = redactor.Secrets, ["paths"] = redactor.Paths };
         return redacted.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) + "\n";
     }
@@ -112,7 +120,7 @@ internal static partial class SupportBundle
         try { lines = File.ReadLines(log).TakeLast(2000).ToArray(); }
         catch (IOException) { return ["the runtime's log could not be read"]; }
         catch (UnauthorizedAccessException) { return ["the runtime's log could not be read"]; }
-        return [.. lines.Where(l => ErrorLine().IsMatch(l)).TakeLast(ErrorLines).Select(l => (JsonNode)(l.Length > 300 ? l[..300] + "…" : l))];
+        return [.. lines.Where(l => ErrorLine().IsMatch(l)).TakeLast(ErrorLines).Select(l => (JsonNode)l)];
     }
 
     private static JsonObject Configuration(string root)
@@ -216,6 +224,11 @@ internal static partial class SupportBundle
                 }
             }
 
+            if (SecretShapes.HasEscapedClaudeSetupToken(result))
+            {
+                Secrets++;
+                return "<secret>";
+            }
             result = SecretShapes.Secret().Replace(result, _ => { Secrets++; return "<secret>"; });
             result = PathTail().Replace(result, match => SecretShapes.AbsolutePath().IsMatch(match.Value) || TempPath().IsMatch(match.Value) ? Count(match) : match.Value);
             return result;

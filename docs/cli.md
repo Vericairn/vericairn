@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 52, November 27, 2026. Add Claude Code setup-token import, the non-recording `worker qualify --check` and the Claude Code version check in `doctor`, in the development build.
+
 Revision 51, November 27, 2026. Add `--flow-path` to `goal propose --flow` and `--check` to `goal step` for runs of a flow. An agent work step without a permitted path is refused at proposal or activation in the development build.
 
 Revision 50, November 27, 2026. A progress target keeps each comment attempt before it is sent and never sends a comment whose outcome is uncertain again; `progress target resolve` removes an entry once a person has checked it, and one follower follows a target on a machine at a time, in the development build.
@@ -468,6 +470,31 @@ requires prepared markers and any existing migration review. After adoption,
 `docs pin --render-template` refreshes those regions. See the complete
 [adoption workflow](templates.md#adopt-an-existing-estate-document) before
 transferring a hand-maintained table to records.
+
+## Provisioning and checking Claude Code (0.9.5)
+
+In a terminal, generate a headless sign-in with `claude setup-token`. Import it on the worker's machine:
+
+```sh
+vericairn worker configure --launcher claude-code --model <selector> --effort <effort>
+vericairn worker configure --launcher claude-code --import-setup-token --account-type pro
+```
+
+Choose `pro` or `max` for the account and enter the bare token at the hidden prompt. For scripts, add `--token-stdin`
+and supply the token on a single line of standard input. The worker stores the login outside the estate, the
+repository and the harness configuration. An existing provisioned `.credentials.json` remains supported.
+
+```sh
+vericairn worker qualify --check --launcher claude-code
+vericairn doctor
+```
+
+The check needs no `--by`. It probes inventory with a temporary login copy and reports the sign-in form, version
+and qualification, and any blocked-term matches in the worker's configured model selector. It removes the copy and
+creates no record. It exits with an error when the version lacks a matching qualification or the model setting
+is blocked or missing. For a pinned installation, pass `--setting command=<executable>` to qualification, preflight
+and doctor. To record a qualification, run `worker qualify --launcher claude-code --by <human-principal>` with the
+same command setting. See the [software guide](software.md#native-inventory-qualification-run-02-and-run-03).
 
 ## Preparing a workspace before the agent starts (0.9.1)
 

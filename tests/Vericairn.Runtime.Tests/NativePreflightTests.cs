@@ -148,7 +148,7 @@ public class NativePreflightTests
 /// <summary>Native launcher probes run the test executable, never an installed coding agent.</summary>
 internal sealed class NativeProbe : IDisposable
 {
-    public NativeProbe(string harness)
+    public NativeProbe(string harness, string? setupToken = null)
     {
         Root = Path.Combine(Path.GetTempPath(), "vn-" + Ulid.NewUlid().Value);
         Login = Path.Combine(Root, "login");
@@ -158,13 +158,18 @@ internal sealed class NativeProbe : IDisposable
         Directory.CreateDirectory(Path.Combine(Root, "run"));
         Directory.CreateDirectory(Path.Combine(Root, "user"));
         File.WriteAllText(Path.Combine(Login, "auth.json"), "synthetic-login");
-        File.WriteAllText(Path.Combine(Login, ".credentials.json"), "{\"claudeAiOauth\":{\"subscriptionType\":\"pro\"}}");
+        // The ordinary user configuration has no file-based Claude sign-in on macOS. The explicit legacy fixture is separate.
+        if (setupToken is null)
+            File.WriteAllText(Path.Combine(Login, ".credentials.json"), "{\"claudeAiOauth\":{\"subscriptionType\":\"pro\"}}");
         File.WriteAllText(Path.Combine(Login, "ambient.txt"), "never imported");
         Launcher = harness == "codex" ? new CodexLauncher() : new ClaudeCodeLauncher();
         var environment = WorkerEnvironment.Build(WorkerEnvironment.Current(), Launcher.EnvironmentNames);
         environment["HOME"] = Path.Combine(Root, "user");
         environment["USERPROFILE"] = Path.Combine(Root, "user");
         environment[harness == "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"] = Login;
+        environment["VERICAIRN_HOME"] = Path.Combine(Root, "private-worker-state");
+        if (setupToken is not null)
+            new WorkerConfigurationStore(environment["VERICAIRN_HOME"]).ImportClaudeSetupToken(setupToken, "max");
         string mcp = Path.Combine(Root, "run", "mcp.json");
         environment["VERICAIRN_MCP_CONFIG"] = mcp;
         var server = FakeHarness.Command("native-server", Path.Combine(Root, "server.jsonl"));
@@ -173,6 +178,7 @@ internal sealed class NativeProbe : IDisposable
             new Dictionary<string, string>(StringComparer.Ordinal),
             new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("native-" + harness, Report) }, environment,
             Execution: JsonSerializer.SerializeToElement(new { requested = new { model = "model-a", effort = "high" } }));
+        if (setupToken is not null) Behavior("setupToken", "required");
     }
 
     public string Root { get; }
