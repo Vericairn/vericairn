@@ -86,7 +86,7 @@ public sealed class ResultType : IRecordType
             if (OutputRuleWitness(context.Model, context.Record) is { } witness)
             {
                 context.Findings.Info(OutputSchemeCode, location, message +
-                    $" Historical: the result's claimed time precedes migration {witness.Migration} to 0.9.2, and checkpoint {witness.Result} witnessed these exact bytes no later than checkpoint {witness.Start}, the first to list that migration. The times are claimed; the checkpoints are signed.");
+                    $" Historical: checkpoint {witness.Result} witnessed these exact bytes no later than checkpoint {witness.Start}, the first to list migration {witness.Migration} to 0.9.2. A result written between that migration and that checkpoint reads the same, since no claimed time decides it.");
             }
             else
             {
@@ -241,8 +241,8 @@ public sealed class ResultType : IRecordType
 
     /// <summary>
     /// The exact result, and the migration that began the rule, must both be witnessed by the signed checkpoint graph, the result no
-    /// later than the first checkpoint that lists the migration, and the result's claimed time must precede the migration's: that first
-    /// checkpoint can come long after the migration, and a result written in between was written under the rule.
+    /// later than the first checkpoint that lists the migration. No claimed record time decides it (decision 01M7NC0F35X707YE133WTPQ74M),
+    /// so a result written between the migration and that checkpoint reads the same, and the finding says so.
     /// </summary>
     private static (string Result, string Migration, string Start)? OutputRuleWitness(EstateModel model, RecordEnvelope result)
     {
@@ -253,7 +253,7 @@ public sealed class ResultType : IRecordType
 
         // In an estate without checkpoints at upgrade, the adoption at this pin is the first signed inventory.
         RecordEnvelope[] migrations = [.. model.OfType("migration").Where(model.Counts)];
-        foreach (RecordEnvelope migration in migrations.Where(m => EstateModel.BodyString(m, "toPin") == pin && GoalRules.Before(result, m)))
+        foreach (RecordEnvelope migration in migrations.Where(m => EstateModel.BodyString(m, "toPin") == pin))
         {
             if (!history.Listings.TryGetValue(migration.Id, out IReadOnlyList<string>? migrationListings)) continue;
             foreach (string start in migrationListings)

@@ -149,25 +149,28 @@ public sealed class ResultOutputSchemeTests
         Assert.Contains(upgrade.Id, historical.Message, StringComparison.Ordinal);
         Assert.Contains(migration.Id, historical.Message, StringComparison.Ordinal);
         Assert.Contains((earlier ?? upgrade).Id, historical.Message, StringComparison.Ordinal);
-        Assert.Contains("The times are claimed; the checkpoints are signed.", historical.Message, StringComparison.Ordinal);
+        Assert.Contains("since no claimed time decides it", historical.Message, StringComparison.Ordinal);
         Assert.Equal(Severity.Warning, unproved.Severity);
     }
 
     [Fact]
-    public void AResultWrittenAfterTheMigrationIsNotHistoricalThoughTheFirstCheckpointWitnessesIt()
+    public void AResultWrittenBeforeTheFirstCheckpointAfterTheMigrationReadsAsHistoricalAndSaysSo()
     {
         using var history = new HistoryFixture();
         TestEstate estate = history.Estate;
         RecordEnvelope attempt = StartAttempt(estate);
         RecordEnvelope migration = estate.Add("migration", estate.OperatorId,
             """{"fromPin":"release 0.9.1","toPin":"release 0.9.2","fromFormat":3,"toFormat":3,"migrations":[],"changes":[]}""", signer: history.OperatorSigner);
-        // Written a month after the migration, under the rule, and first witnessed by the adoption that lists the migration.
+        // Written after the migration and first witnessed by the adoption that lists it: no claimed time decides the reading, so it
+        // reads as historical, and the finding states that limit.
         estate.SetClock(migration.AtTime.AddDays(30));
         RecordEnvelope late = estate.Add("result", estate.BuilderId, Body(GitHubLocation), attempt.Reference, signer: history.BuilderSigner);
-        history.Adopt();
+        RecordEnvelope adoption = history.Adopt();
 
         Finding finding = Assert.Single(estate.Load().Findings, f => f.Code == Code && f.Location.StartsWith(late.ExpectedPath + "#", StringComparison.Ordinal));
-        Assert.Equal(Severity.Warning, finding.Severity);
+        Assert.Equal(Severity.Info, finding.Severity);
+        Assert.Contains(adoption.Id, finding.Message, StringComparison.Ordinal);
+        Assert.Contains("A result written between that migration and that checkpoint reads the same, since no claimed time decides it.", finding.Message, StringComparison.Ordinal);
     }
 
     /// <summary>An ordinary work order assigned to the builder and the builder's attempt at it.</summary>
