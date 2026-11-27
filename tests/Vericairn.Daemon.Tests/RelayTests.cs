@@ -155,7 +155,7 @@ public class RelayTests
         // A revoked device or a stranger knows the address and floods it with tickets that do not verify.
         for (int i = 0; i < 64; i++)
         {
-            await relay.RefusesAsync(valid with { Counter = valid.Counter + i + 1 });
+            await relay.RefusesAsync(valid with { Counter = valid.Counter + i + 1 }, "203.0.113.9");
         }
 
         (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control, valid);
@@ -181,27 +181,84 @@ public class RelayTests
     }
 
     [Fact]
-    public async Task JoinsWithoutAValidTicketCloseAnAddressForOneWindowAtMost()
+    public async Task OneClientsJoinsWithoutAValidTicketCloseTheAddressOnlyToThatClient()
     {
         var clock = new ManualTime(DateTimeOffset.UtcNow);
         await using var relay = new InProcessRelay(clock);
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         string address = AddressOf(key);
         using WebSocket control = await relay.RegisterAsync(address, key);
-        for (int i = 0; i < 300; i++)
-        {
-            using WebSocket stranger = relay.Connect();
-            await RelayProtocol.SendAsync(stranger, new("join", Ticket: new RelayTicket(address, "0", 0, 0, 0, "")), TestStop);
-        }
+        await SendBadJoinsAsync(relay, address, "203.0.113.9", 300);
+        await WaitForUnverifiedAsync(relay, address, 32);
 
-        await Task.Delay(300, TestStop);
-        // Past the limit, this window refuses before verifying, a valid ticket too; the next window starts with an empty budget.
-        await relay.RefusesAsync(RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1));
-        clock.Advance(TimeSpan.FromSeconds(10));
+        // Past its share, that client is refused before verifying, a valid ticket too; another client still joins.
+        await relay.RefusesAsync(RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1), "203.0.113.9");
         (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control,
-            RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 2));
+            RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 2), "198.51.100.4");
         phone.Dispose();
         runtime.Dispose();
+        Assert.Equal(32, relay.Unverified(address));
+    }
+
+    [Fact]
+    public async Task JoinsWithoutAValidTicketFromManyClientsCloseAnAddressForOneWindowAtMost()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        await using var relay = new InProcessRelay(clock);
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string address = AddressOf(key);
+        using WebSocket control = await relay.RegisterAsync(address, key);
+        for (int client = 0; client < 8; client++)
+        {
+            await SendBadJoinsAsync(relay, address, $"203.0.113.{client}", 32);
+        }
+
+        await WaitForUnverifiedAsync(relay, address, 256);
+        await relay.RefusesAsync(RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1), "198.51.100.4");
+        clock.Advance(TimeSpan.FromSeconds(10));
+        (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control,
+            RelayProtocol.Issue(key, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 2), "198.51.100.4");
+        phone.Dispose();
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public async Task RegistrationLimitsApplyInTotalAndPerClientAsConfigured()
+    {
+        await using var relay = new InProcessRelay(TimeProvider.System, new RelayLimits(Registrations: 3, RegistrationsPerClient: 2));
+        ECDsa[] keys = [.. Enumerable.Range(0, 4).Select(_ => ECDsa.Create(ECCurve.NamedCurves.nistP256))];
+        try
+        {
+            using WebSocket first = await relay.RegisterAsync(AddressOf(keys[0]), keys[0]);
+            using WebSocket second = await relay.RegisterAsync(AddressOf(keys[1]), keys[1]);
+            // The client's own limit refuses its third; another client's is held until the total is reached.
+            Assert.False(await relay.TryRegisterAsync(AddressOf(keys[2]), keys[2]));
+            using WebSocket third = await relay.RegisterAsync(AddressOf(keys[2]), keys[2], "198.51.100.4");
+            Assert.False(await relay.TryRegisterAsync(AddressOf(keys[3]), keys[3], "192.0.2.80"));
+        }
+        finally
+        {
+            foreach (ECDsa key in keys) key.Dispose();
+        }
+    }
+
+    private static async Task SendBadJoinsAsync(InProcessRelay relay, string address, string peer, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            using WebSocket stranger = relay.Connect(peer);
+            await RelayProtocol.SendAsync(stranger, new("join", Ticket: new RelayTicket(address, "0", 0, 0, 0, "")), TestStop);
+        }
+    }
+
+    // Joins are counted as the relay reads them; wait for its count rather than for time.
+    private static async Task WaitForUnverifiedAsync(InProcessRelay relay, string address, int count)
+    {
+        for (int i = 0; relay.Unverified(address) < count; i++)
+        {
+            Assert.True(i < 500, $"The relay counted {relay.Unverified(address)} of {count} joins without a valid ticket.");
+            await Task.Delay(10, TestStop);
+        }
     }
 
     [Fact]
@@ -408,13 +465,15 @@ public class RelayTests
         await Assert.ThrowsAnyAsync<HttpRequestException>(() => remote.HealthAsync(TestStop));
     }
 
-    private sealed class InProcessRelay(TimeProvider clock) : IAsyncDisposable
+    private sealed class InProcessRelay(TimeProvider clock, RelayLimits? limits = null) : IAsyncDisposable
     {
-        private readonly RelayServer server = new(clock);
+        private readonly RelayServer server = new(clock, limits);
         private readonly CancellationTokenSource stopped = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
         private readonly List<Task> handlers = [];
 
-        internal WebSocket Connect()
+        internal int Unverified(string address) => server.Unverified(address);
+
+        internal WebSocket Connect(string peer = "in-process")
         {
             var incoming = new Pipe();
             var outgoing = new Pipe();
@@ -422,22 +481,22 @@ public class RelayTests
             var relay = new Wire(outgoing.Reader.AsStream(), incoming.Writer.AsStream());
             lock (handlers)
             {
-                handlers.Add(RunAsync(relay));
+                handlers.Add(RunAsync(relay, peer));
             }
 
             return WebSocket.CreateFromStream(client, false, null, Timeout.InfiniteTimeSpan);
         }
 
-        private async Task RunAsync(Stream transport)
+        private async Task RunAsync(Stream transport, string peer)
         {
             using WebSocket socket = WebSocket.CreateFromStream(transport, true, null, Timeout.InfiniteTimeSpan);
-            await server.HandleAsync(socket, "in-process", stopped.Token);
+            await server.HandleAsync(socket, peer, stopped.Token);
         }
 
         // Whether a registration of the address with the key is accepted: the relay answers "registered" or closes without a word.
-        internal async Task<bool> TryRegisterAsync(string address, ECDsa key)
+        internal async Task<bool> TryRegisterAsync(string address, ECDsa key, string peer = "in-process")
         {
-            using WebSocket control = Connect();
+            using WebSocket control = Connect(peer);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
             deadline.CancelAfter(TimeSpan.FromSeconds(2));
             try
@@ -456,9 +515,9 @@ public class RelayTests
             }
         }
 
-        internal async Task<WebSocket> RegisterAsync(string address, ECDsa key)
+        internal async Task<WebSocket> RegisterAsync(string address, ECDsa key, string peer = "in-process")
         {
-            WebSocket control = Connect();
+            WebSocket control = Connect(peer);
             await RelayProtocol.SendAsync(control, new("register", address, Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo())), TestStop);
             RelayMessage challenge = Assert.IsType<RelayMessage>(await RelayProtocol.ReceiveAsync(control, TestStop));
             Assert.Equal("challenge", challenge.Kind);
@@ -468,11 +527,11 @@ public class RelayTests
             return control;
         }
 
-        internal async Task<(RelayStream, RelayStream)> JoinAsync(string address, WebSocket control, RelayTicket ticket)
+        internal async Task<(RelayStream, RelayStream)> JoinAsync(string address, WebSocket control, RelayTicket ticket, string peer = "in-process")
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
             deadline.CancelAfter(TimeSpan.FromSeconds(2));
-            WebSocket phone = Connect();
+            WebSocket phone = Connect(peer);
             await RelayProtocol.SendAsync(phone, new("join", Ticket: ticket), deadline.Token);
             RelayMessage request = Assert.IsType<RelayMessage>(await RelayProtocol.ReceiveAsync(control, deadline.Token));
             Assert.Equal("stream", request.Kind);
@@ -482,9 +541,9 @@ public class RelayTests
             return (new RelayStream(phone), new RelayStream(runtime));
         }
 
-        internal async Task RefusesAsync(RelayTicket? ticket)
+        internal async Task RefusesAsync(RelayTicket? ticket, string peer = "in-process")
         {
-            using WebSocket phone = Connect();
+            using WebSocket phone = Connect(peer);
             await RelayProtocol.SendAsync(phone, new("join", Ticket: ticket), TestStop);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
             deadline.CancelAfter(TimeSpan.FromSeconds(2));

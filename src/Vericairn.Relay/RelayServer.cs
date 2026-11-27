@@ -8,20 +8,28 @@ using Vericairn.Protocol;
 
 namespace Vericairn.Relay;
 
+/// <summary>
+/// How many runtimes one relay holds registered, in total and per client. Each registration keeps up to 16,384 revocations,
+/// about 2 MB at most, so the total bounds the relay's memory. A host serving many estates from one address raises the
+/// per-client limit.
+/// </summary>
+internal sealed record RelayLimits(int Registrations = 256, int RegistrationsPerClient = 32);
+
 /// <summary>The relay's live registrations and joins. It never decodes the joined streams.</summary>
-internal sealed class RelayServer(TimeProvider clock)
+internal sealed class RelayServer(TimeProvider clock, RelayLimits? limits = null)
 {
+    private readonly RelayLimits limits = (limits ?? new RelayLimits()) is { Registrations: > 0, RegistrationsPerClient: > 0 } valid
+        ? valid : throw new ArgumentOutOfRangeException(nameof(limits), "Relay registration limits must be positive.");
     private readonly Dictionary<string, Registration> registrations = new(StringComparer.Ordinal);
     private readonly object gate = new();
     private static readonly TimeSpan SetupTimeout = TimeSpan.FromSeconds(10);
     private const int AddressLimit = 32;
     private const int TicketLimit = 4;
     private const int UnverifiedLimit = 256;
+    private const int UnverifiedPerClient = 32;
     private const int WindowSeconds = 10;
     private const int SocketLimit = 4096;
     private const int PeerSocketLimit = 256;
-    private const int RegistrationLimit = 256;
-    private const int PeerRegistrationLimit = 8;
     private readonly Dictionary<string, int> peerSockets = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> peerRegistrations = new(StringComparer.Ordinal);
     private int sockets;
@@ -80,7 +88,7 @@ internal sealed class RelayServer(TimeProvider clock)
                     await RegisterAsync(socket, message, peer, setup.Token, cancellationToken).ConfigureAwait(false);
                     break;
                 case "join":
-                    await JoinAsync(socket, message.Ticket, setup.Token, cancellationToken).ConfigureAwait(false);
+                    await JoinAsync(socket, message.Ticket, peer, setup.Token, cancellationToken).ConfigureAwait(false);
                     break;
                 case "accept":
                     await AcceptAsync(socket, message.Address, message.Nonce, cancellationToken).ConfigureAwait(false);
@@ -134,7 +142,7 @@ internal sealed class RelayServer(TimeProvider clock)
         setup.ThrowIfCancellationRequested();
         lock (gate)
         {
-            if (registrations.Count >= RegistrationLimit || peerRegistrations.GetValueOrDefault(peer) >= PeerRegistrationLimit
+            if (registrations.Count >= limits.Registrations || peerRegistrations.GetValueOrDefault(peer) >= limits.RegistrationsPerClient
                 || !registrations.TryAdd(address, registration))
             {
                 return;
@@ -190,7 +198,7 @@ internal sealed class RelayServer(TimeProvider clock)
         }
     }
 
-    private async Task JoinAsync(WebSocket socket, RelayTicket? ticket, CancellationToken setup, CancellationToken cancellationToken)
+    private async Task JoinAsync(WebSocket socket, RelayTicket? ticket, string peer, CancellationToken setup, CancellationToken cancellationToken)
     {
         if (ticket is null || !RelayProtocol.IsId(ticket.Address))
         {
@@ -203,7 +211,7 @@ internal sealed class RelayServer(TimeProvider clock)
         string nonce;
         lock (gate)
         {
-            if (!registrations.TryGetValue(ticket.Address, out registration) || registration.Saturated(now) || !registration.CanJoin(ticket, now))
+            if (!registrations.TryGetValue(ticket.Address, out registration) || registration.Saturated(peer, now) || !registration.CanJoin(ticket, peer, now))
             {
                 return;
             }
@@ -271,6 +279,15 @@ internal sealed class RelayServer(TimeProvider clock)
 
     private long Now() => clock.GetUtcNow().ToUnixTimeSeconds();
 
+    /// <summary>This window's joins to <paramref name="address"/> whose ticket did not verify, counted so far.</summary>
+    internal int Unverified(string address)
+    {
+        lock (gate)
+        {
+            return registrations.TryGetValue(address, out Registration? registration) ? registration.UnverifiedIn(Now()) : 0;
+        }
+    }
+
     private sealed class Registration(string key)
     {
         private readonly Dictionary<string, (long Counter, long Expires)> revoked = new(StringComparer.Ordinal);
@@ -278,6 +295,7 @@ internal sealed class RelayServer(TimeProvider clock)
         private long window = -1;
         private int calls;
         private int unverified;
+        private readonly Dictionary<string, int> unverifiedFrom = new(StringComparer.Ordinal);
 
 
         internal Channel<RelayMessage> Requests { get; } = Channel.CreateBounded<RelayMessage>(AddressLimit);
@@ -292,6 +310,7 @@ internal sealed class RelayServer(TimeProvider clock)
             window = current;
             calls = 0;
             unverified = 0;
+            unverifiedFrom.Clear();
             ticketUses.Clear();
             foreach (string device in revoked.Where(item => item.Value.Expires <= now).Select(item => item.Key).ToArray())
             {
@@ -299,15 +318,22 @@ internal sealed class RelayServer(TimeProvider clock)
             }
         }
 
-        // Whether this window's joins without a valid ticket have reached their limit; past it they are refused before verifying,
-        // at no signature's cost, until the window ends.
-        internal bool Saturated(long now)
+        internal int UnverifiedIn(long now)
         {
             Roll(now);
-            return unverified >= UnverifiedLimit;
+            return unverified;
         }
 
-        internal bool CanJoin(RelayTicket ticket, long now)
+        // Whether this window's joins without a valid ticket have reached their limit, from this client or in total; past it
+        // joins are refused before verifying, at no signature's cost, until the window ends. One client's joins use only its own
+        // share, so closing an address for a window takes at least UnverifiedLimit / UnverifiedPerClient clients.
+        internal bool Saturated(string peer, long now)
+        {
+            Roll(now);
+            return unverified >= UnverifiedLimit || unverifiedFrom.GetValueOrDefault(peer) >= UnverifiedPerClient;
+        }
+
+        internal bool CanJoin(RelayTicket ticket, string peer, long now)
         {
             Roll(now);
 
@@ -317,6 +343,7 @@ internal sealed class RelayServer(TimeProvider clock)
                 || revoked.TryGetValue(ticket.Device, out var floor) && ticket.Counter <= floor.Counter)
             {
                 unverified++;
+                unverifiedFrom[peer] = unverifiedFrom.GetValueOrDefault(peer) + 1;
                 return false;
             }
 

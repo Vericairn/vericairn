@@ -4,6 +4,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Vericairn.Relay;
 
@@ -16,7 +17,10 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 WebApplication app = builder.Build();
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15), KeepAliveTimeout = TimeSpan.FromSeconds(15) });
-var relay = new RelayServer(TimeProvider.System);
+// Relay:Registrations and Relay:RegistrationsPerClient, from the command line (--Relay:Registrations=512) or the environment
+// (Relay__Registrations=512), raise or lower the registration limits.
+var relay = new RelayServer(TimeProvider.System, new RelayLimits(
+    builder.Configuration.GetValue("Relay:Registrations", 256), builder.Configuration.GetValue("Relay:RegistrationsPerClient", 32)));
 app.Map("/v1/relay", async context =>
 {
     if (!context.Request.IsHttps || !context.WebSockets.IsWebSocketRequest)
