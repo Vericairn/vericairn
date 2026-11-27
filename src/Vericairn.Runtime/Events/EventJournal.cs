@@ -278,6 +278,15 @@ internal sealed class EventJournal : IDisposable
         }
     }
 
+    /// <summary>Reads retained admission events from the serving runtime's open journal.</summary>
+    internal IReadOnlyList<JournalEntry> ReadAdmissionObservations(IReadOnlyList<string> admissionIds)
+    {
+        lock (sync)
+        {
+            return disposed ? [] : ReadAdmissionObservations(connection, admissionIds);
+        }
+    }
+
     /// <summary>Reads retained admission events from a snapshot without opening or modifying the live journal database.</summary>
     internal static (string? Epoch, IReadOnlyList<JournalEntry> Entries) ReadAdmissionObservations(string directory, IReadOnlyList<string> admissionIds)
     {
@@ -295,6 +304,12 @@ internal sealed class EventJournal : IDisposable
         command.CommandText = "SELECT value FROM meta WHERE key = 'epoch';";
         if (command.ExecuteScalar() is not string value || Decode(value, EpochBytes) is not byte[] epoch)
             throw new IOException("The event journal has no readable epoch.");
+        return (Convert.ToHexStringLower(epoch), ReadAdmissionObservations(connection, admissionIds));
+    }
+
+    private static List<JournalEntry> ReadAdmissionObservations(SqliteConnection connection, IReadOnlyList<string> admissionIds)
+    {
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT position, entry FROM events WHERE
                 json_extract(entry, '$.kind') = 'record' AND json_extract(entry, '$.subject.type') = 'admission'
@@ -303,7 +318,7 @@ internal sealed class EventJournal : IDisposable
             ORDER BY position;
             """;
         command.Parameters.AddWithValue("$ids", JsonSerializer.Serialize(admissionIds, ProtocolJson.Options));
-        return (Convert.ToHexStringLower(epoch), Read(command));
+        return Read(command);
     }
 
     /// <summary>Whether the derivation has observed a record before.</summary>

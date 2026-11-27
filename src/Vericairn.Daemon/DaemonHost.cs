@@ -372,9 +372,10 @@ public sealed class DaemonHost : IAsyncDisposable
         // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
         RouteGroupBuilder routes = app.MapGroup(string.Empty);
         routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log, () => host.BeforeDeviceWrite?.Invoke()));
-        string serverObserverIdentity = service.RevocationJournalIdentity ?? Guid.NewGuid().ToString("N");
+        string serverObserverFallback = Guid.NewGuid().ToString("N");
         ApiRoutes.Map(routes, service, () => _ = Task.Run(host.StopAsync), () =>
-            new RevocationObserver("server", serverObserverIdentity, "write-served", RecordParser.FormatTimestamp(host.Time.GetUtcNow())));
+            new RevocationObserver("server", service.RevocationJournalIdentity ?? serverObserverFallback, "write-served",
+                RecordParser.FormatTimestamp(host.Time.GetUtcNow())));
         DaemonRoutes.Map(routes, host);
         EventRoutes.Map(routes, host);
         try

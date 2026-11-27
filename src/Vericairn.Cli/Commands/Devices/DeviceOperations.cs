@@ -8,6 +8,7 @@ using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
 using Vericairn.Runtime.Service;
+using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
@@ -65,13 +66,20 @@ internal sealed class DeviceOperations(CommandContext context)
         if (!DateTimeOffset.TryParseExact(since, ["yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:sszzz"],
             CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset start))
             return context.Fail("--since requires an ISO 8601 timestamp with seconds and Z or an explicit offset.");
-        if (!IsEstate(root)) return context.Fail(NotAnEstate(root));
 
-        try
+        return context.WithApi(root, api =>
         {
             using EstateService service = EstateService.OpenReadOnly(root);
-            DeviceReachReport? report = service.DeviceReach(device, start);
+            DeviceReachReport? report = service.DeviceReach(device, start, includeRevocations: !context.UsingDaemon);
             if (report is null) return context.Fail($"Device {device} is not a device of this estate.");
+            if (context.UsingDaemon)
+            {
+                DeviceRevocationReachReport? servingReach = api.DeviceRevocationReach(report.Device);
+                if (servingReach is null || servingReach.Device != report.Device)
+                    return context.Fail($"The serving daemon did not return revocation reach for device {report.Device}.");
+                report = report with { Revocations = servingReach.Revocations, JournalProblem = servingReach.JournalProblem };
+            }
+
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(report, ProtocolJson.Options));
@@ -79,14 +87,22 @@ internal sealed class DeviceOperations(CommandContext context)
             }
 
             context.Output.WriteLine($"device {report.Device} since {report.Since} (inclusive)");
-            context.Output.WriteLine("  Record times are the author's claims. Checkpoint times state when the witness was recorded. Ledger times come from this machine.");
+            context.Output.WriteLine("  Record and checkpoint times are their signers' claims. Ledger times come from this machine.");
+            context.Output.WriteLine("  A counting checkpoint signed by another device must witness the exact record id and hash before the cutoff for the record to be omitted.");
+            context.Output.WriteLine("  Checkpoints signed by any revision of the suspected device supply no cutoff evidence.");
             context.Output.WriteLine("  A record outside a closing may have arrived from another copy. Its signing time remains unknown.");
             if (report.Records.Count == 0) context.Output.WriteLine("  no matching signatures in the available records or presence ledger");
             foreach (DeviceSignatureReach record in report.Records)
             {
                 string sessions = record.Sessions.Count > 0 ? $"  sessions {string.Join(", ", record.Sessions)}" : string.Empty;
                 string at = record.Source == "presence-ledger" ? "ledger signed at" : "stated at";
-                string line = $"  {record.Type} {record.Id}  {record.Hash}  {record.Source}  {at} {record.At}{sessions}";
+                string evidence = record.Evidence switch
+                {
+                    DeviceSignatureReach.WitnessedAfterCutoff => "witnessed after the cutoff",
+                    DeviceSignatureReach.ClaimedTime => "listed on the record's own claimed time",
+                    _ => record.Evidence,
+                };
+                string line = $"  {record.Type} {record.Id}  {record.Hash}  {record.Source}  {at} {record.At}  {evidence}{sessions}";
                 if (record.Source == "presence-ledger") WriteRuntime(context.Output, line);
                 else context.Output.WriteLine(line);
                 if (record.FirstWitness is { } witness)
@@ -105,23 +121,23 @@ internal sealed class DeviceOperations(CommandContext context)
 
             if (report.PresenceProblem is { } presenceProblem) context.Output.WriteLine($"  presence evidence unavailable: {presenceProblem}");
             if (report.JournalProblem is { } journalProblem) context.Output.WriteLine($"  server evidence unavailable: {journalProblem}");
-            context.Output.WriteLine("  Revocation observations cover this process and this machine's retained journal. Absence of an observation leaves that observer's status unknown.");
+            context.Output.WriteLine(context.UsingDaemon
+                ? "  Revocation observations cover the serving daemon and its retained journal."
+                : "  Revocation observations cover this process and this machine's retained journal.");
+            context.Output.WriteLine("  Absence of an observation leaves that observer's status unknown.");
             if (report.Revocations.Count == 0) context.Output.WriteLine("  no revocation records in this copy");
             foreach (DeviceRevocationReach revocation in report.Revocations)
             {
                 string current = revocation.Current ? "  current admission revision" : string.Empty;
                 context.Output.WriteLine($"  revocation {revocation.Id}  {revocation.Hash}  stated at {revocation.At}  {(revocation.Counts ? "counts" : "does not count")}{current}");
-                if (revocation.RevokedAt is { } revokedAt) WriteRuntime(context.Output, $"    stated effective time {revokedAt}");
+                if (revocation.RevokedAt is { } revokedAt)
+                    context.Output.WriteLine($"    stated effective time {PresenceNoticeReader.Sanitize(revokedAt)}");
                 foreach (RevocationObserver observation in revocation.Observations)
                     context.Output.WriteLine($"    {observation.Kind} {observation.Identity}  {observation.Evidence} at {observation.At}");
             }
 
             return Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            return context.Fail(exception.Message);
-        }
+        }, readOnly: true);
     }
 
     public int DevicesRecovery(string root, string principal, string name, string output, bool passphraseStdin, bool json)

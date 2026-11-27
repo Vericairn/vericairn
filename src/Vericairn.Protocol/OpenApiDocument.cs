@@ -88,6 +88,7 @@ public static class OpenApiDocument
         ("POST", "/v1/standing/outputs"),
         ("POST", "/v1/work/takeover"),
         ("GET", "/v1/devices"),
+        ("GET", "/v1/devices/{id}/revocation-reach"),
         ("POST", "/v1/devices"),
         ("POST", "/v1/devices/admit"),
         ("POST", "/v1/devices/rename"),
@@ -424,6 +425,16 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = "ReleaseBasisResponse: complete retained evidence, or null evidence with a release-basis-unavailable problem naming every failed reference. Historical evidence grants no submission authority." };
             responses["404"] = new JsonObject { ["description"] = "No supported retained release basis has this hash." };
+        }
+        else if (path == "/v1/devices/{id}/revocation-reach")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "The serving runtime's observations of exact revocation revisions for this device. An empty list means this copy holds no revocation records for it.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference("DeviceRevocationReachReport") } },
+            };
+            responses["404"] = new JsonObject { ["description"] = "This copy has no device with that identity or revision id." };
+            responses["401"] = new JsonObject { ["description"] = "A device-signed request must be signed by an admitted device acting for an operator or a principal with the administer scope (Problem with code denied)." };
         }
         else if (path == "/v1/companions" || path.StartsWith("/v1/companions/", StringComparison.Ordinal))
         {
@@ -846,6 +857,15 @@ public static class OpenApiDocument
         decisionNew["required"] = new JsonArray("by", "ask", "statement", "answeredAt", "baseCommit", "title", "summary", "synthesis", "effects", "documents");
         foreach (string field in new[] { "effects", "documents", "affects", "notAuthorized" })
             decisionNew["properties"]![field]!["items"] = new JsonObject { ["type"] = "string" };
+        JsonObject revocationReport = Required(Object(("device", "string"), ("revocations", "array"), ("journalProblem", "string")),
+            "device", "revocations");
+        revocationReport["properties"]!["revocations"]!["items"] = SchemaReference("DeviceRevocationReach");
+        JsonObject revocation = Required(Object(("id", "string"), ("hash", "string"), ("at", "string"), ("revokedAt", "string"),
+            ("counts", "boolean"), ("current", "boolean"), ("observations", "array")), "id", "hash", "at", "revokedAt", "counts", "current", "observations");
+        revocation["properties"]!["revokedAt"]!["nullable"] = true;
+        revocation["properties"]!["observations"]!["items"] = SchemaReference("RevocationObserver");
+        JsonObject writeOutcome = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"), ("notices", "array"), ("revocationReach", "array")));
+        writeOutcome["properties"]!["revocationReach"]!["items"] = SchemaReference("RevocationObserver");
         JsonObject policyHashRequest = Object(("body", "object"));
         policyHashRequest["required"] = new JsonArray("body");
         JsonObject policyHashResponse = Object(("definitionHash", "string"), ("problem", "object"));
@@ -1145,6 +1165,10 @@ public static class OpenApiDocument
             ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object"), ("decision", "object"), ("notices", "array")),
             ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string"), ("basis", "string")),
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
+            ["DeviceRevocationReachReport"] = revocationReport,
+            ["DeviceRevocationReach"] = revocation,
+            ["RevocationObserver"] = Required(Object(("kind", "string"), ("identity", "string"), ("evidence", "string"), ("at", "string")),
+                "kind", "identity", "evidence", "at"),
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
             ["ChangesPushRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
             ["OperatorRecordRequest"] = operatorRecordRequest,
@@ -1234,7 +1258,7 @@ public static class OpenApiDocument
             ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string"), ("presenceDevice", "object"), ("presenceSignature", "string")),
             ["CertificateRotateRequest"] = Object(("compromised", "boolean"), ("reason", "string"), ("identity", "boolean")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
-            ["WriteOutcome"] = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"), ("notices", "array"), ("revocationReach", "array"))),
+            ["WriteOutcome"] = writeOutcome,
             ["TriggeredCheckpoint"] = Required(Object(("trigger", "string"), ("written", "object"), ("skipped", "string")), "trigger"),
             ["HistoryCheckpointRequest"] = Object(("by", "string"), ("adopt", "boolean"), ("check", "boolean"), ("expectPlan", "string")),
             ["HistoryCheckpointResponse"] = Required(Object(("trigger", "string"), ("applied", "boolean"), ("adopted", "boolean"), ("witnessed", "integer"), ("listed", "integer"), ("heads", "array"),
@@ -1452,6 +1476,7 @@ public static class OpenApiDocument
         ("POST", "/v1/standing/outputs") => "From 0.9.4: record one output of a standing agent's occurrence, a possibility, an ask or a publication request, by the contributor of the assignment that carries it; the runtime names what raised it, and another principal disposes of it.",
         ("POST", "/v1/work/takeover") => "Hand a step an agent holds over to a person: a new assignment of the step to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop, each stop's facts reported as observed. Recorded by a person only, the one taking the step over, the sponsor of its goal or an operator, never by an agent.",
         ("GET", "/v1/devices") => "Devices known to the estate and whether this machine holds their keys.",
+        ("GET", "/v1/devices/{id}/revocation-reach") => "Read the serving runtime's revocation observations for a device. On signed profiles this is an administrator's read.",
         ("POST", "/v1/devices") => "Create a device on the runtime's machine.",
         ("POST", "/v1/devices/admit") => "Admit a device.",
         ("POST", "/v1/devices/rename") => "Rename a device, keeping its identity.",

@@ -197,6 +197,10 @@ public partial interface IEstateApi
     Task<IReadOnlyList<DeviceRow>> DevicesAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Devices), () => Devices(), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable read of revocation observations for a device.</summary>
+    Task<DeviceRevocationReachReport?> DeviceRevocationReachAsync(string device, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(DeviceRevocationReach), () => DeviceRevocationReach(device), false, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="DeviceCreate"/>; a stopped observation does not undo an effect.</summary>
     Task<WriteOutcome> DeviceCreateAsync(DeviceCreateRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(DeviceCreate), () => DeviceCreate(request), true, this as IClientOperationLifetime, cancellationToken);
