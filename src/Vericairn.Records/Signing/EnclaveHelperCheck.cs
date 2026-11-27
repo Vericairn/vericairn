@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 
 namespace Vericairn.Records.Signing;
 
-/// <summary>How the vericairn-enclave helper answered when asked its version.</summary>
+/// <summary>How the vericairn-enclave helper answered its availability or version check.</summary>
 internal enum EnclaveHelperAnswer
 {
     /// <summary>With its version and commands: a helper from 0.9.5 on.</summary>
@@ -21,6 +21,9 @@ internal enum EnclaveHelperAnswer
 
     /// <summary>Not at all: it did not start, did not answer in time or failed in another way.</summary>
     None,
+
+    /// <summary>The helper did not complete its availability check.</summary>
+    AvailabilityFailed,
 }
 
 /// <summary>
@@ -35,6 +38,8 @@ internal enum EnclaveHelperAnswer
 /// <param name="Commands">The commands it serves, from its version answer or, for a helper before 0.9.5, its usage line.</param>
 internal sealed record EnclaveHelperReport(EnclaveHelperAnswer Answer, string? Version, ImmutableArray<string> Commands)
 {
+    internal static EnclaveHelperReport FailedAvailability { get; } = new(EnclaveHelperAnswer.AvailabilityFailed, null, []);
+
     /// <summary>Whether the helper serves a command.</summary>
     internal bool Serves(string command) => Commands.Contains(command, StringComparer.Ordinal);
 
@@ -54,6 +59,7 @@ internal sealed record EnclaveHelperReport(EnclaveHelperAnswer Answer, string? V
     internal string Description => Answer switch
     {
         EnclaveHelperAnswer.None => "did not answer when asked for its version",
+        EnclaveHelperAnswer.AvailabilityFailed => "could not complete its availability check",
         EnclaveHelperAnswer.Usage when !Serves("sign-record") => "reports no version and serves no sign-record, so it comes from a release before 0.9.4",
         EnclaveHelperAnswer.Usage => "reports no version, so it comes from a release before 0.9.5",
         _ when Version is null => "reports a version this command line cannot read",
@@ -65,10 +71,12 @@ internal sealed record EnclaveHelperReport(EnclaveHelperAnswer Answer, string? V
     /// The refusal of a helper this command line does not sign through, naming the helper's version, the command line's, the version it
     /// needs and where the right helper comes from; null when it signs through it.
     /// </summary>
-    internal string? Refusal(string commandLine) => !Refused ? null
-        : $"The {SecureEnclaveCustody.HelperName} helper beside this command line cannot sign for it: the helper {Description}, and this command line is "
-            + $"version {commandLine}, which needs {SecureEnclaveCustody.HelperName} {SecureEnclaveCustody.HelperVersion} or later. The helper and the command "
-            + $"line come from the same release archive: put the {SecureEnclaveCustody.HelperName} from this command line's archive beside it. Nothing was signed.";
+    internal string? Refusal(string commandLine) => Refused ? Refusal(commandLine, Description) : null;
+
+    internal static string Refusal(string commandLine, string description) =>
+        $"The {SecureEnclaveCustody.HelperName} helper beside this command line cannot sign for it: the helper {description}, and this command line is "
+        + $"version {commandLine}, which needs {SecureEnclaveCustody.HelperName} {SecureEnclaveCustody.HelperVersion} or later. The helper and the command "
+        + $"line come from the same release archive: put the {SecureEnclaveCustody.HelperName} from this command line's archive beside it. Nothing was signed.";
 
     /// <summary>
     /// doctor's account of the helper beside the command line: its version beside the command line's, and a mismatch flagged, when it is
@@ -100,6 +108,9 @@ internal static partial class EnclaveHelperCheck
     /// <summary>This command line's version, as <c>vericairn version</c> prints it.</summary>
     internal static string CommandLineVersion { get; } =
         typeof(EnclaveHelperCheck).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+
+    internal static EnclaveHelperMismatchException Refuse(string description) =>
+        new(EnclaveHelperReport.Refusal(CommandLineVersion, description));
 
     /// <summary>
     /// Asks a helper its version and the commands it serves, once for each helper file as it is: an answer is kept while the file's size

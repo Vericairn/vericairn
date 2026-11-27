@@ -28,13 +28,28 @@ internal sealed class MachineDiagnostics(CommandContext context)
         bool estate = IsEstate(root);
         string full = Path.GetFullPath(root);
         long? format = estate ? EstateManifest.Load(root, new FindingList())?.RecordFormat : null;
-        string custody = format is < 2 ? DeviceKeyStores.Default(enclave: false).Kind : DeviceKeyStores.Default().Kind;
+        string custodyWithoutEnclave = DeviceKeyStores.Default(enclave: false).Kind;
+        string platformCustody = custodyWithoutEnclave;
+        Probe enclave = new("not-applicable", null, null);
+        Probe helper = new("not-applicable", null, null);
+        if (OperatingSystem.IsMacOS())
+        {
+            string? path = SecureEnclaveCustody.HelperPath();
+            bool? available = SecureEnclaveKeyStore.Probe(path);
+            if (available is not false) platformCustody = SecureEnclaveCustody.Kind;
+            enclave = Enclave(available, path is not null);
+            EnclaveHelperReport? report = available is null ? EnclaveHelperReport.FailedAvailability
+                : path is null ? null : EnclaveHelperCheck.Ask(path);
+            helper = Helper(report, EnclaveHelperCheck.CommandLineVersion);
+        }
+
+        string custody = format is < 2 ? custodyWithoutEnclave : platformCustody;
+        bool custodyUnavailable = custody == SecureEnclaveCustody.Kind && helper.State == "unavailable";
         string custodyDetail = format is < 2
-            ? $"the default for this estate, at record format {format}, which cannot name the Secure Enclave; {DeviceKeyStores.Default().Kind} once it is at format 2"
-            : "default on this platform";
-        Probe enclave = !OperatingSystem.IsMacOS() ? new("not-applicable", null, null) : Enclave(SecureEnclaveKeyStore.Probe(), SecureEnclaveCustody.HelperPath() is not null);
-        Probe helper = !OperatingSystem.IsMacOS() ? new("not-applicable", null, null)
-            : Helper(SecureEnclaveCustody.HelperPath() is string path ? EnclaveHelperCheck.Ask(path) : null, EnclaveHelperCheck.CommandLineVersion);
+            ? $"the default for this estate, at record format {format}, which cannot name the Secure Enclave; {platformCustody} once it is at format 2"
+            : custodyUnavailable
+                ? $"default custody unavailable until the {SecureEnclaveCustody.HelperName} from this command line's release archive is beside it"
+                : "default on this platform";
         Probe presence = Presence(root, estate);
         string records = string.Join(", ", RecordFormats.Reads);
         string writes = $"writes an estate's own format, at most {RecordFormats.Current}";
@@ -57,7 +72,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
                 ["git"] = git is null ? new Probe("missing", null, "not found on PATH") : new Probe("present", git, null),
                 ["dotnet"] = dotnet is null ? new Probe("missing", null, "not found on PATH (needed only to build from source)") : new Probe("present", dotnet, null),
                 ["estate"] = estate ? new Probe("present", full, "manifest present") : new Probe("missing", full, $"not an estate root (no {EstateLayout.ManifestPath})"),
-                ["custody"] = new Probe("present", custody, $"{custodyDetail}; per-user state at {VericairnHome.Path()}"),
+                ["custody"] = new Probe(custodyUnavailable ? "unavailable" : "present", custodyUnavailable ? null : custody, $"{custodyDetail}; per-user state at {VericairnHome.Path()}"),
                 ["enclave"] = enclave,
                 ["helper"] = helper,
                 ["presence"] = presence,
@@ -103,13 +118,12 @@ internal sealed class MachineDiagnostics(CommandContext context)
     /// The enclave probe on a Mac: present when the helper reports a Secure Enclave available to this process; otherwise unavailable,
     /// because the helper is not beside the command line or because it reports no Secure Enclave available to this process, which
     /// describes the context the probe ran in, not the machine. The enrollment troubleshooting guide quotes each line (DOCS-45). From
-    /// 0.9.5 <paramref name="available"/> is null for a helper that is beside the command line but cannot be started, which is said
-    /// without its path; up to 0.9.4 doctor ended there with the start failure.
+    /// 0.9.5 <paramref name="available"/> is null for a helper that failed its availability check, which is reported without its path.
     /// </summary>
     internal static Probe Enclave(bool? available, bool helper) => available switch
     {
         true => new("present", "secure-enclave", "Secure Enclave custody available (record format 2): a person's device asks for Touch ID or the login password at every signature unless it is created with --presence false; an agent's never asks"),
-        null => new("unavailable", null, $"the {SecureEnclaveCustody.HelperName} helper beside the command line could not be started"),
+        null => new("unavailable", null, $"the {SecureEnclaveCustody.HelperName} helper beside the command line {EnclaveHelperReport.FailedAvailability.Description}"),
         false => new("unavailable", null, helper ? "no Secure Enclave available to this process" : $"no {SecureEnclaveCustody.HelperName} helper beside the command line"),
     };
 

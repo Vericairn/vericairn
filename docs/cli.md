@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 48, November 27, 2026. A present `vericairn-enclave` helper must complete its availability check: one that cannot start, exits unexpectedly, is killed or times out makes `devices create` refuse before it makes a key and `doctor` mark the Secure Enclave default unavailable, while exit 3 and an absent helper keep file custody; a daemon that cannot read its Secure Enclave identity refuses to start and keeps the identity, in the development build.
+
 Revision 47, November 26, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
 
 Revision 46, November 24, 2026. An agent's `operator done` or `operator dismiss` citing the operator's words writes `--said-at`, which needs `Z` or an explicit offset, in whole seconds UTC, and the time of the recording without it, and `docs pass --before` without `--previous` and `--by` reads the estate's releases read-only, in the development build.
@@ -1092,11 +1094,14 @@ when it serves no `sign-record` either. The line is flagged `mismatch` when the 
 lacks a command the command line calls. Before its first signature through the helper, and before it makes a Secure Enclave key, every
 command asks the same question and refuses an older helper, or one without `sign-record`, before anything is signed: the refusal names
 the helper's version, the command line's and the helper version it needs, says that the helper and the command line come from the same
-release archive, and ends "Nothing was signed." A helper that is beside the command line but cannot be started, such as one without
-execute permission, is refused the same way, as one that did not answer: the `helper` line says so, the `enclave` line reads `Secure
-Enclave custody unavailable (the vericairn-enclave helper beside the command line could not be started)`, and `devices create` refuses
-before it makes a key rather than taking another custody; neither names the helper's path. Up to 0.9.4 both commands ended with the
-start failure and a stack trace.
+release archive, and ends "Nothing was signed."
+
+From 0.9.5 (FIX-175), a present helper must complete its availability check. If it cannot start, exits unexpectedly, is killed
+or times out, `devices create` refuses before making a key. Exit 3 still reports that the Secure Enclave is unavailable, and
+a Mac with no helper or with that result uses file custody by default. `doctor` reports the helper failure, and its `custody`
+line marks the Secure Enclave default unavailable until the helper from this command line's release archive is beside it.
+The diagnostics and refusal omit the helper's path. If a daemon cannot read its held Secure Enclave identity because the helper
+fails, it refuses to start with the same remedy and preserves the identity so paired devices keep their pin.
 
 ```text
 helper    vericairn-enclave reports no version and serves no sign-record, so it comes from a release before 0.9.4; vericairn 0.9.5+<commit> expects vericairn-enclave 0.9.5: mismatch, so Secure Enclave signatures are refused until the vericairn-enclave from this command line's release archive is beside it
