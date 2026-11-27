@@ -45,7 +45,7 @@ internal static class DaemonRoutes
             return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A pairing code is issued for a principal (principal) by an administrator (by).");
         }
 
-        IReadOnlyList<string> profiles = request.Profiles is { Count: > 0 } ? request.Profiles.Distinct(StringComparer.Ordinal).ToList() : [RequestAuthenticator.LocalNetworkProfile];
+        IReadOnlyList<string> profiles = request.Profiles is { Count: > 0 } ? request.Profiles.Distinct(StringComparer.Ordinal).ToList() : host.Relay is null ? [RequestAuthenticator.LocalNetworkProfile] : [RequestAuthenticator.LocalNetworkProfile, RequestAuthenticator.RelayProfile];
         (PairingAuthority? issuer, string? refusal) = host.Service.PairingIssuer(request.Principal, request.By, profiles);
         if (issuer is null)
         {
@@ -157,6 +157,7 @@ internal static class DaemonRoutes
                 PresenceDevice = withPresence ? presence!.Written!.Id : null,
                 PresenceAdmission = withPresence ? presenceAdmitted!.Written!.Id : null,
                 PresenceHash = withPresence ? presence!.Written!.Hash : null,
+                Relay = exchange.Hello.Relay == true ? host.Relay?.Issue(device) : null,
             };
             completed = completed with { Mac = PairingProtocol.CompletedMac(pairing.RuntimeKey, exchange.Hello, exchange.Challenge, confirm, completed) };
             host.Log($"device {device} ({confirm.Device.Platform}) paired for {pairing.Principal} under {pairing.By}, pairing {pairing.Id}" + (withPresence ? $", with presence device {completed.PresenceDevice}" : ""));
@@ -181,7 +182,7 @@ internal static class DaemonRoutes
     /// </summary>
     private static IResult Prove(DaemonHost host, HttpContext context, string? nonce)
     {
-        if (host.Identity is null || !DaemonHost.OnLocalNetwork(context) || context.Connection.ClientCertificate is not { } client)
+        if (host.Identity is null || (!DaemonHost.OnLocalNetwork(context) && !DaemonHost.OnRelay(context)) || context.Connection.ClientCertificate is not { } client)
         {
             return Problem(StatusCodes.Status404NotFound, "not-found", "The runtime identity proves itself to paired devices over the local network only.");
         }

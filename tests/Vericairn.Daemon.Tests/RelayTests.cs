@@ -1,0 +1,376 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Buffers.Text;
+using System.IO.Pipelines;
+using System.Net.Security;
+using System.Net.WebSockets;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.Connections;
+using Vericairn.Protocol;
+using Vericairn.Records.Identity;
+using Vericairn.Records.Tests;
+using Vericairn.Relay;
+using Vericairn.Runtime.Service;
+using Vericairn.Sdk;
+
+namespace Vericairn.Daemon.Tests;
+
+public class RelayTests
+{
+    private static CancellationToken TestStop => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public void TicketIsBoundToRegistrationDeviceTimesAndCounter()
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using ECDsa other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string publicKey = Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo());
+        string address = RelayProtocol.RandomId();
+        string device = Ulid.NewUlid().Value;
+        const long now = 123_456;
+        RelayTicket ticket = RelayProtocol.Issue(key, address, device, now, 1);
+        Assert.Equal(RelayProtocol.Lifetime, ticket.Expires - ticket.Issued);
+        Assert.True(RelayProtocol.Verify(ticket, address, publicKey, now));
+        Assert.False(RelayProtocol.Verify(ticket, address, publicKey, ticket.Expires));
+        Assert.False(RelayProtocol.Verify(ticket, address, publicKey, now - 1));
+        Assert.False(RelayProtocol.Verify(ticket, RelayProtocol.RandomId(), publicKey, now));
+        Assert.False(RelayProtocol.Verify(ticket, address, Base64Url.EncodeToString(other.ExportSubjectPublicKeyInfo()), now));
+        Assert.False(RelayProtocol.Verify(ticket with { Device = Ulid.NewUlid().Value }, address, publicKey, now));
+        Assert.False(RelayProtocol.Verify(ticket with { Counter = ticket.Counter + 1 }, address, publicKey, now));
+        Assert.False(RelayProtocol.Verify(ticket with { Expires = ticket.Expires + 1 }, address, publicKey, now));
+
+        string challenge = RelayProtocol.RandomId();
+        string proof = RelayProtocol.Prove(key, address, challenge);
+        Assert.True(RelayProtocol.VerifyProof(address, challenge, publicKey, proof));
+        Assert.False(RelayProtocol.VerifyProof(address, RelayProtocol.RandomId(), publicKey, proof));
+    }
+
+    [Fact]
+    public async Task UnticketedAndExpiredJoinsNeverContactTheRuntime()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        await using var relay = new InProcessRelay(clock);
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string address = RelayProtocol.RandomId();
+        string device = Ulid.NewUlid().Value;
+        long now = clock.GetUtcNow().ToUnixTimeSeconds();
+        using WebSocket control = await relay.RegisterAsync(address, key);
+        await relay.RefusesAsync(null);
+        await relay.RefusesAsync(RelayProtocol.Issue(key, address, device, now - RelayProtocol.Lifetime, 1));
+        RelayTicket admitted = RelayProtocol.Issue(key, address, device, now, 2);
+        using WebSocket join = relay.Connect();
+        await RelayProtocol.SendAsync(join, new("join", Ticket: admitted), TestStop);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+        deadline.CancelAfter(TimeSpan.FromSeconds(2));
+        RelayMessage request = Assert.IsType<RelayMessage>(await RelayProtocol.ReceiveAsync(control, deadline.Token));
+        Assert.Equal("stream", request.Kind);
+        Assert.Equal(admitted, request.Ticket);
+    }
+
+    [Fact]
+    public async Task RelayForwardsBytesAndClosesTheRevokedDevicesStream()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        await using var relay = new InProcessRelay(clock);
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string address = RelayProtocol.RandomId();
+        string device = Ulid.NewUlid().Value;
+        RelayTicket ticket = RelayProtocol.Issue(key, address, device, clock.GetUtcNow().ToUnixTimeSeconds(), 1);
+        using WebSocket control = await relay.RegisterAsync(address, key);
+        (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control, ticket);
+        using (phone)
+        using (runtime)
+        {
+            byte[] encrypted = RandomNumberGenerator.GetBytes(64);
+            await phone.WriteAsync(encrypted, TestStop);
+            byte[] forwarded = new byte[encrypted.Length];
+            await runtime.ReadExactlyAsync(forwarded, TestStop);
+            Assert.Equal(encrypted, forwarded);
+
+            await RelayProtocol.SendAsync(control, new("revoke", Device: device, Counter: ticket.Counter), TestStop);
+            await Assert.ThrowsAnyAsync<WebSocketException>(async () => await phone.ReadExactlyAsync(forwarded, TestStop));
+            await relay.RefusesAsync(ticket);
+        }
+    }
+
+    [Fact]
+    public async Task FloodingOneAddressAndTicketLeavesAnotherAddressReachable()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        await using var relay = new InProcessRelay(clock);
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string first = RelayProtocol.RandomId();
+        string second = RelayProtocol.RandomId();
+        string device = Ulid.NewUlid().Value;
+        long now = clock.GetUtcNow().ToUnixTimeSeconds();
+        using WebSocket firstControl = await relay.RegisterAsync(first, key);
+        RelayTicket ticket = RelayProtocol.Issue(key, first, device, now, 1);
+        for (int i = 0; i < 4; i++)
+        {
+            (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(first, firstControl, ticket);
+            phone.Dispose();
+            runtime.Dispose();
+        }
+        await relay.RefusesAsync(ticket);
+
+        for (int i = 0; i < 32; i++)
+        {
+            await relay.RefusesAsync(ticket with { Counter = i + 2 });
+        }
+
+        await relay.RefusesAsync(RelayProtocol.Issue(key, first, device, now, 35));
+        clock.Advance(TimeSpan.FromSeconds(10));
+        (RelayStream firstPhone, RelayStream firstRuntime) =
+            await relay.JoinAsync(first, firstControl, RelayProtocol.Issue(key, first, device, now, 36));
+        firstPhone.Dispose();
+        firstRuntime.Dispose();
+
+        using WebSocket secondControl = await relay.RegisterAsync(second, key);
+        (RelayStream otherPhone, RelayStream otherRuntime) =
+            await relay.JoinAsync(second, secondControl, RelayProtocol.Issue(key, second, device, now, 1));
+        otherPhone.Dispose();
+        otherRuntime.Dispose();
+    }
+
+    [Fact]
+    public async Task ACorruptedTlsHandshakeDoesNotMakeItThroughTheRelay()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        await using var relay = new InProcessRelay(clock);
+        using ECDsa registration = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string address = RelayProtocol.RandomId();
+        RelayTicket ticket = RelayProtocol.Issue(registration, address, Ulid.NewUlid().Value, clock.GetUtcNow().ToUnixTimeSeconds(), 1);
+        using WebSocket control = await relay.RegisterAsync(address, registration);
+        (RelayStream phone, RelayStream runtime) = await relay.JoinAsync(address, control, ticket);
+        using (phone)
+        using (runtime)
+        using (var tls = new SslStream(phone, leaveInnerStreamOpen: true))
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+            deadline.CancelAfter(TimeSpan.FromSeconds(5));
+            Task accepting = tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = "runtime.invalid" }, deadline.Token);
+            await runtime.WriteAsync(new byte[] { 21, 3, 3, 0, 2, 2, 40 }, deadline.Token);
+            Exception? refused = await Record.ExceptionAsync(() => accepting);
+            Assert.True(refused is AuthenticationException or IOException, refused?.ToString());
+            Assert.False(tls.IsAuthenticated);
+        }
+    }
+
+    [Fact]
+    public async Task RuntimeRegistrationAndItsRevocationsSurviveRestart()
+    {
+        DaemonTestHome.Ensure();
+        using var estate = new TestEstate(2);
+        using EstateService service = EstateService.Open(estate.Root);
+        WriteOutcome created = service.DeviceCreate(new DeviceCreateRequest(estate.OperatorId, "Test device", "file", ["relay"]));
+        Assert.True(created.Ok, created.Problem?.Message);
+        string device = created.Written!.Id;
+        WriteOutcome admitted = service.DeviceAdmit(new AdmitRequest(device, estate.OperatorId, "Fixture."));
+        Assert.True(admitted.Ok, admitted.Problem?.Message);
+
+        var address = new Uri("https://relay.invalid");
+        string state = Path.Combine(estate.Root, "local", "relay");
+        Directory.CreateDirectory(state);
+        using var firstStop = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+        RelayRoute first;
+        await using (var relay = new InProcessRelay(TimeProvider.System))
+        using (var runtime = new RuntimeRelay(state, address, service, TimeProvider.System, _ => { }, (_, _) => Task.FromResult(relay.Connect())))
+        {
+            Task running = runtime.RunAsync(firstStop.Token);
+            try
+            {
+                RelayRoute? available = null;
+                for (int i = 0; available is null && i < 50; i++)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(20), TestStop);
+                    available = runtime.Issue(device);
+                }
+
+                first = Assert.IsType<RelayRoute>(available);
+                using WebSocket phone = relay.Connect();
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+                deadline.CancelAfter(TimeSpan.FromSeconds(2));
+                await RelayProtocol.SendAsync(phone, new("join", Ticket: first.Ticket), deadline.Token);
+                Assert.Equal("joined", (await RelayProtocol.ReceiveAsync(phone, deadline.Token))?.Kind);
+                await using ConnectionContext connection = Assert.IsAssignableFrom<ConnectionContext>(await runtime.Listener.AcceptAsync(deadline.Token));
+                Assert.Equal(device, connection.Items[RelayListener.TicketDevice]);
+                WriteOutcome revoked = service.DeviceRevoke(new RevokeRequest(device, estate.OperatorId, "Fixture revoked."));
+                Assert.True(revoked.Ok, revoked.Problem?.Message);
+                Assert.Null(runtime.Issue(device));
+                Assert.True(connection.ConnectionClosed.IsCancellationRequested);
+            }
+            finally
+            {
+                await firstStop.CancelAsync();
+                await running;
+            }
+        }
+
+        using var secondStop = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+        await using var restartedRelay = new InProcessRelay(TimeProvider.System);
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var restarted = new RuntimeRelay(state, address, service, TimeProvider.System,
+            message => { if (message == "relay registration current") ready.TrySetResult(); }, (_, _) => Task.FromResult(restartedRelay.Connect()));
+        Task registration = restarted.RunAsync(secondStop.Token);
+        try
+        {
+            await ready.Task.WaitAsync(TimeSpan.FromSeconds(5), TestStop);
+            Assert.Null(restarted.Issue(device));
+            await restartedRelay.RefusesAsync(first.Ticket);
+        }
+        finally
+        {
+            await secondStop.CancelAsync();
+            await registration;
+        }
+    }
+
+    [Fact]
+    public async Task PairedDeviceRefreshesAndUsesItsTicketWithThePinnedIdentity()
+    {
+        await using var relay = new InProcessRelay(TimeProvider.System);
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(systemClock: true,
+            relay: new Uri("https://relay.invalid"), connectRelay: (_, _) => Task.FromResult(relay.Connect()));
+
+        RuntimeConnection phone = harness.Pair(harness.Estate.BuilderId);
+        using var direct = VericairnClient.LocalNetwork(phone, harness.Signer(phone));
+        RelayRoute? route = phone.Relay;
+        for (int i = 0; route is null && i < 20; i++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(100), TestStop);
+            route = await direct.RefreshRelayAsync(TestStop);
+        }
+
+        RelayRoute first = Assert.IsType<RelayRoute>(route);
+        Assert.Equal(phone.Device, first.Ticket.Device);
+        Assert.Contains("relay", phone.Profiles);
+        phone = phone with { Relay = first };
+        using var remote = VericairnClient.ViaRelay(phone, harness.Signer(phone), TimeSpan.FromSeconds(5), (_, _) => Task.FromResult(relay.Connect()));
+        Assert.Equal((await direct.HealthAsync(TestStop)).Api, (await remote.HealthAsync(TestStop)).Api);
+        RelayRoute next = Assert.IsType<RelayRoute>(await remote.RefreshRelayAsync(TestStop));
+        Assert.Equal(first.Ticket.Address, next.Ticket.Address);
+        Assert.True(next.Ticket.Counter > first.Ticket.Counter);
+        Assert.ThrowsAny<HttpRequestException>(remote.Shutdown);
+
+        DeviceRequestSigner signer = harness.Signer(phone);
+        using var credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(phone.DevicePublicKey));
+        await using Stream stream = await LocalNetworkTransport.ConnectAsync(phone, signer, credential, TestStop,
+            route: next, relayConnect: (_, _) => Task.FromResult(relay.Connect()));
+        const string path = "/v1/health";
+        string signed = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
+        string signature = Base64Url.EncodeToString(signer.Sign(harness.Digest("GET", path, signed, [])));
+        byte[] request = Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: {phone.Address}\r\n{RequestSigning.DeviceHeader}: {phone.Device}\r\n{RequestSigning.SignedAtHeader}: {signed}\r\n{RequestSigning.SignatureHeader}: {signature}\r\n\r\n");
+        await stream.WriteAsync(request, TestStop);
+        Assert.Equal(200, (await RawHttp.ReadResponseAsync(stream, TestStop)).Status);
+        await stream.WriteAsync(request, TestStop);
+        Assert.Equal(401, (await RawHttp.ReadResponseAsync(stream, TestStop)).Status);
+
+        using ECDsa wrong = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        RuntimeConnection altered = phone with { Identity = Base64Url.EncodeToString(wrong.ExportSubjectPublicKeyInfo()) };
+        using var refused = VericairnClient.ViaRelay(altered, harness.Signer(phone), TimeSpan.FromSeconds(5), (_, _) => Task.FromResult(relay.Connect()));
+        await Assert.ThrowsAnyAsync<HttpRequestException>(() => refused.HealthAsync(TestStop));
+
+        Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(phone.Device, harness.Estate.OperatorId, "Test revocation.")).Ok);
+        await Assert.ThrowsAnyAsync<HttpRequestException>(() => remote.HealthAsync(TestStop));
+    }
+
+    private sealed class InProcessRelay(TimeProvider clock) : IAsyncDisposable
+    {
+        private readonly RelayServer server = new(clock);
+        private readonly CancellationTokenSource stopped = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+        private readonly List<Task> handlers = [];
+
+        internal WebSocket Connect()
+        {
+            var incoming = new Pipe();
+            var outgoing = new Pipe();
+            var client = new Wire(incoming.Reader.AsStream(), outgoing.Writer.AsStream());
+            var relay = new Wire(outgoing.Reader.AsStream(), incoming.Writer.AsStream());
+            lock (handlers)
+            {
+                handlers.Add(RunAsync(relay));
+            }
+
+            return WebSocket.CreateFromStream(client, false, null, Timeout.InfiniteTimeSpan);
+        }
+
+        private async Task RunAsync(Stream transport)
+        {
+            using WebSocket socket = WebSocket.CreateFromStream(transport, true, null, Timeout.InfiniteTimeSpan);
+            await server.HandleAsync(socket, stopped.Token);
+        }
+
+        internal async Task<WebSocket> RegisterAsync(string address, ECDsa key)
+        {
+            WebSocket control = Connect();
+            await RelayProtocol.SendAsync(control, new("register", address, Base64Url.EncodeToString(key.ExportSubjectPublicKeyInfo())), TestStop);
+            RelayMessage challenge = Assert.IsType<RelayMessage>(await RelayProtocol.ReceiveAsync(control, TestStop));
+            Assert.Equal("challenge", challenge.Kind);
+            await RelayProtocol.SendAsync(control, new("prove", Signature: RelayProtocol.Prove(key, address, challenge.Nonce!)), TestStop);
+            await RelayProtocol.SendAsync(control, new("ready"), TestStop);
+            Assert.Equal("registered", (await RelayProtocol.ReceiveAsync(control, TestStop))?.Kind);
+            return control;
+        }
+
+        internal async Task<(RelayStream, RelayStream)> JoinAsync(string address, WebSocket control, RelayTicket ticket)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+            deadline.CancelAfter(TimeSpan.FromSeconds(2));
+            WebSocket phone = Connect();
+            await RelayProtocol.SendAsync(phone, new("join", Ticket: ticket), deadline.Token);
+            RelayMessage request = Assert.IsType<RelayMessage>(await RelayProtocol.ReceiveAsync(control, deadline.Token));
+            Assert.Equal("stream", request.Kind);
+            WebSocket runtime = Connect();
+            await RelayProtocol.SendAsync(runtime, new("accept", address, Nonce: request.Nonce), deadline.Token);
+            Assert.Equal("joined", (await RelayProtocol.ReceiveAsync(phone, deadline.Token))?.Kind);
+            return (new RelayStream(phone), new RelayStream(runtime));
+        }
+
+        internal async Task RefusesAsync(RelayTicket? ticket)
+        {
+            using WebSocket phone = Connect();
+            await RelayProtocol.SendAsync(phone, new("join", Ticket: ticket), TestStop);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestStop);
+            deadline.CancelAfter(TimeSpan.FromSeconds(2));
+            await Assert.ThrowsAnyAsync<WebSocketException>(() => RelayProtocol.ReceiveAsync(phone, deadline.Token));
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await stopped.CancelAsync();
+            await Task.WhenAll(handlers);
+            stopped.Dispose();
+        }
+    }
+
+    private sealed class Wire(Stream input, Stream output) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Flush() => output.Flush();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => input.Read(buffer, offset, count);
+        public override void Write(byte[] buffer, int offset, int count) => output.Write(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => input.ReadAsync(buffer, cancellationToken);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => output.WriteAsync(buffer, cancellationToken);
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                input.Dispose();
+                output.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+}

@@ -4,6 +4,7 @@
 using System.Collections.Concurrent;
 using System.IO.Pipelines;
 using System.Net;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -41,6 +42,10 @@ public sealed record DaemonOptions
 
     /// <summary>Where the runtime identity's key is made and held; the strongest custody this machine offers when null.</summary>
     public IDeviceKeyStore? IdentityStore { get; init; }
+
+    internal Func<Uri, CancellationToken, Task<WebSocket>>? ConnectRelay { get; init; }
+
+    internal Uri? RelayUrl { get; init; }
 
     /// <summary>The clock that pairing codes and the certificate's schedule are judged by; the system's when null.</summary>
     public TimeProvider? Time { get; init; }
@@ -91,6 +96,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private static readonly object LoopbackMarker = new();
     private static readonly object LocalSocketMarker = new();
     private static readonly object LocalNetworkMarker = new();
+    private static readonly object RelayMarker = new();
     private static readonly object CertificateMarker = new();
     private static readonly object TlsEstablishedMarker = new();
     private static readonly TimeSpan ScheduleCheck = TimeSpan.FromHours(1);
@@ -109,6 +115,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private Task? leasing;
     private Task? sweeping;
     private Task? stopping;
+    private Task? registration;
     private ListenOptions? loopbackListener;
     private ListenOptions? localNetworkListener;
 
@@ -140,6 +147,8 @@ public sealed class DaemonHost : IAsyncDisposable
     internal RuntimeIdentity? Identity { get; private set; }
 
     internal PairingRegistry Pairings { get; }
+
+    internal RuntimeRelay? Relay { get; private set; }
 
     internal RequestAuthenticator Authenticator { get; }
 
@@ -252,12 +261,15 @@ public sealed class DaemonHost : IAsyncDisposable
         RuntimeIdentity? identity = null;
         IPEndPoint? localNetwork;
         RuntimeSettings settings;
+        Uri? relayUrl;
         try
         {
             settings = RuntimeSettings.Load(directory);
             localNetwork = options.LocalNetwork ?? settings.LocalNetworkEndPoint();
-            certificates = loopback || localNetwork is not null ? new RuntimeCertificates(directory) : null;
-            identity = localNetwork is null ? null : RuntimeIdentity.LoadOrCreate(directory, options.IdentityStore, options.Log);
+            relayUrl = options.RelayUrl ?? (settings.Relay is null ? null : new Uri(settings.Relay));
+            bool paired = localNetwork is not null || relayUrl is not null;
+            certificates = loopback || paired ? new RuntimeCertificates(directory) : null;
+            identity = paired ? RuntimeIdentity.LoadOrCreate(directory, options.IdentityStore, options.Log) : null;
         }
         catch
         {
@@ -272,6 +284,7 @@ public sealed class DaemonHost : IAsyncDisposable
         {
             // The event journal is machine state beside the live store, in the directory just made owner-only.
             service.EnableEvents(directory, host.Time, options.EventCapacity);
+            host.Relay = relayUrl is null ? null : new RuntimeRelay(directory, relayUrl, service, host.Time, host.Log, options.ConnectRelay);
         }
         catch
         {
@@ -295,6 +308,10 @@ public sealed class DaemonHost : IAsyncDisposable
             json.SerializerOptions.PropertyNameCaseInsensitive = true;
         });
         builder.WebHost.UseKestrelHttpsConfiguration();
+        if (host.Relay is { } relay)
+        {
+            builder.Services.AddSingleton<IConnectionListenerFactory>(relay.Listener);
+        }
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             kestrel.Limits.MaxConcurrentConnections = ConcurrentConnections;
@@ -329,39 +346,52 @@ public sealed class DaemonHost : IAsyncDisposable
 
             if (localNetwork is not null)
             {
-                // Mutual TLS: the runtime presents its certificate, and a client may present one; the request pipeline then requires
-                // a certificate its device's key issued for everything but the pairing exchange. Sessions are never resumed, so each
-                // connection shows its certificates afresh.
                 kestrel.Listen(localNetwork, listen =>
                 {
                     host.localNetworkListener = listen;
-                    listen.Protocols = HttpProtocols.Http1;
-                    listen.Use(host.Track(LocalNetworkMarker));
-
-                    // A client certificate is read for what its device's key signed, never by building its chain: nothing it names, no
-                    // issuer, OCSP or CRL address, is fetched, so no client, paired or not, makes the runtime reach anywhere. A platform's
-                    // TLS may evaluate a client certificate before any policy applies (macOS's asks its trust service, which fetches), so
-                    // the listener speaks TLS 1.2 only, where the certificate travels in the clear, and the screen refuses one that names
-                    // an address before the platform's TLS reads it. The chain policy stays as well.
-                    listen.Use(host.Screen);
-                    listen.UseHttps(new HttpsConnectionAdapterOptions
-                    {
-                        ServerCertificateSelector = host.SelectCertificate,
-                        SslProtocols = TlsScreenStream.Protocols,
-                        ClientCertificateMode = ClientCertificateMode.AllowCertificate,
-                        ClientCertificateValidation = (_, _, _) => true,
-                        CheckCertificateRevocation = false,
-                        OnAuthenticate = (_, tls) =>
-                        {
-                            // A renegotiation would carry a new certificate inside the encrypted channel, out of the screen's sight.
-                            tls.AllowRenegotiation = false;
-                            tls.AllowTlsResume = false;
-                            tls.CipherSuitesPolicy = TlsScreenStream.CipherSuites;
-                            tls.CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
-                        },
-                    });
-                    listen.Use(TlsEstablished);
+                    ConfigurePaired(listen, LocalNetworkMarker);
                 });
+            }
+
+            if (host.Relay is { } registration)
+            {
+                kestrel.Listen(registration.Listener.EndPoint, listen => ConfigurePaired(listen, RelayMarker));
+            }
+
+            void ConfigurePaired(ListenOptions listen, object marker)
+            {
+                listen.Protocols = HttpProtocols.Http1;
+                listen.Use(host.Track(marker));
+
+                // A client certificate is read for what its device's key signed, never by building its chain: nothing it names, no
+                // issuer, OCSP or CRL address, is fetched, so no client, paired or not, makes the runtime reach anywhere. A platform's
+                // TLS may evaluate a client certificate before any policy applies (macOS's asks its trust service, which fetches), so
+                // the listener speaks TLS 1.2 only, where the certificate travels in the clear, and the screen refuses one that names
+                // an address before the platform's TLS reads it. The chain policy stays as well.
+                listen.Use(host.Screen);
+                listen.UseHttps(new HttpsConnectionAdapterOptions
+                {
+                    ServerCertificateSelector = host.SelectCertificate,
+                    SslProtocols = TlsScreenStream.Protocols,
+                    ClientCertificateMode = marker == RelayMarker ? ClientCertificateMode.RequireCertificate : ClientCertificateMode.AllowCertificate,
+                    ClientCertificateValidation = (_, _, _) => true,
+                    CheckCertificateRevocation = false,
+                    OnAuthenticate = (connection, tls) =>
+                    {
+                        // A renegotiation would carry a new certificate inside the encrypted channel, out of the screen's sight.
+                        tls.AllowRenegotiation = false;
+                        tls.AllowTlsResume = false;
+                        tls.CipherSuitesPolicy = TlsScreenStream.CipherSuites;
+                        if (marker == RelayMarker)
+                        {
+                            tls.RemoteCertificateValidationCallback = (_, certificate, _, _) => certificate is X509Certificate2 peer
+                                && connection.Items[RelayListener.TicketDevice] is string device && host.Relay!.PermitsCertificate(device, peer);
+                        }
+
+                        tls.CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
+                    },
+                });
+                listen.Use(TlsEstablished);
             }
         });
         WebApplication app = builder.Build();
@@ -369,6 +399,7 @@ public sealed class DaemonHost : IAsyncDisposable
         app.Use(host.HandleRequestAsync);
         // Network MCP (MCP-03) is served once its request is authenticated; it runs each tool's operation through the routes below.
         app.Use(host.Mcp.InvokeAsync);
+        app.Use(host.ServeRelayTicketAsync);
         // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
         RouteGroupBuilder routes = app.MapGroup(string.Empty);
         routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log, () => host.BeforeDeviceWrite?.Invoke()));
@@ -393,6 +424,7 @@ public sealed class DaemonHost : IAsyncDisposable
             certificates?.Dispose();
             service.Dispose();
             host.schedule.Dispose();
+            host.Relay?.Dispose();
             throw;
         }
 
@@ -414,6 +446,11 @@ public sealed class DaemonHost : IAsyncDisposable
         if (certificates is not null)
         {
             host.scheduled = Task.Run(() => host.RunScheduleAsync(host.schedule.Token), CancellationToken.None);
+        }
+
+        if (host.Relay is { } configuredRelay)
+        {
+            host.registration = configuredRelay.RunAsync(host.schedule.Token);
         }
 
         host.deriving = Task.Run(() => service.RunEventDerivationAsync(options.EventTick, host.Log, host.schedule.Token), CancellationToken.None);
@@ -543,9 +580,29 @@ public sealed class DaemonHost : IAsyncDisposable
     /// <summary>Whether a request came over the local-network profile.</summary>
     internal static bool OnLocalNetwork(HttpContext context) => context.Features.Get<IConnectionItemsFeature>()?.Items.ContainsKey(LocalNetworkMarker) == true;
 
+    internal static bool OnRelay(HttpContext context) => context.Features.Get<IConnectionItemsFeature>()?.Items.ContainsKey(RelayMarker) == true;
+
+    private async Task ServeRelayTicketAsync(HttpContext context, RequestDelegate next)
+    {
+        if (!HttpMethods.IsGet(context.Request.Method) || context.Request.Path != RelayProtocol.TicketPath)
+        {
+            await next(context).ConfigureAwait(false);
+            return;
+        }
+
+        if (context.Items[RequestAuthenticator.DeviceItem] is not AuthenticatedDevice device || Relay?.Issue(device.Identity) is not RelayRoute route)
+        {
+            await WriteProblemAsync(context, StatusCodes.Status404NotFound, new Problem("unavailable", "No relay ticket is available for this connection.", []), close: true).ConfigureAwait(false);
+            return;
+        }
+
+        context.Response.Headers.CacheControl = "no-store";
+        await context.Response.WriteAsJsonAsync(route, ProtocolJson.Options, context.RequestAborted).ConfigureAwait(false);
+    }
+
     /// <summary>Whether a request came over a profile whose requests are device-signed: loopback or the local network, never the local socket.</summary>
     internal static bool OnSignedProfile(HttpContext context) =>
-        context.Features.Get<IConnectionItemsFeature>()?.Items is { } items && (items.ContainsKey(LoopbackMarker) || items.ContainsKey(LocalNetworkMarker));
+        context.Features.Get<IConnectionItemsFeature>()?.Items is { } items && (items.ContainsKey(LoopbackMarker) || items.ContainsKey(LocalNetworkMarker) || items.ContainsKey(RelayMarker));
 
     /// <summary>The fingerprint of the certificate the runtime presented on a request's connection; the current one for a connection without TLS.</summary>
     internal string CertificateOf(HttpContext context) =>
@@ -587,7 +644,7 @@ public sealed class DaemonHost : IAsyncDisposable
             maximum = Math.Min(maximum ?? long.MaxValue, RequestAuthenticator.PairingBodyLimit);
         }
         else if (context.Connection.LocalIpAddress is not null
-            || context.Features.Get<IConnectionItemsFeature>()?.Items is { } items && (items.ContainsKey(LoopbackMarker) || items.ContainsKey(LocalNetworkMarker)))
+            || context.Features.Get<IConnectionItemsFeature>()?.Items is { } items && (items.ContainsKey(LoopbackMarker) || items.ContainsKey(LocalNetworkMarker) || items.ContainsKey(RelayMarker)))
         {
             maximum = Math.Min(maximum ?? long.MaxValue, RequestAuthenticator.SignedBodyLimit);
         }
@@ -651,8 +708,11 @@ public sealed class DaemonHost : IAsyncDisposable
 
         IDictionary<object, object?>? items = context.Features.Get<IConnectionItemsFeature>()?.Items;
         bool localNetwork = items?.ContainsKey(LocalNetworkMarker) == true;
-        Problem? denied = localNetwork
-            ? await Authenticator.VerifyLocalNetworkAsync(context).ConfigureAwait(false)
+        bool viaRelay = items?.ContainsKey(RelayMarker) == true;
+        Problem? denied = viaRelay
+            ? await Authenticator.VerifyLocalNetworkAsync(context, RequestAuthenticator.RelayProfile, items![RelayListener.TicketDevice] as string).ConfigureAwait(false)
+            : localNetwork
+                ? await Authenticator.VerifyLocalNetworkAsync(context).ConfigureAwait(false)
             : items?.ContainsKey(LoopbackMarker) == true || context.Connection.LocalIpAddress is not null
                 ? await Authenticator.VerifyAsync(context).ConfigureAwait(false)
                 : null;
@@ -684,7 +744,7 @@ public sealed class DaemonHost : IAsyncDisposable
 
     /// <summary>Whether a connection was accepted by the daemon's local socket or named pipe listener, and by no other.</summary>
     internal static bool OverLocalSocket(IDictionary<object, object?>? items) =>
-        items?.ContainsKey(LocalSocketMarker) == true && !items.ContainsKey(LoopbackMarker) && !items.ContainsKey(LocalNetworkMarker);
+        items?.ContainsKey(LocalSocketMarker) == true && !items.ContainsKey(LoopbackMarker) && !items.ContainsKey(LocalNetworkMarker) && !items.ContainsKey(RelayMarker);
 
     // The local socket's and named pipe's listener names each connection it accepts.
     private static ConnectionDelegate MarkLocalSocket(ConnectionDelegate next) => connection =>
@@ -906,6 +966,10 @@ public sealed class DaemonHost : IAsyncDisposable
         try
         {
             Mcp.Stop();
+            if (registration is not null)
+            {
+                await registration.ConfigureAwait(false);
+            }
             await App.StopAsync().ConfigureAwait(false);
             if (sweeping is not null)
             {
@@ -960,6 +1024,7 @@ public sealed class DaemonHost : IAsyncDisposable
                 File.Delete(Endpoint.Address);
             }
 
+            Relay?.Dispose();
             Service.Dispose();
         }
     }

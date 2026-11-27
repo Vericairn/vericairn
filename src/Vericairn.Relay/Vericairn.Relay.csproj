@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>vericairn-relay</AssemblyName>
+    <Description>The Vericairn relay joins a paired device with its runtime and forwards their encrypted bytes.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vericairn.Daemon.Tests" />
+    <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>
