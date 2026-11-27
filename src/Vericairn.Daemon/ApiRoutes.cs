@@ -12,7 +12,9 @@ namespace Vericairn.Daemon;
 public static class ApiRoutes
 {
     /// <summary>Maps every route onto a service.</summary>
-    public static void Map(IEndpointRouteBuilder app, IEstateApi service, Action shutdown)
+    public static void Map(IEndpointRouteBuilder app, IEstateApi service, Action shutdown) => Map(app, service, shutdown, null);
+
+    internal static void Map(IEndpointRouteBuilder app, IEstateApi service, Action shutdown, Func<RevocationObserver>? observeRevocation)
     {
         ArgumentNullException.ThrowIfNull(app);
         ArgumentNullException.ThrowIfNull(service);
@@ -112,12 +114,20 @@ public static class ApiRoutes
         app.MapPost($"{v}/standing/outputs", (StandingOutputRequest request) => Outcome(service.StandingOutput(request)));
         app.MapPost($"{v}/work/takeover", (TakeoverRequest request) => Results.Json(service.WorkTakeover(request), ProtocolJson.Options));
         app.MapGet($"{v}/devices", () => Results.Json(service.Devices(), ProtocolJson.Options));
+        app.MapGet($"{v}/devices/{{id}}/revocation-reach", (string id) =>
+            service.DeviceRevocationReach(id) is { } report ? Results.Json(report, ProtocolJson.Options) : Results.NotFound());
         app.MapPost($"{v}/devices", (DeviceCreateRequest request) => Outcome(service.DeviceCreate(request)));
         app.MapPost($"{v}/devices/admit", (AdmitRequest request) => Outcome(service.DeviceAdmit(request)));
         app.MapPost($"{v}/devices/rename", (DeviceRenameRequest request) => Outcome(service.DeviceRename(request)));
         app.MapPost($"{v}/devices/rotate", (DeviceRotateRequest request) => Outcome(service.DeviceRotate(request)));
         app.MapPost($"{v}/devices/recovery", (DeviceRecoveryRequest request) => Outcome(service.DeviceRecovery(request)));
-        app.MapPost($"{v}/devices/revoke", (RevokeRequest request) => Outcome(service.DeviceRevoke(request)));
+        app.MapPost($"{v}/devices/revoke", (RevokeRequest request) =>
+        {
+            WriteOutcome outcome = service.DeviceRevoke(request);
+            if (outcome.Written is not null && observeRevocation is not null)
+                outcome = outcome with { RevocationReach = [.. outcome.RevocationReach ?? [], observeRevocation()] };
+            return Outcome(outcome);
+        });
         app.MapGet($"{v}/releases", () => Results.Json(service.Releases(), ProtocolJson.Options));
         app.MapGet($"{v}/documents", () => Results.Json(service.Documents(), ProtocolJson.Options));
         app.MapGet($"{v}/documents/pass/{{version}}", (string version, string? product) => Results.Json(service.DocumentPass(version, product), ProtocolJson.Options));
