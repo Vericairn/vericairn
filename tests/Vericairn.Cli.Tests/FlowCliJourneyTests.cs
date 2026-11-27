@@ -3,7 +3,9 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Mcp;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
 
@@ -42,10 +44,17 @@ public partial class FlowCliJourneyTests
             string[] propose = ["goal", "propose", "--by", op, "--title", "Master the song", "--objective", "Produce the master.", "--done", """{"type":"work-order","fields":{"key":"SONG-1"}}""",
                 "--work-order", order, "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2"];
             Refused(root, "go with --flow", [.. propose, "--until", "master"]);
+            Refused(root, "--flow-path configures a run and goes with --flow", [.. propose, "--flow-path", "song/**"]);
             Refused(root, "--subject is name=value with a field of the flow's subject", [.. propose, "--flow", "example/song@1.0.0", "--subject", "carrier=x"]);
             Refused(root, "Step master is required", [.. propose, "--flow", "example/song@1.0.0", "--subject", "recording=" + order, "--subject", "tracks=intro", "--flow-option", "step.master=off"]);
+            CliHarness.Outcome refusedPaths = CliHarness.Run(["--estate", root, "--json", .. propose, "--flow", "example/song@1.0.0", "--subject", "recording=" + order,
+                "--subject", "tracks=intro", "--flow-path", "docs/**"]);
+            Assert.NotEqual(0, refusedPaths.Code);
+            Assert.Equal("flow.permitted-paths", refusedPaths.Json.GetProperty("problem").GetProperty("code").GetString());
             string goal = CliHarness.Ok(["--estate", root, "--json", .. propose, "--flow", "example/song@1.0.0", "--subject", "recording=" + order, "--subject", "tracks=intro,outro",
-                "--flow-option", "step.shorts=off", "--until", "master"]).Id;
+                "--flow-option", "step.shorts=off", "--flow-path", "song/lyrics/**", "--flow-path", "song/master/**", "--until", "master"]).Id;
+            JsonElement plan = CliHarness.Ok("--estate", root, "records", "show", goal).Json.GetProperty("body").GetProperty("plan").GetProperty("flow");
+            Assert.Equal(["song/lyrics/**", "song/master/**"], Paths(plan, "paths"));
             CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
             string shown = CliHarness.Ok("--estate", root, "goal", "show", goal).Out;
             Assert.Contains("Flow: example/song 1.0.0", shown, StringComparison.Ordinal);
@@ -59,9 +68,15 @@ public partial class FlowCliJourneyTests
             Assert.Contains("draft", CliHarness.Ok("--estate", root, "goal", "next", goal).Out, StringComparison.Ordinal);
 
             // One step per command: draft is the operator's, as the writer; its assignment names the step.
+            JsonElement preview = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op, "--check").Json.GetProperty("step");
+            Assert.Equal("draft", preview.GetProperty("step").GetString());
+            Assert.Equal(["path:song/lyrics/**", "path:song/master/**"], Paths(preview, "permittedChanges").Order(StringComparer.Ordinal));
+            Assert.Equal("stopped", CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("flow").GetProperty("steps")[0].GetProperty("state").GetString());
             JsonElement first = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op).Json.GetProperty("step");
             Assert.Equal(("ask", "draft", "person"), (first.GetProperty("outcome").GetString(), first.GetProperty("step").GetString(), first.GetProperty("route").GetString()));
             string drafting = first.GetProperty("assignment").GetProperty("id").GetString()!;
+            JsonElement brief = CliHarness.Ok("--estate", root, "records", "show", drafting).Json.GetProperty("body").GetProperty("brief");
+            Assert.Equal(Paths(preview, "permittedChanges"), Paths(brief, "permittedChanges"));
             JsonElement lyrics = Carry(root, scratch, op, drafting, "lyrics", "text/markdown", 'a');
 
             // The review is the reviewer's, an agent other than the writer, which no launcher here starts: goal step says so and records
@@ -88,6 +103,60 @@ public partial class FlowCliJourneyTests
         }
     }
 
+    private static string[] Paths(JsonElement element, string property) => [.. element.GetProperty(property).EnumerateArray().Select(path => path.GetString()!)];
+
+    [Fact]
+    public void McpCanProposeActivateAndPreviewAFlowRunForTheOperator()
+    {
+        string root = CliHarness.TempDirectory("mcp-flow-run");
+        string scratch = CliHarness.TempDirectory("mcp-flow-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Run a flow.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", op, "--name", "Operator device", "--custody", "file").Id;
+            CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "The first authority.");
+            Directory.CreateDirectory(Path.Combine(root, "docs", "templates"));
+            File.WriteAllText(Path.Combine(root, "docs", "templates", "example-song-1.0.0.json"), FlowFixture.Song().ToJsonString());
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json",
+                $$$"""{"roles":[{"role":"writer","principals":["{{{op}}}"]},{"role":"reviewer","principals":["{{{op}}}"]},{"role":"listener","principals":["{{{op}}}"]},{"role":"decider","principals":["{{{op}}}"]}]}"""));
+            string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json",
+                """{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":["path:song/","song"],"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the song"]}""")).Id;
+            JsonElement pin = Assert.Single(CliHarness.Ok("--estate", root, "--json", "templates", "list").Json.GetProperty("templates").EnumerateArray(),
+                template => template.GetProperty("pin").GetProperty("id").GetString() == "example/song").GetProperty("pin");
+            JsonObject goalBody = JsonNode.Parse($$$$"""
+                {"title":"Draft the song","objective":"Finish its lyrics.","completion":[{"record":{"type":"work-order","fields":{"key":"SONG-1"}}}],
+                 "constraints":[],"kind":"finite","sponsor":"{{{{op}}}}","budget":{"wallMinutes":60,"attemptsPerStep":2},"inputs":[],
+                 "plan":{"policy":"given","approval":"sponsor-approves","workOrders":["{{{{order}}}}"],"flow":{"pin":{{{{pin.GetRawText()}}}},
+                 "subject":{"recording":{"type":"work-order","id":"{{{{order}}}}"},"tracks":["intro"]},"paths":["song/lyrics/**"],"until":"draft"}}}
+                """)!.AsObject();
+
+            using EstateService api = EstateService.Open(root);
+            var registry = new ToolRegistry(api, op);
+            string goal = McpGoalResult(registry.Call("goal_propose", new JsonObject { ["body"] = goalBody })).GetProperty("written").GetProperty("id").GetString()!;
+            JsonElement activated = McpGoalResult(registry.Call("goal_activate", new JsonObject { ["goal"] = goal }));
+            Assert.True(activated.TryGetProperty("written", out _));
+
+            JsonElement preview = McpGoalResult(registry.Call("goal_step", new JsonObject { ["goal"] = goal, ["check"] = true }));
+            Assert.Equal("draft", preview.GetProperty("step").GetString());
+            Assert.Equal(["path:song/lyrics/**"], Paths(preview, "permittedChanges"));
+            Assert.Empty(api.Records("assignment"));
+            JsonElement taken = McpGoalResult(registry.Call("goal_step", new JsonObject { ["goal"] = goal }));
+            Assert.Equal("ask", taken.GetProperty("outcome").GetString());
+            Assert.Single(api.Records("assignment"));
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    private static JsonElement McpGoalResult(ToolCallResult result)
+    {
+        Assert.False(result.IsError, result.Text);
+        using JsonDocument document = JsonDocument.Parse(result.Text);
+        return document.RootElement.Clone();
+    }
+
     [Fact]
     public void TheSoftwarePacksReleaseFlowRunsFromTheCommandLineWithoutInstallingIt()
     {
@@ -102,7 +171,7 @@ public partial class FlowCliJourneyTests
             Assert.Equal(["vericairn.software/bug-hunter", "vericairn.software/release", "vericairn.software/researcher", "vericairn.software/upgrade"], flows);
             string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", ReleaseLineFixture.ProductBody().ToJsonString())).Id;
             string carrier = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "carrier.json",
-                """{"key":"REL-1","kind":"ordinary","title":"Release 1.2.0","intent":"Release the product.","scope":["release"],"exitQuestion":"Is 1.2.0 released?","inputs":[],"deliverables":["the release"]}""")).Id;
+                """{"key":"REL-1","kind":"ordinary","title":"Release 1.2.0","intent":"Release the product.","scope":["path:docs/","release"],"exitQuestion":"Is 1.2.0 released?","inputs":[],"deliverables":["the release"]}""")).Id;
             string[] propose = ["goal", "propose", "--by", op, "--title", "Release 1.2.0", "--objective", "Release the product.", "--done", $$"""{"type":"acceptance","subject":"{{carrier}}"}""",
                 "--work-order", carrier, "--budget", "wallMinutes=600", "--budget", "attemptsPerStep=2", "--flow", "vericairn.software/release@1.0.0",
                 "--subject", "carrier=" + carrier, "--subject", "product=" + product, "--subject", "version=1.2.0"];
@@ -143,7 +212,7 @@ public partial class FlowCliJourneyTests
             File.Copy(ReleaseFlowFixture.FirstPartyPath, Path.Combine(root, "docs", "templates", "vericairn-first-party-release-1.0.0.json"));
             string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", ReleaseLineFixture.ProductBody().ToJsonString())).Id;
             string carrier = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "carrier.json",
-                """{"key":"REL-1","kind":"ordinary","title":"Release 1.2.0","intent":"Release the product.","scope":["release"],"exitQuestion":"Is 1.2.0 released?","inputs":[],"deliverables":["the release"]}""")).Id;
+                """{"key":"REL-1","kind":"ordinary","title":"Release 1.2.0","intent":"Release the product.","scope":["path:docs/","release"],"exitQuestion":"Is 1.2.0 released?","inputs":[],"deliverables":["the release"]}""")).Id;
             string[] propose = ["goal", "propose", "--by", op, "--title", "Release 1.2.0", "--objective", "Release the product.", "--done", $$"""{"type":"acceptance","subject":"{{carrier}}"}""",
                 "--work-order", carrier, "--budget", "wallMinutes=600", "--budget", "attemptsPerStep=2",
                 "--subject", "carrier=" + carrier, "--subject", "product=" + product, "--subject", "version=1.2.0", "--subject", "repository=Example/example"];

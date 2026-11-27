@@ -710,6 +710,15 @@ internal sealed class RunAdmissionService(
             return (null, assignmentRefusal, null);
         }
 
+        // From 0.9.5 (FIX-166): a run's flow step runs only within the step's current path declarations, as goal step checks, however
+        // the run is started. A standing agent's step is not judged here (design/standing-agents.md keeps its brief).
+        if (FlowRuns.StepOf(assignment) is FlowRuns.StepRef pathStep && FlowRuns.RunOf(model, order) is RecordEnvelope pathRun
+            && !StandingAgents.IsStanding(pathRun) && FlowRuns.Resolve(model, pathRun).Flow?.Step(pathStep.Key) is FlowStep declared
+            && FlowPermissions.Carried(FlowPermissions.For(model, pathRun, order, declared), assignment) is null)
+        {
+            return (null, $"{FlowPermissions.Code}: assignment {assignment.Id} of flow step {pathStep} needs a brief with permitted paths within the step's current path declarations; take the step again with 'vericairn goal step'.", null);
+        }
+
         if (!Strings(assignment.Body.GetProperty("brief"), "permittedChanges").Any(entry => PermittedPaths.Pattern(entry) is not null))
         {
             return (null, "The assignment brief's permittedChanges contain no interpretable repository-relative path pattern. Use a pattern such as path:NOTES.md or path:src/**; prose may accompany at least one pattern.", null);

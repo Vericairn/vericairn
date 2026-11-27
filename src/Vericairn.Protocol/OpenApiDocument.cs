@@ -88,6 +88,7 @@ public static class OpenApiDocument
         ("POST", "/v1/standing/outputs"),
         ("POST", "/v1/work/takeover"),
         ("GET", "/v1/devices"),
+        ("GET", "/v1/devices/{id}/revocation-reach"),
         ("POST", "/v1/devices"),
         ("POST", "/v1/devices/admit"),
         ("POST", "/v1/devices/rename"),
@@ -138,6 +139,7 @@ public static class OpenApiDocument
         ("GET", "/v1/overlaps"),
         ("POST", "/v1/overlaps/preview"),
         ("POST", "/v1/goals/{id}/step"),
+        ("POST", "/v1/goals/{id}/step/check"),
         ("POST", "/v1/goals/{id}/activate"),
         ("POST", "/v1/goals/{id}/pause"),
         ("POST", "/v1/goals/{id}/resume"),
@@ -424,6 +426,16 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = "ReleaseBasisResponse: complete retained evidence, or null evidence with a release-basis-unavailable problem naming every failed reference. Historical evidence grants no submission authority." };
             responses["404"] = new JsonObject { ["description"] = "No supported retained release basis has this hash." };
+        }
+        else if (path == "/v1/devices/{id}/revocation-reach")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "The serving runtime's observations of exact revocation revisions for this device. An empty list means this copy holds no revocation records for it.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference("DeviceRevocationReachReport") } },
+            };
+            responses["404"] = new JsonObject { ["description"] = "This copy has no device with that identity or revision id." };
+            responses["401"] = new JsonObject { ["description"] = "A device-signed request must be signed by an admitted device acting for an operator or a principal with the administer scope (Problem with code denied)." };
         }
         else if (path == "/v1/companions" || path.StartsWith("/v1/companions/", StringComparison.Ordinal))
         {
@@ -754,6 +766,14 @@ public static class OpenApiDocument
                 responses["200"]!["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/RunSettleResponse" } } };
             responses.Remove("404");
         }
+        else if (method == "POST" && path == "/v1/goals/{id}/step/check")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "The current route and permitted changes for the flow run's next step, or a problem.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/GoalStepResponse" } } },
+            };
+        }
         else if (method == "POST" && path is "/v1/goals/{id}/step" or "/v1/work/takeover")
         {
             responses["200"] = new JsonObject { ["description"] = path == "/v1/work/takeover" ? "TakeoverResponse: the hand-over recorded and the stops asked; a problem inside when nothing was recorded." : "GoalStepResponse: what was recorded and started; a problem inside when nothing was dispatched." };
@@ -846,6 +866,15 @@ public static class OpenApiDocument
         decisionNew["required"] = new JsonArray("by", "ask", "statement", "answeredAt", "baseCommit", "title", "summary", "synthesis", "effects", "documents");
         foreach (string field in new[] { "effects", "documents", "affects", "notAuthorized" })
             decisionNew["properties"]![field]!["items"] = new JsonObject { ["type"] = "string" };
+        JsonObject revocationReport = Required(Object(("device", "string"), ("revocations", "array"), ("journalProblem", "string")),
+            "device", "revocations");
+        revocationReport["properties"]!["revocations"]!["items"] = SchemaReference("DeviceRevocationReach");
+        JsonObject revocation = Required(Object(("id", "string"), ("hash", "string"), ("at", "string"), ("revokedAt", "string"),
+            ("counts", "boolean"), ("current", "boolean"), ("observations", "array")), "id", "hash", "at", "revokedAt", "counts", "current", "observations");
+        revocation["properties"]!["revokedAt"]!["nullable"] = true;
+        revocation["properties"]!["observations"]!["items"] = SchemaReference("RevocationObserver");
+        JsonObject writeOutcome = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"), ("notices", "array"), ("revocationReach", "array")));
+        writeOutcome["properties"]!["revocationReach"]!["items"] = SchemaReference("RevocationObserver");
         JsonObject policyHashRequest = Object(("body", "object"));
         policyHashRequest["required"] = new JsonArray("body");
         JsonObject policyHashResponse = Object(("definitionHash", "string"), ("problem", "object"));
@@ -1141,10 +1170,14 @@ public static class OpenApiDocument
             ["GoalCloseRequest"] = Object(("by", "string"), ("reason", "string"), ("stepReasons", "array")),
             ["GoalDecideRequest"] = Object(("by", "string"), ("step", "string"), ("paths", "array"), ("reasons", "string"), ("evidence", "array")),
             ["GoalStepReason"] = Object(("step", "string"), ("reason", "string")),
-            ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("occurrence", "string"), ("now", "string"))),
-            ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object"), ("decision", "object"), ("notices", "array")),
+            ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("occurrence", "string"), ("now", "string"), ("check", "boolean"))),
+            ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object"), ("decision", "object"), ("notices", "array"), ("permittedChanges", "array")),
             ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string"), ("basis", "string")),
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
+            ["DeviceRevocationReachReport"] = revocationReport,
+            ["DeviceRevocationReach"] = revocation,
+            ["RevocationObserver"] = Required(Object(("kind", "string"), ("identity", "string"), ("evidence", "string"), ("at", "string")),
+                "kind", "identity", "evidence", "at"),
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
             ["ChangesPushRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
             ["OperatorRecordRequest"] = operatorRecordRequest,
@@ -1234,7 +1267,7 @@ public static class OpenApiDocument
             ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string"), ("presenceDevice", "object"), ("presenceSignature", "string")),
             ["CertificateRotateRequest"] = Object(("compromised", "boolean"), ("reason", "string"), ("identity", "boolean")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
-            ["WriteOutcome"] = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"), ("notices", "array"))),
+            ["WriteOutcome"] = writeOutcome,
             ["TriggeredCheckpoint"] = Required(Object(("trigger", "string"), ("written", "object"), ("skipped", "string")), "trigger"),
             ["HistoryCheckpointRequest"] = Object(("by", "string"), ("adopt", "boolean"), ("check", "boolean"), ("expectPlan", "string")),
             ["HistoryCheckpointResponse"] = Required(Object(("trigger", "string"), ("applied", "boolean"), ("adopted", "boolean"), ("witnessed", "integer"), ("listed", "integer"), ("heads", "array"),
@@ -1305,7 +1338,7 @@ public static class OpenApiDocument
         "/v1/work/amend" => "AmendRequest",
         "/v1/standing/outputs" => "StandingOutputRequest",
         "/v1/work/takeover" => "TakeoverRequest",
-        "/v1/goals/{id}/step" => "GoalStepRequest",
+        "/v1/goals/{id}/step" or "/v1/goals/{id}/step/check" => "GoalStepRequest",
         "/v1/devices" => "DeviceCreateRequest",
         "/v1/devices/admit" => "AdmitRequest",
         "/v1/devices/rename" => "DeviceRenameRequest",
@@ -1452,6 +1485,7 @@ public static class OpenApiDocument
         ("POST", "/v1/standing/outputs") => "From 0.9.4: record one output of a standing agent's occurrence, a possibility, an ask or a publication request, by the contributor of the assignment that carries it; the runtime names what raised it, and another principal disposes of it.",
         ("POST", "/v1/work/takeover") => "Hand a step an agent holds over to a person: a new assignment of the step to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop, each stop's facts reported as observed. Recorded by a person only, the one taking the step over, the sponsor of its goal or an operator, never by an agent.",
         ("GET", "/v1/devices") => "Devices known to the estate and whether this machine holds their keys.",
+        ("GET", "/v1/devices/{id}/revocation-reach") => "Read the serving runtime's revocation observations for a device. On signed profiles this is an administrator's read.",
         ("POST", "/v1/devices") => "Create a device on the runtime's machine.",
         ("POST", "/v1/devices/admit") => "Admit a device.",
         ("POST", "/v1/devices/rename") => "Rename a device, keeping its identity.",
@@ -1487,6 +1521,7 @@ public static class OpenApiDocument
         ("POST", "/v1/overlaps/preview") => "From 0.9.4: a draft brief's overlaps with the active assignments before it is recorded, as the overlap check's view shows them. Records nothing.",
         ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
         ("GET", "/v1/goals/{id}/due") => "From 0.9.4: a standing agent's occurrences as of an explicit UTC time, asOf or the runtime's clock (vericairn.due/1): its state, its triggers and when each is next due, its period's caps and spend, its concurrency and failure pause, and each occurrence with its key and state (due, deferred with its reason, running, assigned, settled, disposed or held). Read-only; the same on every machine for the same records and time.",
+        ("POST", "/v1/goals/{id}/step/check") => "Preview the next step of an active flow run and its assignment's permitted paths. Reads the same route as goal step. Signs, records and dispatches nothing.",
         ("POST", "/v1/goals/{id}/step") => "Take an active goal's next step, one at a time, as an operator, the goal's sponsor when a person, or a principal holding local-engineering: its first eligible step whose route acts, routed from the runtime's machine. An agent's step goes on with the assignment that holds it, or is assigned to the agent together with its run's intent after the worker's whole preflight, and its run starts through the worker; every refusal before the intent, custody, the budget, the repository, the launcher or the workspace, records nothing, the assignment included. A person's step is assigned to the person and asked of them, the recommendation first, the two recorded together; a step no principal is available for is asked of the sponsor, never given to a contributor the roster does not name. It activates, funds, accepts and answers nothing.",
         ("POST", "/v1/goals/{id}/activate") => "Activate a proposed goal, which grants its budget: by its sponsor, a person who holds the operator role or a grant of the spending scope, or by an operator when an agent sponsors it; an agent never activates a goal.",
         ("POST", "/v1/goals/{id}/pause") => "Pause an active goal; its sponsor's, or an operator's for a goal an agent sponsors. Prevents new runs but does not stop runs already in flight; request each run's stop separately.",
