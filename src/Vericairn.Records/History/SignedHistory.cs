@@ -210,8 +210,20 @@ internal sealed class HistoryAnalysis
     internal static HistoryAnalysis Anchoring(EstateTrust trust, EstateModel model)
     {
         var analysis = new HistoryAnalysis(trust, model);
-        foreach (CheckpointBody checkpoint in analysis.checkpoints.Where(c => c.Previous.Count == 0 || c.Anchored.Count > 0 || c.Removed.Count > 0))
+        foreach (CheckpointBody checkpoint in analysis.checkpoints)
         {
+            RecordEnvelope record = checkpoint.Record;
+            if (record.Signatures.Count > 0 && HistoryCheckpointType.HasGitRemovals(record.Body) && !trust.MayAcknowledgeGitDeletion(record))
+            {
+                foreach (GitRemoval removal in HistoryCheckpointType.GitRemovals(record.Body, record.Id, out _))
+                {
+                    analysis.findings.Warning("history.git-removal-author", record.ExpectedPath + "#body.removed",
+                        $"This checkpoint's acknowledgment of the deletion of {removal.Id} in commit {removal.Commit} is ignored. Only the root operator may acknowledge a Git deletion, using an admitted signing device whose custody requires presence.");
+                }
+            }
+
+            bool hasAnchorsOrRemovals = checkpoint.Anchored.Count > 0 || checkpoint.Removed.Count > 0;
+            if (checkpoint.Previous.Count > 0 && !hasAnchorsOrRemovals) continue;
             bool eligible = trust.MayAnchor(checkpoint.Record);
             if (eligible) analysis.eligible.Add(checkpoint.Record.Id);
             if (checkpoint.Previous.Count == 0 && !eligible && checkpoint.Record.Signatures.Count > 0)
@@ -221,7 +233,7 @@ internal sealed class HistoryAnalysis
                     "An estate's first checkpoint, its adoption, is signed by the root operator or a person holding administer through a grant that rests on signatures, never an agent, with devices whose own admissions rest on signatures. This one counts for nothing and adopts nothing.");
             }
 
-            if (checkpoint.Anchored.Count == 0 && checkpoint.Removed.Count == 0) continue;
+            if (!hasAnchorsOrRemovals) continue;
             if (eligible)
             {
                 foreach ((string id, string hash) in checkpoint.Anchored) analysis.AnchorKeys.Add(SignatureChecks.AnchorKey(id, hash));

@@ -196,6 +196,7 @@ public class HistoryCheckpointServiceTests
         FindingDto acknowledged = Assert.Single(check.Findings, x => x.Code == "history.deleted-in-git" && x.Location == record.ExpectedPath);
         Assert.Equal("info", acknowledged.Severity);
         Assert.Contains(written.Id, acknowledged.Message, StringComparison.Ordinal);
+        Assert.Contains(mergeCommit, acknowledged.Message, StringComparison.Ordinal);
         Assert.Contains(branchCommit, acknowledged.Message, StringComparison.Ordinal);
         Assert.Contains(check.Findings, x => x.Code == "history.deleted-in-git" && x.Location == other.ExpectedPath && x.Severity == "warning");
 
@@ -211,6 +212,45 @@ public class HistoryCheckpointServiceTests
         warning = Assert.Single(f.Api.Check().Findings, x => x.Code == "history.deleted-in-git" && x.Location == record.ExpectedPath);
         Assert.Equal("warning", warning.Severity);
         Assert.Contains(Git(root, "rev-parse", "HEAD"), warning.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnAcknowledgmentDoesNotSettleALaterDeletionOfTheSameBytes(bool deleteInMerge)
+    {
+        TestPrerequisites.RequireGit();
+        using var f = new Fixture();
+        f.HoldPresenceKey();
+        (RecordEnvelope record, _, string firstDeletion) = PrepareDeletions(f);
+        Ok(WriteDeletionAcknowledgment(f, record, firstDeletion, "Remove duplicate test evidence."));
+        Assert.Contains(f.Api.Check().Findings, x => x.Code == "history.deleted-in-git" &&
+            x.Location == record.ExpectedPath && x.Severity == "info");
+
+        string root = f.Records.Estate.Root;
+        Git(root, "checkout", firstDeletion + "^", "--", record.ExpectedPath);
+        Git(root, [.. GitIdentity, "commit", "-q", "-m", "Restore the same record"]);
+        Assert.DoesNotContain(f.Api.Check().Findings, x => x.Code == "history.deleted-in-git" && x.Location == record.ExpectedPath);
+
+        if (deleteInMerge)
+        {
+            // This parent has its own deletion, while the parent that reaches the acknowledged deletion holds the restored record.
+            Git(root, "switch", "-q", "-c", "side", firstDeletion + "^");
+            Git(root, "rm", "-q", record.ExpectedPath);
+            Git(root, [.. GitIdentity, "commit", "-q", "-m", "Delete the record on the side branch"]);
+            Git(root, "switch", "-q", "main");
+            Git(root, [.. GitIdentity, "merge", "--no-ff", "--no-edit", "side"]);
+        }
+        else
+        {
+            Git(root, "rm", "-q", record.ExpectedPath);
+            Git(root, [.. GitIdentity, "commit", "-q", "-m", "Delete the restored record"]);
+        }
+        string laterDeletion = Git(root, "rev-parse", "HEAD");
+
+        FindingDto warning = Assert.Single(f.Api.Check().Findings, x => x.Code == "history.deleted-in-git" && x.Location == record.ExpectedPath);
+        Assert.Equal("warning", warning.Severity);
+        Assert.Contains(laterDeletion, warning.Message, StringComparison.Ordinal);
     }
 
     [Theory]

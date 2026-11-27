@@ -12,7 +12,14 @@ namespace Vericairn.Adapters.Git;
 public sealed partial class GitCommandAdapter
 {
     /// <inheritdoc />
-    public SourceFile? DeletedRecordAtCommit(string root, string commit, string id)
+    public SourceFile? DeletedRecordAtCommit(string root, string commit, string id) =>
+        ReadRecordDeletion(root, commit, id, carriedFrom: null);
+
+    /// <inheritdoc />
+    public SourceFile? DeletedRecordAtCommit(string root, string commit, string id, string carriedFrom) =>
+        ReadRecordDeletion(root, commit, id, carriedFrom);
+
+    private SourceFile? ReadRecordDeletion(string root, string commit, string id, string? carriedFrom)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         if (!Ulid.IsValid(id) || !IsFullObjectId(commit) || MainLine(root) is not { } main) return null;
@@ -52,10 +59,24 @@ public sealed partial class GitCommandAdapter
 
             if (versions.Count != 1) return null;
             (string path, string blob) = versions.Single();
+            if (carriedFrom is not null && !CarriesDeletion(carriedFrom, path)) return null;
             if (!long.TryParse(Text("cat-file", "-s", blob), NumberStyles.None, CultureInfo.InvariantCulture, out long size) ||
                 size > EstateLayout.MaxFileBytes || Run(out byte[] bytes, "cat-file", "blob", blob) != 0 || bytes.LongLength != size)
                 return null;
             return new SourceFile(path, bytes);
+
+            bool CarriesDeletion(string ancestor, string path)
+            {
+                if (!IsFullObjectId(ancestor) || Text("rev-parse", "--verify", ancestor + "^{commit}") != ancestor ||
+                    Text("rev-list", "--parents", "--max-count=1", commit) is not { } line)
+                    return false;
+
+                string[] commits = line.Split(' ');
+                return commits.Length >= 3 && commits[0] == commit && commits[1..].Any(parent =>
+                    IsFullObjectId(parent) && Run(out _, "merge-base", "--is-ancestor", ancestor, parent) == 0 &&
+                    Run(out byte[] tree, "ls-tree", "-z", "--full-tree", parent, "--", ":(literal)" + path) == 0 &&
+                    tree.Length == 0);
+            }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or DecoderFallbackException)
         {

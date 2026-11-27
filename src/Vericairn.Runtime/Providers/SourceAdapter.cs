@@ -143,6 +143,12 @@ public interface ISourceAdapter
     SourceFile? DeletedRecordAtCommit(string root, string commit, string id) => null;
 
     /// <summary>
+    /// The same deletion evidence, provided the commit is a merge and the path is absent in a parent that reaches
+    /// <paramref name="carriedFrom"/>.
+    /// </summary>
+    SourceFile? DeletedRecordAtCommit(string root, string commit, string id, string carriedFrom) => null;
+
+    /// <summary>
     /// The commit that added each record file in the checked-out commit's reachable history, the oldest when several did, without fetching
     /// or changing the repository; a shallow clone reports itself and lists nothing. Null means unavailable or unsupported.
     /// </summary>

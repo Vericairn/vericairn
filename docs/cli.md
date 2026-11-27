@@ -845,8 +845,9 @@ when there are none. `vericairn estate bootstrap --force` writes the new scripts
 `estate check` reports `history.deleted-in-git` for record files deleted in the checked-out commit's reachable
 history, merges included, that are absent here and that no history checkpoint witnessed. It warns by default. From 0.9.5
 (ID-19), a verified acknowledgment by the root operator with presence makes the finding informational and names the
-checkpoint. Use the commit the warning names. When it names a merge, you can also name the branch's deleting commit
-if both commits show the same record id, content hash and path deleted and both are reachable from the local main line.
+checkpoint and the listed deletion commit. Use the commit the warning names. When it names a merge, you can also
+name the branch's deleting commit if the merge reaches it through a parent that already lacks the path and both commits
+show the same record id and content hash deleted at that path. Both commits must be reachable from the local main line.
 See the [checkpoint entry format](record-format-v3.md#history-checkpoints-092). The finding depends on the clone and
 appears only in the check. A shallow clone reports the history as unavailable.
 

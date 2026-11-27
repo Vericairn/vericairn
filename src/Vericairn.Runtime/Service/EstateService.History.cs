@@ -47,9 +47,12 @@ public sealed partial class EstateService
         return null;
     }
 
-    private static string? GitDeletionPath(EstateModel model, ISourceAdapter git, GitRemoval removal)
+    private static string? GitDeletionPath(EstateModel model, ISourceAdapter git, GitRemoval removal, string? carriedFrom = null)
     {
-        if (git.DeletedRecordAtCommit(model.Root, removal.Commit, removal.Id) is not { } file) return null;
+        SourceFile? file = carriedFrom is null
+            ? git.DeletedRecordAtCommit(model.Root, removal.Commit, removal.Id)
+            : git.DeletedRecordAtCommit(model.Root, removal.Commit, removal.Id, carriedFrom);
+        if (file is null) return null;
         var findings = new FindingList();
         RecordEnvelope? record = RecordParser.Parse(file.Bytes, file.Path, findings, checkFormatting: false);
         return !findings.HasErrors && record is not null && record.Id == removal.Id && record.ComputedHash == removal.Hash &&
@@ -58,10 +61,11 @@ public sealed partial class EstateService
 
     private static bool MatchesGitDeletion(EstateModel model, ISourceAdapter git, RecordDeletion deletion, GitRemoval removal)
     {
-        // A merge may also delete the record relative to another parent. When the commits differ, verify the exact
-        // record and canonical path at both. An older deletion of different contents cannot settle this finding.
+        // A merge may report a deletion already carried by one of its parents. Verify the exact record and canonical
+        // path in both commits, as well as the route through the parent where the path is already absent.
         return GitDeletionPath(model, git, removal) == deletion.Path &&
-            (removal.Commit == deletion.Commit || GitDeletionPath(model, git, removal with { Commit = deletion.Commit }) == deletion.Path);
+            (removal.Commit == deletion.Commit ||
+                GitDeletionPath(model, git, removal with { Commit = deletion.Commit }, carriedFrom: removal.Commit) == deletion.Path);
     }
 
     /// <summary>Candidate acknowledgments indexed by record id. The clone must still prove each deletion.</summary>

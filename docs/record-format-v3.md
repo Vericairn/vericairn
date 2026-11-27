@@ -1114,16 +1114,21 @@ version no head witnesses.
 
 **Unwitnessed Git deletions (0.9.5).** An entry with `commit` requires the root
 operator's admitted presence device. It names the full deleting commit, the absent
-record's id and content hash from that commit's parent, and a non-blank reason. A
-complete local history must show the deletion at the record's canonical path in
-that commit and reach the commit from the local main line. The entry leaves the
-inventory and record set hash unchanged. `estate check` reports
-`history.deleted-in-git` as acknowledged and names the checkpoint when it can
-verify the same deletion. If the finding and the checkpoint name different
-commits, both commits must be reachable from the local main line and show the
-deletion of the same record id and content hash at the same canonical path. This
-covers a deletion brought into the main line by a merge. Every other unwitnessed
-deletion still warns. Earlier readers refuse the added `commit` field.
+record's id and content hash from that commit's parent, and a non-blank reason.
+Signatures and formatting whitespace are outside the content hash. Only a record
+that parses and whose declared hash agrees with its computed hash can be
+acknowledged. A complete local history must show the deletion at the record's
+canonical path in that commit and reach the commit from the local main line.
+The deleted record contributes nothing to the checkpoint's inventory or record
+set hash. `estate check` reports `history.deleted-in-git` as acknowledged and
+names the checkpoint and listed deletion commit when it can verify the claim.
+The listed commit may differ from the one the checkpoint names when it is a
+merge that reaches the named commit through a parent that already lacks the path.
+Both commits must be reachable from the local main line and show the same record
+id and content hash deleted at that path. A later separate deletion of the same
+record still warns. `history.git-removal-author` reports an entry that lacks the
+root operator's required presence signature. Earlier readers refuse the added
+`commit` field.
 
 **Who writes them (OPS-07).** `vericairn estate checkpoint` writes one with trigger `manual` and, with `--adopt`, the
 adoption checkpoint, anchoring the unsigned records that count; a new estate's root operator's first device writes the
