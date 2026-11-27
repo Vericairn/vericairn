@@ -127,14 +127,16 @@ public sealed class McpStatelessTests
         Assert.NotNull(answers[6]["result"]);
     }
 
-    [Fact]
-    public async Task BridgeSuppliesStatelessHeadersAndPreservesTheRpcsErrorWithoutNegotiating()
+    [Theory]
+    [InlineData("vericairn://estate/document/café")]
+    [InlineData(" vericairn://estate/document/pin ")]
+    public async Task BridgeSuppliesStatelessHeadersAndPreservesTheRpcsErrorWithoutNegotiating(string resourceUri)
     {
-        using var upstream = new StatelessUpstream();
+        using var upstream = new StatelessUpstream(resourceUri);
         using var http = new HttpClient(upstream) { BaseAddress = new Uri("https://runtime.invalid") };
         using var bridge = new McpBridge(http, "test-principal", _ => throw new InvalidOperationException("A read does not sign a record."));
         JsonObject parameters = Metadata();
-        parameters["uri"] = "vericairn://estate/document/café";
+        parameters["uri"] = resourceUri;
         using var input = new StringReader(Request(1, "resources/read", parameters).ToJsonString());
         using var output = new StringWriter();
         await bridge.RunAsync(input, output, TestContext.Current.CancellationToken);
@@ -225,7 +227,7 @@ public sealed class McpStatelessTests
         }
     }
 
-    private sealed class StatelessUpstream : HttpMessageHandler
+    private sealed class StatelessUpstream(string resourceUri) : HttpMessageHandler
     {
         public int Calls { get; private set; }
 
@@ -236,7 +238,7 @@ public sealed class McpStatelessTests
             Assert.False(request.Headers.Contains("Mcp-Session-Id"));
             Assert.Equal(Modern, Assert.Single(request.Headers.GetValues("MCP-Protocol-Version")));
             Assert.Equal("resources/read", Assert.Single(request.Headers.GetValues("Mcp-Method")));
-            string uri = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("vericairn://estate/document/café"));
+            string uri = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(resourceUri));
             Assert.Equal("=?base64?" + uri + "?=", Assert.Single(request.Headers.GetValues("Mcp-Name")));
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
             {

@@ -623,9 +623,9 @@ runtime therefore reaches nothing.
 **Session-based transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
 request is answered with one JSON body; a notification or a response gets `202` and no body. Batches
 and the older HTTP transport are not served: `initialize` negotiates 2025-11-25, 2025-06-18 or 2025-03-26.
-`initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits; every later request
-names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A request
-without a session gets `400`, and one naming a session its device does not hold, or one that ended,
+`initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits. Every later request
+names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A legacy POST
+without a session gets `400`, and a request naming a session its device does not hold, or one that ended,
 gets `404`, after which a client initializes again. DELETE ends a session. A session is bound to the
 device, principal and profile that opened it and is never authentication: it ends on DELETE, an idle
 hour, its device's revocation or loss of the profile, or the runtime's restart. A device holds at most
@@ -635,11 +635,25 @@ that count), so network MCP never takes the connections the API and the
 event streams need. A dropped connection cancels nothing: a write whose answer is lost is reconciled
 by reading. `notifications/cancelled` stops observing the named request and undoes no effect.
 
-**Stateless transport.** A modern POST names its version in `MCP-Protocol-Version`, its method in `Mcp-Method`
-and, for `tools/call`, `prompts/get` or `resources/read`, the name or URI in `Mcp-Name`. All match the JSON-RPC body.
-It opens no MCP session. The response to `subscriptions/listen` is an SSE stream. Closing it cancels observation and
-a client opens a new subscription after a drop. A lost write response still calls for a checked read to reconcile the outcome.
-The bridge forwards either revision under the signed device's identity.
+**Stateless transport (0.9.5).** A modern POST opens no MCP session. It sends `MCP-Protocol-Version` and
+`Mcp-Method`, plus `Mcp-Name` for the tool name, prompt name or resource URI in `tools/call`, `prompts/get`
+or `resources/read`. These headers must match the JSON-RPC body. `Accept` must explicitly list both
+`application/json` and `text/event-stream` with positive quality. Wildcards do not satisfy either requirement.
+
+| HTTP status | JSON-RPC code | Condition |
+| --- | --- | --- |
+| `400` | `-32602` | Required version or client capabilities are missing from `params._meta`, or the body omits the required tool name, prompt name or resource URI. |
+| `400` | `-32020` | A required version, method or name header is missing or disagrees with the body. |
+| `400` | `-32022` | The request names an unsupported version. Error data contains `requested` and `supported`. |
+| `404` | `-32601` | The JSON-RPC method is unknown. |
+| `405` | | GET or DELETE names `2026-07-28`, or supplies neither a version nor a session ID. The response includes `Allow: POST`. |
+| `406` | | `Accept` fails the two-media-type requirement. |
+
+`subscriptions/listen` streams its acknowledgment and notifications on the opening POST, with a keep-alive
+comment every 15 seconds. Each signed HTTP listener registers presence for its device's principal. The daemon
+renews that lease while the stream is open, releases it on cleanup and logs refusals. The stream can run for
+up to an hour. A dropped connection stops observing the subscription or an in-flight stateless request.
+A client opens a new subscription after a drop and uses a checked read to reconcile an uncertain write.
 
 **One authorization model.** Each tool call runs as its API operation for the requesting device: the
 daemon runs the very route the API maps, in its own process, with that route's request scope, so a
@@ -683,11 +697,13 @@ record, is dated within a plan's ten minutes of this machine's clock (allowing t
 signed request may have), is about the assignment or attempt the call names, and holds every field the
 call supplies unchanged with nothing beyond what the runtime adds, then signs it with the same key and
 repeats the call, returning only the final answer. Any other call is forwarded once as it came, and
-nothing it returns is signed. A session the runtime ended is opened again once; when its input ends,
-the bridge ends its session. While its client holds a resource subscription the runtime accepted, the bridge also
-holds the session's server stream and writes each resource notification on it to its client as a line, opening the
-stream again after the runtime ends it. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
-`DeviceSignedRecords` or its own code, is Vericairn-aware.
+nothing it returns is signed. The bridge preserves the revision and forwards under the signed device's identity.
+In the session-based revision, a session the runtime ended is opened again once. When its input ends, the bridge
+ends its session. While its client holds an accepted legacy resource subscription, the bridge holds the session's
+server stream and writes each resource notification to its client as a line, opening the stream again after the
+runtime ends it. In the stateless revision, the bridge forwards each `subscriptions/listen` separately and sends
+its acknowledgment and notifications back to the client. Any other client doing the same, with the SDK's
+`DeviceRequestSigner` and `DeviceSignedRecords` or its own code, is Vericairn-aware.
 
 **What a device's signature vouches for.** The bridge binds what the call itself supplies: its
 arguments, the author, the subject an assignment or attempt argument names, the record type, its time

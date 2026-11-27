@@ -36,7 +36,9 @@ internal static class Mcp20260728
         : null;
 
     public static string EncodeHeader(string value) =>
-        value.All(c => c is >= ' ' and <= '~') && !value.StartsWith("=?base64?", StringComparison.Ordinal)
+        // HTTP strips surrounding whitespace from a plain header value.
+        value.All(c => c is >= ' ' and <= '~') && !value.StartsWith(' ') && !value.EndsWith(' ')
+            && !value.StartsWith("=?base64?", StringComparison.Ordinal)
             ? value : "=?base64?" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) + "?=";
 
     public static bool MatchesHeader(string header, string value)

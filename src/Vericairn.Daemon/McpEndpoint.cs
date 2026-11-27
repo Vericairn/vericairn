@@ -146,7 +146,9 @@ internal sealed class McpEndpoint
         {
             await PostAsync(context, device, profile).ConfigureAwait(false);
         }
-        else if (context.Request.Headers[VersionHeader].ToString() == Mcp20260728.Version)
+        else if (context.Request.Headers[VersionHeader].ToString() == Mcp20260728.Version
+            || ((HttpMethods.IsGet(method) || HttpMethods.IsDelete(method))
+                && !context.Request.Headers.ContainsKey(VersionHeader) && !context.Request.Headers.ContainsKey(SessionHeader)))
         {
             context.Response.Headers.Allow = "POST";
             await Problem(context, StatusCodes.Status405MethodNotAllowed, new Problem("refused", $"MCP {Mcp20260728.Version} answers POST at /mcp.", [])).ConfigureAwait(false);
@@ -446,8 +448,15 @@ internal sealed class McpEndpoint
         // The listener may keep a presence lease for its signed principal. The lease client reaches only the three presence routes,
         // and stays available during disconnect cleanup so it can release its own lease.
         using VericairnClient presenceClient = OpenClient(context, device, identity, presence: true, CancellationToken.None);
-        await using var presence = new PresenceKeeper(presenceClient, new PresenceRegisterRequest(device.Principal, "mcp subscriptions/listen"),
+        await using var presence = new PresenceKeeper(presenceClient, new PresenceRegisterRequest(device.Principal, "MCP subscription"),
             time: host.Time, log: host.Log);
+        presence.Answered += answer =>
+        {
+            if (answer.Problem is { } refusal)
+            {
+                host.Log($"network MCP: presence refused for device {device.Identity}: {refusal.Code}: {refusal.Message}");
+            }
+        };
         try
         {
             try
@@ -459,30 +468,75 @@ internal sealed class McpEndpoint
                 host.Log($"network MCP: presence could not be registered for device {device.Identity}: {exception.Message}");
             }
 
-            async Task Send(JsonObject notification)
+            using var writes = new SemaphoreSlim(1);
+            using var keepAliveStop = CancellationTokenSource.CreateLinkedTokenSource(end.Token);
+            Task keepAlive = Task.CompletedTask;
+
+            async Task SendFrame(string frame, CancellationToken stopping)
             {
-                // A throttled notification may have waited since the last journal read. Recheck standing at delivery.
-                if (Denied() is string refusal)
+                await writes.WaitAsync(stopping).ConfigureAwait(false);
+                try
                 {
-                    host.Log($"closed an MCP subscription stream of device {device.Identity}: {refusal}");
+                    // A throttled notification may have waited since the last journal read. Recheck standing at delivery.
+                    if (Denied() is string refusal)
+                    {
+                        host.Log($"closed an MCP subscription stream of device {device.Identity}: {refusal}");
+                        await end.CancelAsync().ConfigureAwait(false);
+                        end.Token.ThrowIfCancellationRequested();
+                    }
+
+                    if (!response.HasStarted)
+                    {
+                        response.StatusCode = StatusCodes.Status200OK;
+                        response.ContentType = EventVocabulary.StreamMediaType + "; charset=utf-8";
+                        response.Headers.CacheControl = "no-cache, no-store";
+                        context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+                        // Arm the timer with the first frame. The write lock keeps the acknowledgment ahead of every comment.
+                        keepAlive = KeepAliveAsync();
+                    }
+
+                    await WriteAsync(response, frame, stopping).ConfigureAwait(false);
+                }
+                finally
+                {
+                    writes.Release();
+                }
+            }
+
+            async Task KeepAliveAsync()
+            {
+                using var timer = new PeriodicTimer(EventRoutes.KeepAlive, host.Time);
+                try
+                {
+                    while (await timer.WaitForNextTickAsync(keepAliveStop.Token).ConfigureAwait(false))
+                    {
+                        await SendFrame(": keep-alive\n\n", keepAliveStop.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (keepAliveStop.IsCancellationRequested)
+                {
+                    // The listener ended.
+                }
+                catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+                {
                     await end.CancelAsync().ConfigureAwait(false);
-                    end.Token.ThrowIfCancellationRequested();
                 }
-
-                if (!response.HasStarted)
-                {
-                    response.StatusCode = StatusCodes.Status200OK;
-                    response.ContentType = EventVocabulary.StreamMediaType + "; charset=utf-8";
-                    response.Headers.CacheControl = "no-cache, no-store";
-                    context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
-                }
-
-                await WriteAsync(response, "event: message\ndata: " + notification.ToJsonString() + "\n\n", end.Token).ConfigureAwait(false);
             }
 
             string? Denied() => subscription.Refusal() ?? StandingRefusal(device.Identity, device.PublicKey, device.Principal, profile);
 
-            JsonObject answer = await server.ListenAsync(id, parameters, Send, followEmpty: true, stopping: end.Token).ConfigureAwait(false);
+            JsonObject answer;
+            try
+            {
+                answer = await server.ListenAsync(id, parameters,
+                    notification => SendFrame("event: message\ndata: " + notification.ToJsonString() + "\n\n", end.Token),
+                    followEmpty: true, stopping: end.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                await keepAliveStop.CancelAsync().ConfigureAwait(false);
+                await keepAlive.ConfigureAwait(false);
+            }
             if (!context.RequestAborted.IsCancellationRequested && Denied() is null)
             {
                 if (response.HasStarted)
