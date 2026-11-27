@@ -135,7 +135,7 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         ((CountingApi)client).BeforeCall = name => BeforeApiCall?.Invoke(name);
         ((CountingApi)client).LoseAcknowledgmentResponse = () => LoseAcknowledgmentResponse;
         ((CountingApi)client).LoseRunStopResponse = () => LoseRunStopResponse;
-        ((CountingApi)client).LoseDesktopHandoffResponse = () => LoseDesktopHandoffResponse;
+        ((CountingApi)client).PrepareHandoff = (request, token) => PrepareHandoffAsync(connection, request, token);
         ((CountingApi)client).Basis = () => { BasisReads++; return Basis; };
         ((CountingApi)client).RecordRead = record =>
         {
@@ -153,13 +153,15 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         public Action<string> BeforeCall { get; set; } = null!;
         public Func<bool> LoseAcknowledgmentResponse { get; set; } = null!;
         public Func<bool> LoseRunStopResponse { get; set; } = null!;
-        public Func<bool> LoseDesktopHandoffResponse { get; set; } = null!;
+        public Func<DesktopHandoffRequest, CancellationToken, Task<DesktopHandoffResponse>> PrepareHandoff { get; set; } = null!;
         public Func<RecordResponse?, RecordResponse?> RecordRead { get; set; } = null!;
         public Func<DecisionBasisResponse?> Basis { get; set; } = null!;
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             Called();
             BeforeCall(targetMethod!.Name);
+            if (targetMethod.Name == nameof(IEstateApi.PrepareDesktopHandoffAsync))
+                return PrepareHandoff((DesktopHandoffRequest)args![0]!, (CancellationToken)args[1]!);
             if (targetMethod!.Name == nameof(IEstateApi.DecisionBasisAsync) && Basis() is DecisionBasisResponse basis) return Task.FromResult(basis);
             try
             {
@@ -169,7 +171,6 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
                 {
                     Task<AttentionAcknowledgeResponse> acknowledgment when LoseAcknowledgmentResponse() => LostResponse(acknowledgment),
                     Task<RunStopResponse> requested when LoseRunStopResponse() => LostResponse(requested),
-                    Task<DesktopHandoffResponse> prepared when LoseDesktopHandoffResponse() => LostResponse(prepared),
                     _ => result,
                 };
             }
@@ -183,6 +184,37 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
             throw new HttpRequestException("The response was lost.");
         }
     }
+    private string? handoffDevice;
+
+    private async Task<DesktopHandoffResponse> PrepareHandoffAsync(RuntimeConnection connection, DesktopHandoffRequest request, CancellationToken token)
+    {
+        using EstateService.RequestDeviceScope device = ForHandoffDevice(connection);
+        DesktopHandoffResponse response = await ((IEstateApi)service).PrepareDesktopHandoffAsync(request, token).ConfigureAwait(false);
+        return LoseDesktopHandoffResponse ? throw new HttpRequestException("The response was lost.") : response;
+    }
+
+    internal DesktopHandoffResponse OpenHandoff(DesktopHandoffOpenRequest request)
+    {
+        using EstateService.RequestDeviceScope device = ForHandoffDevice(Kept.Single(c => c.Principal == request.By));
+        using IDisposable socket = service.ForLocalSocketRequest();
+        return service.OpenDesktopHandoff(request);
+    }
+
+    private EstateService.RequestDeviceScope ForHandoffDevice(RuntimeConnection connection)
+    {
+        if (service.Standing(connection.Device) is { } paired)
+            return service.ForDeviceRequest(paired.Identity, paired.PublicKey);
+        if (handoffDevice is null)
+        {
+            WriteOutcome created = service.DeviceCreate(new(connection.Principal, "Handoff fixture phone", "file"));
+            Assert.True(created.Ok, created.Problem?.Message);
+            handoffDevice = created.Written!.Id;
+            WriteOutcome admitted = service.DeviceAdmit(new(handoffDevice, connection.Principal, "Handoff fixture admission."));
+            Assert.True(admitted.Ok, admitted.Problem?.Message);
+        }
+        return service.ForDeviceRequest(handoffDevice, service.Standing(handoffDevice)!.PublicKey);
+    }
+
     public IReadOnlyList<RemoteInterventionReceipt> LoadInterventions(RuntimeConnection connection) =>
         new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).LoadInterventions(connection);
 

@@ -19,6 +19,12 @@ public sealed record DesktopHandoff(string Id, string Estate, string? Node, stri
 {
     /// <summary>When this runtime stops retaining the handoff.</summary>
     public string? ExpiresAt { get; init; }
+
+    /// <summary>The authenticated device that prepared this handoff, when known.</summary>
+    public string? PreparedByDevice { get; init; }
+
+    /// <summary>The authenticated device that observed the first Workbench opening, when known.</summary>
+    public string? OpenedByDevice { get; init; }
 }
 
 /// <summary>The retained handoffs available to the acting person.</summary>

@@ -8,11 +8,13 @@ using System.Text;
 using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
+using Vericairn.Sdk;
 
 namespace Vericairn.Workbench;
 
 /// <summary>A retained hand-over and its current comparison, both through the runtime. Refresh never replaces the basis.</summary>
-public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationProfile>? profile = null, Func<string?>? acting = null) : Document("Hand-over and resume", "handoff")
+public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationProfile>? profile = null, Func<string?>? acting = null,
+    Func<IEstateApi, string, VericairnClient?>? desktopDevice = null) : Document("Hand-over and resume", "handoff")
 {
     private HandoffPackage? package;
     private IReadOnlyList<DesktopHandoff> remoteHandoffs = [];
@@ -96,16 +98,18 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             }
 
             if (person != acting?.Invoke() || !ReferenceEquals(estate, api())) return;
-            DesktopHandoffResponse response = await estate.OpenDesktopHandoffAsync(new(person, selected.Id), cancellationToken).ConfigureAwait(true);
+            DesktopHandoffResponse? response = await WithDesktopDeviceAsync(estate, person,
+                signed => signed.OpenDesktopHandoffAsync(new(person, selected.Id), cancellationToken), cancellationToken).ConfigureAwait(true);
             if (person != acting?.Invoke() || !ReferenceEquals(estate, api())) return;
-            if (response.Handoff is not { } handoff)
+            if (response?.Handoff is not { } handoff)
             {
-                RemoteNote = response.Problem?.Message ?? "Opening has not been observed. Refresh Handoffs before retrying.";
+                RemoteNote = response is null ? "Select your admitted device on this desktop before opening the handoff."
+                    : response.Problem?.Message ?? "Opening has not been observed. Refresh Handoffs before retrying.";
                 return;
             }
 
             RemoteNote = $"Opened in Workbench at {handoff.OpenedAt}.";
-            RemoteText = $"{handoff.Task}\n\nReason for handoff\n{handoff.Reason}\n\nEstate {handoff.Estate} · Runtime {handoff.Node ?? "identity unavailable"}\nPrepared at {handoff.PreparedAt}\n{(handoff.ExpiresAt is { } expiry ? $"Expires at {expiry}\n" : "")}Subject revision: {handoff.SubjectState}\nObserved work status: {handoff.SubjectStatus ?? "unavailable here"}\nThe chosen task still needs its own review and completion.\n"
+            RemoteText = $"{handoff.Task}\n\nReason for handoff\n{handoff.Reason}\n\nEstate {handoff.Estate} · Runtime {handoff.Node ?? "identity unavailable"}\nPrepared at {handoff.PreparedAt} by device {handoff.PreparedByDevice ?? "unavailable"}\nOpened by device {handoff.OpenedByDevice ?? "unavailable"}\n{(handoff.ExpiresAt is { } expiry ? $"Expires at {expiry}\n" : "")}Subject revision: {handoff.SubjectState}\nObserved work status: {handoff.SubjectStatus ?? "unavailable here"}\nThe chosen task still needs its own review and completion.\n"
                 + (handoff.Draft is null ? string.Empty : "\nDraft from Remote\n" + handoff.Draft + "\n")
                 + "\nOriginals\n" + originals;
             RemoteHandoffs = RemoteHandoffs.Select(item => item.Id == handoff.Id ? handoff : item).ToArray();
@@ -120,11 +124,13 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             selected.By != person || api() is not { } estate) return;
         await ReadAsync(async _ =>
         {
-            DesktopHandoffRemoveResponse response = await estate.RemoveDesktopHandoffAsync(new(person, selected.Id), cancellationToken).ConfigureAwait(true);
+            DesktopHandoffRemoveResponse? response = await WithDesktopDeviceAsync(estate, person,
+                signed => signed.RemoveDesktopHandoffAsync(new(person, selected.Id), cancellationToken), cancellationToken).ConfigureAwait(true);
             if (person != acting?.Invoke() || !ReferenceEquals(estate, api())) return;
-            if (!response.Removed)
+            if (response is not { Removed: true })
             {
-                RemoteNote = response.Problem?.Message ?? "Removal has not been observed. Refresh Handoffs before retrying.";
+                RemoteNote = response is null ? "Select your admitted device on this desktop before removing the handoff."
+                    : response.Problem?.Message ?? "Removal has not been observed. Refresh Handoffs before retrying.";
                 return;
             }
 
@@ -133,6 +139,14 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             RemoteText = string.Empty;
             RemoteNote = "The selected handoff was removed.";
         }).ConfigureAwait(true);
+    }
+
+    private async Task<T?> WithDesktopDeviceAsync<T>(IEstateApi estate, string person, Func<IEstateApi, Task<T>> send, CancellationToken cancellationToken) where T : class
+    {
+        if (desktopDevice is null) return await send(estate).ConfigureAwait(false);
+        using VericairnClient? signed = desktopDevice(estate, person);
+        // The selected device may ask for its owner's presence when it signs this explicit request.
+        return signed is null ? null : await Task.Run(() => send(signed), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The retained package, or none. Only an explicit prepare or successful load replaces it.</summary>

@@ -1091,7 +1091,7 @@ public static class OpenApiDocument
             ["DesktopHandoffOpenRequest"] = Object(("by", "string"), ("id", "string")),
             ["DesktopHandoffRemoveRequest"] = Object(("by", "string"), ("id", "string")),
             ["DesktopHandoffRemoveResponse"] = Object(("removed", "boolean"), ("problem", "object")),
-            ["DesktopHandoff"] = Object(("id", "string"), ("estate", "string"), ("node", "string"), ("by", "string"), ("subject", "object"), ("task", "string"), ("reason", "string"), ("draft", "string"), ("evidence", "array"), ("preparedAt", "string"), ("openedAt", "string"), ("subjectState", "string"), ("subjectStatus", "string"), ("expiresAt", "string")),
+            ["DesktopHandoff"] = Object(("id", "string"), ("estate", "string"), ("node", "string"), ("by", "string"), ("subject", "object"), ("task", "string"), ("reason", "string"), ("draft", "string"), ("evidence", "array"), ("preparedAt", "string"), ("openedAt", "string"), ("subjectState", "string"), ("subjectStatus", "string"), ("expiresAt", "string"), ("preparedByDevice", "string"), ("openedByDevice", "string")),
             ["DesktopHandoffsResponse"] = Object(("handoffs", "array"), ("problem", "object")),
             ["DesktopHandoffResponse"] = Object(("handoff", "object"), ("problem", "object")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),

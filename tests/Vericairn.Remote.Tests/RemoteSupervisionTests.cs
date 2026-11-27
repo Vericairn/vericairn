@@ -179,7 +179,7 @@ public sealed class RemoteSupervisionTests(HeadlessFixture fixture)
             Assert.Equal(assignment.ComputedHash, kept.Subject.Hash);
             Assert.Equal("work-order", Assert.Single(kept.Evidence).Type);
 
-            Assert.NotNull(connections.Service.OpenDesktopHandoff(new(estate.OperatorId, kept.Id)).Handoff);
+            Assert.NotNull(connections.OpenHandoff(new(estate.OperatorId, kept.Id)).Handoff);
             await model.RefreshHandoffsCommand.ExecuteAsync();
             displayed = Assert.Single(model.Handoffs);
             Assert.Contains("Opened in Workbench", displayed.State, StringComparison.Ordinal);

@@ -39,7 +39,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         }
 
         string operation = RequestAuthenticator.Operation(context.HttpContext);
-        if (Refusal(operation, device) is string machine)
+        if (Refusal(operation, device, DaemonHost.IsLocalSocketRequest(context.HttpContext)) is string machine)
         {
             return Denied(context.HttpContext, device, machine);
         }
@@ -384,12 +384,12 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// Stopping the runtime, replacing its certificate or identity, and inspecting revocation reach require an administrator.
     /// The local-network profile also refuses shutdown and certificate or identity changes as operations on the runtime's own machine.
     /// </summary>
-    private string? Refusal(string operation, AuthenticatedDevice device) =>
+    private string? Refusal(string operation, AuthenticatedDevice device, bool localSocket) =>
         !Covers(operation)
             ? $"{operation} has no request scope rule and is refused."
-            : operation == "POST /v1/handoff/desktop/open"
+            : !localSocket && operation == "POST /v1/handoff/desktop/open"
             ? "Open the handoff from Workbench on the runtime's machine."
-            : operation == "POST /v1/handoff/desktop/remove"
+            : !localSocket && operation == "POST /v1/handoff/desktop/remove"
             ? "Remove the handoff from Workbench on the runtime's machine."
             : operation == "GET /v1/devices/{id}/revocation-reach"
             ? Administrator("Reading revocation reach", device)

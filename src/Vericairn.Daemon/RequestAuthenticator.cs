@@ -138,7 +138,7 @@ internal sealed class RequestAuthenticator
     }
 
     /// <summary>Null when a loopback request is authenticated; otherwise the problem to answer with.</summary>
-    public async Task<Problem?> VerifyAsync(HttpContext context)
+    public async Task<Problem?> VerifyAsync(HttpContext context, string? missingSignature = null)
     {
         HttpRequest request = context.Request;
         string? device = Header(request, RequestSigning.DeviceHeader);
@@ -146,7 +146,7 @@ internal sealed class RequestAuthenticator
         string? signature = Header(request, RequestSigning.SignatureHeader);
         if (device is null || signedAt is null || signature is null)
         {
-            return Denied($"Loopback requests are signed by an admitted device: send {RequestSigning.DeviceHeader}, {RequestSigning.SignedAtHeader} and {RequestSigning.SignatureHeader}, or use the local socket.");
+            return Denied(missingSignature ?? $"Loopback requests are signed by an admitted device: send {RequestSigning.DeviceHeader}, {RequestSigning.SignedAtHeader} and {RequestSigning.SignatureHeader}, or use the local socket.");
         }
 
         if (Freshness(signedAt) is Problem freshness)

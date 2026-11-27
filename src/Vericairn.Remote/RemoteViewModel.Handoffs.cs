@@ -374,7 +374,8 @@ public sealed partial class RemoteViewModel
     {
         Handoffs = Selected?.Observation?.DesktopHandoffs?.Select(h => new RemoteHandoffRow(h.Task,
             $"{h.Subject.Type} {h.Subject.Id} at {h.Subject.Hash} ({h.SubjectState})\nEstate {h.Estate} · node {h.Node}\n{h.Reason}",
-            $"Prepared {h.PreparedAt} · " + (h.OpenedAt is { } opened ? $"Opened in Workbench {opened}." : "No Workbench opening observed.") +
+            $"Prepared {h.PreparedAt} by device {h.PreparedByDevice ?? "unavailable"} · " +
+            (h.OpenedAt is { } opened ? $"Opened in Workbench {opened} by device {h.OpenedByDevice ?? "unavailable"}." : "No Workbench opening observed.") +
             (h.SubjectStatus is { } status ? $"\nLatest observed subject state: {status}." : "\nDownstream state has not been observed."),
             h.Draft ?? "")).ToList() ?? [];
         Raise(nameof(HandoffFreshness));

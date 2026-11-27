@@ -655,10 +655,16 @@ public sealed class DaemonHost : IAsyncDisposable
 
         IDictionary<object, object?>? items = context.Features.Get<IConnectionItemsFeature>()?.Items;
         bool localNetwork = items?.ContainsKey(LocalNetworkMarker) == true;
+        bool localSocket = OverLocalSocket(items);
+        // These explicit Workbench observations require the opening person's device, even on the same-user socket.
+        bool signedHandoff = localSocket && RequestAuthenticator.Operation(context) is
+            "POST /v1/handoff/desktop/open" or "POST /v1/handoff/desktop/remove";
         Problem? denied = localNetwork
             ? await Authenticator.VerifyLocalNetworkAsync(context).ConfigureAwait(false)
-            : items?.ContainsKey(LoopbackMarker) == true || context.Connection.LocalIpAddress is not null
-                ? await Authenticator.VerifyAsync(context).ConfigureAwait(false)
+            : signedHandoff || items?.ContainsKey(LoopbackMarker) == true || context.Connection.LocalIpAddress is not null
+                ? await Authenticator.VerifyAsync(context, signedHandoff
+                    ? "Use your admitted Workbench device on this desktop to open or remove this handoff."
+                    : null).ConfigureAwait(false)
                 : null;
         if (denied is not null)
         {
@@ -676,7 +682,7 @@ public sealed class DaemonHost : IAsyncDisposable
 
         // From 0.9.4 (ID-16) a request over the local socket or named pipe, and only one, is named the local-socket profile, on which a
         // presence session may open; the profile is named positively, from the listener that accepted the connection.
-        if (OverLocalSocket(items))
+        if (localSocket)
         {
             using IDisposable profile = Service.ForLocalSocketRequest();
             await next(context).ConfigureAwait(false);
@@ -687,6 +693,9 @@ public sealed class DaemonHost : IAsyncDisposable
     }
 
     /// <summary>Whether a connection was accepted by the daemon's local socket or named pipe listener, and by no other.</summary>
+    internal static bool IsLocalSocketRequest(HttpContext context) => OverLocalSocket(context.Features.Get<IConnectionItemsFeature>()?.Items);
+
+    /// <summary>Whether the listener marked this connection as the local socket or named pipe.</summary>
     internal static bool OverLocalSocket(IDictionary<object, object?>? items) =>
         items?.ContainsKey(LocalSocketMarker) == true && !items.ContainsKey(LoopbackMarker) && !items.ContainsKey(LocalNetworkMarker);
 

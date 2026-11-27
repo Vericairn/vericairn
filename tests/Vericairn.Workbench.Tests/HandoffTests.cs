@@ -8,6 +8,7 @@ using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
+using Vericairn.Runtime.Service;
 using System.Text.Json;
 
 namespace Vericairn.Workbench.Tests;
@@ -91,14 +92,24 @@ public class HandoffTests(HeadlessFixture fixture)
         RecordResponse subject = Assert.IsType<RecordResponse>(api.Record(person));
         var request = new DesktopHandoffRequest(person, Guid.NewGuid().ToString("N"), new(subject.Type, subject.Id, subject.Hash),
             "Review on the desktop", "A desktop review is needed", "A private draft");
-        Assert.NotNull(api.PrepareDesktopHandoff(request).Handoff);
+        EstateService service = Assert.IsType<EstateService>(api);
+        WriteOutcome created = service.DeviceCreate(new(person, "Workbench handoff fixture device", "file"));
+        Assert.True(created.Ok, created.Problem?.Message);
+        string device = created.Written!.Id;
+        WriteOutcome admitted = service.DeviceAdmit(new(device, person, "Workbench handoff fixture admission."));
+        Assert.True(admitted.Ok, admitted.Problem?.Message);
+        using IDisposable socket = service.ForLocalSocketRequest();
+        using (service.ForDeviceRequest(device, service.Standing(device)!.PublicKey))
+            Assert.Equal(device, api.PrepareDesktopHandoff(request).Handoff?.PreparedByDevice);
         string acting = person;
         var page = new HandoffDocument(() => api, acting: () => acting);
 
         await page.ReadRemoteHandoffsAsync(TestContext.Current.CancellationToken);
         page.SelectedRemoteHandoff = Assert.Single(page.RemoteHandoffs);
         Assert.Null(page.SelectedRemoteHandoff.OpenedAt);
-        await page.OpenRemoteHandoffAsync(TestContext.Current.CancellationToken);
+        using (service.ForDeviceRequest(device, service.Standing(device)!.PublicKey))
+            await page.OpenRemoteHandoffAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(device, page.RemoteText, StringComparison.Ordinal);
         Assert.Contains("A private draft", page.RemoteText, StringComparison.Ordinal);
         Assert.Contains(subject.Hash, page.RemoteText, StringComparison.Ordinal);
         Assert.NotNull(Assert.Single(api.DesktopHandoffs(person).Handoffs).OpenedAt);
@@ -112,7 +123,8 @@ public class HandoffTests(HeadlessFixture fixture)
         acting = person;
         await page.ReadRemoteHandoffsAsync(TestContext.Current.CancellationToken);
         page.SelectedRemoteHandoff = Assert.Single(page.RemoteHandoffs);
-        await page.RemoveRemoteHandoffAsync(TestContext.Current.CancellationToken);
+        using (service.ForDeviceRequest(device, service.Standing(device)!.PublicKey))
+            await page.RemoveRemoteHandoffAsync(TestContext.Current.CancellationToken);
         Assert.Empty(page.RemoteHandoffs);
         Assert.Null(page.SelectedRemoteHandoff);
         Assert.Contains("removed", page.RemoteNote, StringComparison.Ordinal);

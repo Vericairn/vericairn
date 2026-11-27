@@ -698,7 +698,7 @@ public sealed partial class ShellViewModel : Observable
         HandoffDocument? page = Documents.OfType<HandoffDocument>().FirstOrDefault();
         if (page is null)
         {
-            page = new HandoffDocument(() => connection?.Api, () => communication, () => ActingPrincipalId);
+            page = new HandoffDocument(() => connection?.Api, () => communication, () => ActingPrincipalId, DesktopHandoffDevice);
             await page.PrepareAsync(cancellationToken).ConfigureAwait(true);
         }
 
@@ -714,6 +714,10 @@ public sealed partial class ShellViewModel : Observable
         Inspector = "A hand-over keeps its exact originals. Save it for another surface, or open a saved package to see every change since it. Refresh compares with the retained basis. Open handoffs prepared on the phone in From Remote.";
         return page;
     }
+
+    private VericairnClient? DesktopHandoffDevice(IEstateApi estate, string principal) =>
+        ReferenceEquals(connection?.Api, estate) && estate is VericairnClient runtimeClient && SelectedActing is { } device && device.Principal == principal &&
+        DeviceRequestSigner.Find(device.Id) is { } signer ? new VericairnClient(runtimeClient.Endpoint, signer) : null;
 
     private async Task RefreshWorkObservationsAsync(IEstateApi api, CancellationToken cancellationToken)
     {

@@ -52,6 +52,8 @@ public sealed partial class EstateService
             EstateModel model = session.Load();
             if (HandoffPrincipalRefusal(model, request.By) is { } problem) return new(null, problem);
             if (session.IsReadOnly) return new(null, new("denied", "This session is read-only.", []));
+            if (requestDevice.Value is not { Closed: false } device)
+                return new(null, new("denied", "Prepare the handoff from an admitted device of this person.", []));
             if (!Guid.TryParseExact(request.RequestId, "N", out Guid id) || id == Guid.Empty || request.Subject is null ||
                 string.IsNullOrWhiteSpace(request.Task) || request.Task.Length > 512 ||
                 string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 2048 ||
@@ -76,7 +78,7 @@ public sealed partial class EstateService
                         return new(null, new("conflict", "The exact subject or an evidence reference could not be checked. Refresh the subject and review it before preparing a handoff.", []));
                     string at = RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow());
                     var prepared = new DesktopHandoff(key, session.Manifest.Estate, DesktopHandoffNode, request.By, request.Subject,
-                        request.Task, request.Reason, request.Draft, evidence, at);
+                        request.Task, request.Reason, request.Draft, evidence, at) { PreparedByDevice = device.Device };
                     StoreHandoffObservation(directory, path, JsonSerializer.SerializeToUtf8Bytes(prepared, ProtocolJson.Options));
                     kept = ReadHandoff(path) ?? throw new IOException("Missing prepared handoff.");
                 }
@@ -101,8 +103,8 @@ public sealed partial class EstateService
         {
             EstateModel model = session.Load();
             if (HandoffPrincipalRefusal(model, request.By) is { } problem) return new(null, problem);
-            if (session.IsReadOnly || requestDevice.Value is { Closed: false })
-                return new(null, new("denied", "Open the handoff from Workbench on the runtime's machine.", []));
+            if (session.IsReadOnly || PresenceProfile != LocalSocketProfile || requestDevice.Value is not { Closed: false } device)
+                return new(null, new("denied", "Open the handoff from Workbench on the runtime's machine using your admitted device.", []));
             if (!Guid.TryParseExact(request.Id, "N", out Guid id))
                 return new(null, new("unknown", "No handoff with that identity is available for this person.", []));
 
@@ -120,7 +122,10 @@ public sealed partial class EstateService
                 }
                 string path = HandoffOpenedPath(directory, kept.Id);
                 if (!File.Exists(path))
-                    StoreHandoffObservation(directory, path, System.Text.Encoding.UTF8.GetBytes(RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow())));
+                {
+                    var opened = new HandoffOpening(RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow()), device.Device);
+                    StoreHandoffObservation(directory, path, JsonSerializer.SerializeToUtf8Bytes(opened, ProtocolJson.Options));
+                }
                 return new(ObserveHandoff(model, directory, kept));
             }
             catch (Exception exception) when (HandoffStorageFailure(exception))
@@ -138,8 +143,8 @@ public sealed partial class EstateService
         {
             EstateModel model = session.Load();
             if (HandoffPrincipalRefusal(model, request.By) is { } problem) return new(false, problem);
-            if (session.IsReadOnly || requestDevice.Value is { Closed: false })
-                return new(false, new("denied", "Remove the handoff from Workbench on the runtime's machine.", []));
+            if (session.IsReadOnly || PresenceProfile != LocalSocketProfile || requestDevice.Value is not { Closed: false })
+                return new(false, new("denied", "Remove the handoff from Workbench on the runtime's machine using your admitted device.", []));
             if (!Guid.TryParseExact(request.Id, "N", out Guid id) || id == Guid.Empty)
                 return new(false, UnknownHandoff());
 
@@ -227,7 +232,15 @@ public sealed partial class EstateService
 
     private static DesktopHandoff ObserveHandoff(EstateModel model, string directory, DesktopHandoff kept)
     {
-        string? openedAt = File.Exists(HandoffOpenedPath(directory, kept.Id)) ? File.ReadAllText(HandoffOpenedPath(directory, kept.Id)) : null;
+        HandoffOpening? opened = null;
+        string path = HandoffOpenedPath(directory, kept.Id);
+        if (File.Exists(path))
+        {
+            string stored = File.ReadAllText(path);
+            opened = stored.StartsWith('{')
+                ? JsonSerializer.Deserialize<HandoffOpening>(stored, ProtocolJson.Options)
+                : new HandoffOpening(stored, null);
+        }
         RecordEnvelope? record = ExactHandoffRecord(model, kept.Subject);
         string state = record is null || kept.Evidence.Any(pin => ExactHandoffRecord(model, pin) is null)
             ? "unavailable" : ReportedCurrent(model, record) ? "current" : "superseded";
@@ -237,8 +250,17 @@ public sealed partial class EstateService
             "operation" => EstateModel.BodyString(record, "status"),
             _ => null,
         };
-        return kept with { OpenedAt = openedAt, SubjectState = state, SubjectStatus = status, ExpiresAt = RecordParser.FormatTimestamp(HandoffExpiry(kept)) };
+        return kept with
+        {
+            OpenedAt = opened?.At,
+            OpenedByDevice = opened?.Device,
+            SubjectState = state,
+            SubjectStatus = status,
+            ExpiresAt = RecordParser.FormatTimestamp(HandoffExpiry(kept)),
+        };
     }
+
+    private sealed record HandoffOpening(string At, string? Device);
 
     private static void StoreHandoffObservation(string directory, string path, byte[] bytes)
     {

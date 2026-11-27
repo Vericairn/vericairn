@@ -27,10 +27,11 @@
 >
 > `GET /v1/handoff/desktop` lists a person's retained desktop tasks, with `principal` identifying the authorized person.
 > `POST /v1/handoff/desktop` prepares a task at an exact subject revision, with `by`, `requestId`, `subject`, `task`, `reason`,
-> and optional `draft` and `evidence`. Repeating the same request identity and content returns the original preparation.
-> `POST /v1/handoff/desktop/open` observes an opening by the same person on the serving runtime's machine. Responses report
-> the original preparation, any observed opening and the subject state when it can be checked.
-> `POST /v1/handoff/desktop/remove` on the runtime's machine removes a task for its owner.
+> and optional `draft` and `evidence`. An admitted device prepares for its own principal. Repeating the same request identity
+> and content from that device returns the original preparation. `POST /v1/handoff/desktop/open` observes the first opening
+> signed by an admitted device of the same person over the serving runtime's local socket. Responses report the preparation,
+> `preparedByDevice`, any observed opening and `openedByDevice`, and the subject state when it can be checked.
+> `POST /v1/handoff/desktop/remove` requires the same local-socket proof of ownership.
 
 ## docs/api-compatibility-0.9.5.md
 
