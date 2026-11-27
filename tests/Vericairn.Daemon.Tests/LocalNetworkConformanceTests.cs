@@ -5,6 +5,8 @@ using System.Buffers.Text;
 using System.Globalization;
 using System.Net;
 using System.Numerics;
+using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Vericairn.Protocol;
@@ -13,6 +15,7 @@ using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Sdk;
+using Vericairn.TestSupport;
 
 namespace Vericairn.Daemon.Tests;
 
@@ -100,6 +103,75 @@ public class LocalNetworkConformanceTests
         Assert.False(RuntimeSettings.TryParseAddress("192.168.1.20", out _, out string? noPort));
         Assert.Contains("port", noPort, StringComparison.Ordinal);
         Assert.False(RuntimeSettings.TryParseAddress("runtime.example:7443", out _, out _));
+    }
+
+    [Theory]
+    [InlineData("exit")]
+    [InlineData("signal")]
+    [InlineData("timeout")]
+    [InlineData("unstartable")]
+    [SupportedOSPlatform("macos")]
+    public async Task AFailedEnclaveIdentityReadRefusesStartupAndKeepsTheIdentity(string failure)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("The Secure Enclave helper runs on macOS only.");
+        using var estate = new TestEstate(recordFormat: 2);
+        using EnclaveHelperStandIn helper = EnclaveHelperStandIn.Failing("public", failure == "unstartable" ? "exit" : failure);
+        if (failure == "unstartable")
+        {
+            File.SetUnixFileMode(helper.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(estate.Root))!;
+        new RuntimeSettings("127.0.0.1:0").Save(directory);
+        string home = Path.Combine(estate.Root, "fixture-home");
+        string keys = Path.Combine(home, "keys");
+        Directory.CreateDirectory(keys);
+        string id = Ulid.NewUlid().Value;
+        string blob = Path.Combine(keys, id + ".se");
+        byte[] fakeBlob = [1, 2, 3];
+        File.WriteAllBytes(blob, fakeBlob);
+        using ECDsa fixture = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        byte[] spki = fixture.ExportSubjectPublicKeyInfo();
+        string identity = Path.Combine(directory, RuntimeIdentity.FileName);
+        File.WriteAllText(identity, JsonSerializer.Serialize(new
+        {
+            format = "vericairn.runtime-identity/1", key = id, custody = SecureEnclaveCustody.Kind, publicKey = RecordSigning.EncodePublicKey(spki),
+        }));
+        byte[] before = File.ReadAllBytes(identity);
+        var store = new IdentityStoreThatCanReplace(new SecureEnclaveKeyStore(home, helper: helper.Path), spki);
+        var messages = new List<string>();
+        var options = new DaemonOptions { IdentityStore = store, Log = messages.Add };
+
+        Exception? error = await Record.ExceptionAsync(async () =>
+        {
+            await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken);
+        });
+
+        // A store that can make a replacement would expose a swallowed refusal immediately.
+        Assert.Equal(0, store.Created);
+        Assert.Equal(before, File.ReadAllBytes(identity));
+        Assert.Equal(fakeBlob, File.ReadAllBytes(blob));
+        Assert.DoesNotContain(messages, line => line.Contains("no longer held", StringComparison.Ordinal));
+        EnclaveHelperMismatchException refusal = Assert.IsType<EnclaveHelperMismatchException>(error);
+        Assert.Contains("Nothing was signed.", refusal.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Path.GetDirectoryName(helper.Path)!, refusal.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class IdentityStoreThatCanReplace(IDeviceKeyStore held, byte[] publicKey) : IDeviceKeyStore
+    {
+        internal int Created { get; private set; }
+        public string Kind => held.Kind;
+        public bool Has(string deviceId) => held.Has(deviceId);
+        public byte[]? PublicKey(string deviceId) => held.PublicKey(deviceId);
+        public byte[] Create(string deviceId)
+        {
+            Created++;
+            return publicKey;
+        }
+
+        public byte[] Sign(string deviceId, ReadOnlySpan<byte> digest) => throw new NotSupportedException();
+        public void Remove(string deviceId) => throw new NotSupportedException();
+        public void Promote(string keyId, string deviceId) => throw new NotSupportedException();
     }
 
     [Fact]

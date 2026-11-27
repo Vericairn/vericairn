@@ -129,7 +129,9 @@ public sealed class RuntimeIdentity
                 ? new RuntimeIdentity(held, id, publicKey)
                 : null;
         }
-        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException or IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        // A failed helper cannot tell us that the held identity disappeared. Let the caller report its refusal without rotating it.
+        catch (Exception exception) when (exception is not EnclaveHelperMismatchException &&
+            exception is (JsonException or InvalidOperationException or FormatException or IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException))
         {
             return null;
         }

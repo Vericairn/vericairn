@@ -13,6 +13,10 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 48, November 27, 2026. A present `vericairn-enclave` helper must complete its availability check: one that cannot start, exits unexpectedly, is killed or times out makes `devices create` refuse before it makes a key and `doctor` mark the Secure Enclave default unavailable, while exit 3 and an absent helper keep file custody; a daemon that cannot read its Secure Enclave identity refuses to start and keeps the identity, in the development build.
+
+Revision 47, November 26, 2026. `estate upgrade` exports the live store and each database beside it from its file on disk, holding the clone's writer lock alone, and checks each copy before it writes anything, refusing the upgrade when a copy is incomplete or another runtime has the estate open for writing, in the development build.
+
 Revision 46, November 24, 2026. An agent's `operator done` or `operator dismiss` citing the operator's words writes `--said-at`, which needs `Z` or an explicit offset, in whole seconds UTC, and the time of the recording without it, and `docs pass --before` without `--previous` and `--by` reads the estate's releases read-only, in the development build.
 
 Revision 45, November 24, 2026. `doctor` reports the `vericairn-enclave` helper's version beside the command line's and flags a mismatch, `doctor --json` adds the `helper` probe, and a command line refuses to sign through a helper older than itself, or to make a key beside one that cannot be started, in the development build.
@@ -646,6 +650,22 @@ vericairn estate upgrade --to <published-version> --check
 vericairn estate upgrade --to <published-version> --by <principal id> --one-way
 ```
 
+From 0.9.5 (FIX-174), the restore point exports the live store from its file on disk, whichever runtime applies the upgrade: in
+0.9.4 the command line's upgrade of a repository-synced estate with no daemon serving it kept no live store, since it opens the
+estate read-only and exported an in-memory stand-in, which wrote no file. Every SQLite database beside the live store, such as the
+daemon's `events.db` and a local-only estate's `objects.db`, is exported the same way, as one file read through SQLite, never as its
+files copied while a runtime holds them open, so the restore point holds no database's `-wal`, `-shm` or `-journal` file. Before the
+upgrade writes anything, each copy must exist, pass SQLite's integrity check and hold as many rows in each table as the database it
+copies; otherwise the upgrade, one-way or not, is refused (`refused`) with nothing changed, and the message names the database and
+what failed. The copies are made while the upgrade holds the clone's writer lock, `live.lock`, alone, as `estate cache rebuild`
+does, so no writable session opens meanwhile. While a daemon, an MCP server (`vericairn mcp serve`, as an AI client or a run starts
+it) or another command has the estate open for writing, the upgrade is refused with nothing changed, and the message says to run it
+through the daemon serving the estate, or after stopping the daemon and closing any MCP server. A change detected while a database is
+copied refuses the upgrade too; the check catches some changes by a process that writes without the lock, not all of them
+([limitations](limitations-and-platforms.md)). The
+way back names each database's `-wal` and `-shm` to remove before the exported state is copied back, and the clone's live store too
+when it kept none before the upgrade.
+
 `vericairn runtime status` adds a `release` line with the serving daemon's release against the estate's pin and, while they
 differ, a `mismatch:` line with the commands that settle it. Its `--json` adds `servingRelease`, `pin` (the manifest's pin as
 `estate upgrade` describes it), `pinnedRelease` (null for a source pin) and `mismatch` (null when they agree or no daemon
@@ -1074,11 +1094,14 @@ when it serves no `sign-record` either. The line is flagged `mismatch` when the 
 lacks a command the command line calls. Before its first signature through the helper, and before it makes a Secure Enclave key, every
 command asks the same question and refuses an older helper, or one without `sign-record`, before anything is signed: the refusal names
 the helper's version, the command line's and the helper version it needs, says that the helper and the command line come from the same
-release archive, and ends "Nothing was signed." A helper that is beside the command line but cannot be started, such as one without
-execute permission, is refused the same way, as one that did not answer: the `helper` line says so, the `enclave` line reads `Secure
-Enclave custody unavailable (the vericairn-enclave helper beside the command line could not be started)`, and `devices create` refuses
-before it makes a key rather than taking another custody; neither names the helper's path. Up to 0.9.4 both commands ended with the
-start failure and a stack trace.
+release archive, and ends "Nothing was signed."
+
+From 0.9.5 (FIX-175), a present helper must complete its availability check. If it cannot start, exits unexpectedly, is killed
+or times out, `devices create` refuses before making a key. Exit 3 still reports that the Secure Enclave is unavailable, and
+a Mac with no helper or with that result uses file custody by default. `doctor` reports the helper failure, and its `custody`
+line marks the Secure Enclave default unavailable until the helper from this command line's release archive is beside it.
+The diagnostics and refusal omit the helper's path. If a daemon cannot read its held Secure Enclave identity because the helper
+fails, it refuses to start with the same remedy and preserves the identity so paired devices keep their pin.
 
 ```text
 helper    vericairn-enclave reports no version and serves no sign-record, so it comes from a release before 0.9.4; vericairn 0.9.5+<commit> expects vericairn-enclave 0.9.5: mismatch, so Secure Enclave signatures are refused until the vericairn-enclave from this command line's release archive is beside it

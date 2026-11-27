@@ -755,7 +755,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 presence = request.Presence ?? (format >= 2 && DeviceKeyStores.PresenceByDefault(person, kind));
                 store = DeviceKeyStores.Named(kind, presence);
             }
-            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
+            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException or EnclaveHelperMismatchException)
             {
                 // The refusal is for a person: the message alone, without the parameter name an ArgumentException appends.
                 string message = exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message;
@@ -848,7 +848,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 presence = request.Presence ?? (EstateModel.BodyString(device!, "presence") == "required" && DeviceKeyStores.PresenceKinds.IndexOf(DeviceKeyStores.Named(custody).Kind) >= 0);
                 next = DeviceKeyStores.Named(custody, presence);
             }
-            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
+            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException or EnclaveHelperMismatchException)
             {
                 return Refuse(exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message);
             }
@@ -1928,6 +1928,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 RepositoryObservation? repository = model.Manifest!.Profile == "repository-synced" ? RestoreRepository(session.Root) : null;
                 restore = UpgradeReturns.Record(session, plan.FromPin, plan.ToPin, repository?.Commit, repository is null || repository.Clean, PolicyClock.GetUtcNow());
             }
+            catch (SqliteExportException exception)
+            {
+                // From 0.9.5 (FIX-174): a restore point without a checked copy of the live store, and of each database beside it, is no
+                // way back, so the upgrade, one-way or not, is refused before it writes anything, saying what failed.
+                return (null, new Problem("refused", $"The upgrade's restore point could not be recorded on this machine: {exception.Message}. Nothing was applied, and nothing changed.", []));
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
             {
                 return (null, new Problem("refused", $"The upgrade's restore point could not be recorded on this machine ({exception.GetType().Name}), so nothing was applied. Nothing changed.", []));
@@ -1943,9 +1949,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             changes.AddRange(context.Staged.Keys.Order(StringComparer.Ordinal).Select(relative => $"{relative} written by the migrations"));
             changes.AddRange(regenerated.GroupBy(m => (m.Destination, m.Earlier, m.Current)).OrderBy(g => g.Key.Destination, StringComparer.Ordinal)
                 .ThenBy(g => g.Key.Earlier, StringComparer.Ordinal).Select(g => $"{g.Key.Destination}: {g.Count()} generated member{(g.Count() == 1 ? string.Empty : "s")} rewritten by {g.Key.Current}; each held exactly the bytes {g.Key.Earlier} wrote for the same sources"));
+            string liveStore = restore.Files.Contains(Path.GetFileName(session.Live.Path), StringComparer.Ordinal) ? ", its live store included" : string.Empty;
             changes.Add(restore.Commit is { } restoreCommit
                 ? $"restore point {restore.Id}: estate commit {restoreCommit}{(restore.Clean ? string.Empty : " with uncommitted changes beside it")} and this machine's local state, inventory {restore.StateHash}, kept on the machine that applied the upgrade; readability by {plan.FromPin}: {readability.Readability}"
-                : $"restore point {restore.Id}: this machine's local state, its live store included, inventory {restore.StateHash}, kept on the machine that applied the upgrade; readability by {plan.FromPin}: {readability.Readability}");
+                : $"restore point {restore.Id}: this machine's local state{liveStore}, inventory {restore.StateHash}, kept on the machine that applied the upgrade; readability by {plan.FromPin}: {readability.Readability}");
             using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
             var migrationDraft = new RecordDraft("migration", request.By, body.RootElement,
                 Subject: VericairnReleaseObservation.Is(plan.Release) ? plan.Release.Reference : null, Format: Math.Min(plan.ToFormat, RecordFormats.Current));

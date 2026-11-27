@@ -90,30 +90,28 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
     /// <inheritdoc />
     public string Kind => SecureEnclaveCustody.Kind;
 
-    /// <summary>
-    /// True when the helper is present and this Mac has a Secure Enclave the process can use. From 0.9.5 false, never a thrown start
-    /// failure, beside a helper that cannot be started (<see cref="Probe()"/> tells that case apart).
-    /// </summary>
-    public static bool Available() => Probe() == true;
+    /// <summary>True when the helper is present and this process can use the Secure Enclave.</summary>
+    public static bool Available() => Probe(SecureEnclaveCustody.HelperPath()) == true;
 
     /// <summary>
-    /// From 0.9.5: what the helper beside the command line says when asked whether this process can use a Secure Enclave: true when it
-    /// can, false when it cannot or no helper is beside the command line, and null for a helper that is there but cannot be started,
-    /// such as one without execute permission. Up to 0.9.4 that start failure escaped unhandled, with a stack trace naming the helper's
-    /// path, so doctor and devices create ended before the helper's version check (FIX-169) could refuse the helper. The key store
-    /// choice now takes the Secure Enclave beside such a helper, so that check refuses it before any key is made, rather than taking a
-    /// weaker custody in its place.
+    /// True when the helper reports available, false when there is no helper or it reports exit 3 (no Secure Enclave),
+    /// and null when a present helper fails the check. Callers that choose custody must refuse the last case.
     /// </summary>
-    internal static bool? Probe()
+    internal static bool? Probe(string? helper)
     {
-        if (SecureEnclaveCustody.HelperPath() is not string helper)
+        if (helper is null)
         {
             return false;
         }
 
         try
         {
-            return Run(helper, Quick, "available").Code == 0;
+            return Run(helper, Quick, "available").Code switch
+            {
+                0 => true,
+                3 => false,
+                _ => null,
+            };
         }
         catch (Exception exception) when (EnclaveHelperCheck.CouldNotStart(exception))
         {
@@ -150,8 +148,21 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
             return null;
         }
 
-        (int code, string output) = Run(helper, Quick, "public", Blob(deviceId));
-        return code == 0 ? Convert.FromBase64String(output) : throw new InvalidOperationException(output);
+        RequireHelper();
+        try
+        {
+            (int code, string output) = Run(helper, Quick, "public", Blob(deviceId));
+            if (code == 0)
+            {
+                return Convert.FromBase64String(output);
+            }
+        }
+        catch (Exception exception) when (EnclaveHelperCheck.CouldNotStart(exception) || exception is FormatException)
+        {
+            // Helper output and launch exceptions can include machine paths.
+        }
+
+        throw EnclaveHelperCheck.Refuse("could not read the held key's public key");
     }
 
     /// <inheritdoc />
