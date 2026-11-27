@@ -181,15 +181,17 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
     /// <inheritdoc />
     public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, IReadOnlyList<string> excluded)
     {
-        if (ShallowProblem(workspace.Path) is string shallow)
-        {
-            if (reviews.TryGetValue(workspace, out Review? refused)) refused.Head = null;
-            return new RunScope(0, 0, [], shallow);
-        }
-
         WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory,
             startExclude: baseline.ExcludeHash);
         RunScope scope = WorkspaceScopeAudit.Compare(baseline, after, permitted, excluded);
+        // A replaced or shallow administration refuses the audit and its retention, and the physical walk still names every file
+        // outside scope.
+        if (ShallowProblem(workspace.Path) is string shallow)
+        {
+            if (reviews.TryGetValue(workspace, out Review? refused)) refused.Head = null;
+            return scope with { Problem = scope.Problem is null ? shallow : shallow + " " + scope.Problem };
+        }
+
         if (reviews.TryGetValue(workspace, out Review? review))
             review.Head = baseline.Identity is not null && baseline.Identity == after.Identity
                 && Same(review.GitDirectory, baseline.GitDirectory ?? string.Empty) ? after.Head : null;

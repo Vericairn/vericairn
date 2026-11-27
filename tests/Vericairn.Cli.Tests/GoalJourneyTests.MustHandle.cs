@@ -78,7 +78,7 @@ public partial class GoalJourneyTests
             Assert.Equal(2, CliHarness.MergeRecords(a, b));
             Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, homeB);
             string cloneB = Path.Combine(scratch, "widget-b");
-            Git(scratch, "clone", "-q", clone, cloneB);
+            Git(scratch, "clone", "-q", "--no-hardlinks", clone, cloneB);
             CliHarness.Ok("--estate", b, "--json", "sources", "clone", cloneB, "--resource", resource);
 
             // There the goal is paused, as the laptop left it, and takes no step; its sponsor resumes it there, signed by that machine's device.
