@@ -333,9 +333,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             string id = Path.GetFileNameWithoutExtension(deletion.Path);
             if (model.FilePaths?.Contains(deletion.Path) == true || model.ById.ContainsKey(id) || history.IsWitnessed(id) || history.IsAcknowledgedRemoval(id)) continue;
-            if (acknowledgments.TryGetValue((id, deletion.Commit), out var candidates) &&
-                candidates.FirstOrDefault(candidate => GitDeletionPath(model, git, candidate.Removal) == deletion.Path) is { Checkpoint: { } checkpoint })
-                findings.Info("history.deleted-in-git", deletion.Path, $"Acknowledged by history checkpoint {checkpoint.Id} at {checkpoint.ComputedHash}. Deleted in commit {deletion.Commit}.");
+            if (acknowledgments.TryGetValue(id, out var candidates) &&
+                candidates.FirstOrDefault(candidate => MatchesGitDeletion(model, git, deletion, candidate.Removal)) is { Checkpoint: { } checkpoint, Removal: { } removal })
+                findings.Info("history.deleted-in-git", deletion.Path, $"Acknowledged by history checkpoint {checkpoint.Id} at {checkpoint.ComputedHash}. Deleted in commit {removal.Commit}.");
             else
                 findings.Warning("history.deleted-in-git", deletion.Path, $"Deleted in commit {deletion.Commit}, which the checked-out commit reaches, and absent here. No history checkpoint witnessed it. Restore it from that commit's parent if it belongs here.");
         }

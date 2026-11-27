@@ -56,10 +56,18 @@ public sealed partial class EstateService
             record.ExpectedPath == file.Path ? file.Path : null;
     }
 
-    /// <summary>Candidate acknowledgments, indexed by the record and deleting commit they name. The clone must still prove each deletion.</summary>
-    private static Dictionary<(string Id, string Commit), List<(GitRemoval Removal, RecordEnvelope Checkpoint)>> GitDeletionAcknowledgments(EstateModel model)
+    private static bool MatchesGitDeletion(EstateModel model, ISourceAdapter git, RecordDeletion deletion, GitRemoval removal)
     {
-        var claims = new Dictionary<(string Id, string Commit), List<(GitRemoval Removal, RecordEnvelope Checkpoint)>>();
+        // A merge may also delete the record relative to another parent. When the commits differ, verify the exact
+        // record and canonical path at both. An older deletion of different contents cannot settle this finding.
+        return GitDeletionPath(model, git, removal) == deletion.Path &&
+            (removal.Commit == deletion.Commit || GitDeletionPath(model, git, removal with { Commit = deletion.Commit }) == deletion.Path);
+    }
+
+    /// <summary>Candidate acknowledgments indexed by record id. The clone must still prove each deletion.</summary>
+    private static Dictionary<string, List<(GitRemoval Removal, RecordEnvelope Checkpoint)>> GitDeletionAcknowledgments(EstateModel model)
+    {
+        var claims = new Dictionary<string, List<(GitRemoval Removal, RecordEnvelope Checkpoint)>>(StringComparer.Ordinal);
         foreach (RecordEnvelope checkpoint in model.OfType("history-checkpoint")
             .Where(record => HistoryCheckpointType.HasGitRemovals(record.Body) && model.Counts(record) && model.Trust.MayAcknowledgeGitDeletion(record))
             .OrderBy(record => record.Id, StringComparer.Ordinal))
@@ -68,8 +76,7 @@ public sealed partial class EstateService
                 continue;
             foreach (GitRemoval removal in HistoryCheckpointType.GitRemovals(checkpoint.Body, checkpoint.Id, out _))
             {
-                var key = (removal.Id, removal.Commit);
-                if (!claims.TryGetValue(key, out var candidates)) claims.Add(key, candidates = []);
+                if (!claims.TryGetValue(removal.Id, out var candidates)) claims.Add(removal.Id, candidates = []);
                 candidates.Add((removal, checkpoint));
             }
         }
