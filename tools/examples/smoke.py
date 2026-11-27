@@ -97,7 +97,16 @@ def checkout(pin, destination, environment, local_source=None):
     git(destination, environment, "init", "--quiet")
     # The local source is an offline test input; the CI route always uses the public HTTPS repository.
     source = str(local_source) if local_source else f"https://github.com/{pin['name']}.git"
-    git(destination, environment, "fetch", "--quiet", "--no-tags", source, pin["commit"])
+    remote_head = git(destination, environment, "ls-remote", "--symref", "--exit-code", source, "HEAD")
+    default = re.search(r"(?m)^ref: (refs/heads/[^\t\n]+)\tHEAD$", remote_head)
+    if default is None:
+        raise SmokeFailure(f"{pin['name']} at {pin['commit']}: the repository advertises no default branch.")
+    branch = default[1]
+    git(destination, environment, "fetch", "--quiet", "--no-tags", source, branch)
+    try:
+        git(destination, environment, "merge-base", "--is-ancestor", pin["commit"], "FETCH_HEAD")
+    except SmokeFailure as failure:
+        raise SmokeFailure(f"{pin['name']} at {pin['commit']} is not reachable from its default branch {branch}.") from failure
     git(destination, environment, "checkout", "--quiet", "--detach", pin["commit"])
     if git(destination, environment, "rev-parse", "HEAD").strip() != pin["commit"]:
         raise SmokeFailure(f"{pin['name']} was not checked out at {pin['commit']}.")
@@ -108,27 +117,53 @@ def tracked_paths(repo, environment):
     return {row.split("\t", 1)[1]: row.split(" ", 1)[0] for row in listing.split("\0") if row}
 
 
-def readme_destinations(markdown):
-    # Code fences are documentation examples. Relative inline links, images, reference definitions and HTML link attributes are checked.
-    outside_fences = []
+def readme_prose(markdown):
+    # A comment can contain a literal fence, and a real fence can contain a literal comment opener.
     fence = None
+    in_comment = False
     for line in markdown.splitlines():
-        delimiter = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-        if delimiter:
-            marker = delimiter[1]
-            if fence is None:
-                fence = marker
-                continue
-            if marker[0] == fence[0] and len(marker) >= len(fence) and not line[delimiter.end():].strip():
+        delimiter = None if in_comment else re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if fence is not None:
+            if delimiter and delimiter[1][0] == fence[0] and len(delimiter[1]) >= len(fence) and not delimiter[2].strip():
                 fence = None
-                continue
-        if fence is None:
-            outside_fences.append(line)
-    text = "\n".join(outside_fences)
-    target = r"(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)"
-    for pattern in (r"\]\(\s*" + target, r"(?m)^ {0,3}\[[^\]\n]+\]:\s*" + target):
-        yield from (match[1].removeprefix("<").removesuffix(">") for match in re.finditer(pattern, text))
-    yield from (match[2] for match in re.finditer(r"""<(?:a|img)\b[^>]*?\b(?:href|src)\s*=\s*(["'])(.*?)\1""", text, re.I))
+            yield ""
+            continue
+        if delimiter and (delimiter[1][0] == "~" or "`" not in delimiter[2]):
+            fence = delimiter[1]
+            yield ""
+            continue
+        content = []
+        while line:
+            before, marker, line = line.partition("-->" if in_comment else "<!--")
+            if not in_comment:
+                content.append(before)
+            if not marker:
+                break
+            in_comment = not in_comment
+        yield " ".join(content)
+
+
+def readme_destinations(markdown):
+    target = r"<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+"
+    container = r"[ \t]*(?:(?:>[ \t]*|(?:[-+*]|[0-9]{1,9}[.)])[ \t]+))*"
+    attribute = r"""([A-Za-z_:][\w.:-]*)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'<>`]+))?"""
+    # Consume inline destinations and HTML tags before checking stand-alone angle-bracket destinations.
+    pattern = (
+        rf"\]\(\s*(?P<inline>{target})"
+        rf"|^{container}\[[^\]\n]+\]:(?:[ \t]*\n{container})?[ \t]*(?P<reference>{target})"
+        rf"|</?[A-Za-z][A-Za-z0-9-]*(?P<attributes>(?:\s+{attribute})*)\s*/?>"
+        r"|<[^\s/<>@]+@[^\s/<>@]+\.[^\s/<>@]+>"
+        r"|(?<!\\)<(?P<angle>[^\s<>]+)>"
+    )
+    for match in re.finditer(pattern, "\n".join(readme_prose(markdown)), re.M):
+        destination = match["inline"] or match["reference"] or match["angle"]
+        if destination:
+            yield destination.removeprefix("<").removesuffix(">")
+        elif match["attributes"]:
+            for field in re.finditer(attribute, match["attributes"]):
+                name, value = field.groups()
+                if name.lower() in {"href", "src"} and value:
+                    yield value[1:-1] if value[0] in "\"'" else value
 
 
 def readme_findings(repo, environment, expected_release):
@@ -145,8 +180,14 @@ def readme_findings(repo, environment, expected_release):
         release = read_json(manifest)["vericairn"]
         if release["mode"] != "release" or release["version"] != expected_release:
             findings.append(("error", "readme.estate-pin", "estate/manifest.json"))
-        lines = re.findall(r"(?m)^.*\b[Pp]ins\s+\[Vericairn ([^\]]+)\]\(([^)]+)\).*$", text)
-        if lines != [(release["version"], RELEASE_TAG + release["version"])]:
+        named = []
+        versions = []
+        for line in readme_prose(text):
+            if re.search(r"\b[Pp]ins[ \t]+\[Vericairn ", line):
+                named.extend(re.findall(r"\[Vericairn ([^\]]+)\](?:\(([^)]*)\))?", line))
+                versions.extend(re.findall(r"\bVericairn v?(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)\b", line))
+        expected = (release["version"], RELEASE_TAG + release["version"])
+        if not named or any(pin != expected for pin in named) or any(version != release["version"] for version in versions):
             findings.append(("error", "readme.release-pin", "README.md"))
     for target in dict.fromkeys(readme_destinations(text)):
         target = html.unescape(re.sub(r"\\([!-`{-~])", r"\1", target))
