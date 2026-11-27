@@ -51,6 +51,10 @@ public static class EstateStatus
     /// <summary>A work order's derived status, as <see cref="WorkItems"/> gives it, for one work order's current revision.</summary>
     internal static string StatusOf(EstateModel model, RecordEnvelope order) => Reading(model, order).Status;
 
+    /// <summary>The acceptance that settles the current work order, including an accepted current result or a placement-only move.</summary>
+    internal static RecordEnvelope? CurrentAcceptance(EstateModel model, RecordEnvelope order) =>
+        Reading(model, order) is ("accepted", { Type: "acceptance" } acceptance) ? acceptance : null;
+
     /// <summary>
     /// A work order's derived status and the record it rests on. It is accepted when the latest acceptance of its revisions names its
     /// current revision, or one that differs from it only in placement, or, for ordinary work, when an acceptance names its current

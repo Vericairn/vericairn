@@ -145,15 +145,16 @@ public sealed class WorkPlacementCurrencyTests
         IReadOnlyList<RecordEnvelope> afterEdit = RecordsOn(f, content);
         moved = Move(f, content, "later");
         EstateModel model = f.Estate.Load();
-        AssertCurrency(model, moved, beforeEdit, current: false);
+        AssertCurrency(model, moved, beforeEdit, current: false, afterEdit.Single(r => r.Type == "acceptance"));
         AssertCurrency(model, moved, afterEdit, current: true);
 
         RecordEnvelope reverted = f.Add("work-order", PolicyFixture.Body(original), supersedes: moved.Id);
         IReadOnlyList<RecordEnvelope> afterRevert = RecordsOn(f, reverted);
         moved = Move(f, reverted, "last");
         model = f.Estate.Load();
-        AssertCurrency(model, moved, beforeEdit, current: false);
-        AssertCurrency(model, moved, afterEdit, current: false);
+        RecordEnvelope acceptance = afterRevert.Single(r => r.Type == "acceptance");
+        AssertCurrency(model, moved, beforeEdit, current: false, acceptance);
+        AssertCurrency(model, moved, afterEdit, current: false, acceptance);
         AssertCurrency(model, moved, afterRevert, current: true);
     }
 
@@ -241,14 +242,18 @@ public sealed class WorkPlacementCurrencyTests
 
     private static bool IsStale(Finding finding) => finding.Code is "record.subject-stale" or "acceptance.unresolved";
 
-    private static void AssertCurrency(EstateModel model, RecordEnvelope order, IReadOnlyList<RecordEnvelope> records, bool current)
+    private static void AssertCurrency(EstateModel model, RecordEnvelope order, IReadOnlyList<RecordEnvelope> records, bool current, RecordEnvelope? currentAcceptance = null)
     {
         Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
         foreach (RecordEnvelope record in records)
         {
             Assert.True(model.IsCurrent(record));
             bool stale = !current && record.Subject!.Type == "work-order";
-            Assert.Equal(stale, model.Findings.Any(f => f.Location == record.ExpectedPath && f.Code == "record.subject-stale"));
+            bool settled = stale && record.Type == "assignment" && currentAcceptance is not null;
+            Assert.Equal(stale && !settled, model.Findings.Any(f => f.Location == record.ExpectedPath && f.Code == "record.subject-stale"));
+            if (settled)
+                Assert.Contains(model.Findings, f => f.Location == record.ExpectedPath && f.Code == "record.subject-settled"
+                    && f.Severity == Severity.Info && f.Message.Contains(currentAcceptance!.Id, StringComparison.Ordinal));
             if (record.Type == "acceptance")
                 Assert.Equal(stale, model.Findings.Any(f => f.Location == record.ExpectedPath && f.Code == "acceptance.unresolved"));
         }
