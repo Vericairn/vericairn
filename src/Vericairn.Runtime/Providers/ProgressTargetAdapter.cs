@@ -36,7 +36,8 @@ public sealed record ProgressTargetDestination(bool Private, ProgressTargetPlace
 /// its text, adds a comment and reports where it lives. What the text says, and what a public target may carry, stay the runtime's.
 /// An adapter never reads or stores a credential, never passes the service's own text on except a place's current text, and reports
 /// a refusal before any effect with <see cref="ProviderRefusedException"/> and an effect it cannot confirm with
-/// <see cref="ProviderUncertainException"/>, which the runtime reconciles by locating the place again before any retry.
+/// <see cref="ProviderUncertainException"/>. The runtime locates the place again to reconcile an uncertain creation. The contract
+/// has no comment receipt lookup, so the follower keeps an uncertain comment for a person to check.
 /// </summary>
 public interface IProgressTargetAdapter
 {

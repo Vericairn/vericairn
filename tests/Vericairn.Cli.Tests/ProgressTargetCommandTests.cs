@@ -5,6 +5,7 @@ using System.Text.Json;
 using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Providers.GitHub;
+using Vericairn.Runtime.Progress;
 using Vericairn.Runtime.Providers;
 using Vericairn.Sdk;
 
@@ -89,6 +90,68 @@ public sealed class ProgressTargetCommandTests : IDisposable
         Assert.Contains("the place it kept stays where it is", CliHarness.Ok("--estate", root, "progress", "target", "remove", "status").Out, StringComparison.Ordinal);
         Assert.Equal(2, CliHarness.Run("--estate", root, "progress", "target", "refresh", "status").Code);
         Assert.Equal(2, CliHarness.Run("--estate", root, "progress", "target", "remove", "status").Code);
+    }
+
+    [Fact]
+    public void ACommentWithoutAnOutcomeIsListedWithItsOriginalDestination()
+    {
+        CliHarness.Ok("--estate", root, "progress", "target", "set", "status", "--adapter", "github-discussions",
+            "--setting", "repository=Example/current", "--form", "public");
+        const string key = "ask:example";
+        const string hash = "sha256:example";
+        const string place = "https://example.invalid/original";
+        var pending = new ProgressTargetComment("github-discussions", hash, "private", "D_1", place);
+        ProgressTargetStore.Of(root).Update("status", state => state with { Comments = state.Comments.Add(key, pending) });
+
+        string list = CliHarness.Ok("--estate", root, "progress", "target", "list").Out;
+        Assert.Contains("uncertain comment ask:example", list, StringComparison.Ordinal);
+        Assert.Contains(place, list, StringComparison.Ordinal);
+        JsonElement comments = CliHarness.Ok("--estate", root, "--json", "progress", "target", "list").Json
+            .GetProperty("targets")[0].GetProperty("uncertainComments");
+        JsonElement original = Assert.Single(comments.EnumerateArray());
+        Assert.Equal((key, hash, "private", "uncertain"),
+            (original.GetProperty("key").GetString(), original.GetProperty("payloadHash").GetString(),
+                original.GetProperty("form").GetString(), original.GetProperty("outcome").GetString()));
+        Assert.Equal(place, original.GetProperty("place").GetProperty("url").GetString());
+        Assert.Null(ProgressTargetStore.Of(root).State("status").Comments[key].Outcome);
+        Assert.Empty(target.Comments);
+    }
+
+    [Fact]
+    public void AnUncertainCommentIsResolvedByAPersonAndAnInFlightOneIsNeither()
+    {
+        CliHarness.Ok("--estate", root, "progress", "target", "set", "status", "--adapter", "github-discussions",
+            "--setting", "repository=Example/current", "--form", "public");
+        var entry = new ProgressTargetComment("github-discussions", "sha256:example", "private", "D_1", "https://example.invalid/original");
+        ProgressTargetStore store = ProgressTargetStore.Of(root);
+        store.Update("status", state => state with
+        {
+            Comments = state.Comments.Add("ask:uncertain", entry with { Outcome = "uncertain" }).Add("ask:sending", entry),
+        });
+
+        // While a follower holds the target, a comment with no outcome is one it is sending: not listed as uncertain, and not resolvable.
+        using (FileStream? held = store.Follow("status"))
+        {
+            Assert.NotNull(held);
+            JsonElement listed = CliHarness.Ok("--estate", root, "--json", "progress", "target", "list").Json
+                .GetProperty("targets")[0].GetProperty("uncertainComments");
+            Assert.Equal(["ask:uncertain"], listed.EnumerateArray().Select(c => c.GetProperty("key").GetString()));
+            CliHarness.Outcome sending = CliHarness.Run("--estate", root, "progress", "target", "resolve", "status", "ask:sending");
+            Assert.Equal(2, sending.Code);
+            Assert.Contains("is sending comment ask:sending now", sending.Err, StringComparison.Ordinal);
+        }
+
+        JsonElement resolved = CliHarness.Ok("--estate", root, "--json", "progress", "target", "resolve", "status", "ask:uncertain").Json.GetProperty("resolved");
+        Assert.Equal(("status", "ask:uncertain", "uncertain", "https://example.invalid/original"),
+            (resolved.GetProperty("target").GetString(), resolved.GetProperty("key").GetString(), resolved.GetProperty("outcome").GetString(),
+                resolved.GetProperty("place").GetProperty("url").GetString()));
+        Assert.Equal(["ask:sending"], store.State("status").Comments.Keys);
+        Assert.Contains("Resolved comment ask:sending of progress target status",
+            CliHarness.Ok("--estate", root, "progress", "target", "resolve", "status", "ask:sending").Out, StringComparison.Ordinal);
+        Assert.Empty(store.State("status").Comments);
+        Assert.Equal(2, CliHarness.Run("--estate", root, "progress", "target", "resolve", "status", "ask:sending").Code);
+        Assert.Equal(2, CliHarness.Run("--estate", root, "progress", "target", "resolve", "missing", "ask:sending").Code);
+        Assert.Empty(target.Comments);
     }
 
     [Fact]
