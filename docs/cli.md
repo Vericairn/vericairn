@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 52, November 27, 2026. A standing agent's occurrence brief takes permitted paths from the flow step, repeatable `--flow-path` patterns and the work order's explicit `path:` entries.
+
 Revision 51, November 27, 2026. Add `--flow-path` to `goal propose --flow` and `--check` to `goal step` for runs of a flow. An agent work step without a permitted path is refused at proposal or activation in the development build.
 
 Revision 50, November 27, 2026. A progress target keeps each comment attempt before it is sent and never sends a comment whose outcome is uncertain again; `progress target resolve` removes an entry once a person has checked it, and one follower follows a target on a machine at a time, in the development build.
@@ -555,8 +557,7 @@ of its own, so a revision written after proposal can narrow a run's paths and ne
 revision. A later revision that drops every `path:` entry withdraws nothing: the run keeps the named revision's paths until the
 goal names another. A step a person carries, or a reserved one, needs no pattern: its brief carries the work order's prose
 entries that cannot be read as a pattern, never a pattern. `worker run` on a step's held assignment refuses with
-`flow.permitted-paths` unless the assignment's brief is within the step's current paths, as `goal step` does; a standing agent's
-steps keep their own briefs.
+`flow.permitted-paths` unless the assignment's brief is within the step's current paths, as `goal step` does.
 
 `goal step <goal> --by <principal> --check` previews a flow run's next eligible step and its permitted changes without
 signing, recording or dispatching. With `--json`, the preview includes `step.permittedChanges` for the routed assignment.
@@ -1431,6 +1432,18 @@ From 0.9.4 (GOAL-07), a standing agent is a stewardship goal whose plan carries 
 and one routed work step, the subject it binds, its triggers, its caps per UTC-anchored period, an until time and, optionally, the
 runtime that dispatches it unattended. Each occurrence a trigger makes due is carried as one assignment of the goal's one ordinary
 work order, naming the occurrence. A flow, a trigger and a proposal grant nothing; the sponsor's activation grants the budget.
+
+From 0.9.5 (FIX-179), the assignment for an occurrence uses the flow step's `paths`, the goal's repeatable `--flow-path` patterns
+and the `path:` entries of the work order revision named by the goal. The work order's later revisions can only narrow those
+entries. Every supplied list must cover each pattern in the brief. Older goals with `path:` entries keep those paths within the
+same bounds. Proposal, activation, resume and dispatch to an agent require at least one interpretable pattern and report
+`flow.permitted-paths` when none fits. `goal show`, `goal next`, `goal due` and `status` warn when an active standing goal lacks
+matching paths for an agent. If an existing goal's work order carries only prose, declare paths on the step or the goal, or revise
+the goal to name an order revision with explicit `path:` entries.
+
+A held assignment must fit the current paths before it can run, and `goal next` reports when the next assignment no longer
+fits. An eligible person can carry it with `work takeover <assignment> --by <person>`. If the brief already carries path
+patterns, a goal revision can clear the path refusal by supplying typed declarations that cover all of them.
 
 ```sh
 vericairn goal propose --by <sponsor> --kind stewardship --standing example/researcher@1.0.0 --work-order RES-1 \

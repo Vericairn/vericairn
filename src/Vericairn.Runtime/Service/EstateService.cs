@@ -1359,7 +1359,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             var draft = new RecordDraft("goal", request.By, request.Body, null, request.Supersedes);
-            if (TJson.Object(TJson.Object(request.Body, "plan"), "flow").ValueKind == JsonValueKind.Object)
+            JsonElement plan = TJson.Object(request.Body, "plan");
+            if (TJson.Object(plan, "flow").ValueKind == JsonValueKind.Object || TJson.Object(plan, "standing").ValueKind == JsonValueKind.Object)
             {
                 // Derive against the unsigned goal before asking for any signature.
                 var candidate = new RecordEnvelope("goal", Ulid.NewUlid().Value, RecordParser.FormatTimestamp(FlowClock.GetUtcNow()),

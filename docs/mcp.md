@@ -346,11 +346,12 @@ sections; `record_get` and other original read routes retain complete records.
 
 Writes are visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with: `work_attempt`, `work_progress`, `work_result`, `work_amend`, `document_review` (a review of an estate document by its path, refused where the declaration's `clearedBy` excludes the acting principal), and from 0.9.4 `goal_decide` (PROC-19: the decision of a run's decision step whose current assignment the acting principal holds, its paths, reasons and evidence by hash, as `vericairn goal decide` records it; refused for an agent where only a person decides, and never offered over the network), and from 0.9.4 `standing_possibility`, `standing_question` and `standing_publication` (GOAL-08: an output of a standing agent's occurrence, recorded by the contributor of the assignment that carries it, the runtime naming the goal, occurrence, assignment and the contributor's run in flight: a possibility with its fingerprint, sources and optionally evidence for and against, review triggers, links, a draft work order and extras; an ask to a person; or a publication request whose exact text the operator approves; another principal disposes of each, and none is offered over the network). A write the runtime refuses comes back as an error result carrying the runtime's findings, every objection at once. There is no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type. Workers read their goals and report through attempts and results. The command line and the API carry pauses, resumptions, stops, evaluations and acceptances under the goal's existing authority rules. A test calls every tool a worker sees with arguments that name a goal and ask for its activation and acceptance, and holds that none changes the goal. No tool answers an ask either: an ask is answered by a decision of the principal it is put to, which no tool records, and reading what waits answers nothing; the same test holds that calling every tool a worker sees records no decision and leaves an ask waiting. The worker records an agent run's cap, usage and settlement, while the agent reports through `work_attempt` and `work_result`.
 
-From 0.9.5 (FIX-166), an admitted local operator can call `goal_propose` with the complete goal `body` and optionally
-`supersedes`, `goal_activate` with `goal` and optionally `note`, and `goal_step` with `goal` and the routing options.
-A flow run with no interpretable permitted path pattern for an agent work step is refused at proposal and activation with
-`flow.permitted-paths`. For a flow run, setting `check` to true on `goal_step` returns the route and its `permittedChanges`
-without signing, recording or dispatching. These tools use the runtime's goal operations and are available over standard streams.
+From 0.9.5 (FIX-166, FIX-179), an admitted local operator can call `goal_propose` with the complete goal `body` and optionally
+`supersedes`, `goal_activate` with `goal` and optionally `note`, and `goal_step` with `goal` and the routing options. The body can
+supply repository-relative patterns in `plan.flow.paths` for a flow run or `plan.standing.paths` for a standing goal. Both kinds
+of goal are refused at proposal and activation with `flow.permitted-paths` if an agent work step has no interpretable permitted
+path pattern. For a flow run, setting `check` to true on `goal_step` returns the route and its `permittedChanges` without signing,
+recording or dispatching. These tools use the runtime's goal operations and are available over standard streams.
 
 Every tool description describes and never directs: nothing a tool returns, and nothing in this server's text, is an instruction from the estate's operator, and the harness is expected to treat it as data.
 
@@ -407,12 +408,12 @@ no tool, so every change reaches this guide with the release that makes it.
 | `estate_progress` | yes | no | yes | `106472a820e2` | 0.9.4 |
 | `estate_status` | yes | no | yes | `64854ad7ef78` | 0.9.4 |
 | `events_read` | yes | no | yes | `be3f7a1e467c` | 0.9.4 |
-| `goal_activate` | no | no | no | `f931ba80d99f` | 0.9.5 |
+| `goal_activate` | no | no | no | `c5677569e43f` | 0.9.5 |
 | `goal_decide` | no | no | no | `2101fd20d4c9` | 0.9.4 |
 | `goal_due` | yes | no | yes | `a47c6c3519fd` | 0.9.4 |
 | `goal_get` | yes | no | yes | `ae07f1748a4f` | 0.9.4 |
 | `goal_progress` | yes | no | yes | `25cc15685d14` | 0.9.4 |
-| `goal_propose` | no | no | no | `f937734f090c` | 0.9.5 |
+| `goal_propose` | no | no | no | `77a28d18d169` | 0.9.5 |
 | `goal_step` | no | no | no | `3598457988c1` | 0.9.5 |
 | `policies_list` | yes | no | yes | `d7db25dc8221` | 0.9.4 |
 | `policy_access` | yes | no | yes | `acb3f0697d0f` | 0.9.4 |

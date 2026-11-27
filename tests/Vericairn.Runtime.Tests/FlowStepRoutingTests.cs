@@ -293,6 +293,49 @@ public class FlowStepRoutingTests
         Assert.Contains("flow.permitted-paths", direct.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void APathRefusalForADirectRunNamesTheReviewInstanceAndRemedy()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        JsonObject flow = FlowFixture.Song();
+        JsonObject shorts = flow["steps"]!.AsArray().Single(step => step!["key"]!.GetValue<string>() == "shorts")!.DeepClone().AsObject();
+        shorts.Remove("inputs");
+        flow["steps"] = new JsonArray(shorts);
+        string goal = Run(run, flow, change: body =>
+        {
+            body["plan"]!["flow"]!["options"] = new JsonObject { ["review"] = "independent" };
+            body["roles"]![0] = FlowFixture.Role("writer", op);
+            body["roles"]![1] = FlowFixture.Role("reviewer", builder);
+        });
+        string named = run.Estate.Load().ById[goal].Body.GetProperty("plan").GetProperty("workOrders")[0].GetString()!;
+
+        GoalStepResponse writing = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
+        Assert.True(writing.Ok, writing.Message);
+        Assert.Equal(("ask", "shorts[intro]"), (writing.Outcome, writing.Step));
+        Done(run, writing.Assignment!.Id, ("clip", FlowFixture.Hash('a'), null), by: op);
+
+        GoalStepResponse reviewing = Step(run, goal, "review-before-narrowing");
+        Assert.True(reviewing.Ok, reviewing.Message);
+        Assert.Equal(("run", "shorts[intro] review"), (reviewing.Outcome, reviewing.Step));
+        run.Settled(reviewing.Run!.Run);
+        string held = reviewing.Assignment!.Id;
+
+        Revise(run, """["path:song/clips/**"]""", named);
+        RunResponse refused = run.Service.RunStart(new RunStartRequest(held, "claude-code", builder, op, run.Resource, goal, WallMinutes: 30, Settings: Command(run, "review-after-narrowing")));
+        Assert.False(refused.Ok);
+        Assert.Contains("flow.permitted-paths", refused.Message, StringComparison.Ordinal);
+        Assert.Contains($"{held} of flow step shorts[intro] review", refused.Message, StringComparison.Ordinal);
+        Assert.Contains($"vericairn work takeover {held} --by <person>", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("take the step again with 'vericairn goal step'", refused.Message, StringComparison.Ordinal);
+
+        GoalStepResponse retry = Step(run, goal, "review-retry-after-narrowing");
+        Assert.False(retry.Ok);
+        Assert.Equal("flow.permitted-paths", retry.Problem!.Code);
+        Assert.StartsWith("flow.permitted-paths: " + retry.Message, refused.Message, StringComparison.Ordinal);
+    }
+
     private static string Revise(RunEstate run, string scope, string supersedes) =>
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId, RunEstate.Json($$"""{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":{{scope}},"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the released song"]}"""), Supersedes: supersedes))).Id;
 

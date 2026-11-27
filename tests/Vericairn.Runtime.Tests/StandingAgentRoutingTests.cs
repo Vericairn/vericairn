@@ -18,8 +18,133 @@ namespace Vericairn.Runtime.Tests;
 /// with an ask, and a lapsed, paused or future-dated agent dispatching nothing. Every harness is the stand-in.
 /// </summary>
 [Collection("home")]
-public class StandingAgentRoutingTests
+public partial class StandingAgentRoutingTests
 {
+    [Theory]
+    [InlineData(false, "Research the widget")]
+    [InlineData(false, "research")]
+    [InlineData(true, "Research the widget")]
+    [InlineData(true, "research")]
+    public void AStandingAgentWithOnlyProseScopeIsRefused(bool activate, string scope)
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        JsonObject body = StandingBody(run, scope: new JsonArray(scope));
+        JsonElement proposal = JsonSerializer.SerializeToElement(body);
+        string? legacy = activate ? RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("goal", op, proposal))).Id : null;
+
+        WriteOutcome refused = legacy is null ? run.Service.GoalPropose(new GoalProposeRequest(op, proposal))
+            : run.Service.GoalActivate(legacy, new GoalActionRequest(op));
+
+        Assert.False(refused.Ok);
+        Assert.Equal("flow.permitted-paths", refused.Problem!.Code);
+        Assert.Equal("plan.standing.research", Assert.Single(refused.Problem.Findings).Location);
+    }
+
+    [Theory]
+    [InlineData(null, null, "research", "path:research")]
+    [InlineData("research/notes/**", "research/**", "research", "path:research/notes/**")]
+    [InlineData("research", "research/notes/**", "research/**", "path:research/notes/**")]
+    [InlineData("research/**", "research", "research/notes/**", "path:research/notes/**")]
+    public void AStandingAgentsBriefUsesTheNarrowestTypedPath(string? stepPath, string? goalPath, string orderPath, string expected)
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        JsonObject body = StandingBody(run, scope: new JsonArray("draft", $"path:{orderPath}", "Research the widget"), stepPath: stepPath);
+        if (goalPath is not null)
+        {
+            body["plan"]!["standing"]!["paths"] = new JsonArray(goalPath);
+        }
+
+        // A goal recorded by an earlier runtime may already have been proposed before typed permissions were checked.
+        string goal = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("goal", op, JsonSerializer.SerializeToElement(body)))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
+
+        GoalStepResponse response = Step(run, goal, "typed-standing-scope");
+        Assert.True(response.Ok, response.Message);
+        RecordEnvelope assignment = run.Estate.Load().ById[response.Assignment!.Id];
+        Assert.Equal(expected, Assert.Single(assignment.Body.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray()).GetString());
+        Assert.Equal("observed-success", run.Settled(response.Run!.Run).Status);
+    }
+
+    [Fact]
+    public void AnActiveStandingAgentRefusesDispatchAfterTheOrderPathsBecomeDisjoint()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string goal = Standing(run);
+        string order = run.Estate.Load().ById[goal].Body.GetProperty("plan").GetProperty("workOrders")[0].GetString()!;
+        ReviseStandingOrder(run, order, new JsonArray("path:elsewhere/**"));
+
+        GoalStepResponse refused = Step(run, goal, "standing-disjoint-revision");
+
+        Assert.False(refused.Ok);
+        Assert.Equal("flow.permitted-paths", refused.Problem!.Code);
+        Assert.Null(refused.Assignment);
+        Assert.Null(refused.Ask);
+        Assert.Null(refused.Run);
+        Assert.DoesNotContain(run.Estate.Load().OfType("assignment"), a => StandingAgents.KeyOf(a) is not null);
+        Assert.False(File.Exists(run.Report("standing-disjoint-revision")));
+    }
+
+    [Theory]
+    [InlineData("path:research/**", "path:research/notes/**")]
+    [InlineData("elsewhere", "path:research/notes/**")]
+    [InlineData("path:research/notes/drafts/**", "path:research/notes/drafts/**")]
+    public void AStandingOrderRevisionCanNarrowOnlyWithTypedPaths(string scope, string expected)
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        JsonObject body = StandingBody(run, scope: new JsonArray("path:research/notes/**"));
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
+        ReviseStandingOrder(run, body["plan"]!["workOrders"]![0]!.GetValue<string>(), new JsonArray(scope, "Research the widget"));
+
+        GoalStepResponse step = Step(run, goal, "standing-revised-scope");
+
+        Assert.True(step.Ok, step.Message);
+        RecordEnvelope assignment = run.Estate.Load().ById[step.Assignment!.Id];
+        Assert.Equal(expected, Assert.Single(assignment.Body.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray()).GetString());
+        Assert.Equal("observed-success", run.Settled(step.Run!.Run).Status);
+    }
+
+    [Fact]
+    public void AStandingOccurrenceRoutedToAPersonCanCarryProseScope()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        const string prose = "Research the widget";
+        JsonObject body = StandingBody(run, holder: op, scope: new JsonArray("research", prose));
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
+
+        GoalStepResponse step = Step(run, goal, "standing-person-scope");
+
+        Assert.True(step.Ok, step.Message);
+        Assert.Equal(("ask", "person", op), (step.Outcome, step.Route, step.Principal));
+        Assert.Null(step.Run);
+        RecordEnvelope assignment = run.Estate.Load().ById[step.Assignment!.Id];
+        Assert.Equal(prose, Assert.Single(assignment.Body.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray()).GetString());
+    }
+
+    [Fact]
+    public void DirectRunOfAHeldStandingAssignmentRefusesItsOutdatedPaths()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Standing(run);
+        GoalStepResponse first = Step(run, goal, "standing-before-narrowing");
+        Assert.True(first.Ok, first.Message);
+        Assert.Equal("observed-success", run.Settled(first.Run!.Run).Status);
+        RecordEnvelope held = run.Estate.Load().ById[first.Assignment!.Id];
+        ReviseStandingOrder(run, held.Subject!.Id, new JsonArray("path:research/notes/**"));
+
+        RunResponse direct = run.Service.RunStart(new RunStartRequest(held.Id, "claude-code", run.Estate.BuilderId, op, run.Resource, goal,
+            WallMinutes: 10, Settings: Command(run, "standing-after-narrowing")));
+        Assert.False(direct.Ok);
+        Assert.Contains("flow.permitted-paths", direct.Message, StringComparison.Ordinal);
+        Assert.Contains($"vericairn work takeover {held.Id} --by <person>", direct.Message, StringComparison.Ordinal);
+    }
+
     // One assignment per occurrence, and one sponsor ask at the period cap.
     [Trait("Journey", "D07-A")]
     [Trait("Journey", "D07-E")]
@@ -1093,6 +1218,15 @@ public class StandingAgentRoutingTests
     private static Dictionary<string, string> Command(RunEstate run, string report) =>
         new(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", run.Report(report)) };
 
+    private static void ReviseStandingOrder(RunEstate run, string orderId, JsonArray scope)
+    {
+        RecordEnvelope order = run.Estate.Load().ById[orderId];
+        JsonObject revision = JsonNode.Parse(order.Body.GetRawText())!.AsObject();
+        revision["scope"] = scope;
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId,
+            JsonSerializer.SerializeToElement(revision), Supersedes: order.Id)));
+    }
+
     /// <summary>A fixed clock, the runtime's controlled time.</summary>
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
@@ -1106,12 +1240,35 @@ public class StandingAgentRoutingTests
     internal static string Standing(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null, string? holder = null, JsonArray? triggers = null, string[]? holders = null, string role = "researcher", JsonObject? outputs = null)
     {
         string op = run.Estate.OperatorId;
+        JsonObject body = StandingBody(run, period, budget, until, holder, triggers, holders, role, outputs);
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
+        return goal;
+    }
+
+    private static JsonObject StandingBody(RunEstate run, JsonObject? period = null, JsonObject? budget = null, string? until = null,
+        string? holder = null, JsonArray? triggers = null, string[]? holders = null, string role = "researcher", JsonObject? outputs = null,
+        JsonArray? scope = null, string? stepPath = null)
+    {
+        string op = run.Estate.OperatorId;
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}"""), Supersedes: run.Estate.BuilderId)));
         bool duty = role == "duty-carrier";
+        JsonObject researcher = StandingFlows.Researcher();
+        if (stepPath is not null)
+        {
+            researcher["steps"]![0]!["paths"] = new JsonArray(stepPath);
+        }
+
         TemplateDefinition flow = duty
             ? StandingRoleFlows.Definitions.Single(definition => definition.Id == StandingRoleFlows.DutyCarrier)
-            : FlowFixture.Install(run.Estate, StandingFlows.Researcher());
-        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json("""{"key":"RES-1","kind":"ordinary","title":"Research the widget","intent":"Keep researching the widget.","scope":["path:research/"],"exitQuestion":"Is each occurrence's research recorded?","inputs":[],"deliverables":["cited findings"]}""")))).Id;
+            : FlowFixture.Install(run.Estate, researcher);
+        JsonObject orderBody = JsonNode.Parse("""{"key":"RES-1","kind":"ordinary","title":"Research the widget","intent":"Keep researching the widget.","scope":["path:research/"],"exitQuestion":"Is each occurrence's research recorded?","inputs":[],"deliverables":["cited findings"]}""")!.AsObject();
+        if (scope is not null)
+        {
+            orderBody["scope"] = scope;
+        }
+
+        string order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, JsonSerializer.SerializeToElement(orderBody)))).Id;
         DateTimeOffset first = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddDays(-2).AddMinutes(-5).ToUnixTimeSeconds());
         var body = new JsonObject
         {
@@ -1135,9 +1292,7 @@ public class StandingAgentRoutingTests
             ["inputs"] = new JsonArray(),
         };
         if (outputs is not null) body["plan"]!["standing"]!["outputs"] = outputs;
-        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
-        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
-        return goal;
+        return body;
     }
 
     internal static void AllowStandInWithFixtureKey(RunEstate run, string goal)
