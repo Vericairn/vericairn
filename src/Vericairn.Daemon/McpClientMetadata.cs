@@ -141,34 +141,49 @@ internal sealed record McpClientMetadata(string Id, string Name, string[] Redire
         return !QueryHelpers.ParseQuery(uri.Query).Keys.Any(key => key is "code" or "error" or "iss" or "state");
     }
 
-    private static async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
+    private static ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken) =>
+        ConnectAsync(context.DnsEndPoint, Dns.GetHostAddressesAsync, ConnectAddressAsync, cancellationToken);
+
+    internal static async ValueTask<Stream> ConnectAsync(DnsEndPoint endpoint,
+        Func<string, CancellationToken, Task<IPAddress[]>> resolve,
+        Func<IPEndPoint, CancellationToken, ValueTask<Stream>> connect,
+        CancellationToken cancellationToken)
     {
-        IPAddress[] addresses = await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cancellationToken).ConfigureAwait(false);
+        IPAddress[] addresses = await resolve(endpoint.Host, cancellationToken).ConfigureAwait(false);
         if (addresses.Length == 0 || addresses.Any(address => !IsPublic(address)))
         {
             throw new HttpRequestException("A client metadata host must resolve only to publicly reachable addresses.");
         }
 
+        // Pass only reviewed IP addresses to the TCP connector so a later DNS answer cannot change the destination.
         foreach (IPAddress address in addresses)
         {
-            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
             try
             {
-                await socket.ConnectAsync(new IPEndPoint(address, context.DnsEndPoint.Port), cancellationToken).ConfigureAwait(false);
-                return new NetworkStream(socket, ownsSocket: true);
+                return await connect(new IPEndPoint(address, endpoint.Port), cancellationToken).ConfigureAwait(false);
             }
             catch (SocketException)
             {
-                socket.Dispose();
-            }
-            catch
-            {
-                socket.Dispose();
-                throw;
+                // Try the next validated address.
             }
         }
 
         throw new HttpRequestException("No client metadata address could be reached.");
+    }
+
+    private static async ValueTask<Stream> ConnectAddressAsync(IPEndPoint endpoint, CancellationToken cancellationToken)
+    {
+        var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        try
+        {
+            await socket.ConnectAsync(endpoint, cancellationToken).ConfigureAwait(false);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     internal static bool IsPublic(IPAddress address)
