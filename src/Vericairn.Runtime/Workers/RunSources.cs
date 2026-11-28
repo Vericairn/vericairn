@@ -15,7 +15,7 @@ namespace Vericairn.Runtime.Workers;
 /// <summary>
 /// A retrieval run's sources (RUN-04): each invocation of one of the run's admitted web tools, and the result the harness gave the agent
 /// for it, retained as an untrusted original in the run's custody, the run's owner-only directory on the machine that runs it. The text
-/// is kept exactly as the harness reported it, named by its content hash; it never enters a record, a repository or the agent's
+/// is kept after the launcher's output redaction, named by its retained content hash; it never enters a record, a repository or the agent's
 /// instructions, and the worker fetches nothing itself. Settlement records each source by its address or query, its time, its content
 /// hash and size. The log is not tamper-evident: a harness that does not sandbox the agent runs as the same user and could change it.
 /// </summary>
@@ -70,18 +70,18 @@ internal static class RunSources
     }
 
     /// <summary>Logs an invocation of an admitted web tool, with the address or query it names; false when it could not be logged.</summary>
-    internal static bool Invoked(RunDirectory directory, HarnessAction action, DateTimeOffset at)
+    internal static bool Invoked(RunDirectory directory, HarnessAction action, string id, DateTimeOffset at, Func<string, string> redact)
     {
         ArgumentNullException.ThrowIfNull(directory);
         ArgumentNullException.ThrowIfNull(action);
-        var line = new JsonObject { ["event"] = "invoked", ["id"] = action.Id, ["tool"] = action.Tool, ["at"] = RecordParser.FormatTimestamp(at) };
-        if (Address(action) is string address) line["address"] = address;
-        else if (Text(action.Input, "query") is string query) line["query"] = query;
+        var line = new JsonObject { ["event"] = "invoked", ["id"] = id, ["tool"] = redact(action.Tool), ["at"] = RecordParser.FormatTimestamp(at) };
+        if (Address(action) is string address) line["address"] = redact(address);
+        else if (Text(action.Input, "query") is string query) line["query"] = redact(query);
         return Append(directory, line);
     }
 
     /// <summary>
-    /// Retains a web tool's result as the harness gave it to the agent, named by its content hash, and logs it; a result beyond the
+    /// Retains a web tool's redacted result, named by its content hash, and logs it; a result beyond the
     /// per-source or per-run size is logged by hash and size but not retained. False when it could not be retained or logged.
     /// </summary>
     internal static bool Retrieved(RunDirectory directory, HarnessToolResult result, DateTimeOffset at)

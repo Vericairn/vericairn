@@ -88,6 +88,29 @@ public class RetrievalRunTests
         }
     }
 
+    [Fact]
+    public void SecretBearingSourceEventsRetainTheRedactedQueryAndResult()
+    {
+        using NativeRun fixture = Fixture("claude");
+        fixture.Probe.Behavior("retrieval", "secret-text");
+        RunResponse started = fixture.Start();
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", fixture.Run.Settled(started.Run).Status);
+
+        JsonElement observed = AgentRuns.Find(fixture.Run.Estate.Load(), started.Run)!.Latest.Body.GetProperty("sourcesObserved");
+        Assert.True(observed.GetProperty("complete").GetBoolean());
+        JsonElement source = Assert.Single(observed.GetProperty("sources").EnumerateArray());
+        Assert.Equal("WebSearch", source.GetProperty("tool").GetString());
+        Assert.Equal("Widget guide <secret>", source.GetProperty("query").GetString());
+        Assert.True(source.GetProperty("retained").GetBoolean());
+
+        var directory = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);
+        bool secretRetained = SecretShapes.Secret().IsMatch(File.ReadAllText(directory.SourcesFile));
+        Assert.False(secretRetained);
+        string path = Assert.Single(Directory.EnumerateFiles(directory.SourcesDirectory));
+        Assert.True(File.ReadAllText(path) == "Retrieved widget page <secret>");
+    }
+
     // D07-A requires retrieval to be refused when the run's records name a credential reference.
     [Trait("Journey", "D07-A")]
     [Theory]

@@ -81,7 +81,7 @@ public sealed class RunSupervisor
     private long? failedStateWriteHeartbeat;
     private readonly HashSet<string> retrievalTools;
     private readonly HashSet<string> invokedSources = new(StringComparer.Ordinal);
-    private readonly HashSet<string> pendingSources = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> pendingSources = new(StringComparer.Ordinal);
 
     private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate, Func<RunSignal, string?>? signalAttention, JsonElement? execution, IReadOnlyDictionary<string, string> environment)
     {
@@ -477,13 +477,8 @@ public sealed class RunSupervisor
         {
             while (reader.ReadLine() is string line)
             {
-                string safe = line;
-                if (launcher.Launcher == "claude-code")
-                {
-                    safe = SecretShapes.HasEscapedClaudeSetupToken(line)
-                        ? "<secret-bearing harness line withheld>"
-                        : SecretShapes.Secret().Replace(line, "<secret>");
-                }
+                string safe = RedactHarnessText(line);
+                bool redacted = safe != line;
                 Log(errors ? "[stderr] " + safe : safe);
                 if (errors)
                 {
@@ -497,9 +492,6 @@ public sealed class RunSupervisor
                     options.AfterEvent?.Invoke();
                 }
 
-                // Retained execution and retrieval evidence requires the original event.
-                if (safe != line) continue;
-
                 if (IsAcknowledgment(line))
                 {
                     Acknowledge("the harness printed its acknowledgment on its output");
@@ -509,6 +501,7 @@ public sealed class RunSupervisor
                 HarnessSignal? signal = null;
                 try
                 {
+                    // Inspect the original structure and command semantics. Only sanitized text leaves observation.
                     signal = launcher.Read(line);
                     foreach (HarnessAction action in launcher.ReadActions(line))
                     {
@@ -535,12 +528,12 @@ public sealed class RunSupervisor
                             foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted, environment, options.BeforeCredentialCheck))
                             {
                                 if (retrieving && observation.Code == "network" && observation.Severity == "warning") continue;
-                                AddSignal(observation);
+                                AddSignal(redacted ? observation with { Fingerprint = null } : observation);
                             }
 
                             foreach (RunSignal observation in watch.Action(action))
                             {
-                                AddSignal(observation);
+                                AddSignal(redacted ? observation with { Fingerprint = null } : observation);
                             }
 
                             if (retrieving && invokedSources.Add(action.Id))
@@ -551,8 +544,10 @@ public sealed class RunSupervisor
                                     AddSignal(new RunSignal("network", "critical", RecordParser.FormatTimestamp(now), "A web tool was asked for an address that is not public (this machine, a private, link-local or local-only host, user information, or a scheme other than http or https); the address stays in the run's custody."));
                                 }
 
-                                pendingSources.Add(action.Id);
-                                if (!RunSources.Invoked(directory, action, now)) SourcesIncomplete();
+                                // Keep the harness-supplied id in memory for correlation. Retention needs only a local id.
+                                string id = invokedSources.Count.ToString(CultureInfo.InvariantCulture);
+                                pendingSources.Add(action.Id, id);
+                                if (!RunSources.Invoked(directory, action, id, now, RedactHarnessText)) SourcesIncomplete();
                             }
                         }
                     }
@@ -561,7 +556,9 @@ public sealed class RunSupervisor
                     {
                         lock (gate)
                         {
-                            if (pendingSources.Remove(result.Id) && !RunSources.Retrieved(directory, result, options.Clock.GetUtcNow())) SourcesIncomplete();
+                            if (pendingSources.Remove(result.Id, out string? id)
+                                && !RunSources.Retrieved(directory, result with { Id = id, Content = RedactHarnessText(result.Content) }, options.Clock.GetUtcNow()))
+                                SourcesIncomplete();
                         }
                     }
                     if (launcher.ReadExecution(line) is HarnessExecution reported)
@@ -662,6 +659,10 @@ public sealed class RunSupervisor
             // Output closure proves no exit; the whole launch boundary must be observed exited.
         }
     }
+
+    private string RedactHarnessText(string text) => launcher.Launcher != "claude-code" ? text
+        : SecretShapes.HasEscapedClaudeSetupToken(text) ? "<secret-bearing harness line withheld>"
+        : SecretShapes.Secret().Replace(text, "<secret>");
 
     // A source the worker could not retain or log leaves the run's sources incomplete, which settlement records.
     private void SourcesIncomplete()
