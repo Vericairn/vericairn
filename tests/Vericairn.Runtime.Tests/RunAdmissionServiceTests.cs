@@ -41,6 +41,47 @@ public sealed class RunAdmissionServiceTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    // FIX-184, after the Reviewer's review: the workspace is judged under the reviews read with the plan, and a review superseded
+    // while it is prepared refuses the run at intent, under the gate.
+    [Fact]
+    public void AConfigurationReviewSupersededWhileTheWorkspaceIsPreparedRefusesTheRunAtIntent()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        File.AppendAllText(Path.Combine(run.Clone, ".git", "config"), "[future]\n\tsetting = inert-test-data\n");
+        string reviewed = new Vericairn.Adapters.Git.GitCommandAdapter().Inspect(run.Clone).ConfigurationHash!;
+        string subject = $"resource:{run.Resource}:{run.Service.Record(run.Resource)!.Hash}";
+        System.Text.Json.JsonElement Review(string config) => RunEstate.Json($$"""
+            {"independence":"self","outcome":"pass","summary":"Read the exact configuration.","findings":[],
+             "repositoryConfiguration":{"config":"{{config}}"} }
+            """);
+        RecordWritten passed = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("review", run.Estate.OperatorId, Review(reviewed), subject)));
+
+        // The operator's key leaves the machine before the run, as the custody guard requires, and returns only to sign the change.
+        var keys = new Vericairn.Records.Signing.FileKeyStore(Vericairn.Records.Signing.VericairnHome.Path());
+        string keyFile = Directory.GetFiles(Path.Combine(Vericairn.Records.Signing.VericairnHome.Path(), "keys"), run.OperatorDevice + "*").Single();
+        byte[] key = File.ReadAllBytes(keyFile);
+        keys.Remove(run.OperatorDevice);
+        int superseded = 0;
+        run.Service.Providers.Register(new HookedLauncher(new ReportedLauncher(new GenericLauncher()), verify: () =>
+        {
+            // The plan was judged under the passing review; the workspace has not yet been acquired.
+            if (Interlocked.Increment(ref superseded) != 1) return null;
+            File.WriteAllBytes(keyFile, key);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("review", run.Estate.OperatorId,
+                Review("sha256:" + new string('0', 64)), subject, Supersedes: passed.Id)));
+            keys.Remove(run.OperatorDevice);
+            return null;
+        }));
+
+        RunResponse refused = run.Start("generic", "claude", run.Report("superseded"), wallMinutes: 5, branch: "work/superseded");
+
+        Assert.Equal(1, superseded);
+        Assert.False(refused.Ok, refused.Message);
+        Assert.Contains("configuration review changed while the workspace was prepared", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(run.Service.Runs().Runs);
+    }
+
     [Fact]
     public void APreparedIntentDoesNotAuthorizeDispatchAfterConfigurationChanges()
     {

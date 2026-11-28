@@ -19,6 +19,25 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class EstateSessionTests
 {
+    // FIX-184, after the Reviewer's review: the live store's own monitor, not only the session's load lock, keeps a file read and a
+    // load of one session from opening transactions on its one connection at once.
+    [Fact]
+    public async Task FilesAndLoadsOfOneSessionNeverShareTheLiveConnectionAtOnce()
+    {
+        using var estate = new TestEstate();
+        using EstateSession session = EstateSession.Open(estate.Root);
+        session.Load();
+        using var start = new Barrier(2);
+        CancellationToken cancellation = TestContext.Current.CancellationToken;
+        Task Loop(Action read) => Task.Factory.StartNew(() =>
+        {
+            Assert.True(start.SignalAndWait(TestTiming.HangTimeout, cancellation));
+            for (int i = 0; i < 300; i++) read();
+        }, cancellation, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+        await Task.WhenAll(Loop(() => session.Files()), Loop(() => session.Load()));
+    }
+
     [Fact]
     public async Task ConcurrentLoadsOfOneSessionShareTheParsedRecordsAndReturnCompleteModels()
     {

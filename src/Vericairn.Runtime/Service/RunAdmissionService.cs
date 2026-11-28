@@ -346,6 +346,14 @@ internal sealed class RunAdmissionService(
             if (WorkspaceRootProblem(configuredRoot) is string rootProblem)
                 return Refused(RunProblem(pending, "not-started", "refused", rootProblem + " Nothing was recorded."));
             EstateModel model = recordAccess.LoadWith(carried);
+            // From 0.9.5 (FIX-184): the workspace was accepted under the configuration reviews judged with the plan. A review withdrawn
+            // or superseded since then refuses the run here, under the gate where its intent is written.
+            List<RepositoryConfigurationReview> currentReviews = ConfigurationReviews(model, plan);
+            if (configurationReviews.Any(review => !currentReviews.Contains(review)))
+            {
+                return Refused(RunProblem(pending, "not-started", "refused", "A repository configuration review changed while the workspace was prepared. Start the run again, so the workspace is judged under the current reviews. Nothing was recorded."));
+            }
+
             RecordEnvelope? goal = AgentRuns.GoalAt(model, plan.Goal);
             if (AssignmentRefusal(model, plan.Assignment, plan.Key) is string assignmentRefusal)
             {
