@@ -27,7 +27,7 @@ public sealed class SignedInterventionTests
             var keys = new FileKeyStore(homes.FullName);
             string publicKey = RecordSigning.EncodePublicKey(keys.Create(device));
             var signer = new StoreSigner(keys, device);
-            var body = DeviceRecords.Body(person, "Phone presence test device", "ios", SecureEnclaveCustody.Kind,
+            var body = DeviceRecords.Body(person, "Presence test device", "macos", SecureEnclaveCustody.Kind,
                 publicKey, ["local-network"], 3, "required");
             RecordEnvelope identity = estate.Add("device", person, body.ToJsonString(), id: device, signer: signer);
             RecordEnvelope admission = estate.Add("admission", person,

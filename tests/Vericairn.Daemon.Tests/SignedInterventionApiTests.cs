@@ -149,20 +149,23 @@ public sealed class SignedInterventionApiTests
 
 internal sealed partial class RemoteApiFixture
 {
-    internal (VericairnClient Client, PresenceKeyStandIn Key, string Device) SignedPhone(string person)
+    internal (VericairnClient Client, IDeviceKeyStore Key, string Device) SignedPhone(string person)
     {
-        var key = new PresenceKeyStandIn(listener?.DeviceHome ?? Path.Combine(Estate.Root, "phone-fixture"));
         if (listener is not null)
         {
+            var key = listener.AndroidPresence();
             RuntimeConnection connection = listener.Connections.Add(listener.Address, listener.Issue(person).Code,
                 new PairingOptions("Presence phone") { PresenceKeyStore = key });
             return (listener.Connections.Connect(connection), key, Assert.IsType<string>(connection.PresenceDevice));
         }
 
-        var requestKey = new FileKeyStore(Path.Combine(Estate.Root, "phone-fixture"));
+        string home = Path.Combine(Estate.Root, "phone-fixture");
+        var requestKey = new FileKeyStore(home);
         string requestDevice = AdmitFixtureDevice(person, "Phone request device", requestKey, ["local-network"]);
-        string presenceDevice = AdmitFixtureDevice(person, "Phone presence device", key, ["embedded"], "required");
-        return (DeviceClient(requestDevice), key, presenceDevice);
+        // A separately enrolled desktop presence stand-in lets the mapped route exercise signing without native attestation.
+        var presenceKey = new PresenceKeyStandIn(home, SecureEnclaveCustody.Kind);
+        string presenceDevice = AdmitFixtureDevice(person, "Presence stand-in", presenceKey, ["embedded"], "required", "macos");
+        return (DeviceClient(requestDevice), presenceKey, presenceDevice);
     }
 
     internal async Task<RemoteViewModel> PairRemoteWithoutPresence(string person)

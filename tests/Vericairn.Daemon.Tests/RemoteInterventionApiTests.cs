@@ -167,11 +167,11 @@ internal sealed partial class RemoteApiFixture(TestEstate estate, EstateService 
             { BaseAddress = new Uri("http://fixture.invalid") });
     }
 
-    private string AdmitFixtureDevice(string by, string name, IDeviceKeyStore keys, string[] profiles, string? presence = null)
+    private string AdmitFixtureDevice(string by, string name, IDeviceKeyStore keys, string[] profiles, string? presence = null, string platform = "ios")
     {
         string id = Ulid.NewUlid(Estate.Clock.AddSeconds(1)).Value;
         byte[] spki = keys.Create(id);
-        JsonObject body = DeviceRecords.Body(by, name, "ios", keys.Kind, RecordSigning.EncodePublicKey(spki), profiles, 3, presence);
+        JsonObject body = DeviceRecords.Body(by, name, platform, keys.Kind, RecordSigning.EncodePublicKey(spki), profiles, 3, presence);
         Estate.Add("device", by, body.ToJsonString(), id: id, signer: new StoreSigner(keys, id));
         Ok(Service.DeviceAdmit(new(id, Estate.OperatorId, "Test phone admission.")));
         return id;

@@ -31,6 +31,7 @@ public sealed partial class EstateService
         ArgumentNullException.ThrowIfNull(request);
         if (requestDevice.Value is not RequestDeviceScope device || device.Closed)
             return Unprepared("refused", "A record is prepared for the device whose request asks for it, so only a device-signed request can prepare one.");
+        if (SuppliesPairingEvidence(request.Type, request.Body)) return Unprepared("refused", PairingEvidenceOnly);
         if (RecordTypeRegistry.Find(request.Type) is null) return Unprepared("refused", $"Unknown record type '{request.Type}'.");
         if (!Ulid.IsValid(request.By)) return Unprepared("refused", "The authoring principal must be a ULID.");
         if (request.At is not null || request.Id is not null) return Unprepared("refused", "The runtime fixes a prepared record's id and time.");
@@ -93,8 +94,8 @@ public sealed partial class EstateService
             if (Standing(model, device.Device) is not DeviceStanding requester || Standing(model, signer) is not DeviceStanding signing
                 || signing.Admission != "admitted" || !string.Equals(signing.Principal, requester.Principal, StringComparison.Ordinal))
                 return WriteOutcome.Fail(new Problem("denied", $"Device {signer} is not an admitted device of device {device.Device}'s principal, so it cannot sign this plan.", []));
-            if (EstateModel.BodyString(model.Latest(model.ById[signing.Identity]), "presence") != "required")
-                return Refuse($"Device {signer} does not need its owner's presence at each signature, so it cannot sign a plan another device prepared.");
+            if (ReportedPresence(model, model.Latest(model.ById[signing.Identity])) != "required")
+                return Refuse($"Device {signer} has no verified per-signature presence requirement, so it cannot sign a plan another device prepared.");
             // The record's signature names the device's identity, whichever of its record ids the request gave.
             signer = signing.Identity;
             key = signing.PublicKey;
@@ -102,7 +103,7 @@ public sealed partial class EstateService
 
         if (IsReviewedIntervention(plan.Draft) &&
             (Standing(model, signer) is not { Admission: "admitted" } interventionSigner ||
-             EstateModel.BodyString(model.Latest(model.ById[interventionSigner.Identity]), "presence") != "required"))
+             ReportedPresence(model, model.Latest(model.ById[interventionSigner.Identity])) != "required"))
             return Refuse("A reviewed intervention needs a signature from the person's admitted presence device.");
 
         if (string.IsNullOrEmpty(request.Signature) || !RecordSigning.Verify(key, RecordSigning.Digest(plan.Hash), request.Signature))

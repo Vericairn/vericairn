@@ -21,7 +21,8 @@ public class LocalCompanionGoldenTests
     [Fact]
     public void LocalImplementationHashDependsOnlyOnItsExplicitVersionAndNoSourceResources()
     {
-        Assert.Empty(typeof(LocalCompanions).Assembly.GetManifestResourceNames());
+        // The Android verifier's trust anchors are independent of the local companion implementation.
+        Assert.All(typeof(LocalCompanions).Assembly.GetManifestResourceNames(), name => Assert.Equal("Vericairn.AndroidAttestationRoots.pem", name));
         DocumentGeneratorDescriptor descriptor = Descriptor();
         Assert.Matches("^vericairn\\.runtime/local-readers/[1-9][0-9]*$", descriptor.Implementation);
         Assert.Equal(ContentHash.Sha256(Encoding.UTF8.GetBytes(descriptor.Implementation)), descriptor.ImplementationHash);

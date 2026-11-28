@@ -37,8 +37,8 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
 
     public IReadOnlyList<RuntimeConnection> List() => Kept;
 
-    /// <summary>The phone's presence store: file keys recorded as the iPhone Secure Enclave custody, asking nobody.</summary>
-    public PresenceKeyStandIn PresenceKeys => presenceKeys ??= new(phoneHome.FullName);
+    /// <summary>File-backed stand-in for an admitted presence key. Real phone attestation is tested by the daemon.</summary>
+    public PresenceKeyStandIn PresenceKeys => presenceKeys ??= new(phoneHome.FullName, SecureEnclaveCustody.Kind);
     private PresenceKeyStandIn? presenceKeys;
 
     /// <summary>Pairs like a phone whose custody cannot require presence: only the request key is registered.</summary>
@@ -68,13 +68,13 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
         return Task.FromResult(connection);
     }
 
-    // The presence device as a pairing records it: a second key of the same principal, stating presence required in a phone custody,
-    // signed by its own key and admitted by the operator through the request device that is the fixture's authority.
+    // Use the runtime's trusted desktop-presence admission to exercise signing without a real phone or attestation.
+    // The second key is still held by the test client and admitted for the same person.
     private RuntimeConnection WithPresenceDevice(RuntimeConnection connection)
     {
         string id = Ulid.NewUlid().Value;
         string publicKey = RecordSigning.EncodePublicKey(PresenceKeys.Create(id));
-        var body = DeviceRecords.Body(connection.Principal, "Test phone (presence key)", "ios", PresenceKeys.Kind, publicKey, ["local-network"], 3, "required");
+        var body = DeviceRecords.Body(connection.Principal, "Test presence key", "macos", PresenceKeys.Kind, publicKey, ["local-network"], 3, "required");
         AuthoredRecord device = RecordAuthor.Create(new("device", connection.Principal, JsonSerializer.SerializeToElement(body), Id: id, Format: 3), new StoreSigner(PresenceKeys, id));
         RecordAuthor.Write(root, device);
         RecordAuthor.Write(root, RecordAuthor.Create(new("admission", connection.Principal,

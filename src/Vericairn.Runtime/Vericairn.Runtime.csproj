@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Service/Attestation/android-attestation-roots.pem" LogicalName="Vericairn.AndroidAttestationRoots.pem" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
 
