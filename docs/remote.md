@@ -98,8 +98,9 @@ connection and an unavailable worker observation can appear together. Cached wor
 ## Readable companions
 
 From 0.9.5 (READ-05), choose **Readable companions** in **Products**. Select a permitted collection and choose **Open
-collection** to read the current revisions at the runtime's selected snapshot. Under **Items on this page**, each row
-identifies its record type and revision. Choose **Read selected item** to open the exact revision from that collection.
+collection** to read the **Estate manifest** or browse a list of current record revisions at the runtime's selected snapshot.
+Each record row shows a title, record type, the end of the revision ID and the start of its hash. Select a row and choose
+**Read selected item** to open that exact revision.
 The reader shows the source basis, currentness at observation and audience. Both readers use the same runtime generator
 as Workbench. See [Readable companion contracts](readable-companions.md).
 
@@ -113,7 +114,8 @@ If the runtime confirms access to the exact item but its rendition is unavailabl
 prepare a [desktop task](#desktop-tasks) for the pinned revision. Workbench checks access and availability again when you
 open the task in **From Remote**.
 
-With a 0.9.4 runtime, a newer Remote shows the collection text and explains that item navigation requires a newer runtime.
+When a record collection has no page metadata, Remote still shows its text. If the runtime reports a version older than
+0.9.5, Remote says item navigation requires a newer runtime. Otherwise it says the generator reports no pages.
 
 ## Desktop tasks
 

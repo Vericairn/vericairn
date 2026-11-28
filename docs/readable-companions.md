@@ -102,8 +102,9 @@ generated text has no editor or submission action. See [Workbench](workbench.md)
 ### Readable companions in Remote
 
 From 0.9.5 (READ-05), choose **Readable companions** in **Products** to open Remote's collection catalog.
-Open a collection to read its current revisions at the selected snapshot, then choose **Read selected item**
-to open an exact revision from that list. Remote uses the same runtime generator as Workbench through the SDK.
+Open a collection to read the **Estate manifest** or browse current record revisions at the selected snapshot.
+In a record list, select a row and choose **Read selected item** to open that exact revision. Remote uses the
+same runtime generator as Workbench through the SDK.
 
 The last collection page and the last item page stay in memory. Remote checks current access and the exact
 source and generator basis before it reuses a page. **Cached** labels a reused page with its original
@@ -113,7 +114,8 @@ both cached pages.
 
 When an exact permitted item's rendition is unavailable, choose **Continue in Workbench** to prepare a
 desktop task pinned to that revision. Workbench checks access again when you open the task in **From Remote**.
-With a 0.9.4 runtime, a newer Remote shows the collection text and explains that item navigation requires a newer runtime.
+When a record collection has no page metadata, Remote shows its text and explains why item navigation is unavailable.
+Remote asks for a newer runtime if the reported version is older than 0.9.5. Otherwise it says the generator reports no pages.
 See [Remote](remote.md#readable-companions).
 
 ## Record coverage

@@ -35,6 +35,7 @@ public sealed partial class RemoteViewModel
     private const string RecordCompanion = "vericairn.records/items";
     private const string ManifestCompanion = "vericairn.estate/manifest";
     private const string CompanionUnavailable = "The readable companion is unavailable. Refresh to check access and its source.";
+    private static readonly Version CompanionPagingVersion = new(0, 9, 5);
     private bool companionsOpen;
     private CompanionRequest? companionRequest;
     private CompanionRequest? returnToCollection;
@@ -250,7 +251,7 @@ public sealed partial class RemoteViewModel
                 if (Selected != estate || !CompanionsOpen) return;
                 if (MatchesCompanionBasis(retained.Response, basis))
                 {
-                    ShowCompanionRendition(retained, cached: true);
+                    await ShowCompanionRenditionAsync(estate, api, retained, cached: true).ConfigureAwait(true);
                     return;
                 }
             }
@@ -269,7 +270,7 @@ public sealed partial class RemoteViewModel
             var observation = new CompanionObservation(request, response, Now);
             if (request.Revision is null) cachedCollection = observation;
             else cachedItem = observation;
-            ShowCompanionRendition(observation);
+            await ShowCompanionRenditionAsync(estate, api, observation).ConfigureAwait(true);
         }
         catch (Exception exception) when (ClientFailure.FromException(exception) is not null ||
             exception is NotSupportedException or JsonException or IOException or UnauthorizedAccessException)
@@ -279,16 +280,34 @@ public sealed partial class RemoteViewModel
         finally { Busy = false; }
     }
 
-    private void ShowCompanionRendition(CompanionObservation observation, bool cached = false)
+    private async Task ShowCompanionRenditionAsync(RemoteEstate estate, IEstateApi api, CompanionObservation observation, bool cached = false)
     {
-        ShowCompanion(observation, cached: cached);
         string message = observation.Response.Reason ?? "";
         if (observation.Request.Selection == "current" && observation.Response.Page is null)
         {
-            const string needsNewerRuntime = "Item navigation requires a newer runtime.";
-            message = message.Length == 0 ? needsNewerRuntime : $"{message} {needsNewerRuntime}";
+            string pagingMessage = await CompanionPagingMessageAsync(api).ConfigureAwait(true);
+            if (Selected != estate || !CompanionsOpen) return;
+            message = message.Length == 0 ? pagingMessage : $"{message} {pagingMessage}";
         }
+        ShowCompanion(observation, cached: cached);
         CompanionMessage = message;
+    }
+
+    private static async Task<string> CompanionPagingMessageAsync(IEstateApi api)
+    {
+        try
+        {
+            HealthResponse health = await api.HealthAsync().ConfigureAwait(false);
+            string? release = health?.Vericairn?.Split('-', '+')[0];
+            if (Version.TryParse(release, out Version? version) && version.Build >= 0 && version < CompanionPagingVersion)
+                return "Item navigation requires a newer runtime.";
+        }
+        catch (Exception exception) when (ClientFailure.FromException(exception) is { Code: not "refused" } ||
+            exception is NotSupportedException or JsonException or IOException)
+        {
+            // Optional version diagnostics cannot establish that an otherwise readable collection needs an upgrade.
+        }
+        return "The generator reports no pages.";
     }
 
     private void CompanionReadUnavailable(AttentionReference? handoff = null)

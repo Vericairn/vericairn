@@ -127,6 +127,40 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task ASupersededItemRendersAgainAfterASuccessfulSourceRecheck()
+    {
+        using var policy = new PolicyFixture();
+        RecordEnvelope order = policy.Add("work-order", JsonNode.Parse("""
+            {"key":"REMOTE-READ","kind":"ordinary","title":"Original work order","intent":"Read an exact revision.","scope":["tests"],"exitQuestion":"Readable?","inputs":[],"deliverables":["evidence"]}
+            """)!.AsObject());
+        using var connections = CompanionConnections(policy.Estate);
+        connections.PairAdmissionSigner = policy.OperatorSigner;
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            await OpenWorkOrdersAsync(model);
+            await OpenItemAsync(model);
+            Assert.Contains("current at observation", model.CompanionFreshness, StringComparison.Ordinal);
+            await model.BackCompanionCommand.ExecuteAsync();
+
+            JsonObject revision = PolicyFixture.Body(order);
+            revision["title"] = "Revised work order";
+            policy.Add("work-order", revision, supersedes: order.Id);
+            policy.AssertValid();
+
+            List<string> calls = [];
+            connections.BeforeApiCall = calls.Add;
+            await OpenItemAsync(model);
+
+            Assert.Equal([nameof(IEstateApi.CompanionSourcesAsync), nameof(IEstateApi.CompanionRenderAsync)], calls);
+            Assert.StartsWith("Observed", model.CompanionFreshness, StringComparison.Ordinal);
+            Assert.Contains("historical at observation", model.CompanionFreshness, StringComparison.Ordinal);
+            Assert.Contains(order.ComputedHash, model.CompanionText, StringComparison.Ordinal);
+            return true;
+        });
+    }
+
+    [Fact]
     public async Task EstateRecordRowsIdentifyUntitledRecords()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
@@ -258,11 +292,16 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
         });
     }
 
-    [Fact]
-    public async Task ACollectionWithoutPageMetadataExplainsHowToGetItemNavigation()
+    [Theory]
+    [InlineData("0.9.4+test", "Item navigation requires a newer runtime.")]
+    [InlineData("0.9.5", "The generator reports no pages.")]
+    [InlineData("0.10.0-dev+test", "The generator reports no pages.")]
+    [InlineData("unknown", "The generator reports no pages.")]
+    public async Task ACollectionWithoutPageMetadataExplainsWhy(string reportedVersion, string expectedMessage)
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
         using var connections = CompanionConnections(estate);
+        connections.Service.ReportedVersion = reportedVersion;
         connections.TransformCompanionRendition = (_, response) => response with { Page = null };
         await fixture.UiAsync(async () =>
         {
@@ -271,18 +310,18 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
             Assert.Contains("Shown on the phone", model.CompanionText, StringComparison.Ordinal);
             Assert.False(model.ShowCompanionItems);
             Assert.False(model.ShowCompanionPages);
-            Assert.Equal("Item navigation requires a newer runtime.", model.CompanionMessage);
+            Assert.Equal(expectedMessage, model.CompanionMessage);
 
             await model.BackCompanionCommand.ExecuteAsync();
             await OpenWorkOrdersAsync(model);
             Assert.StartsWith("Cached", model.CompanionFreshness, StringComparison.Ordinal);
-            Assert.Equal("Item navigation requires a newer runtime.", model.CompanionMessage);
+            Assert.Equal(expectedMessage, model.CompanionMessage);
 
             await model.BackCompanionCommand.ExecuteAsync();
             model.SelectedCompanionCollection = Assert.Single(model.CompanionCollections, collection => collection.Name == "Estate manifest");
             await model.OpenCompanionCollectionCommand.ExecuteAsync();
             Assert.NotEmpty(model.CompanionText);
-            Assert.DoesNotContain("Item navigation", model.CompanionMessage, StringComparison.Ordinal);
+            Assert.Empty(model.CompanionMessage);
             return true;
         });
     }

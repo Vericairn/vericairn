@@ -4,9 +4,9 @@
 
 ### In "13. Workbench, the desktop", after the paragraph beginning "The Documents page (Ctrl+Shift+D)"
 
-> From 0.9.5 (READ-05), open **Readable companions** in Remote's **Products** area. Browse a collection at its exact snapshot
-> and select a listed current record to read the exact revision shown on the page. A cached page shows its original observation
-> time and age. When the item rendition is unavailable and the runtime confirms access to its source, choose
+> From 0.9.5 (READ-05), open **Readable companions** in Remote's **Products** area. At the selected snapshot, read the
+> **Estate manifest** or browse current record revisions. Select a listed record to read its exact revision. A cached page shows
+> its original observation time and age. When the item rendition is unavailable and the runtime confirms access to its source, choose
 > **Continue in Workbench** and prepare a task for the exact permitted subject. Open it
 > through **From Remote** on the paired runtime. See the [Remote guide](remote.md).
 
@@ -18,6 +18,8 @@
 > one item page in memory for the selected runtime. A source-only read must confirm current access and the same source and
 > generator basis before Remote reuses either page. When disconnected, the reader reports unavailability. Workbench checks
 > access again when the person opens a task received from the phone. Local companion inspectors stay on their owning surfaces.
+> When a record collection has no page metadata, Remote shows its text. It asks for a newer runtime if the reported version
+> is older than 0.9.5. Otherwise it says the generator reports no pages.
 > Headless Remote reader tests, mobile head builds and real-device observations are separate qualification evidence.
 
 ## docs/api-v1.md
