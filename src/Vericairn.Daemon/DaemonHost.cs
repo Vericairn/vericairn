@@ -500,6 +500,7 @@ public sealed class DaemonHost : IAsyncDisposable
             Mcp = host.Mcp.Enabled && (loopbackEndpoint is not null || localNetworkEndpoint is not null) ? McpEndpoint.Path : null,
             PublicMcp = host.OAuth is not null && host.publicMcpExpiresAt is DateTimeOffset expires
                 ? new PublicMcpEndpoint(host.OAuth.Resource, RecordParser.FormatTimestamp(expires)) : null,
+            VericairnHome = VericairnHome.Path(),
         });
         if (certificates is not null)
         {

@@ -38,6 +38,9 @@ public sealed record DaemonEndpoint(string Kind, string Address, int ProcessId, 
 
     /// <summary>The live public token listener and its certificate's expiry, when configured.</summary>
     public PublicMcpEndpoint? PublicMcp { get; init; }
+
+    /// <summary>The Vericairn home the local daemon opened. Endpoints from before 0.9.5 omit it.</summary>
+    public string? VericairnHome { get; init; }
 }
 
 

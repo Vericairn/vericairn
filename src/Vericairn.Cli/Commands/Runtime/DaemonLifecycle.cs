@@ -25,7 +25,7 @@ namespace Vericairn.Cli;
 /// <param name="Warning">What still stands and exactly what to run, when something does.</param>
 internal sealed record RuntimeReplacement(string Outcome, ServingRuntime? Served, ServingRuntime? Started, string? Done, string? Warning);
 
-internal sealed class DaemonLifecycle(CommandContext context)
+internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoint, HealthResponse?>? probe = null)
 {
     internal const string DaemonLogName = "daemon.log";
 
@@ -106,7 +106,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
             }
 
             DaemonEndpoint? existing = DaemonHost.Discover(root);
-            if (existing is not null && context.IsAlive(existing))
+            if (existing is not null && Probe(existing) is not null)
             {
                 return RuntimeStatus(root, json);
             }
@@ -266,9 +266,19 @@ internal sealed class DaemonLifecycle(CommandContext context)
         }
 
         DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-        HealthResponse? health = null;
-        bool alive = endpoint is not null && context.IsAlive(endpoint, out health);
-        ServingRuntime? serving = alive && health is not null ? ServingRuntime.Of(root, endpoint!, health) : null;
+        HealthResponse? health = endpoint is null ? null : Probe(endpoint);
+        bool alive = health is not null;
+        string requestedHome = VericairnHome.Path();
+        string? servingHome = null;
+        if (alive)
+        {
+            // Older daemons omit the field. Discovery read the endpoint from the requested home's live directory.
+            servingHome = endpoint!.VericairnHome ?? requestedHome;
+            if (!VericairnHome.SamePath(servingHome, requestedHome))
+                return context.Fail($"the serving daemon uses Vericairn home '{servingHome}', which differs from the requested home '{requestedHome}'.");
+        }
+
+        ServingRuntime? serving = health is null ? null : ServingRuntime.Of(root, endpoint!, health);
         EstateManifest? pin = serving is null ? ServingRuntime.Pin(root) : serving.Manifest;
         string? configured = null;
         bool mcpConfigured = false;
@@ -291,6 +301,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
             {
                 mode = alive ? "daemon" : "embedded",
                 daemon = alive ? endpoint : null,
+                vericairnHome = servingHome,
                 localNetwork = configured,
                 mcp = mcpConfigured,
                 publicEndpoint = publicMcpConfigured,
@@ -303,6 +314,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         else if (alive)
         {
             context.Output.WriteLine($"daemon {endpoint!.ProcessId} serves {endpoint.Root} since {endpoint.StartedAt}");
+            context.Output.WriteLine($"  home  {servingHome}");
             context.Output.WriteLine($"  {endpoint.Kind}  {endpoint.Address}");
             if (endpoint.Loopback is LoopbackEndpoint published)
             {
@@ -333,7 +345,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         }
         else
         {
-            context.Output.WriteLine("no daemon is serving this estate; commands run the embedded runtime");
+            context.Output.WriteLine($"no daemon is serving this estate in Vericairn home '{requestedHome}'. Commands run the embedded runtime.");
             if (configured is not null)
             {
                 context.Output.WriteLine($"  the local-network profile is configured at {configured} and served from the runtime's next start");
@@ -350,6 +362,9 @@ internal sealed class DaemonLifecycle(CommandContext context)
 
         return Clean;
     }
+
+    private HealthResponse? Probe(DaemonEndpoint endpoint) =>
+        probe is null ? (context.IsAlive(endpoint, out HealthResponse? health) ? health : null) : probe(endpoint);
 
     /// <summary>How a stop request reaches a daemon; a test stands in for a daemon that refuses or ignores it.</summary>
     internal static Func<VericairnClient, CancellationToken, Task> AskToStop { get; set; } = (client, token) => client.ShutdownAsync(token);
@@ -500,14 +515,14 @@ internal sealed class DaemonLifecycle(CommandContext context)
                 return context.Fail(NotAnEstate(root));
             }
 
-            ServicePlan plan = ServiceInstaller.PlanHere(root);
             if (planOnly)
             {
-                PrintPlan(plan, json);
+                PrintPlan(ServiceInstaller.PlanHere(root), json);
                 return Clean;
             }
 
-            IReadOnlyList<string> log = ServiceInstaller.Install(plan);
+            ServicePlan plan = ServiceInstaller.PlanHereForInstall(root);
+            IReadOnlyList<string> log = ServiceInstaller.Install(plan, ServiceInstaller.LegacyPlanHere(root));
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(new { installed = plan.Label, unit = plan.UnitPath, log }));
@@ -540,10 +555,10 @@ internal sealed class DaemonLifecycle(CommandContext context)
             }
 
             ServicePlan plan = ServiceInstaller.PlanHere(root);
-            IReadOnlyList<string> log = ServiceInstaller.Uninstall(plan);
+            (IReadOnlyList<string> labels, IReadOnlyList<string> log, string? error) = ServiceInstaller.Uninstall(plan, ServiceInstaller.LegacyPlanHere(root));
             if (json)
             {
-                context.Output.WriteLine(JsonSerializer.Serialize(new { uninstalled = plan.Label, log }));
+                context.Output.WriteLine(JsonSerializer.Serialize(new { uninstalled = labels, log }));
             }
             else
             {
@@ -552,10 +567,13 @@ internal sealed class DaemonLifecycle(CommandContext context)
                     context.Output.WriteLine(line);
                 }
 
-                context.Output.WriteLine($"uninstalled {plan.Label}");
+                foreach (string label in labels)
+                {
+                    context.Output.WriteLine($"uninstalled {label}");
+                }
             }
 
-            return Clean;
+            return error is null ? Clean : context.Fail(error);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or PlatformNotSupportedException or System.ComponentModel.Win32Exception)
         {
@@ -612,6 +630,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         }
 
         context.Output.WriteLine($"{plan.Platform}: {plan.Label}");
+        context.Output.WriteLine($"  home  {plan.VericairnHome}");
         context.Output.WriteLine($"unit {plan.UnitPath}:");
         context.Output.Write(plan.UnitContent);
         foreach (IReadOnlyList<string> command in plan.Install)
