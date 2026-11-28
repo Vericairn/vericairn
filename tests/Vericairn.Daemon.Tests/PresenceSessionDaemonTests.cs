@@ -104,17 +104,17 @@ public sealed class PresenceSessionDaemonTests
         string[] launcher = ["/opt/vericairn/vericairn"];
         string root = Path.Combine(Path.GetTempPath(), "estate");
         ServicePlan mac = ServiceInstaller.Plan("macos", root, "01ESTATE", launcher, "/home/someone", "/home/someone/vericairn", 501, release);
-        Assert.Contains("<key>EnvironmentVariables</key>\n  <dict>\n    <key>DOTNET_EnableDiagnostics</key><string>0</string>\n  </dict>\n", mac.UnitContent, StringComparison.Ordinal);
+        Assert.Contains("<key>DOTNET_EnableDiagnostics</key><string>0</string>", mac.UnitContent, StringComparison.Ordinal);
         ServicePlan linux = ServiceInstaller.Plan("linux", root, "01ESTATE", launcher, "/home/someone", "/home/someone/vericairn", 1000, release);
-        Assert.Contains("[Service]\nEnvironment=\"DOTNET_EnableDiagnostics=0\"\nExecStart=", linux.UnitContent, StringComparison.Ordinal);
+        Assert.Contains("[Service]\nEnvironment=\"DOTNET_EnableDiagnostics=0\"\n", linux.UnitContent, StringComparison.Ordinal);
 
-        // A development build's environment is empty, and its plans are the ones before 0.9.4.
+        // The development build supplies no diagnostics settings. The installer supplies the home in both builds.
         IReadOnlyDictionary<string, string> development = PresenceSessionBuild.Parse(null, null, null).RuntimeEnvironment;
         Assert.Empty(development);
         Assert.Equal(ServiceInstaller.Plan("macos", root, "01ESTATE", launcher, "/home/someone", "/home/someone/vericairn", 501).UnitContent,
             ServiceInstaller.Plan("macos", root, "01ESTATE", launcher, "/home/someone", "/home/someone/vericairn", 501, development).UnitContent);
-        Assert.DoesNotContain("EnvironmentVariables", ServiceInstaller.Plan("macos", root, "01ESTATE", launcher, "/home/someone", "/home/someone/vericairn", 501).UnitContent, StringComparison.Ordinal);
-        Assert.DoesNotContain("Environment=", ServiceInstaller.Plan("linux", root, "01ESTATE", launcher, "/home/someone", "/home/someone/vericairn", 1000).UnitContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("DOTNET_EnableDiagnostics", ServiceInstaller.Plan("macos", root, "01ESTATE", launcher, "/home/someone", "/home/someone/vericairn", 501).UnitContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("DOTNET_EnableDiagnostics", ServiceInstaller.Plan("linux", root, "01ESTATE", launcher, "/home/someone", "/home/someone/vericairn", 1000).UnitContent, StringComparison.Ordinal);
     }
 
     private sealed class Accepting : IPresenceHelperRequirement

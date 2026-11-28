@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers.Text;
 using System.Diagnostics;
 using System.Reflection;
 using System.Security;
+using System.Security.Cryptography;
 using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -27,7 +29,11 @@ public sealed record ServicePlan(
     string UnitContent,
     IReadOnlyList<IReadOnlyList<string>> Install,
     IReadOnlyList<IReadOnlyList<string>> Uninstall,
-    IReadOnlyList<IReadOnlyList<string>> AfterUninstall);
+    IReadOnlyList<IReadOnlyList<string>> AfterUninstall)
+{
+    /// <summary>The absolute Vericairn home captured by the service unit.</summary>
+    public string? VericairnHome { get; init; }
+}
 
 /// <summary>
 /// Installs the daemon as a per-user service that starts at login and restarts after failure: a launchd agent on macOS, a systemd
@@ -36,6 +42,8 @@ public sealed record ServicePlan(
 /// </summary>
 public static class ServiceInstaller
 {
+    internal const string ServiceHomeOption = "--service-home";
+
     /// <summary>The plan for an estate on this machine, with the running executable.</summary>
     public static ServicePlan PlanHere(string root)
     {
@@ -45,7 +53,8 @@ public static class ServiceInstaller
         EstateManifest manifest = EstateManifest.Load(root, findings) ?? throw new InvalidOperationException(string.Join("; ", findings.Select(f => f.Message)));
         string platform = VericairnHome.Platform();
         uint? user = platform is "macos" or "linux" ? GetUid() : null;
-        return Plan(platform, root, manifest.Estate, CurrentLauncher(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), VericairnHome.Path(), user,
+        string home = Path.GetFullPath(VericairnHome.Path());
+        return Plan(platform, root, manifest.Estate, CurrentLauncher(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), home, user,
             PresenceSessionBuild.Current.RuntimeEnvironment);
     }
 
@@ -73,12 +82,23 @@ public static class ServiceInstaller
             throw new ArgumentException("A launcher names at least the executable.", nameof(launcher));
         }
 
+        if (vericairnHome.Any(char.IsControl))
+            throw new ArgumentException("The Vericairn home contains a control character the service unit cannot carry.", nameof(vericairnHome));
+
+        string homeKey = Path.TrimEndingDirectorySeparator(vericairnHome);
+        if (platform == "windows")
+            homeKey = homeKey.ToUpperInvariant();
+        string suffix = "-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(homeKey)));
+
+        var settings = new Dictionary<string, string>(environment, StringComparer.Ordinal);
+        settings[VericairnHome.EnvironmentVariable] = vericairnHome;
+
         string[] arguments = [.. launcher, "--estate", root, "runtime", "serve"];
         switch (platform)
         {
             case "macos":
             {
-                string label = "org.vericairn.runtime." + estateId.ToLowerInvariant();
+                string label = "org.vericairn.runtime." + estateId.ToLowerInvariant() + suffix;
                 string log = Path.Combine(vericairnHome, "logs", label + ".log");
                 string unitPath = Path.Combine(userHome, "Library", "LaunchAgents", label + ".plist");
                 var plist = new StringBuilder();
@@ -93,10 +113,10 @@ public static class ServiceInstaller
                 }
 
                 plist.Append("  </array>\n");
-                if (environment.Count > 0)
+                if (settings.Count > 0)
                 {
                     plist.Append("  <key>EnvironmentVariables</key>\n  <dict>\n");
-                    foreach ((string name, string value) in environment.OrderBy(e => e.Key, StringComparer.Ordinal))
+                    foreach ((string name, string value) in settings.OrderBy(e => e.Key, StringComparer.Ordinal))
                         plist.Append("    <key>").Append(SecurityElement.Escape(name)).Append("</key><string>").Append(SecurityElement.Escape(value)).Append("</string>\n");
                     plist.Append("  </dict>\n");
                 }
@@ -114,16 +134,16 @@ public static class ServiceInstaller
                     plist.ToString(),
                     [["launchctl", "bootstrap", domain, unitPath]],
                     [["launchctl", "bootout", domain + "/" + label]],
-                    []);
+                    []) { VericairnHome = vericairnHome };
             }
 
             case "linux":
             {
-                string label = "vericairn-runtime-" + estateId.ToLowerInvariant();
+                string label = "vericairn-runtime-" + estateId.ToLowerInvariant() + suffix;
                 string? xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
                 string unitPath = Path.Combine(string.IsNullOrWhiteSpace(xdg) ? Path.Combine(userHome, ".config") : xdg, "systemd", "user", label + ".service");
                 string exec = string.Join(' ', arguments.Select(SystemdQuote));
-                string variables = string.Concat(environment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => $"Environment={SystemdQuote(e.Key + "=" + e.Value)}\n"));
+                string variables = string.Concat(settings.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => $"Environment={SystemdQuote(e.Key + "=" + e.Value)}\n"));
                 string unit = $"[Unit]\nDescription=Vericairn runtime for estate {estateId}\n\n[Service]\n{variables}ExecStart={exec}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
                 return new ServicePlan(
                     platform,
@@ -132,23 +152,25 @@ public static class ServiceInstaller
                     unit,
                     [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", label + ".service"]],
                     [["systemctl", "--user", "disable", "--now", label + ".service"]],
-                    [["systemctl", "--user", "daemon-reload"]]);
+                    [["systemctl", "--user", "daemon-reload"]]) { VericairnHome = vericairnHome };
             }
 
             case "windows":
             {
-                string label = "Vericairn Runtime " + estateId;
-                string unitPath = Path.Combine(vericairnHome, "services", "vericairn-runtime-" + estateId.ToLowerInvariant() + ".xml");
+                string label = "Vericairn Runtime " + estateId + suffix;
+                string unitPath = Path.Combine(vericairnHome, "services", "vericairn-runtime-" + estateId.ToLowerInvariant() + suffix + ".xml");
+                // An Exec action has no environment block. Encode the path so the scheduler cannot expand a literal %NAME% in it.
+                arguments = [.. arguments, ServiceHomeOption, Base64Url.EncodeToString(Encoding.UTF8.GetBytes(vericairnHome))];
                 string command = arguments[0];
                 string argumentText = string.Join(' ', arguments.Skip(1).Select(WindowsQuote));
                 string task = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"
                     + "<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n"
-                    + $"  <RegistrationInfo><Description>Vericairn runtime for estate {SecurityElement.Escape(estateId)}</Description></RegistrationInfo>\n"
+                    + $"  <RegistrationInfo><Description>Vericairn runtime for estate {SecurityElement.Escape(estateId)} using {SecurityElement.Escape(vericairnHome)}</Description></RegistrationInfo>\n"
                     + "  <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>\n"
                     + "  <Settings>\n    <MultipleInstances>IgnoreNew</MultipleInstances>\n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
                     + "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n    <StartWhenAvailable>true</StartWhenAvailable>\n"
                     + "    <RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>\n    <Hidden>true</Hidden>\n  </Settings>\n"
-                    + "  <Actions Context=\"Author\">\n"
+                    + "  <Actions>\n"
                     + $"    <Exec><Command>{SecurityElement.Escape(command)}</Command><Arguments>{SecurityElement.Escape(argumentText)}</Arguments></Exec>\n"
                     + "  </Actions>\n</Task>\n";
                 return new ServicePlan(
@@ -158,7 +180,7 @@ public static class ServiceInstaller
                     task,
                     [["schtasks", "/Create", "/F", "/TN", label, "/XML", unitPath], ["schtasks", "/Run", "/TN", label]],
                     [["schtasks", "/End", "/TN", label], ["schtasks", "/Delete", "/F", "/TN", label]],
-                    []);
+                    []) { VericairnHome = vericairnHome };
             }
 
             default:
@@ -170,6 +192,8 @@ public static class ServiceInstaller
     public static IReadOnlyList<string> Install(ServicePlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        if (plan.Platform == "macos" && plan.VericairnHome is string home)
+            OwnerOnlyState.CreateDirectory(Path.Combine(home, "logs"), home);
         Directory.CreateDirectory(Path.GetDirectoryName(plan.UnitPath)!);
         File.WriteAllText(plan.UnitPath, plan.UnitContent, plan.Platform == "windows" ? Encoding.Unicode : new UTF8Encoding(false));
         var log = new List<string> { $"wrote {plan.UnitPath}" };
@@ -251,7 +275,7 @@ public static class ServiceInstaller
         return $"ran {line}";
     }
 
-    private static string SystemdQuote(string argument) => "\"" + argument.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    private static string SystemdQuote(string argument) => "\"" + argument.Replace("%", "%%", StringComparison.Ordinal).Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
     private static string WindowsQuote(string argument) => argument.Contains(' ', StringComparison.Ordinal) || argument.Contains('"', StringComparison.Ordinal) ? "\"" + argument.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"" : argument;
 

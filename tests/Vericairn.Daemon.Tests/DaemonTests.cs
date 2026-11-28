@@ -419,27 +419,27 @@ public class DaemonTests
         string root = OperatingSystem.IsWindows() ? @"C:\Estates\example estate" : "/home/someone/estates/example estate";
         string[] launcher = [OperatingSystem.IsWindows() ? @"C:\Tools\vericairn.exe" : "/usr/local/bin/vericairn"];
         ServicePlan mac = ServiceInstaller.Plan("macos", root, "01ESTATE", launcher, "/Users/someone", "/Users/someone/Library/Application Support/Vericairn", 501);
-        Assert.Equal("org.vericairn.runtime.01estate", mac.Label);
-        Assert.EndsWith(Path.Combine("Library", "LaunchAgents", "org.vericairn.runtime.01estate.plist"), mac.UnitPath, StringComparison.Ordinal);
+        Assert.StartsWith("org.vericairn.runtime.01estate", mac.Label, StringComparison.Ordinal);
+        Assert.EndsWith(Path.Combine("Library", "LaunchAgents", mac.Label + ".plist"), mac.UnitPath, StringComparison.Ordinal);
         Assert.Contains("<string>--estate</string>", mac.UnitContent, StringComparison.Ordinal);
         Assert.Contains($"<string>{root}</string>", mac.UnitContent, StringComparison.Ordinal);
         Assert.Contains("<key>KeepAlive</key>", mac.UnitContent, StringComparison.Ordinal);
         Assert.Equal(["launchctl", "bootstrap", "gui/501", mac.UnitPath], mac.Install.Single());
-        Assert.Equal(["launchctl", "bootout", "gui/501/org.vericairn.runtime.01estate"], mac.Uninstall.Single());
+        Assert.Equal(["launchctl", "bootout", "gui/501/" + mac.Label], mac.Uninstall.Single());
 
         ServicePlan linux = ServiceInstaller.Plan("linux", root, "01ESTATE", launcher, "/home/someone", "/home/someone/.config/vericairn", 1000);
-        Assert.Equal("vericairn-runtime-01estate", linux.Label);
-        Assert.Contains(Path.Combine("systemd", "user", "vericairn-runtime-01estate.service"), linux.UnitPath, StringComparison.Ordinal);
+        Assert.StartsWith("vericairn-runtime-01estate", linux.Label, StringComparison.Ordinal);
+        Assert.Contains(Path.Combine("systemd", "user", linux.Label + ".service"), linux.UnitPath, StringComparison.Ordinal);
         Assert.Contains($"ExecStart=\"{launcher[0].Replace("\\", "\\\\", StringComparison.Ordinal)}\" \"--estate\" \"{root.Replace("\\", "\\\\", StringComparison.Ordinal)}\" \"runtime\" \"serve\"", linux.UnitContent, StringComparison.Ordinal);
         Assert.Contains("Restart=on-failure", linux.UnitContent, StringComparison.Ordinal);
-        Assert.Equal(["systemctl", "--user", "enable", "--now", "vericairn-runtime-01estate.service"], linux.Install[1]);
+        Assert.Equal(["systemctl", "--user", "enable", "--now", linux.Label + ".service"], linux.Install[1]);
         Assert.Equal(["systemctl", "--user", "daemon-reload"], linux.AfterUninstall.Single());
 
         ServicePlan windows = ServiceInstaller.Plan("windows", root, "01ESTATE", launcher, @"C:\Users\someone", @"C:\Users\someone\AppData\Local\Vericairn", null);
-        Assert.Equal("Vericairn Runtime 01ESTATE", windows.Label);
+        Assert.StartsWith("Vericairn Runtime 01ESTATE", windows.Label, StringComparison.Ordinal);
         Assert.EndsWith(".xml", windows.UnitPath, StringComparison.Ordinal);
         Assert.Contains("<LogonTrigger>", windows.UnitContent, StringComparison.Ordinal);
-        Assert.Contains($"<Arguments>--estate &quot;{root}&quot; runtime serve</Arguments>", windows.UnitContent, StringComparison.Ordinal);
+        Assert.Contains($"<Arguments>--estate &quot;{root}&quot; runtime serve", windows.UnitContent, StringComparison.Ordinal);
         Assert.Equal(["schtasks", "/Create", "/F", "/TN", windows.Label, "/XML", windows.UnitPath], windows.Install[0]);
         Assert.Equal(["schtasks", "/Delete", "/F", "/TN", windows.Label], windows.Uninstall[1]);
 
