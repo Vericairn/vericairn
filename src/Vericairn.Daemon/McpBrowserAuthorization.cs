@@ -13,6 +13,7 @@ namespace Vericairn.Daemon;
 internal sealed class McpBrowserAuthorization(TimeProvider clock, string issuer)
 {
     private const int Limit = 256;
+    private const int PendingPeerLimit = 8;
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
     private readonly object gate = new();
     private readonly Dictionary<string, McpBrowserFlow> flows = new(StringComparer.Ordinal);
@@ -23,11 +24,12 @@ internal sealed class McpBrowserAuthorization(TimeProvider clock, string issuer)
         lock (gate)
         {
             Prune();
-            if (flows.Count >= Limit) return null;
+            IPAddress peer = McpPublicPeer.Of(http.Connection.RemoteIpAddress);
+            if (flows.Count >= Limit || flows.Values.Count(f => f.Peer.Equals(peer)) >= PendingPeerLimit) return null;
 
             string id = McpTokenStore.RandomValue(18);
             string cookie = McpTokenStore.RandomValue(24);
-            flows.Add(id, new McpBrowserFlow(request, McpTokenStore.Hash(cookie), clock.GetUtcNow() + Lifetime));
+            flows.Add(id, new McpBrowserFlow(request, McpTokenStore.Hash(cookie), clock.GetUtcNow() + Lifetime, peer));
             http.Response.Cookies.Append(Cookie(id), cookie, new CookieOptions
             {
                 Secure = true, HttpOnly = true, SameSite = SameSiteMode.Strict, MaxAge = Lifetime, Path = "/",
@@ -148,7 +150,7 @@ internal sealed class McpBrowserAuthorization(TimeProvider clock, string issuer)
     private static string Cookie(string id) => "__Host-vc-mcp-" + id;
 }
 
-internal sealed record McpBrowserFlow(McpAuthorizationRequest Request, string Cookie, DateTimeOffset Until, McpApproval? Approval = null);
+internal sealed record McpBrowserFlow(McpAuthorizationRequest Request, string Cookie, DateTimeOffset Until, IPAddress Peer, McpApproval? Approval = null);
 internal sealed record McpCodeExchange(McpAuthorizationRequest Request, McpTokenGrant Grant, DateTimeOffset Until);
 internal sealed record McpAuthorizationRequest(
     McpClientMetadata Client, string Redirect, string Challenge, string? Scope, string? State, bool IncludesRead = false);

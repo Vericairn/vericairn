@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Net;
 using System.Text.Json;
 using Vericairn.Protocol;
 
@@ -10,20 +11,26 @@ namespace Vericairn.Daemon;
 internal sealed class McpClientRegistry(string directory, TimeProvider clock)
 {
     private const int PendingLimit = 128;
+    private const int PendingPeerLimit = 8;
     private const int RegisteredLimit = 256;
     private readonly object gate = new();
     private readonly string path = Path.Combine(directory, "mcp-registrations.json");
-    private readonly Dictionary<string, Registration> pending = new(StringComparer.Ordinal);
-    private Dictionary<string, McpClientMetadata>? approved;
+    private readonly Dictionary<string, PendingRegistration> pending = new(StringComparer.Ordinal);
+    private Dictionary<string, ApprovedRegistration>? approved;
 
-    internal bool Add(McpClientMetadata client)
+    internal bool Add(McpClientMetadata client, IPAddress peer)
     {
         lock (gate)
         {
-            Prune();
-            if (pending.Count >= PendingLimit || Load().Count >= RegisteredLimit) return false;
-            pending.Add(client.Id, new Registration(client, clock.GetUtcNow().AddDays(1)));
-            return true;
+            DateTimeOffset now = clock.GetUtcNow();
+            Prune(now);
+            if (pending.Count >= PendingLimit || pending.Count + Load().Count >= RegisteredLimit
+                || pending.Values.Count(r => r.Peer.Equals(peer)) >= PendingPeerLimit)
+            {
+                return false;
+            }
+
+            return pending.TryAdd(client.Id, new PendingRegistration(client, peer, now.AddDays(1)));
         }
     }
 
@@ -31,85 +38,64 @@ internal sealed class McpClientRegistry(string directory, TimeProvider clock)
     {
         lock (gate)
         {
-            Prune();
-            return Load().GetValueOrDefault(id) ?? pending.GetValueOrDefault(id)?.Client;
+            Prune(clock.GetUtcNow());
+            return Load().GetValueOrDefault(id)?.Client ?? pending.GetValueOrDefault(id)?.Client;
         }
     }
 
-    internal void Use(string id)
+    internal void Use(string id, DateTimeOffset until)
     {
         lock (gate)
         {
-            if (!pending.TryGetValue(id, out Registration? registration)) return;
-            Dictionary<string, McpClientMetadata> all = Load();
-            if (all.Count >= RegisteredLimit) return;
-            var next = new Dictionary<string, McpClientMetadata>(all, StringComparer.Ordinal) { [id] = registration.Client };
-            McpTokenStore.WriteState(path, next);
+            DateTimeOffset now = clock.GetUtcNow();
+            Prune(now);
+            Dictionary<string, ApprovedRegistration> all = Load();
+            ApprovedRegistration? existing = all.GetValueOrDefault(id);
+            McpClientMetadata? client = existing?.Client ?? pending.GetValueOrDefault(id)?.Client;
+            if (client is null || until <= now || existing?.Until >= until) return;
+
+            var next = new Dictionary<string, ApprovedRegistration>(all, StringComparer.Ordinal) { [id] = new(client, until) };
+            McpTokenStore.WriteState(path, new RegistrationFile(next));
             approved = next;
             pending.Remove(id);
         }
     }
 
-    private Dictionary<string, McpClientMetadata> Load()
+    private Dictionary<string, ApprovedRegistration> Load()
     {
         if (approved is not null) return approved;
-        if (!File.Exists(path)) return approved = new Dictionary<string, McpClientMetadata>(StringComparer.Ordinal);
+        if (!File.Exists(path)) return approved = new Dictionary<string, ApprovedRegistration>(StringComparer.Ordinal);
         using FileStream stream = File.OpenRead(path);
-        return approved = JsonSerializer.Deserialize<Dictionary<string, McpClientMetadata>>(stream, ProtocolJson.Options)
+        using JsonDocument document = JsonDocument.Parse(stream);
+        if (document.RootElement.TryGetProperty("registrations", out JsonElement registrations))
+        {
+            return approved = registrations.Deserialize<Dictionary<string, ApprovedRegistration>>(ProtocolJson.Options)
+                ?? throw new InvalidDataException("The runtime cannot read its MCP client registrations.");
+        }
+
+        // Earlier runtimes stored bare metadata, with no expiry. Retain it for at most one maximum authorization lifetime
+        // from the last approval in that file so restarting cannot keep old entries alive forever.
+        DateTimeOffset legacyUntil = File.GetLastWriteTimeUtc(path).AddDays(90);
+        Dictionary<string, McpClientMetadata> legacy = document.RootElement.Deserialize<Dictionary<string, McpClientMetadata>>(ProtocolJson.Options)
             ?? throw new InvalidDataException("The runtime cannot read its MCP client registrations.");
+        return approved = legacy.ToDictionary(p => p.Key, p => new ApprovedRegistration(p.Value, legacyUntil), StringComparer.Ordinal);
     }
 
-    private void Prune()
+    private void Prune(DateTimeOffset now)
     {
-        DateTimeOffset now = clock.GetUtcNow();
-        foreach ((string id, Registration registration) in pending)
+        foreach ((string id, PendingRegistration registration) in pending)
         {
-            if (registration.ExpiresAt <= now) pending.Remove(id);
+            if (registration.Until <= now) pending.Remove(id);
+        }
+
+        Dictionary<string, ApprovedRegistration> all = Load();
+        foreach ((string id, ApprovedRegistration registration) in all)
+        {
+            if (registration.Until <= now) all.Remove(id);
         }
     }
 
-    private sealed record Registration(McpClientMetadata Client, DateTimeOffset ExpiresAt);
-}
-
-/// <summary>Bounds the public listener's HTTP budget independently of signed listeners.</summary>
-internal sealed class McpPublicThrottle(TimeProvider clock)
-{
-    private readonly object gate = new();
-    private readonly Dictionary<string, (int Mcp, int OAuth)> clients = new(StringComparer.Ordinal);
-    private long current;
-    private int mcp;
-    private int oauth;
-
-    internal bool Admit(string ip, bool isMcp)
-    {
-        lock (gate)
-        {
-            long minute = clock.GetUtcNow().ToUnixTimeSeconds() / 60;
-            if (minute != current)
-            {
-                current = minute;
-                clients.Clear();
-                mcp = 0;
-                oauth = 0;
-            }
-
-            (int mcpCount, int oauthCount) = clients.GetValueOrDefault(ip);
-            if (clients.Count >= 1024 && !clients.ContainsKey(ip)) return false;
-            if (isMcp)
-            {
-                if (mcp >= 2_048 || mcpCount >= 180) return false;
-                ++mcp;
-                ++mcpCount;
-            }
-            else
-            {
-                if (oauth >= 512 || oauthCount >= 60) return false;
-                ++oauth;
-                ++oauthCount;
-            }
-
-            clients[ip] = (mcpCount, oauthCount);
-            return true;
-        }
-    }
+    private sealed record PendingRegistration(McpClientMetadata Client, IPAddress Peer, DateTimeOffset Until);
+    private sealed record ApprovedRegistration(McpClientMetadata Client, DateTimeOffset Until);
+    private sealed record RegistrationFile(Dictionary<string, ApprovedRegistration> Registrations);
 }

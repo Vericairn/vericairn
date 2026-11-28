@@ -23,6 +23,11 @@
 > connection and rate limits. Its certificate and key are supplied by the operator. It supports public Client ID Metadata
 > Documents and dynamic registration. Read scope has no write tools. Contribute scope offers only the network contributor writes.
 > Each bearer access token lasts at most 15 minutes. A refresh token rotates on use, and reuse ends its family.
+> The public listener serves up to 12 open connections, with up to four from one peer and five seconds to finish TLS.
+> Peers behind the same network address share their allowance, as do IPv6 addresses in one /64 subnet. The listener keeps
+> separate request allowances for MCP, the token endpoint and the other OAuth paths. It holds up to eight pending registrations
+> and eight pending browser flows per peer, within shared caps of 128 registrations and 256 flows. Unused registrations lapse
+> after a day, browser flows after ten minutes, and approved registrations lapse when their last authorization expires.
 
 ## docs/api-v1.md
 

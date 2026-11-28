@@ -36,7 +36,9 @@ internal sealed class McpOAuth
     private readonly McpApprovalCodes approvals;
     private readonly McpBrowserAuthorization browser;
     private readonly McpClientRegistry registrations;
-    private readonly McpPublicThrottle throttle;
+    private readonly McpPublicThrottle mcpThrottle;
+    private readonly McpPublicThrottle tokenThrottle;
+    private readonly McpPublicThrottle oauthThrottle;
     private readonly Func<string, CancellationToken, Task<McpClientMetadata?>> fetchMetadata;
 
     internal McpOAuth(DaemonHost host, McpPublicEndpoint endpoint, string directory, IDeviceKeyStore? custody,
@@ -50,7 +52,9 @@ internal sealed class McpOAuth
         approvals = new McpApprovalCodes(host.Time);
         browser = new McpBrowserAuthorization(host.Time, endpoint.Issuer);
         registrations = new McpClientRegistry(directory, host.Time);
-        throttle = new McpPublicThrottle(host.Time);
+        mcpThrottle = new McpPublicThrottle(host.Time, totalLimit: 2_048, peerLimit: 180);
+        tokenThrottle = new McpPublicThrottle(host.Time, totalLimit: 512, peerLimit: 60);
+        oauthThrottle = new McpPublicThrottle(host.Time, totalLimit: 512, peerLimit: 24);
     }
 
     internal string Issuer => endpoint.Issuer;
@@ -109,7 +113,13 @@ internal sealed class McpOAuth
             return;
         }
 
-        if (!throttle.Admit(http.Connection.RemoteIpAddress?.ToString() ?? "unknown", path == McpEndpoint.Path))
+        McpPublicThrottle throttle = path switch
+        {
+            McpEndpoint.Path => mcpThrottle,
+            TokenPath => tokenThrottle,
+            _ => oauthThrottle,
+        };
+        if (!throttle.Admit(McpPublicPeer.Of(http.Connection.RemoteIpAddress)))
         {
             http.Response.Headers.RetryAfter = "60";
             http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
@@ -241,7 +251,7 @@ internal sealed class McpOAuth
             return;
         }
 
-        if (!registrations.Add(client))
+        if (!registrations.Add(client, McpPublicPeer.Of(http.Connection.RemoteIpAddress)))
         {
             await ErrorAsync(http, StatusCodes.Status429TooManyRequests, "temporarily_unavailable").ConfigureAwait(false);
             return;
@@ -352,7 +362,7 @@ internal sealed class McpOAuth
 
         var grant = new McpTokenGrant(device.Device, device.Principal, device.PublicKey, device.Admission, accepted.Authority.Principal,
             flow.Request.Client.Id, Resource, accepted.Scope, accepted.ExpiresAt);
-        registrations.Use(flow.Request.Client.Id);
+        registrations.Use(flow.Request.Client.Id, accepted.ExpiresAt);
         string? code = browser.Complete(flow.Request, grant);
         await browser.RedirectAsync(http, flow.Request, code, code is null ? "temporarily_unavailable" : null).ConfigureAwait(false);
     }

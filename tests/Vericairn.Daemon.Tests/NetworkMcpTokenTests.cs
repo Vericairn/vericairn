@@ -253,7 +253,7 @@ public sealed partial class NetworkMcpTokenTests
         public string Issuer => host.OAuth!.Issuer;
         public string Resource => host.OAuth!.Resource;
 
-        internal static async Task<PublicHarness> StartAsync()
+        internal static async Task<PublicHarness> StartAsync(TimeProvider? time = null, IReadOnlyList<string>? allowedOrigins = null)
         {
             DaemonTestHome.Ensure();
             TestPrerequisites.RequireLoopback();
@@ -281,6 +281,7 @@ public sealed partial class NetworkMcpTokenTests
                 string fingerprint = RuntimeCertificate.Fingerprint(made);
                 host = await DaemonTestHome.StartAsync(estate.Root, options: new DaemonOptions
                 {
+                    Time = time, McpAllowedOrigins = allowedOrigins,
                     Mcp = true, PublicMcp = new McpPublicEndpoint("localhost:" + port, certificate, key, "127.0.0.1:" + port),
                     McpTokenStore = new FileKeyStore(VericairnHome.Path()),
                     McpClientMetadata = (id, _) => Task.FromResult<McpClientMetadata?>(id == DocumentId ? new(id, "Document client", [Redirect], null) : null),

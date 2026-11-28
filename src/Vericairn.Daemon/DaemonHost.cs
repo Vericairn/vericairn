@@ -129,7 +129,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private ListenOptions? localNetworkListener;
     private X509Certificate2? publicMcpCertificate;
     private X509Certificate2Collection? publicMcpChain;
-    private int publicConnections;
+    private readonly McpPublicConnections publicConnections = new();
 
     private DaemonHost(EstateService service, string endpointFile, string directory, DaemonOptions options, RuntimeCertificates? certificates, RuntimeIdentity? identity)
     {
@@ -449,7 +449,7 @@ public sealed class DaemonHost : IAsyncDisposable
                         ServerCertificate = publicCertificate,
                         ServerCertificateChain = publicChain,
                         SslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
-                        HandshakeTimeout = TimeSpan.FromSeconds(10),
+                        HandshakeTimeout = McpPublicConnections.HandshakeTimeout,
                     });
                     listen.Use(TlsEstablished);
                 });
@@ -961,21 +961,21 @@ public sealed class DaemonHost : IAsyncDisposable
 
     private ConnectionDelegate TrackPublic(ConnectionDelegate next) => async connection =>
     {
-        int count = Interlocked.Increment(ref publicConnections);
+        IPAddress peer = McpPublicPeer.Of((connection.RemoteEndPoint as IPEndPoint)?.Address);
+        if (!publicConnections.TryEnter(peer))
+        {
+            connection.Abort(new ConnectionAbortedException("The public MCP listener is at its connection limit."));
+            return;
+        }
+
         try
         {
-            if (count > 12)
-            {
-                connection.Abort(new ConnectionAbortedException("The public MCP listener is at its connection limit."));
-                return;
-            }
-
             connection.Items[PublicMcpMarker] = true;
             await next(connection).ConfigureAwait(false);
         }
         finally
         {
-            Interlocked.Decrement(ref publicConnections);
+            publicConnections.Leave(peer);
         }
     };
 
