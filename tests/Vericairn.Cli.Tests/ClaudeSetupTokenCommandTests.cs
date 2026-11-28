@@ -126,6 +126,24 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ASetupTokenMistakenlyPassedAsAnArgumentIsNeverEchoed(bool encoded)
+    {
+        string token = Token();
+        string argument = encoded ? token.Replace("-", "%2D", StringComparison.Ordinal) : token;
+        string home = Path.Combine(scratch, "worker-home");
+        CliHarness.Outcome result = await Invoke(home, "", null, "worker", "configure", "--launcher", "claude-code",
+            "--import-setup-token", "--account-type", "pro", argument);
+
+        Assert.NotEqual(0, result.Code);
+        Assert.False((result.Out + result.Err).Contains(token, StringComparison.Ordinal));
+        Assert.False((result.Out + result.Err).Contains(argument, StringComparison.Ordinal));
+        Assert.Contains("hidden prompt or use --token-stdin", result.Err, StringComparison.Ordinal);
+        Assert.False(File.Exists(Provision(home)));
+    }
+
+    [Theory]
     [InlineData("missing", "pro", "bare Claude Code setup-token")]
     [InlineData("wrong-shape", "pro", "bare Claude Code setup-token")]
     [InlineData("short", "pro", "bare Claude Code setup-token")]
