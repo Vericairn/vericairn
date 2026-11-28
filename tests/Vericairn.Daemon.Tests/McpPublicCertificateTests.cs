@@ -99,7 +99,9 @@ public sealed class McpPublicCertificateTests
         using var estate = new TestEstate(3);
         DateTimeOffset now = DateTimeOffset.UtcNow;
         McpPublicEndpoint endpoint = Endpoint(estate, 8443);
-        WriteCertificate(endpoint, now.AddDays(-1), now.AddDays(1));
+        // Reject permissions before any private-key import, including on machines without native TLS custody.
+        File.WriteAllText(endpoint.CertificatePath, "Fixture certificate bytes.");
+        File.WriteAllText(endpoint.KeyPath, "Fixture private-key bytes.");
         File.SetUnixFileMode(endpoint.KeyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
         InvalidOperationException refusal = Assert.Throws<InvalidOperationException>(() => endpoint.LoadCertificate(now));
         Assert.Contains("readable only by its owner", refusal.Message, StringComparison.Ordinal);
