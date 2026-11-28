@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Packs.Software;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -12,6 +13,34 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class RunAdmissionServiceTests
 {
+    [Fact]
+    public async Task ConcurrentRunStartsPrepareTheirWorkspacesWithoutReloadingTheEstate()
+    {
+        using var verifying = new Barrier(2);
+        using var preparingWorkspace = new ThreadLocal<bool>();
+        using var run = new RunEstate(budget: """{"wallMinutes":60,"attemptsPerStep":3,"concurrency":2}""");
+        CancellationToken cancellation = TestContext.Current.CancellationToken;
+        run.Service.Providers.Register(new HookedLauncher(new ReportedLauncher(new GenericLauncher()),
+            verify: () =>
+            {
+                // Both starts have judged the estate and are about to prepare their own workspace.
+                Assert.True(verifying.SignalAndWait(TestTiming.HangTimeout, cancellation));
+                preparingWorkspace.Value = true;
+                return null;
+            },
+            prepared: _ => preparingWorkspace.Value = false));
+        run.Service.Session.Loaded = _ => Assert.False(preparingWorkspace.Value, "Workspace preparation reloaded the estate.");
+
+        RunResponse[] starts = await Task.WhenAll(Enumerable.Range(0, 2).Select(index => Task.Factory.StartNew(
+            () => run.Start("generic", "claude", run.Report($"concurrent-{index}"), wallMinutes: 5, branch: $"work/concurrent-{index}"),
+            cancellation, TaskCreationOptions.LongRunning, TaskScheduler.Default)));
+
+        Assert.All(starts, started => Assert.True(started.Ok, started.Message));
+        Assert.NotEqual(starts[0].Run, starts[1].Run);
+        Assert.All(starts, started => Assert.Equal("observed-success", run.Settled(started.Run).Status));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     [Fact]
     public void APreparedIntentDoesNotAuthorizeDispatchAfterConfigurationChanges()
     {
