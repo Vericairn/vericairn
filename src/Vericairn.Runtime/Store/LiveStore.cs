@@ -15,16 +15,21 @@ namespace Vericairn.Runtime.Store;
 /// </summary>
 public sealed class LiveStore : IDisposable
 {
+    private readonly object connectionSync = new();
     private readonly SqliteConnection connection;
     private readonly SqliteReadSnapshot? readSnapshot;
     private readonly string? profile;
     private FileSnapshot? snapshot;
     private long snapshotVersion;
+    private long filesRead;
     // Numbers every snapshot taken in this process, so a snapshot's number says which records it holds whichever store took it.
     private static long snapshots;
 
     // Deterministic work counters for first-screen regression tests, independent of machine timing.
-    internal long FilesRead { get; private set; }
+    internal long FilesRead
+    {
+        get { lock (connectionSync) return filesRead; }
+    }
 
     /// <summary>Opens (creating when needed) the live store database.</summary>
     public LiveStore(string databasePath) : this(databasePath, false) { }
@@ -105,7 +110,7 @@ public sealed class LiveStore : IDisposable
         while (reader.Read())
         {
             files.Add(new RecordFile(reader.GetString(0), (byte[])reader[1]));
-            FilesRead++;
+            filesRead++;
         }
 
         return (IReadOnlyList<RecordFile>)files;
@@ -159,24 +164,22 @@ public sealed class LiveStore : IDisposable
             command.Parameters.AddWithValue("$size", bytes.LongLength);
             command.Parameters.AddWithValue("$mtime", mtime);
             command.Parameters.AddWithValue("$bytes", bytes);
-            return command.ExecuteNonQuery();
+            int written = command.ExecuteNonQuery();
+            snapshot = null;
+            return written;
         });
-        snapshot = null;
     }
 
     /// <summary>Removes a record file; true when it was held.</summary>
-    public bool Remove(string path)
+    public bool Remove(string path) => Guard(() =>
     {
-        bool removed = Guard(() =>
-        {
-            using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM files WHERE path = $path;";
-            command.Parameters.AddWithValue("$path", path);
-            return command.ExecuteNonQuery() > 0;
-        });
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM files WHERE path = $path;";
+        command.Parameters.AddWithValue("$path", path);
+        bool removed = command.ExecuteNonQuery() > 0;
         if (removed) { snapshot = null; }
         return removed;
-    }
+    });
 
     /// <summary>
     /// Brings the store in line with the records directory of a repository: new and changed files are read, deleted files
@@ -238,15 +241,22 @@ public sealed class LiveStore : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        connection.Dispose();
-        readSnapshot?.Dispose();
+        lock (connectionSync)
+        {
+            connection.Dispose();
+            readSnapshot?.Dispose();
+        }
     }
 
     // A SQLite failure, such as a malformed database, leaves the store as a bounded diagnostic, never an unhandled exception.
     private T Guard<T>(Func<T> operation)
     {
-        try { return operation(); }
-        catch (SqliteException exception) { throw LiveStoreException.From(Path, profile, exception); }
+        // Keep a whole operation on this connection together, including a sync's transaction and snapshot invalidation.
+        lock (connectionSync)
+        {
+            try { return operation(); }
+            catch (SqliteException exception) { throw LiveStoreException.From(Path, profile, exception); }
+        }
     }
 
     private void Execute(string sql)

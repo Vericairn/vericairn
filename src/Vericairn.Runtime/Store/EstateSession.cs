@@ -22,6 +22,8 @@ namespace Vericairn.Runtime.Store;
 /// </summary>
 public sealed class EstateSession : IDisposable
 {
+    // Serializes loads and their shared file and parse caches. Writers can still drop a judgment while a load is judging.
+    private readonly object loadSync = new();
     private readonly RecordParseCache parseCache = new();
     private bool readOnly;
     private LiveStore.FileSnapshot? loadedFiles;
@@ -38,14 +40,20 @@ public sealed class EstateSession : IDisposable
     private long generation;
     private readonly object keptSync = new();
 
-    internal long ParsedFiles => parseCache.ParsedFiles;
+    internal long ParsedFiles
+    {
+        get { lock (loadSync) return parseCache.ParsedFiles; }
+    }
     internal bool IsReadOnly => readOnly;
 
     /// <summary>The Vericairn home this session keeps its machine-local state under.</summary>
     internal string Home => home;
 
     // The response envelope must come from the very bytes whose model was just judged, not a second full store read/sync.
-    internal RecordFile? LoadedFile(string path) => loadedFiles?.ByPath.GetValueOrDefault(path);
+    internal RecordFile? LoadedFile(string path)
+    {
+        lock (loadSync) return loadedFiles?.ByPath.GetValueOrDefault(path);
+    }
 
     private EstateSession(string root, EstateManifest manifest, LiveStore live, IObjectStore objects, JudgmentContext? judgments)
     {
@@ -72,11 +80,14 @@ public sealed class EstateSession : IDisposable
     /// </summary>
     internal bool KeepsJudgment
     {
-        get => keepsJudgment;
+        get { lock (keptSync) return keepsJudgment; }
         set
         {
-            keepsJudgment = value;
-            if (!value) Drop();
+            lock (keptSync)
+            {
+                keepsJudgment = value;
+                if (!value) Drop();
+            }
         }
     }
 
@@ -93,11 +104,6 @@ public sealed class EstateSession : IDisposable
             generation++;
             kept = null;
         }
-    }
-
-    private long Generation()
-    {
-        lock (keptSync) return generation;
     }
 
     /// <summary>Repository root (repository-synced) or estate directory holding the manifest (local-only).</summary>
@@ -317,21 +323,24 @@ public sealed class EstateSession : IDisposable
     /// </summary>
     internal (EstateModel Model, IReadOnlyDictionary<string, RecordFile> Files) LoadIdentities()
     {
-        if (readOnly)
+        lock (loadSync)
         {
-            IReadOnlyList<RecordFile> files = ReadFiles();
-            return (EstateLoader.LoadIdentities(Root, files, null, Judgments), files.ToDictionary(f => f.Path, StringComparer.Ordinal));
-        }
+            if (readOnly)
+            {
+                IReadOnlyList<RecordFile> files = ReadFiles();
+                return (EstateLoader.LoadIdentities(Root, files, null, Judgments), files.ToDictionary(f => f.Path, StringComparer.Ordinal));
+            }
 
-        if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
-        LiveStore.FileSnapshot snapshot = Live.Snapshot();
-        if (!ReferenceEquals(snapshot, loadedFiles))
-        {
-            parseCache.Retain(snapshot.ByPath);
-            loadedFiles = snapshot;
-        }
+            if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
+            LiveStore.FileSnapshot snapshot = Live.Snapshot();
+            if (!ReferenceEquals(snapshot, loadedFiles))
+            {
+                parseCache.Retain(snapshot.ByPath);
+                loadedFiles = snapshot;
+            }
 
-        return (EstateLoader.LoadIdentities(Root, snapshot.Files, parseCache, Judgments), snapshot.ByPath);
+            return (EstateLoader.LoadIdentities(Root, snapshot.Files, parseCache, Judgments), snapshot.ByPath);
+        }
     }
 
     /// <summary>
@@ -415,14 +424,25 @@ public sealed class EstateSession : IDisposable
     /// </summary>
     internal (EstateModel Model, IReadOnlyList<RecordFile> Files) LoadWithFiles()
     {
+        lock (loadSync) return LoadWithFilesLocked();
+    }
+
+    private (EstateModel Model, IReadOnlyList<RecordFile> Files) LoadWithFilesLocked()
+    {
         Loads++;
         if (readOnly) return ReadOnlyJudgment();
 
         // Read before the lock is asked of: a writer that takes the lock after this raises the generation once it holds it, so either
         // this load finds the lock held or its keeping finds the generation changed.
-        long started = Generation();
+        long started;
+        bool keeping;
+        lock (keptSync)
+        {
+            started = generation;
+            keeping = keepsJudgment;
+        }
         // The lock is asked of this session itself, so a load under it is fresh from any caller (design/performance.md § 3.2).
-        bool keeping = keepsJudgment && writeLock?.Entered != true;
+        keeping = keeping && writeLock?.Entered != true;
         CanonicalStamp stamp = default;
         if (keeping)
         {
@@ -482,19 +502,22 @@ public sealed class EstateSession : IDisposable
     /// </summary>
     internal (EstateModel Model, IReadOnlyList<RecordFile> Files) JudgeAfresh()
     {
-        if (readOnly) return ReadOnlyJudgment();
-        using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
-        if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
-        LiveStore.FileSnapshot files = Live.Snapshot();
-        if (!ReferenceEquals(files, loadedFiles))
+        lock (loadSync)
         {
-            parseCache.Retain(files.ByPath);
-            loadedFiles = files;
-            Drop();
-        }
+            if (readOnly) return ReadOnlyJudgment();
+            using IDisposable stage = ClientOperationActivity.Stage(ReadingStage);
+            if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
+            LiveStore.FileSnapshot files = Live.Snapshot();
+            if (!ReferenceEquals(files, loadedFiles))
+            {
+                parseCache.Retain(files.ByPath);
+                loadedFiles = files;
+                Drop();
+            }
 
-        ClientOperationActivity.Report(JudgingStage(files.Files.Count));
-        return (EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments), files.Files);
+            ClientOperationActivity.Report(JudgingStage(files.Files.Count));
+            return (EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader, context: Judgments), files.Files);
+        }
     }
 
     // From 0.9.5 (FIX-171) a read-only load keeps the files it judged, as a writable one does, so a read of a record's bytes
