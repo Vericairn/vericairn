@@ -924,35 +924,57 @@ SR-0001. Start with an operator and a scheduler agent, each with an admitted
 device, and a separate Git repository named `vericairn-example-services-workspace`.
 Adopt the workspace and register its clone so the draft step has a repository.
 
-The roster names the agent as scheduler and the operator as approver. In
-`roster.json`, set the corresponding `principals` entries to the scheduler's
-and operator's principal IDs. The service request's scope is the sentence
-shown in `work new`. Vericairn 0.9.5 refuses the first proposal and a legacy
-run's activation with `flow.permitted-paths`. The legacy goal has the same prose
-scope and no typed pattern. Propose the new run with `--flow-path
-'appointments/**'` and activate it. The preview and the routed assignment's
-brief each give the scheduler exactly `path:appointments/**`.
+Save this roster as `roster.json`, substituting the scheduler's and operator's
+principal IDs.
+
+`{"roles":[{"role":"scheduler","principals":["${scheduler}"]},{"role":"approver","principals":["${operator}"]}]}`
+
+The service request's scope is the sentence shown in `work new`. Vericairn
+0.9.5 refuses the first proposal and a legacy run's activation with
+`flow.permitted-paths`. The legacy goal has the same prose scope and no typed
+pattern. Propose the new run with `--flow-path 'appointments/**'` and activate
+it. The preview and the routed assignment's brief each give the scheduler
+exactly `path:appointments/**`.
 
 The command block uses placeholders. Substitute the IDs and hashes given by
 the preceding commands. For `${untypedGoal}`, use an already recorded legacy
 goal or skip that activation probe on an estate without one. Use a scratch
-directory for the JSON files and export. The journey fixture gives the legacy
-goal body and the other JSON inputs. [E3 journey fixture](../tests/examples/e3-services.json)
+directory for the JSON files and export. The legacy goal uses the same request
+and prose-scoped work order as the new proposal.
 
-After routing the draft, the scheduler records an attempt through MCP's
-`work_attempt`, stores `appointment.json` as an object, and records
-a completed result with `work_result`. The result names the object by hash as
-its `appointment` output with media type `application/json`. Use the attempt
-and result IDs and hashes for the following commands.
+The scheduler runs locally in your own coding-agent harness, using your own
+harness account. No hosted service takes part. Set `${launcherCommand}` to your
+worker launcher's executable or JSON argument array. The first draft step shows what
+happens when the worker can reach a scratch operator's file signing key. It
+refuses the launch. In an isolated scratch estate, the operator can record the
+shown exception, replacing `${custodyExpiry}` with a near-future UTC timestamp.
+With a presence-backed operator device, start at the draft step after the
+exception command.
 
-The operator's first review passes the Tuesday morning draft. Each review body
-uses `independence` set to `operator`, `outcome` set to `pass`, a summary of
-the visit inspected, and an empty `findings` list. The scheduler's revised
-result supersedes the first one, keeps the same attempt as its subject, and
-names the Wednesday morning object. When the result changes, the first approval
-becomes stale. The next step asks the operator again, and the new assignment
-pins the revised draft. The second review passes the revised result by its
-ID and hash.
+In the dispatched run, the scheduler records an attempt through MCP's
+`work_attempt`, creates the appointment, and records a completed result with
+`work_result`. The result names the appointment object by hash as its
+`appointment` output with media type `application/json`. Use the attempt and
+result IDs and hashes for the following commands.
+
+The operator's first review passes the Tuesday morning draft. Save an approval
+body for each visit as `approve-draft.json` and `approve-revision.json`, using
+the summary to identify the appointment you inspected.
+
+`{"independence":"operator","outcome":"pass","summary":"The visit matches the request.","findings":[]}`
+
+`goal show` reports `2 of 2 steps done; the run is complete`. The goal still
+awaits evaluation and acceptance. A review with outcome `findings` sends the
+draft back to the scheduler for another attempt.
+
+For the revision, change the visit to Wednesday morning in
+`appointment-revised.json` and put that file as an object. Save the original
+result body as `result-revised.json`, updating its `summary` and the hash of
+the `appointment` output. The revised result supersedes the first and keeps the
+same attempt as its subject. `estate check` reports the earlier review as
+`record.subject-stale`. The flow asks again only through `goal step`, never
+unattended. The new assignment pins the revised draft. The second review
+passes that exact result by its ID and hash.
 
 For `estate restore` and the commands after it, use a second, fresh Vericairn
 home and an empty destination directory, shown as `${estate}` in the restore
@@ -1000,22 +1022,19 @@ vericairn goal show '${goal}'
 
 `goal show` gives the exact starter flow revision, the steps that passed, and
 the review that approved the latest draft. `records show` on that review
-identifies the approver and the result revision. A headless Workbench Goals workspace test checks the pending approval and
-the person who holds it.
-The scheduler stand-in reads the same history through MCP's `goal_get` and
-`work_observe` tools. After restore, `recover inspect` lists both devices with
-their keys absent. The run position and exact approval survive the restore.
+identifies the approver and the result revision. In Workbench, open the goal in
+the Goals workspace to see its step states. Use **Open Record** on the goal to
+read the flow pin in the Source pane, and on each review to read its signer and
+the exact result it reviewed. MCP's `goal_get` and `work_observe` tools read the
+same history. After restore, `recover inspect` lists both devices with their
+keys absent. The run position and exact approval survive the restore.
 See [export and restore](operator-guide.md#10-export-restore-recovery-and-divergence).
 
-The journey routes the draft through the worker with a stand-in launcher and a
-custody exception scoped to its scratch file keys. The package smoke runs the
-typed-path preview and operator commands on the candidate binary. It uses the
-fixture's runtime for the stand-in dispatch and MCP calls.
-The starter flow's live worker qualification is planned with RUN-06. It
-covers an isolated account, the operator's presence key and workspace baseline,
-and a worker-launched scheduler. GOAL-15 supplies the planned exposure verdict
-and recorded check basis for the shipped command. The restore in this journey
-uses two homes on one machine. The public repeat restores on a second machine.
+The live worker qualification is pending RUN-06. It covers an isolated account,
+the operator's presence key, a workspace baseline and a worker-launched scheduler.
+The `operation.exposure` verdict for the draft preview is pending RUN-06 and
+GOAL-15. When both land, the draft preview must report the typed paths and the
+exposure verdict for uncovered workspace history.
 
 ## Client and extension contract
 
