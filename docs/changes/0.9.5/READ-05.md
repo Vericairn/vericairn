@@ -25,9 +25,9 @@
 ### In "Operations", after the paragraph beginning "From 0.8.0, `docs regenerate --compare`"
 
 > From 0.9.5 (READ-05), `GET /v1/companions/render` includes optional `page` metadata for renditions whose generator reports
-> page boundaries. `number` is the one-based page, `total` is the number of pages and `items` lists the permitted record
-> rows rendered on that page in the same order. Each row gives `revision`, `hash`, `recordType` and `title`. A sources-only
-> response omits `page`.
+> page boundaries. `number` is the one-based page and `total` is the number of pages. For a collection page, `items` lists
+> the permitted record rows rendered on that page in the same order. Each row gives `revision`, `hash`, `recordType` and
+> `title`. For a single-item page, `items` is an empty array. A sources-only response omits `page`.
 
 ## docs/api-compatibility-0.9.5.md
 

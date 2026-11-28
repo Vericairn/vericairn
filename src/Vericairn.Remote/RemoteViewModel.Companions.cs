@@ -250,8 +250,7 @@ public sealed partial class RemoteViewModel
                 if (Selected != estate || !CompanionsOpen) return;
                 if (MatchesCompanionBasis(retained.Response, basis))
                 {
-                    ShowCompanion(retained, cached: true);
-                    CompanionMessage = retained.Response.Reason ?? "";
+                    ShowCompanionRendition(retained, cached: true);
                     return;
                 }
             }
@@ -270,8 +269,7 @@ public sealed partial class RemoteViewModel
             var observation = new CompanionObservation(request, response, Now);
             if (request.Revision is null) cachedCollection = observation;
             else cachedItem = observation;
-            ShowCompanion(observation);
-            CompanionMessage = response.Reason ?? "";
+            ShowCompanionRendition(observation);
         }
         catch (Exception exception) when (ClientFailure.FromException(exception) is not null ||
             exception is NotSupportedException or JsonException or IOException or UnauthorizedAccessException)
@@ -279,6 +277,18 @@ public sealed partial class RemoteViewModel
             if (Selected == estate && CompanionsOpen) CompanionReadUnavailable();
         }
         finally { Busy = false; }
+    }
+
+    private void ShowCompanionRendition(CompanionObservation observation, bool cached = false)
+    {
+        ShowCompanion(observation, cached: cached);
+        string message = observation.Response.Reason ?? "";
+        if (observation.Request.Selection == "current" && observation.Response.Page is null)
+        {
+            const string needsNewerRuntime = "Item navigation requires a newer runtime.";
+            message = message.Length == 0 ? needsNewerRuntime : $"{message} {needsNewerRuntime}";
+        }
+        CompanionMessage = message;
     }
 
     private void CompanionReadUnavailable(AttentionReference? handoff = null)

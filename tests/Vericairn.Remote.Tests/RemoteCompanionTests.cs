@@ -259,6 +259,35 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task ACollectionWithoutPageMetadataExplainsHowToGetItemNavigation()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = CompanionConnections(estate);
+        connections.TransformCompanionRendition = (_, response) => response with { Page = null };
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            await OpenWorkOrdersAsync(model);
+            Assert.Contains("Shown on the phone", model.CompanionText, StringComparison.Ordinal);
+            Assert.False(model.ShowCompanionItems);
+            Assert.False(model.ShowCompanionPages);
+            Assert.Equal("Item navigation requires a newer runtime.", model.CompanionMessage);
+
+            await model.BackCompanionCommand.ExecuteAsync();
+            await OpenWorkOrdersAsync(model);
+            Assert.StartsWith("Cached", model.CompanionFreshness, StringComparison.Ordinal);
+            Assert.Equal("Item navigation requires a newer runtime.", model.CompanionMessage);
+
+            await model.BackCompanionCommand.ExecuteAsync();
+            model.SelectedCompanionCollection = Assert.Single(model.CompanionCollections, collection => collection.Name == "Estate manifest");
+            await model.OpenCompanionCollectionCommand.ExecuteAsync();
+            Assert.NotEmpty(model.CompanionText);
+            Assert.DoesNotContain("Item navigation", model.CompanionMessage, StringComparison.Ordinal);
+            return true;
+        });
+    }
+
+    [Fact]
     public async Task AReadableExactItemDoesNotOfferDesktopContinuation()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
