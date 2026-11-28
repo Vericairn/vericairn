@@ -62,7 +62,7 @@ public sealed class WorkOrderType : IRecordType
 
             if (context.Model.Chain(order)[0] == root)
             {
-                context.Error("work.after", "A work order does not start after itself.");
+                context.BodyError("work.after", "A work order does not start after itself.");
                 return;
             }
 
@@ -127,7 +127,7 @@ public sealed class WorkOrderType : IRecordType
         After(context, after);
         foreach (BodyReader blocker in blockedBy ?? [])
         {
-            RecordReference? reference = RecordParser.ParseReference(blocker.Element, blocker.Location, context.Findings);
+            RecordReference? reference = RecordParser.ParseReference(blocker.Element, blocker.Location, context.BodyFindings);
             if (reference is null)
             {
                 continue;
@@ -145,7 +145,7 @@ public sealed class WorkOrderType : IRecordType
         {
             foreach (BodyReader input in inputs)
             {
-                RecordReference? reference = RecordParser.ParseReference(input.Element, input.Location, context.Findings);
+                RecordReference? reference = RecordParser.ParseReference(input.Element, input.Location, context.BodyFindings);
                 if (reference is not null)
                 {
                     context.RequireReference("inputs", reference.Id, reference.Type);

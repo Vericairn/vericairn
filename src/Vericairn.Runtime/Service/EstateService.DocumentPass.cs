@@ -61,8 +61,8 @@ public sealed partial class EstateService
             // is too, and a presence session lists both by exact hash (ID-16).
             DateTimeOffset at = SessionNow();
             RecordDraft ordering = Fixed(new RecordDraft("work-order", request.By, orderBody), at);
-            (AuthoredRecord? unsignedOrder, string? refusal) = AuthorUnsignedLocked(ordering, model);
-            if (unsignedOrder is null) return new([], new("refused", refusal!, []));
+            (AuthoredRecord? unsignedOrder, Problem? refusal) = AuthorUnsignedLocked(ordering, model);
+            if (unsignedOrder is null) return new([], refusal);
             string[] context = [.. selected.SelectMany(d =>
                 d.CoveredPaths.Select(p => $"{d.Path}: covers {p}.")
                     .Concat(d.Changes.Select(c => $"{d.Path}: {c.Kind} {c.Path} between the publication commits."))
@@ -90,10 +90,10 @@ public sealed partial class EstateService
                 ? [new("work-order", request.Key, "records a new work-order"), new("assignment", request.Key, "records a new assignment")] : null,
                 ExactSession("docs pass assign", "docs pass assign:" + request.Release.Id + ":" + request.Key, [ordering, assigning], redatable: false));
             (AuthoredRecord? order, refusal) = AuthorLocked(SessionDraft(ordering), model);
-            if (order is null) return new([], new("refused", refusal!, []));
+            if (order is null) return new([], refusal);
             if (order.Envelope.ComputedHash != unsignedOrder.Envelope.ComputedHash) return new([], new("refused", "The work order changed while it was signed; nothing was assigned.", []));
             (AuthoredRecord? assignment, refusal) = AuthorLocked(SessionDraft(assigning), model);
-            if (assignment is null) return new([], new("refused", refusal!, []));
+            if (assignment is null) return new([], refusal);
             var stored = StoreTogetherLocked([order, assignment], "Assign publication documentation for review.", order.Envelope.Id, Check);
             return new(stored.Written, stored.Written.Count > 0 && stored.Problem is not null
                 ? stored.Problem with { Code = "reconcile-required", Message = "The documentation assignment batch did not finish. Inspect the returned receipts and original batch before retrying." }

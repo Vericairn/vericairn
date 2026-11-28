@@ -129,7 +129,7 @@ public sealed class ProductType : IRecordType
             string? repository = changes.Ulid("repository", true);
             if (context.RequireReference("changes.repository", repository, "resource") is { } resource
                 && Estate.EstateModel.BodyString(resource, "kind") != "repository")
-                changes.Error("product.changes", "repository", "Changes require a repository resource.");
+                changes.RelationshipError("product.changes", "repository", "Changes require a repository resource.");
             changes.Text("target", true, 200);
             changes.StringArray("requiredChecks", true, allowEmpty: true, maxItemLength: 200);
             changes.NoOtherKeys();
@@ -153,7 +153,7 @@ public sealed class ProductType : IRecordType
                 if (context.Model.OfType("release").Any(record => record.Subject is not null
                     && productChain.Contains(record.Subject.Id, StringComparer.Ordinal)
                     && reserved.Contains(Estate.EstateModel.BodyString(record, "version"), StringComparer.OrdinalIgnoreCase)))
-                    packages.Error("product.packages-reserved", "reserved", "A reserved placeholder version cannot also be a recorded release of this product.");
+                    packages.RelationshipError("product.packages-reserved", "reserved", "A reserved placeholder version cannot also be a recorded release of this product.");
             }
             packages.NoOtherKeys();
         }

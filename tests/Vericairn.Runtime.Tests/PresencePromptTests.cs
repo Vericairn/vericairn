@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
@@ -127,6 +128,122 @@ public sealed class PresencePromptTests
         Assert.Equal($"Signature 1 of 1: acceptance STEP-1: accepts result {step.Result.Id} at its exact hash", notices[1].Text);
         Assert.Equal("Signed 1 of 1.", notices[2].Text);
         Assert.Equal($"sign Vericairn signature 1 of 1: acceptance STEP-1, accepts result {step.Result.Id} at its exact hash", Assert.Single(custody.Reasons));
+    }
+
+    [Theory]
+    [InlineData("resource", "{}", "body.missing")]
+    [InlineData("resource", """{"kind":"service","name":15,"role":"Documentation","location":{"url":"https://example.invalid"},"visibility":"public"}""", "body.type")]
+    [InlineData("resource", """{"kind":"service","name":"","role":"Documentation","location":{"url":"https://example.invalid"},"visibility":"public"}""", "body.length")]
+    [InlineData("resource", """{"kind":"service","name":"Site","role":"Documentation","location":{"url":"http://example.invalid"},"visibility":"public"}""", "body.pattern")]
+    [InlineData("qualification", """{"profile":"Test profile","outcome":"qualified","evidence":[],"summary":"Qualified.","limitations":[]}""", "qualification.evidence")]
+    [InlineData("assignment", """{"outcome":"Assign a step."}""", "body.missing")]
+    public void AnInvalidSingleRecordBodyDoesNotAskForASignature(string type, string body, string code)
+    {
+        using var f = new OperatorCloseFixture();
+        var step = f.Add("STEP-1");
+        RecordingCustody custody = Presence(f);
+        custody.BeforeSigning = _ => Assert.Fail("An invalid body must never reach the signing device.");
+        long start = f.Api.PresencePrompts(new()).Cursor;
+        using JsonDocument parsed = JsonDocument.Parse(body);
+
+        WriteOutcome refused = type == "assignment"
+            ? f.Api.Assign(new(step.Order.Id, f.Estate.BuilderId, f.Estate.OperatorId, parsed.RootElement))
+            : f.Api.NewRecord(new(type, f.Estate.OperatorId, parsed.RootElement));
+
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == code && finding.Severity == "error");
+        Assert.Empty(custody.Reasons);
+        Assert.Empty(Since(f.Api, start));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ASubjectTheRecordAloneGetsWrongDoesNotAskForASignature(bool wrongType)
+    {
+        using var f = new OperatorCloseFixture();
+        var step = f.Add("STEP-1");
+        RecordingCustody custody = Presence(f);
+        custody.BeforeSigning = _ => Assert.Fail("A record without its subject must never reach the signing device.");
+        long start = f.Api.PresencePrompts(new()).Cursor;
+        using JsonDocument body = JsonDocument.Parse("""{"status":"active","note":"Started."}""");
+
+        WriteOutcome refused = f.Api.NewRecord(new("work-status", f.Estate.OperatorId, body.RootElement, Subject: wrongType ? "assignment:" + step.Assignment.Id : null));
+
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "record.subject" && finding.Severity == "error");
+        Assert.Empty(custody.Reasons);
+        Assert.Empty(Since(f.Api, start));
+    }
+
+    [Fact]
+    public void ACredentialInTheRecordsOwnBytesDoesNotAskForASignature()
+    {
+        using var f = new OperatorCloseFixture();
+        f.Add("STEP-1");
+        RecordingCustody custody = Presence(f);
+        custody.BeforeSigning = _ => Assert.Fail("A record carrying a credential must never reach the signing device.");
+        long start = f.Api.PresencePrompts(new()).Cursor;
+        // Built at run time, so this file carries no credential-shaped text of its own.
+        var body = new JsonObject
+        {
+            ["kind"] = "service", ["name"] = "Site " + "sk" + "-" + new string('A', 40), ["role"] = "Documentation",
+            ["location"] = new JsonObject { ["url"] = "https://example.invalid" }, ["visibility"] = "public",
+        };
+
+        WriteOutcome refused = f.Api.NewRecord(new("resource", f.Estate.OperatorId, JsonSerializer.SerializeToElement(body)));
+
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "secrets.pattern" && finding.Severity == "error");
+        Assert.Empty(custody.Reasons);
+        Assert.Empty(Since(f.Api, start));
+    }
+
+    [Fact]
+    public void ASignedSingleWriteStillChecksBodyReferencesUnderTheWriteLock()
+    {
+        using var f = new OperatorCloseFixture();
+        var step = f.Add("STEP-1");
+        RecordingCustody custody = Presence(f);
+        string missing = Ulid.NewUlid().Value;
+        JsonElement original = step.Assignment.Body.GetProperty("brief");
+        JsonObject brief = JsonNode.Parse(original.GetRawText())!.AsObject();
+        brief["sources"] = JsonSerializer.SerializeToNode(new[] { new { type = "resource", id = missing } });
+        bool judged = false;
+        f.Api.BeforeValidatingRecords = _ => judged = f.Api.Session.WriteLock?.Entered == true;
+
+        WriteOutcome refused = f.Api.Assign(new(step.Order.Id, f.Estate.BuilderId, f.Estate.OperatorId, JsonSerializer.SerializeToElement(brief)));
+
+        Assert.False(refused.Ok);
+        Assert.Single(custody.Reasons);
+        Assert.True(judged);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "body.reference");
+    }
+
+    [Fact]
+    public void AProductChecksItsRepositoryResourceUnderTheWriteLock()
+    {
+        using var f = new OperatorCloseFixture();
+        var service = f.Estate.Add("resource", f.Estate.OperatorId,
+            """{"kind":"service","name":"Site","role":"Documentation","location":{"url":"https://example.invalid"},"visibility":"public"}""");
+        RecordingCustody custody = Presence(f);
+        var body = new JsonObject
+        {
+            ["name"] = "Sample product", ["slug"] = "sample", ["summary"] = "The product under test.",
+            ["editions"] = new JsonArray(new JsonObject { ["name"] = "Sample", ["slug"] = "sample", ["summary"] = "The base edition." }),
+            ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "The command line." }),
+            ["changes"] = new JsonObject { ["provider"] = "github", ["repository"] = service.Id, ["target"] = "main", ["requiredChecks"] = new JsonArray() },
+        };
+        bool judged = false;
+        f.Api.BeforeValidatingRecords = _ => judged = f.Api.Session.WriteLock?.Entered == true;
+
+        WriteOutcome refused = f.Api.NewRecord(new("product", f.Estate.OperatorId, JsonSerializer.SerializeToElement(body)));
+
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "product.changes" && finding.Severity == "error");
+        Assert.Single(custody.Reasons);
+        Assert.True(judged);
+        Assert.Empty(f.Estate.Load().OfType("product"));
     }
 
     [Fact]

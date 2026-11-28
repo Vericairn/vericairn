@@ -136,7 +136,7 @@ public sealed class GoalType : IRecordType
 
         foreach (BodyReader input in inputs ?? [])
         {
-            RecordReference? reference = RecordParser.ParseReference(input.Element, input.Location, context.Findings);
+            RecordReference? reference = RecordParser.ParseReference(input.Element, input.Location, context.BodyFindings);
             if (reference is not null)
             {
                 context.RequireReference("inputs", reference.Id, reference.Type);
@@ -169,7 +169,7 @@ public sealed class GoalType : IRecordType
         IReadOnlyList<string> reserved = GoalRules.ReservedActions(context.Model, context.Record, context.Record);
         if (delegated == sponsor)
         {
-            context.Error("goal.delegate", "The sponsor accepts the goal itself; a delegate is another principal.");
+            context.BodyError("goal.delegate", "The sponsor accepts the goal itself; a delegate is another principal.");
         }
         else if (!GoalRules.IsPerson(context.Model, sponsor))
         {
@@ -215,7 +215,7 @@ public sealed class GoalType : IRecordType
         string? subject = predicate.Ulid("subject", false);
         if (subject is not null && context.Find(subject) is null)
         {
-            predicate.Error("body.reference", "subject", $"'subject' references {subject}, which does not exist in this estate.");
+            predicate.RelationshipError("body.reference", "subject", $"'subject' references {subject}, which does not exist in this estate.");
         }
 
         string? product = predicate.Ulid("product", false);
@@ -225,7 +225,7 @@ public sealed class GoalType : IRecordType
         }
         else if (product is not null && context.Find(product) is not { Type: "product" })
         {
-            predicate.Error("body.reference", "product", $"'product' references {product}, which is not a product record of this estate.");
+            predicate.RelationshipError("body.reference", "product", $"'product' references {product}, which is not a product record of this estate.");
         }
 
         BodyReader? fields = predicate.Nested("fields", false);

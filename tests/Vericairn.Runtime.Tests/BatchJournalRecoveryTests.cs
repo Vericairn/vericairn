@@ -218,7 +218,8 @@ public class BatchJournalRecoveryTests
         Assert.Contains(task.Location, status.Json.GetRawText(), StringComparison.Ordinal);
         Assert.Contains(service.Check().Findings, finding => finding.Code == task.Code && finding.Location == task.Location);
 
-        using JsonDocument body = JsonDocument.Parse("""{"kind":"human","name":"Another person","roles":[]}""");
+        // Use a valid draft so the write reaches the journal check under the lock.
+        using JsonDocument body = JsonDocument.Parse("""{"kind":"human","name":"Another person","roles":["contributor"]}""");
         WriteOutcome refused = service.NewRecord(new NewRecordRequest("principal", by, body.RootElement));
         Assert.False(refused.Ok);
         Assert.Equal("reconcile-required", refused.Problem!.Code);

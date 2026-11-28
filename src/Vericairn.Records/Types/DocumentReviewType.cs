@@ -126,7 +126,7 @@ public sealed class DocumentReviewType : IRecordType
         bool elsewhere = EstateModel.BodyString(declaration, "repository") is not null;
         if (elsewhere && content is not null && commit is null)
         {
-            content.Error("document.commit", "commit", "A document of another repository is reviewed at a commit.");
+            content.RelationshipError("document.commit", "commit", "A document of another repository is reviewed at a commit.");
         }
         else if (!elsewhere && commit is not null)
         {
@@ -136,7 +136,7 @@ public sealed class DocumentReviewType : IRecordType
         IReadOnlyList<string> on = Triggers(declaration);
         if (clears && covered is null && on.Contains("covers"))
         {
-            body.Error("document.covered", "covered", "A covers trigger is cleared only by a review that records the covered paths' identity.");
+            body.RelationshipError("document.covered", "covered", "A covers trigger is cleared only by a review that records the covered paths' identity.");
         }
 
         foreach (BodyReader answer in answers ?? [])
@@ -151,7 +151,7 @@ public sealed class DocumentReviewType : IRecordType
 
             if (answer.Has("record"))
             {
-                RecordReference? reference = RecordParser.ParseReference(answer.Element.GetProperty("record"), answer.Location + ".record", context.Findings);
+                RecordReference? reference = RecordParser.ParseReference(answer.Element.GetProperty("record"), answer.Location + ".record", context.BodyFindings);
                 answer.Allow("record");
                 if (reference is not null)
                 {

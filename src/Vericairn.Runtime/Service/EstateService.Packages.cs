@@ -157,8 +157,8 @@ public sealed partial class EstateService
                         ["limitations"] = new JsonArray("Public API state at observation time; registry indexes can change or lag.",
                             "Package bytes, acceptance and the identity of the account holder were not verified."),
                     };
-                    (AuthoredRecord? record, string? refusal) = AuthorLocked(new("observation", request.By, Element(body), (intent ?? selection.Subject).Reference), model);
-                    if (record is null) return PackageProblem("The observation could not be authored: " + refusal);
+                    (AuthoredRecord? record, Problem? refusal) = AuthorLocked(new("observation", request.By, Element(body), (intent ?? selection.Subject).Reference), model);
+                    if (record is null) return PackageProblem("The observation could not be authored: " + refusal!.Message, refusal);
                     authored.Add(record);
                     results.Add(new(state, Written(record.Envelope)));
                     if (intent is not null) matched = PackageRecordRules.Matches(EstateModel.BodyString(intent, "action")!, intent.Body.GetProperty("target"), Element(facts));
@@ -172,8 +172,8 @@ public sealed partial class EstateService
                     body["observed"] = new JsonObject { ["at"] = states[0].AsOf, ["reference"] = observation.Id,
                         ["summary"] = matched ? "The intended state was observed on nuget.org." : "The intended state was not observed on nuget.org; the account holder's act is unconfirmed." };
                     body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "The registry state observed against the original intent.", ["location"] = observation.Path, ["hash"] = observation.Hash });
-                    (AuthoredRecord? record, string? refusal) = AuthorLocked(new("operation", request.By, Element(body), operation.Subject, operation.Id), model);
-                    if (record is null) return PackageProblem("The outcome could not be authored: " + refusal);
+                    (AuthoredRecord? record, Problem? refusal) = AuthorLocked(new("operation", request.By, Element(body), operation.Subject, operation.Id), model);
+                    if (record is null) return PackageProblem("The outcome could not be authored: " + refusal!.Message, refusal);
                     authored.Add(record);
                     outcome = Written(record.Envelope);
                 }
