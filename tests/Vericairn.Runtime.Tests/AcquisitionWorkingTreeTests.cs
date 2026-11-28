@@ -18,8 +18,9 @@ public sealed class AcquisitionWorkingTreeTests : IDisposable
     [InlineData("hard-link", "hard links")]
     [InlineData("pipe", "non-regular file")]
     [InlineData("oversize", "file size")]
-    public void InspectRefusesTheUnsafeEntryByName(string kind, string reason)
+    public void InspectKeepsOnlyTheNameOfAnUntrackedUnsafeEntry(string kind, string reason)
     {
+        _ = reason;
         Assert.SkipWhen(OperatingSystem.IsWindows() && kind is "symbolic-file" or "symbolic-directory" or "pipe",
             "Creating symlinks needs Windows privileges and a FIFO is POSIX-specific.");
         string repository = Repository();
@@ -47,8 +48,41 @@ public sealed class AcquisitionWorkingTreeTests : IDisposable
                 break;
         }
 
+        // From 0.9.5 (CODE-88) an untracked entry's name is all status reads of it: a link, special file, hard-linked or oversized
+        // file is never opened and keeps only its name in the private copy, so it is reported as untracked and refuses nothing.
         var adapter = new GitCommandAdapter();
-        ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(repository));
+        RepositoryObservation observation = adapter.Inspect(repository);
+        Assert.False(observation.Clean);
+        Assert.Equal(1, observation.Untracked);
+        Assert.Equal("outside the repository\n", File.ReadAllText(marker));
+    }
+
+    [Theory]
+    [InlineData("hard-link", "hard links")]
+    [InlineData("oversize", "file size")]
+    public void InspectRefusesATrackedUnsafeEntryByName(string kind, string reason)
+    {
+        string repository = Repository();
+        string name = Path.Combine(repository, kind);
+        if (kind == "oversize")
+        {
+            using (FileStream stream = File.Create(name)) stream.SetLength(64L * 1024 * 1024 + 1);
+        }
+        else
+        {
+            File.WriteAllText(name, "tracked\n");
+        }
+
+        RunEstate.Git(repository, "add", kind);
+        RunEstate.Git(repository, "commit", "-qm", "Track the entry");
+        if (kind == "hard-link")
+        {
+            string other = Path.Combine(scratch, "other-link");
+            Assert.True(OperatingSystem.IsWindows() ? CreateHardLinkW(other, name, 0) : link(name, other) == 0);
+        }
+
+        // A tracked file's content is what status compares, so one that cannot be copied whole refuses the read by name.
+        ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => new GitCommandAdapter().Inspect(repository));
         Assert.Contains("\"" + kind + "\"", refusal.Message, StringComparison.Ordinal);
         Assert.Contains(reason, refusal.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -270,7 +304,8 @@ public sealed class AcquisitionWorkingTreeTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
+        // Git writes its object files read-only, which a plain recursive delete cannot remove on Windows.
+        if (Directory.Exists(scratch)) WorkspaceCleanup.Delete(scratch);
     }
 
 #pragma warning disable SYSLIB1054

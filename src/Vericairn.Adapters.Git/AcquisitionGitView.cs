@@ -147,8 +147,9 @@ internal sealed class AcquisitionGitView
             throw new ProviderRefusedException("The repository has too many shared index files.");
     }
 
-    internal void CopyWorkingTree(string destination, IReadOnlySet<string> submodules) =>
-        AcquisitionWorkingTree.CopyFrom(boundary, Root, destination, path => !submodules.Contains(path), workingTree: true);
+    internal void CopyWorkingTree(string destination, IReadOnlySet<string> submodules, IReadOnlySet<string> tracked, ISet<string> withheld) =>
+        AcquisitionWorkingTree.CopyFrom(boundary, Root, destination, path => !submodules.Contains(path), workingTree: true,
+            withholdable: path => !tracked.Contains(path), withheld: withheld);
 
     internal string? LocalOrigin(string value)
     {

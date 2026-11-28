@@ -4,6 +4,7 @@
 using Vericairn.Adapters.Git;
 using Vericairn.Providers.GitHub;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -49,7 +50,8 @@ public sealed class ProviderProcessTests
         }
         finally
         {
-            Directory.Delete(repository, recursive: true);
+            // Git writes its object files read-only, which a plain recursive delete cannot remove on Windows.
+            WorkspaceCleanup.Delete(repository);
         }
     }
 

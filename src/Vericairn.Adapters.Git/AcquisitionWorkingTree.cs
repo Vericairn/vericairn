@@ -25,8 +25,13 @@ internal static partial class AcquisitionWorkingTree
     internal static void Copy(string root, string destination, Func<string, bool>? include = null, bool workingTree = true)
         => CopyFrom(root, root, destination, include, workingTree);
 
-    /// <summary>Copies a directory reached through the selected acquisition boundary.</summary>
-    internal static void CopyFrom(string root, string source, string destination, Func<string, bool>? include = null, bool workingTree = false)
+    /// <summary>
+    /// Copies a directory reached through the selected acquisition boundary. A file <paramref name="withholdable"/> names (an
+    /// untracked one, whose name is all Git's status reads) that is not a single-link regular file, or would exceed a limit, is
+    /// written as an empty placeholder of the same name and added to <paramref name="withheld"/> instead of refusing the copy.
+    /// </summary>
+    internal static void CopyFrom(string root, string source, string destination, Func<string, bool>? include = null, bool workingTree = false,
+        Func<string, bool>? withholdable = null, ISet<string>? withheld = null)
     {
         var watch = Stopwatch.StartNew();
         int entries = 0;
@@ -91,7 +96,19 @@ internal static partial class AcquisitionWorkingTree
                 if (include?.Invoke(current) == false) continue;
 
                 string next = Path.Combine(target, leaf);
-                Entry info = directory.Classify(leaf);
+                bool mayWithhold = withholdable?.Invoke(current) == true;
+                Entry info;
+                try
+                {
+                    info = directory.Classify(leaf);
+                }
+                catch (IOException) when (mayWithhold)
+                {
+                    // A link or reparse point is never followed; an untracked one keeps only its name.
+                    Withhold(next);
+                    continue;
+                }
+
                 if (info.Type == DirectoryMode)
                 {
                     using var child = directory.OpenDirectory(leaf);
@@ -100,26 +117,51 @@ internal static partial class AcquisitionWorkingTree
                     continue;
                 }
 
+                if (mayWithhold && (info.Type != RegularMode || info.Links != 1))
+                {
+                    // Never opened: a special file, link or hard-linked file that is untracked keeps only its name.
+                    Withhold(next);
+                    continue;
+                }
+
                 using SafeFileHandle file = directory.OpenFile(leaf, info, out int mode);
                 using var source = new FileStream(file, FileAccess.Read, bufferSize: 1);
                 if (source.Length > maximumFileBytes || source.Length > maximumBytes - totalBytes)
-                    throw new IOException("the file size exceeds the acquisition limit.");
+                {
+                    if (!mayWithhold) throw new IOException("the file size exceeds the acquisition limit.");
+                    Withhold(next);
+                    continue;
+                }
 
+                long copied = 0;
+                bool grew = false;
                 using (var output = new FileStream(next, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
-                    long fileBytes = 0;
                     while (true)
                     {
                         CheckTime();
-                        int read = source.Read(buffer, 0, (int)Math.Min(buffer.Length, Math.Min(maximumFileBytes - fileBytes, maximumBytes - totalBytes) + 1));
+                        int read = source.Read(buffer, 0, (int)Math.Min(buffer.Length, Math.Min(maximumFileBytes - copied, maximumBytes - totalBytes - copied) + 1));
                         if (read == 0) break;
-                        fileBytes += read;
-                        totalBytes += read;
-                        if (fileBytes > maximumFileBytes || totalBytes > maximumBytes)
-                            throw new IOException("the file grew beyond the acquisition limit.");
+                        copied += read;
+                        if (copied > maximumFileBytes || totalBytes + copied > maximumBytes)
+                        {
+                            if (!mayWithhold) throw new IOException("the file grew beyond the acquisition limit.");
+                            grew = true;
+                            break;
+                        }
+
                         output.Write(buffer, 0, read);
                     }
                 }
+
+                if (grew)
+                {
+                    File.Delete(next);
+                    Withhold(next);
+                    continue;
+                }
+
+                totalBytes += copied;
                 CheckTime();
                 if (!OperatingSystem.IsWindows() && (mode & 0x40) != 0)
                     File.SetUnixFileMode(next, File.GetUnixFileMode(next) | UnixFileMode.UserExecute);
@@ -129,6 +171,12 @@ internal static partial class AcquisitionWorkingTree
         void CheckTime()
         {
             if (watch.Elapsed >= Deadline) throw new IOException("the acquisition deadline expired.");
+        }
+
+        void Withhold(string next)
+        {
+            using (new FileStream(next, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+            withheld?.Add(current);
         }
     }
 

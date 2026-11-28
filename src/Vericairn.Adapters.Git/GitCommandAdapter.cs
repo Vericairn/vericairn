@@ -167,8 +167,13 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         view.CopyIndex();
         // List cached entries in the bare administration before Git gets a working directory to compare them against.
         // --sparse keeps sparse-directory entries visible, even when their trees have no files.
-        (HashSet<string> submodules, bool sparse) = ReadIndexNames("--sparse");
-        if (sparse) submodules.UnionWith(ReadIndexNames().Gitlinks);
+        (HashSet<string> submodules, bool sparse, HashSet<string> tracked) = ReadIndexNames("--sparse");
+        if (sparse)
+        {
+            (HashSet<string> gitlinks, _, HashSet<string> files) = ReadIndexNames();
+            submodules.UnionWith(gitlinks);
+            tracked.UnionWith(files);
+        }
         Directory.CreateDirectory(mirror);
         List<string> options = ["--git-dir=" + view.Directory, "--work-tree=" + mirror, "-c", "core.bare=false"];
         if (File.Exists(Path.Combine(view.Directory, "info", "sparse-checkout")))
@@ -178,10 +183,12 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
             options.Add("-c");
             options.Add(setting);
         }
-        view.CopyWorkingTree(mirror, submodules);
-        return new GitWorkingTree(mirror, Path.Combine(view.Directory, "index"), options);
+        // Untracked files keep their names, which is all status reads of them; their content is copied only within the limits.
+        var withheld = new HashSet<string>(tracked.Comparer);
+        view.CopyWorkingTree(mirror, submodules, tracked, withheld);
+        return new GitWorkingTree(mirror, Path.Combine(view.Directory, "index"), options, withheld);
 
-        (HashSet<string> Gitlinks, bool Sparse) ReadIndexNames(params string[] extra)
+        (HashSet<string> Gitlinks, bool Sparse, HashSet<string> Tracked) ReadIndexNames(params string[] extra)
         {
             var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
                 CreateNoWindow = true, WorkingDirectory = view.Directory };
@@ -193,6 +200,7 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
 
             bool insensitive = OperatingSystem.IsWindows() || settings.Comparison.Contains("core.ignorecase=true", StringComparer.OrdinalIgnoreCase);
             var gitlinks = new HashSet<string>(insensitive ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            var files = new HashSet<string>(insensitive ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
             bool sparseIndex = false;
             foreach (string entry in index.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
             {
@@ -205,8 +213,9 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
                     throw new ProviderRefusedException("The copied Git index contains an unsafe path " + System.Text.Json.JsonSerializer.Serialize(path) + ".");
                 sparseIndex |= directory;
                 if (entry.StartsWith("160000 ", StringComparison.Ordinal)) gitlinks.Add(name);
+                else if (!directory) files.Add(name);
             }
-            return (gitlinks, sparseIndex);
+            return (gitlinks, sparseIndex, files);
         }
     }
 

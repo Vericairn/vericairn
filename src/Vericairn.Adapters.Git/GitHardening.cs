@@ -166,4 +166,5 @@ internal sealed class GitHardening : IDisposable
 }
 
 /// <summary>A working tree and index copied into a Git read view Vericairn owns.</summary>
-internal sealed record GitWorkingTree(string TopLevel, string Index, IReadOnlyList<string> Options);
+/// <summary>A working-tree read's private copy; <paramref name="Withheld"/> names untracked files kept as empty placeholders.</summary>
+internal sealed record GitWorkingTree(string TopLevel, string Index, IReadOnlyList<string> Options, IReadOnlySet<string> Withheld);

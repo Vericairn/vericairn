@@ -37,7 +37,10 @@ public sealed partial class GitCommandAdapter
             {
                 if (!path.StartsWith("design/", StringComparison.Ordinal) || !DocumentPatterns.IsSafePath(path)) return null;
                 // Deletions, links and aliases cannot receive a content pin and refuse the whole change.
-                string file = GeneratedDocumentVerification.SafeFile(hardening.AcquireWorkingTree(root).TopLevel, path);
+                GitWorkingTree tree = hardening.AcquireWorkingTree(root);
+                // An untracked file the copy withheld (too large, linked or special) cannot receive a content pin either.
+                if (tree.Withheld.Contains(path)) return null;
+                string file = GeneratedDocumentVerification.SafeFile(tree.TopLevel, path);
                 documents.Add(new(path, ContentHash.Sha256File(file)));
             }
             if (Read("rev-parse", "--verify", "HEAD^{commit}")?.Trim() != head) return null;
