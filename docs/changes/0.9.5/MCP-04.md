@@ -16,7 +16,8 @@
 > one-time approval code valid for ten minutes. In the client's browser authorization, enter that code and confirm the exact
 > client, estate, principal, scope and expiry. Tool results go to that client and any model it uses. Use `--days` for an expiry
 > other than 30 days, up to 90, and `--renew <device>` to reauthorize the same admitted token device. `mcp clients` lists the
-> devices and their admission standing. `devices revoke` ends a client's access.
+> devices and their admission standing. `devices revoke` ends a client's access as soon as it is recorded. If the device
+> signed a record in the same second, the historical signature cutoff is set to the next whole second.
 
 ## docs/limitations-and-platforms.md
 

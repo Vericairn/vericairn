@@ -54,6 +54,40 @@ public class HistoryClosingTests
         Assert.DoesNotContain(f.BuilderDevice, SignedHistory.TailRecords(model).Select(r => r.Id));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RevokingInTheLastSignedRecordsSecondPreservesHistoryAndEndsCurrentAccess(bool adopt)
+    {
+        using var f = new HistoryTriggerTests.Fixture(adopt);
+        string builder = f.Records.Estate.BuilderId;
+        string op = f.Records.Estate.OperatorId;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string second = RecordParser.FormatTimestamp(now);
+        WriteOutcome order = f.Api.NewRecord(new NewRecordRequest("work-order", builder,
+            PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("REVOKE-1"))!), At: second));
+        Assert.True(order.Ok, Describe(order));
+
+        WriteOutcome revoked = f.Api.DeviceRevoke(new RevokeRequest(f.BuilderDevice, op, "Retire the device."), now);
+        Assert.True(revoked.Ok, Describe(revoked));
+
+        EstateModel model = f.Api.Session.Load();
+        RecordEnvelope signed = model.ById[order.Written!.Id];
+        RecordEnvelope revocation = model.ById[revoked.Written!.Id];
+        RecordEnvelope device = model.ById[f.BuilderDevice];
+        Assert.Equal(second, signed.At);
+        Assert.Equal(second, revocation.At);
+        string cutoff = RecordParser.FormatTimestamp(now.AddSeconds(1));
+        Assert.Equal(cutoff, EstateModel.BodyString(revocation, "revokedAt"));
+        Assert.Equal(f.BuilderDevice, Assert.Single(signed.Signatures).Device);
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+        Assert.True(SignatureChecks.IsAuthentic(model, signed));
+        Assert.Equal(SignatureChecks.AdmissionState.Admitted, SignatureChecks.AdmissionStateAt(model, device, second));
+        Assert.Equal(SignatureChecks.AdmissionState.Revoked, SignatureChecks.AdmissionStateAt(model, device, cutoff));
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.Equal(adopt, revoked.Checkpoint is { Trigger: "closing" });
+    }
+
     [Fact]
     public void TheOperatorsRecoveryDeviceSignsTheClosingOfARevocationItSignsAndItsAdmissionsCarryNone()
     {
@@ -228,7 +262,12 @@ public class HistoryClosingTests
     {
         using var f = new HistoryTriggerTests.Fixture(adopt: false);
         string op = f.Records.Estate.OperatorId;
-        // Another writer adopts while this one signs its revocation over the copy it read before: the batch it would store holds no closing.
+        EstateModel before = f.Api.Session.Load();
+        RecordEnvelope device = before.ById[f.BuilderDevice];
+        RecordEnvelope admission = SignatureChecks.AdmissionOf(before, device)!;
+        string at = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+        using JsonDocument revocation = JsonDocument.Parse(HistoryFixture.Admission(f.Records.Estate.BuilderId, "Retire the device.", "revoked", at));
+        // Another writer adopts while this one authors an explicitly dated admission over the old copy, so its batch holds no closing.
         bool adopted = false;
         f.Api.BeforeSigningRecord = () =>
         {
@@ -240,7 +279,8 @@ public class HistoryClosingTests
             Assert.True(other.HistoryCheckpoint(new HistoryCheckpointRequest(op, Adopt: true, ExpectPlan: plan)).Checkpoint?.Applied);
         };
 
-        WriteOutcome refused = f.Api.DeviceRevoke(new RevokeRequest(f.BuilderDevice, op, "Revoked over a copy read before its adoption."));
+        WriteOutcome refused = f.Api.NewRecord(new NewRecordRequest("admission", op, revocation.RootElement,
+            $"device:{device.Id}:{device.ComputedHash}", admission.Id, at));
         f.Api.BeforeSigningRecord = null;
         Assert.True(adopted);
         Assert.False(refused.Ok);

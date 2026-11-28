@@ -968,7 +968,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <inheritdoc />
     public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevoke(request, null);
 
-    // A supplied time lets journeys put revocation after signed history without waiting for the next wall-clock second.
+    // A supplied clock reading lets journeys exercise the whole-second boundary deterministically.
     internal WriteOutcome DeviceRevoke(RevokeRequest request, DateTimeOffset? at)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -980,24 +980,44 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         WriteOutcome outcome;
         lock (gate)
         {
-            EstateModel model = session.Load();
-            RecordEnvelope? device = Latest(model, request.Device, "device");
-            if (device is null)
+            // Other runtimes can also write this estate. Choose the signature cutoff and record the revocation under their shared lock.
+            outcome = UnderWriteLock(() =>
             {
-                return NotFound($"No device has id {request.Device}.");
-            }
+                EstateModel model = session.Load();
+                RecordEnvelope? device = Latest(model, request.Device, "device");
+                if (device is null)
+                {
+                    return NotFound($"No device has id {request.Device}.");
+                }
 
-            RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
-            if (admission is null || EstateModel.BodyString(admission, "status") != "admitted")
-            {
-                return Refuse($"Device {request.Device} has no current admission to revoke.");
-            }
+                RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
+                if (admission is null || EstateModel.BodyString(admission, "status") != "admitted")
+                {
+                    return Refuse($"Device {request.Device} has no current admission to revoke.");
+                }
 
-            DateTimeOffset revokedAt = at ?? DateTimeOffset.UtcNow;
-            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(revokedAt) };
-            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: revokedAt);
-            outcome = request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+                DateTimeOffset now = at ?? DateTimeOffset.UtcNow;
+                string revokedAt = RecordParser.FormatTimestamp(now);
+                if (string.CompareOrdinal(revokedAt, admission.At) < 0) revokedAt = admission.At;
+                var deviceRevisions = model.Chain(device).ToHashSet(StringComparer.Ordinal);
+                RecordEnvelope? lastSigned = model.CountingRecords
+                    .Where(record => string.CompareOrdinal(record.At, revokedAt) >= 0 &&
+                        record.Signatures.Any(signature => deviceRevisions.Contains(signature.Device)) && SignatureChecks.IsAuthentic(model, record))
+                    .MaxBy(record => record.At, StringComparer.Ordinal);
+                if (lastSigned is not null)
+                {
+                    // A timestamp has whole-second precision and the signature cutoff is inclusive. Current standing is withdrawn
+                    // as soon as the revocation is recorded, independently of this cutoff for checking historical signatures.
+                    if (lastSigned.AtTime > DateTimeOffset.MaxValue.AddSeconds(-1))
+                        return Refuse("The device signed a record at the last representable second. A later signature cutoff cannot be recorded.");
+                    revokedAt = RecordParser.FormatTimestamp(lastSigned.AtTime.AddSeconds(1));
+                }
+
+                var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = revokedAt };
+                using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+                var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: now);
+                return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+            }, WriteOutcome.Fail);
             if (outcome.Written is not null) outcome = outcome with { RevocationReach = [ObserveRevocation("written")] };
         }
 
