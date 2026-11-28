@@ -406,6 +406,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse($"Unknown record type '{request.Type}'.");
         }
 
+        if (request.Type == RunStopRecord)
+        {
+            return Refuse("A reviewed run stop request must be prepared and signed by the person's device.");
+        }
+
         if (!Ulid.IsValid(request.By))
         {
             return Refuse("The authoring principal must be a ULID.");
@@ -1351,8 +1356,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return new GoalResponse(GoalView.RenderText(model, goal, now), json.RootElement.Clone())
             {
                 EventsCursor = EventsCursorLocked(model, null, new EventPass { StepsOfGoal = model.Chain(goal)[0] }),
+                ActiveStatusHash = json.RootElement.GetProperty("status").GetString() == "active" ? ActiveGoalStatusHash(model, goal) : null,
             };
         }
+    }
+
+    private static string? ActiveGoalStatusHash(EstateModel model, RecordEnvelope goal)
+    {
+        IReadOnlyList<RecordEnvelope> statuses = GoalRules.Statuses(model, goal);
+        return statuses.Count == 0 ? null : statuses[^1].ComputedHash;
     }
 
     /// <inheritdoc />
@@ -1381,7 +1393,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             var draft = new RecordDraft("goal", request.By, request.Body, null, request.Supersedes);
-            if (TJson.Object(TJson.Object(request.Body, "plan"), "flow").ValueKind == JsonValueKind.Object)
+            JsonElement plan = TJson.Object(request.Body, "plan");
+            if (TJson.Object(plan, "flow").ValueKind == JsonValueKind.Object || TJson.Object(plan, "standing").ValueKind == JsonValueKind.Object)
             {
                 // Derive against the unsigned goal before asking for any signature.
                 var candidate = new RecordEnvelope("goal", Ulid.NewUlid().Value, RecordParser.FormatTimestamp(FlowClock.GetUtcNow()),
@@ -1677,6 +1690,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             string status = GoalRules.Status(model, current);
+            if (request.ExpectedActiveStatusHash is { } expected &&
+                (action != "pause" || current.Id != goal || status != "active" ||
+                 ActiveGoalStatusHash(model, current) != expected))
+            {
+                return Refuse("The reviewed active goal status changed. Read it again before requesting a pause.");
+            }
+
             bool ended = status == "achieved" || GoalRules.Ended.IndexOf(status) >= 0;
             string? refusal = action switch
             {

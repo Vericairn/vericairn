@@ -1,0 +1,892 @@
+{
+  "format": "vericairn.example-journey/1",
+  "startsAt": "2026-11-27T12:00:00Z",
+  "steps": [
+    {
+      "id": "init",
+      "role": "operator",
+      "arguments": [
+        "estate", "init", "--name", "Example Services", "--slug", "example-services", "--purpose",
+        "Arrange sample pool cleaning visits.", "--operator-name", "Sample Operator", "--organization", "Example Services",
+        "--commit", "0123456789abcdef0123456789abcdef01234567"
+      ],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/manifest": "estate/manifest.json"
+        }
+      },
+      "capture": {
+        "operator": "/operator"
+      },
+      "setup": true
+    },
+    {
+      "id": "create-operator-device",
+      "role": "operator",
+      "arguments": ["devices", "create", "--principal", "${operator}", "--name", "Operator device", "--custody", "file"],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "operatorDevice": "/id"
+      },
+      "setup": true
+    },
+    {
+      "id": "admit-operator-device",
+      "role": "operator",
+      "arguments": ["devices", "admit", "${operatorDevice}", "--by", "${operator}", "--note", "Admit the sample estate’s first device."],
+      "expect": {
+        "exitCode": 0
+      },
+      "setup": true
+    },
+    {
+      "id": "create-scheduler",
+      "role": "operator",
+      "arguments": ["records", "new", "principal", "--by", "${operator}", "--body", "${scratch}/scheduler.json"],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "scheduler": "/id"
+      },
+      "setup": true,
+      "files": {
+        "scheduler.json": {
+          "kind": "agent",
+          "name": "Scheduler",
+          "roles": ["contributor"],
+          "agent": {
+            "vendor": "Example",
+            "product": "Codex"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-scheduler-device",
+      "role": "operator",
+      "arguments": ["devices", "create", "--principal", "${scheduler}", "--name", "Scheduler device", "--custody", "file"],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "schedulerDevice": "/id"
+      },
+      "setup": true
+    },
+    {
+      "id": "admit-scheduler-device",
+      "role": "operator",
+      "arguments": ["devices", "admit", "${schedulerDevice}", "--by", "${operator}", "--note", "Admit the scheduler’s device."],
+      "expect": {
+        "exitCode": 0
+      },
+      "setup": true
+    },
+    {
+      "id": "prepare-workspace",
+      "role": "operator",
+      "arguments": ["workspace", "${scratch}/vericairn-example-services-workspace"],
+      "expect": {
+        "exitCode": 0
+      },
+      "setup": true,
+      "surface": "services"
+    },
+    {
+      "id": "adopt-workspace",
+      "role": "operator",
+      "arguments": [
+        "sources", "adopt", "${scratch}/vericairn-example-services-workspace", "--by", "${operator}", "--name",
+        "Example services workspace", "--role", "Holds proposed appointments."
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "workspaceResource": "/resource/id"
+      }
+    },
+    {
+      "id": "register-workspace",
+      "role": "operator",
+      "arguments": ["sources", "clone", "${scratch}/vericairn-example-services-workspace", "--resource", "${workspaceResource}"],
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "inspect-starter-flow",
+      "role": "operator",
+      "arguments": ["templates", "show", "vericairn.starter/service-appointment", "--version", "1.0.0"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/templates/0/pin/id": "vericairn.starter/service-appointment",
+          "/templates/0/pin/version": "1.0.0",
+          "/templates/0/definition/subject/fields/0": {
+            "name": "request",
+            "type": "text"
+          },
+          "/templates/0/definition/roles/0/holder": "agent",
+          "/templates/0/definition/roles/1/holder": "person",
+          "/templates/0/definition/steps/0/key": "draft",
+          "/templates/0/definition/steps/0/outputs/0/name": "appointment",
+          "/templates/0/definition/steps/1/key": "approve",
+          "/templates/0/definition/steps/1/inputs/0/output": "appointment"
+        }
+      },
+      "capture": {
+        "flowHash": "/templates/0/pin/hash"
+      }
+    },
+    {
+      "id": "record-roster",
+      "role": "operator",
+      "arguments": ["records", "new", "roster", "--by", "${operator}", "--body", "${scratch}/roster.json"],
+      "expect": {
+        "exitCode": 0
+      },
+      "files": {
+        "roster.json": {
+          "roles": [
+            {
+              "role": "scheduler",
+              "principals": ["${scheduler}"]
+            },
+            {
+              "role": "approver",
+              "principals": ["${operator}"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "record-request",
+      "role": "operator",
+      "arguments": [
+        "work", "new", "--by", "${operator}", "--key", "SR-0001", "--title", "Pool cleaning visit", "--intent",
+        "Turn the sample request into an approved appointment.", "--scope",
+        "Draft an appointment for a pool cleaning visit at 1 Sample Lane.", "--deliverable", "An approved appointment",
+        "--exit-question", "Is the appointment for SR-0001 approved?"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "workOrder": "/id"
+      }
+    },
+    {
+      "id": "inspect-request",
+      "role": "operator",
+      "arguments": ["records", "show", "${workOrder}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/type": "work-order",
+          "/body/key": "SR-0001",
+          "/body/scope": ["Draft an appointment for a pool cleaning visit at 1 Sample Lane."]
+        }
+      }
+    },
+    {
+      "id": "refuse-missing-paths",
+      "role": "operator",
+      "arguments": [
+        "goal", "propose", "--by", "${operator}", "--title", "Appointment for SR-0001", "--objective",
+        "Turn the sample request into an approved appointment.", "--done",
+        "{\"type\":\"work-order\",\"fields\":{\"key\":\"SR-0001\"}}", "--work-order", "${workOrder}", "--budget",
+        "wallMinutes=30", "--budget", "attemptsPerStep=2", "--flow", "vericairn.starter/service-appointment@1.0.0",
+        "--subject", "request=SR-0001: sample pool cleaning visit at 1 Sample Lane, any weekday morning."
+      ],
+      "expect": {
+        "exitCode": 2,
+        "fields": {
+          "/problem/code": "flow.permitted-paths"
+        }
+      }
+    },
+    {
+      "id": "record-legacy-request",
+      "role": "operator",
+      "arguments": [
+        "work", "new", "--by", "${operator}", "--key", "SR-LEGACY", "--title", "Legacy pool cleaning visit",
+        "--intent", "Turn the sample request into an approved appointment.", "--scope",
+        "Draft an appointment for a pool cleaning visit at 1 Sample Lane.", "--deliverable", "An approved appointment",
+        "--exit-question", "Is the legacy appointment approved?"
+      ],
+      "expect": { "exitCode": 0 },
+      "capture": { "legacyWorkOrder": "/id" },
+      "setup": true
+    },
+    {
+      "id": "legacy-goal-without-paths",
+      "role": "operator",
+      "arguments": ["records", "new", "goal", "--by", "${operator}", "--body", "${scratch}/legacy-goal.json"],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "untypedGoal": "/id"
+      },
+      "setup": true,
+      "files": {
+        "legacy-goal.json": {
+          "title": "Legacy appointment for SR-0001",
+          "objective": "Turn the sample request into an approved appointment.",
+          "completion": [
+            {
+              "record": {
+                "type": "work-order",
+                "fields": {
+                  "key": "SR-LEGACY"
+                }
+              }
+            }
+          ],
+          "constraints": [],
+          "kind": "finite",
+          "sponsor": "${operator}",
+          "budget": {
+            "wallMinutes": 30,
+            "attemptsPerStep": 2
+          },
+          "inputs": [],
+          "plan": {
+            "policy": "given",
+            "approval": "sponsor-approves",
+            "workOrders": ["${legacyWorkOrder}"],
+            "flow": {
+              "pin": {
+                "id": "vericairn.starter/service-appointment",
+                "version": "1.0.0",
+                "hash": "${flowHash}"
+              },
+              "subject": {
+                "request": "SR-0001: sample pool cleaning visit at 1 Sample Lane, any weekday morning."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "refuse-legacy-activation",
+      "role": "operator",
+      "arguments": ["goal", "activate", "${untypedGoal}", "--by", "${operator}"],
+      "expect": {
+        "exitCode": 2,
+        "fields": {
+          "/problem/code": "flow.permitted-paths"
+        }
+      }
+    },
+    {
+      "id": "inspect-refused-run",
+      "role": "operator",
+      "arguments": ["goal", "show", "${untypedGoal}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/status": "proposed",
+          "/flow/pathRefusals/0/step": "draft",
+          "/flow/pathRefusals/0/code": "flow.permitted-paths"
+        }
+      },
+      "setup": true
+    },
+    {
+      "id": "propose-with-typed-paths",
+      "role": "operator",
+      "arguments": [
+        "goal", "propose", "--by", "${operator}", "--title", "Appointment for SR-0001", "--objective",
+        "Turn the sample request into an approved appointment.", "--done",
+        "{\"type\":\"work-order\",\"fields\":{\"key\":\"SR-0001\"}}", "--work-order", "${workOrder}", "--budget",
+        "wallMinutes=30", "--budget", "attemptsPerStep=2", "--flow", "vericairn.starter/service-appointment@1.0.0",
+        "--subject", "request=SR-0001: sample pool cleaning visit at 1 Sample Lane, any weekday morning.", "--flow-path",
+        "appointments/**"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "goal": "/id"
+      }
+    },
+    {
+      "id": "activate",
+      "role": "operator",
+      "arguments": ["goal", "activate", "${goal}", "--by", "${operator}"],
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "preview-draft",
+      "role": "operator",
+      "arguments": ["goal", "step", "${goal}", "--by", "${operator}", "--repository", "${workspaceResource}", "--check"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/step/outcome": "check",
+          "/step/step": "draft",
+          "/step/route": "agent",
+          "/step/principal": "${scheduler}",
+          "/step/assignment": null,
+          "/step/permittedChanges": ["path:appointments/**"]
+        }
+      }
+    },
+    {
+      "id": "prepare-launcher",
+      "role": "operator",
+      "arguments": [
+        "launcher"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "launcherCommand": "/command",
+        "custodyExpiry": "/expires"
+      },
+      "setup": true,
+      "surface": "services"
+    },
+    {
+      "id": "refuse-file-custody",
+      "role": "operator",
+      "arguments": [
+        "goal",
+        "step",
+        "${goal}",
+        "--by",
+        "${operator}",
+        "--repository",
+        "${workspaceResource}",
+        "--setting",
+        "command=${launcherCommand}"
+      ],
+      "expect": {
+        "exitCode": 2,
+        "errorContains": "can sign without its owner's presence on this machine"
+      },
+      "surface": "services"
+    },
+    {
+      "id": "inspect-guarded-draft",
+      "role": "operator",
+      "arguments": ["goal", "show", "${goal}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/flow/steps/0/assignment": null,
+          "/flow/steps/0/attempts": []
+        }
+      }
+    },
+    {
+      "id": "record-custody-exception",
+      "role": "operator",
+      "arguments": [
+        "goal",
+        "custody-exception",
+        "${goal}",
+        "--by",
+        "${operator}",
+        "--reason",
+        "Only scratch fixture keys are held here.",
+        "--expires",
+        "${custodyExpiry}"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "custodyException": "/id"
+      }
+    },
+    {
+      "id": "route-draft",
+      "role": "operator",
+      "arguments": [
+        "goal",
+        "step",
+        "${goal}",
+        "--by",
+        "${operator}",
+        "--repository",
+        "${workspaceResource}",
+        "--setting",
+        "command=${launcherCommand}"
+      ],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/step/outcome": "run",
+          "/settled/status": "observed-success",
+          "/step/step": "draft",
+          "/step/principal": "${scheduler}"
+        }
+      },
+      "capture": {
+        "draftAssignment": "/step/assignment/id",
+        "draftAssignmentHash": "/step/assignment/hash",
+        "draftRun": "/step/run/run"
+      },
+      "surface": "services"
+    },
+    {
+      "id": "inspect-run-custody",
+      "role": "operator",
+      "arguments": [
+        "records",
+        "show",
+        "${draftRun}"
+      ],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/body/target/custodyException": "${custodyException}",
+          "/body/target/assignment": "${draftAssignment}"
+        }
+      }
+    },
+    {
+      "id": "inspect-draft-brief",
+      "role": "operator",
+      "arguments": ["records", "show", "${draftAssignment}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/body/contributor": "${scheduler}",
+          "/body/step/key": "draft",
+          "/body/brief/permittedChanges": ["path:appointments/**"]
+        }
+      }
+    },
+    {
+      "id": "inspect-dispatched-draft",
+      "role": "operator",
+      "arguments": [
+        "goal",
+        "show",
+        "${goal}"
+      ],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/flow/steps/0/state": "done",
+          "/flow/steps/0/attemptsUsed": 1,
+          "/flow/steps/0/attempts/0/assignment/id": "${draftAssignment}",
+          "/flow/steps/0/attempts/0/outcome": "completed",
+          "/flow/steps/0/outputs/0/name": "appointment",
+          "/flow/steps/0/outputs/0/mediaType": "application/json"
+        }
+      },
+      "capture": {
+        "attempt": "/flow/steps/0/attempts/0/attempt/id",
+        "attemptHash": "/flow/steps/0/attempts/0/attempt/hash",
+        "draftResult": "/flow/steps/0/result/id",
+        "draftResultHash": "/flow/steps/0/result/hash",
+        "draftObject": "/flow/steps/0/outputs/0/hash"
+      }
+    },
+    {
+      "id": "inspect-draft-attempt",
+      "role": "operator",
+      "arguments": ["records", "show", "${attempt}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/by": "${scheduler}",
+          "/subject/type": "assignment",
+          "/subject/id": "${draftAssignment}",
+          "/subject/hash": "${draftAssignmentHash}",
+          "/signatures/0/device": "${schedulerDevice}"
+        }
+      }
+    },
+    {
+      "id": "inspect-draft-author",
+      "role": "operator",
+      "arguments": [
+        "records",
+        "show",
+        "${draftResult}"
+      ],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/by": "${scheduler}",
+          "/subject/id": "${attempt}",
+          "/subject/hash": "${attemptHash}",
+          "/signatures/0/device": "${schedulerDevice}",
+          "/body/outputs/0/hash": "${draftObject}"
+        }
+      }
+    },
+    {
+      "id": "ask-for-approval",
+      "role": "operator",
+      "arguments": ["goal", "step", "${goal}", "--by", "${operator}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/step/outcome": "ask",
+          "/step/step": "approve",
+          "/step/route": "person",
+          "/step/principal": "${operator}"
+        }
+      },
+      "capture": {
+        "firstApprovalAssignment": "/step/assignment/id"
+      }
+    },
+    {
+      "id": "observe-draft",
+      "role": "operator",
+      "arguments": ["work", "observe", "SR-0001"],
+      "expect": {
+        "exitCode": 0,
+        "outputContains": "output appointment ${draftObject}"
+      },
+      "text": true
+    },
+    {
+      "id": "approve-draft",
+      "role": "operator",
+      "arguments": [
+        "records", "new", "review", "--by", "${operator}", "--subject", "result:${draftResult}:${draftResultHash}", "--body",
+        "${scratch}/approve-draft.json"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "approval": "/id"
+      },
+      "files": {
+        "approve-draft.json": {
+          "independence": "operator",
+          "outcome": "pass",
+          "summary": "The Tuesday morning visit matches the request. Approved.",
+          "findings": []
+        }
+      }
+    },
+    {
+      "id": "inspect-first-approval",
+      "role": "operator",
+      "arguments": ["goal", "show", "${goal}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/flow/complete": true,
+          "/flow/steps/0/result/id": "${draftResult}",
+          "/flow/steps/1/review/id": "${approval}",
+          "/flow/steps/1/state": "done"
+        }
+      }
+    },
+    {
+      "id": "put-revised-object",
+      "role": "scheduler",
+      "arguments": ["objects", "put", "${scratch}/appointment-revised.json"],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "revisedObject": "/hash"
+      },
+      "files": {
+        "appointment-revised.json": {
+          "request": "SR-0001",
+          "service": "pool cleaning",
+          "site": "1 Sample Lane",
+          "start": "2026-12-09T09:00:00-06:00",
+          "durationMinutes": 60,
+          "technician": "Sample Technician"
+        }
+      }
+    },
+    {
+      "id": "revise-draft",
+      "role": "scheduler",
+      "arguments": [
+        "records", "new", "result", "--by", "${scheduler}", "--supersedes", "${draftResult}", "--subject",
+        "attempt:${attempt}:${attemptHash}", "--body", "${scratch}/result-revised.json"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "revision": "/id",
+        "revisionHash": "/hash"
+      },
+      "files": {
+        "result-revised.json": {
+          "outcome": "completed",
+          "summary": "Moved SR-0001 to Wednesday morning.",
+          "outputs": [
+            {
+              "name": "appointment",
+              "hash": "${revisedObject}",
+              "mediaType": "application/json"
+            }
+          ],
+          "evidence": [],
+          "checks": [],
+          "limitations": [],
+          "unresolvedEffects": [],
+          "nextStep": "The approver reviews the exact draft."
+        }
+      }
+    },
+    {
+      "id": "inspect-stale-approval",
+      "role": "operator",
+      "arguments": ["goal", "show", "${goal}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/flow/complete": false,
+          "/flow/steps/0/result/id": "${revision}",
+          "/flow/steps/1/state": "stale"
+        }
+      }
+    },
+    {
+      "id": "check-stale-record",
+      "role": "operator",
+      "arguments": ["estate", "check"],
+      "expect": {
+        "exitCode": 0,
+        "outputContains": "${approval}.json: The subject has been superseded by ${revision}"
+      },
+      "text": true
+    },
+    {
+      "id": "ask-again",
+      "role": "operator",
+      "arguments": ["goal", "step", "${goal}", "--by", "${operator}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/step/outcome": "ask",
+          "/step/step": "approve",
+          "/step/route": "person",
+          "/step/principal": "${operator}"
+        }
+      },
+      "capture": {
+        "secondApprovalAssignment": "/step/assignment/id"
+      }
+    },
+    {
+      "id": "inspect-second-approval-brief",
+      "role": "operator",
+      "arguments": ["records", "show", "${secondApprovalAssignment}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/body/step/inputs/0/id": "${revision}",
+          "/body/step/inputs/0/hash": "${revisionHash}"
+        }
+      }
+    },
+    {
+      "id": "approve-revision",
+      "role": "operator",
+      "arguments": [
+        "records", "new", "review", "--by", "${operator}", "--subject", "result:${revision}:${revisionHash}", "--body",
+        "${scratch}/approve-revision.json"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "reapproval": "/id"
+      },
+      "files": {
+        "approve-revision.json": {
+          "independence": "operator",
+          "outcome": "pass",
+          "summary": "The Wednesday morning visit matches the request. Approved.",
+          "findings": []
+        }
+      }
+    },
+    {
+      "id": "inspect-flow",
+      "role": "operator",
+      "arguments": ["goal", "show", "${goal}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/flow/pin/id": "vericairn.starter/service-appointment",
+          "/flow/pin/version": "1.0.0",
+          "/flow/pin/hash": "${flowHash}",
+          "/flow/complete": true,
+          "/flow/steps/0/result/id": "${revision}",
+          "/flow/steps/0/result/hash": "${revisionHash}",
+          "/flow/steps/0/outputs/0/hash": "${revisedObject}",
+          "/flow/steps/1/review/id": "${reapproval}",
+          "/flow/steps/1/state": "done"
+        }
+      }
+    },
+    {
+      "id": "inspect-review",
+      "role": "operator",
+      "arguments": ["records", "show", "${reapproval}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/by": "${operator}",
+          "/subject/type": "result",
+          "/subject/id": "${revision}",
+          "/subject/hash": "${revisionHash}"
+        }
+      }
+    },
+    {
+      "id": "inspect-flow-over-mcp",
+      "role": "scheduler",
+      "arguments": ["mcp", "goal_get", "${scheduler}", "${scratch}/mcp-goal.json"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/flow/pin/id": "vericairn.starter/service-appointment",
+          "/flow/pin/version": "1.0.0",
+          "/flow/pin/hash": "${flowHash}",
+          "/flow/complete": true,
+          "/flow/steps/0/result/id": "${revision}",
+          "/flow/steps/0/result/hash": "${revisionHash}",
+          "/flow/steps/0/outputs/0/hash": "${revisedObject}",
+          "/flow/steps/1/review/id": "${reapproval}",
+          "/flow/steps/1/state": "done"
+        }
+      },
+      "setup": true,
+      "surface": "services",
+      "files": {
+        "mcp-goal.json": {
+          "goal": "${goal}"
+        }
+      }
+    },
+    {
+      "id": "inspect-visit-over-mcp",
+      "role": "scheduler",
+      "arguments": ["mcp", "work_observe", "${scheduler}", "${scratch}/mcp-observe.json"],
+      "expect": {
+        "exitCode": 0,
+        "outputContains": "review ${reapproval} (operator, pass) by Sample Operator"
+      },
+      "setup": true,
+      "surface": "services",
+      "files": {
+        "mcp-observe.json": {
+          "workOrder": "SR-0001"
+        }
+      }
+    },
+    {
+      "id": "export",
+      "role": "operator",
+      "arguments": ["estate", "export", "--by", "${operator}", "--out", "${scratch}/services.zip"],
+      "expect": {
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "restore",
+      "role": "operator",
+      "arguments": ["estate", "restore", "--from", "${scratch}/services.zip", "--to", "${estate}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/errors": 0
+        }
+      },
+      "context": "restored"
+    },
+    {
+      "id": "inspect-restored-keys",
+      "role": "operator",
+      "arguments": ["recover", "inspect"],
+      "expect": {
+        "exitCode": 0,
+        "outputContains": "${schedulerDevice}  Scheduler  Scheduler device  admitted  key not held here"
+      },
+      "context": "restored",
+      "text": true
+    },
+    {
+      "id": "inspect-restored-operator-key",
+      "role": "operator",
+      "arguments": ["recover", "inspect"],
+      "expect": {
+        "exitCode": 0,
+        "outputContains": "${operatorDevice}  Sample Operator  Operator device  admitted  key not held here"
+      },
+      "context": "restored",
+      "text": true,
+      "setup": true
+    },
+    {
+      "id": "inspect-restored-flow",
+      "role": "operator",
+      "arguments": ["goal", "show", "${goal}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/flow/pin/id": "vericairn.starter/service-appointment",
+          "/flow/pin/version": "1.0.0",
+          "/flow/pin/hash": "${flowHash}",
+          "/flow/complete": true,
+          "/flow/steps/0/result/id": "${revision}",
+          "/flow/steps/0/result/hash": "${revisionHash}",
+          "/flow/steps/0/outputs/0/hash": "${revisedObject}",
+          "/flow/steps/1/review/id": "${reapproval}",
+          "/flow/steps/1/state": "done"
+        }
+      },
+      "context": "restored"
+    },
+    {
+      "id": "inspect-restored-review",
+      "role": "operator",
+      "arguments": ["records", "show", "${reapproval}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/by": "${operator}",
+          "/subject/type": "result",
+          "/subject/id": "${revision}",
+          "/subject/hash": "${revisionHash}"
+        }
+      },
+      "context": "restored",
+      "setup": true
+    },
+    {
+      "id": "inspect-restored-staleness",
+      "role": "operator",
+      "arguments": ["estate", "check"],
+      "expect": {
+        "exitCode": 0,
+        "outputContains": "${approval}.json: The subject has been superseded by ${revision}"
+      },
+      "text": true,
+      "context": "restored",
+      "setup": true
+    }
+  ]
+}

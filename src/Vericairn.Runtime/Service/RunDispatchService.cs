@@ -178,12 +178,19 @@ internal sealed partial class RunDispatchService(
             }
 
             RunStop? stop = RecordedStop(run.Latest) ?? (run.InFlight ? observed?.Stop : null);
-            if (run.InFlight && stop is null)
+            if (run.InFlight && directory is not null)
             {
-                try { stop = Requested(directory?.ReadStop()); }
+                try
+                {
+                    if (stop is null)
+                        stop = Requested(directory.ReadStop());
+                    else if (stop is { EscalatedAt: null, ContainedAt: null } &&
+                        directory.ReadContainment() is { SupersedesReason: string predecessor } containment && stop.Reason == predecessor)
+                        stop = Requested(containment);
+                }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
                 {
-                    unavailable.Add("The local stop request could not be read; the supervising worker treats an unreadable request as a stop, but transmission and containment are unconfirmed.");
+                    unavailable.Add("The local stop request could not be read; no newer transmission or containment facts are available.");
                 }
             }
             IReadOnlyList<RunSignal>? signals = run.Latest.Body.TryGetProperty("signals", out JsonElement recordedSignals)
@@ -236,7 +243,8 @@ internal sealed partial class RunDispatchService(
                 run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
                 signals,
                 run.Intent.Body.TryGetProperty("execution", out JsonElement execution) ? execution.Clone() : null,
-                run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : observed?.Execution));
+                run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : observed?.Execution)
+            { OperationHash = includeLocalObservations ? run.Latest.ComputedHash : null, OperationRevision = includeLocalObservations ? run.Latest.Id : null });
         }
 
         var ledgers = new List<LedgerRow>();
@@ -259,7 +267,7 @@ internal sealed partial class RunDispatchService(
     }
 
     /// <summary>Requests a stop and reports only the containment the worker has observed.</summary>
-    internal RunStopResponse RunStop(string run, RunStopRequest request)
+    internal RunStopResponse RunStop(string run, RunStopRequest request, bool waitForObservation = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(run);
         ArgumentNullException.ThrowIfNull(request);
@@ -271,6 +279,11 @@ internal sealed partial class RunDispatchService(
         if (request.GraceSeconds is < 0 or > 3600)
         {
             return StopProblem(run, "refused", "A grace period is from 0 to 3600 seconds.");
+        }
+
+        if (request.ExpectedStopReason is not null && (request.ExpectedOperationHash is null || request.GraceSeconds != 0 || string.IsNullOrWhiteSpace(request.Reason)))
+        {
+            return StopProblem(run, "refused", "A follow-on containment requires the reviewed run operation, the earlier stop and a new zero-grace request.");
         }
 
         AgentRuns.Run? found;
@@ -305,20 +318,35 @@ internal sealed partial class RunDispatchService(
         StopRequest asked;
         lock (gate)
         {
-            if (recordAccess.RequestDeviceRefusal(session.Load()) is Problem denied)
+            EstateModel model = session.Load();
+            if (recordAccess.RequestDeviceRefusal(model) is Problem denied)
             {
                 return StopProblem(run, denied.Code, denied.Message);
+            }
+            if (request.ExpectedOperationHash is not null && ReviewedStopRefusal(model, run, request) is Problem refusal)
+            {
+                return StopProblem(run, refusal.Code, refusal.Message);
             }
 
             try
             {
-                asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow()), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
+                var stopRequest = new StopRequest(RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow()), request.By,
+                    string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds)
+                {
+                    SupersedesReason = request.ExpectedStopReason,
+                };
+                asked = request.ExpectedStopReason is null ? directory.RequestStop(stopRequest) : directory.RequestContainment(stopRequest);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
             {
                 return StopProblem(found.Id, "unavailable", "The stop request could not be published or read. Any previously published request remains in force; transmission and containment are unconfirmed.");
             }
         }
+        if (!waitForObservation)
+        {
+            return new RunStopResponse(found.Id, "requested", $"The runtime published the stop request for run {found.Id}.", true, Requested(asked));
+        }
+
         RunObservedState? observed = null;
         bool supervised = false;
         bool observationUnavailable = false;
@@ -377,7 +405,8 @@ internal sealed partial class RunDispatchService(
             }
         }
 
-        RunStop stop = observed?.Stop is { } seen && seen.RequestedAt == asked.RequestedAt ? seen : new RunStop(asked.RequestedAt, asked.RequestedBy, asked.Reason);
+        RunStop stop = observed?.Stop is { } seen && seen.RequestedAt == asked.RequestedAt && seen.Reason == asked.Reason
+            ? seen : new RunStop(asked.RequestedAt, asked.RequestedBy, asked.Reason);
         lock (gate)
         {
             if (AgentRuns.Find(session.Load(), found.Id) is { } settled && RecordedStop(settled.Latest) is { } recorded)
@@ -405,6 +434,32 @@ internal sealed partial class RunDispatchService(
             message = $"Run {found.Id}: the stop request is kept; the worker's observation could not be read. The last confirmed stop state is {stop.State}; no additional transmission or containment is inferred.";
         }
         return new RunStopResponse(found.Id, stop.State, message, true, stop);
+    }
+
+    // The caller holds the service gate while checking this pin and publishing the reviewed stop.
+    internal Problem? ReviewedStopRefusal(EstateModel model, string run, RunStopRequest request)
+    {
+        if (AgentRuns.Find(model, run) is not { InFlight: true } current || current.Id != run ||
+            current.Latest.ComputedHash != request.ExpectedOperationHash)
+            return new("refused", "The reviewed run operation changed. Read it again before requesting a stop.", []);
+        if (StopRefusal(model, current, request.By) is string refused) return new("refused", refused, []);
+        if (request.ExpectedStopReason is not string predecessor) return null;
+
+        RunDirectory directory = WorkerOptions.OpenRunDirectory(session.Manifest.Estate, run);
+        try
+        {
+            StopRequest? earlier = directory.ReadStop();
+            RunObservedState? observed = directory.Read();
+            if (earlier is null || earlier.Reason != predecessor || earlier.GraceSeconds == 0 ||
+                observed?.ExitedAt is not null || observed?.Stop is { } stop &&
+                (stop.Reason != predecessor || stop.EscalatedAt is not null || stop.ContainedAt is not null))
+                return new("refused", "The earlier stop has changed or its escalation already began. Inspect the run before acting again.", []);
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new("unavailable", "The earlier stop could not be confirmed. Inspect the run before acting again.", []);
+        }
     }
 
     /// <summary>

@@ -9,6 +9,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Workers;
 using static Vericairn.Runtime.Service.EstateServiceValues;
@@ -205,24 +206,24 @@ public sealed partial class EstateService
 
             route = taken.Route;
             key = taken.Key;
-            if (taken.Step is { } routedStep && route.State is not ("rule" or "request" or "attention"))
+            FlowStep? routedStep = taken.Step?.Step ?? taken.Standing?.Step;
+            if (routedStep is not null && route.State is not ("rule" or "request" or "attention"))
             {
-                IReadOnlyList<string> paths = FlowPermissions.For(model, current, taken.Order, routedStep.Step);
+                IReadOnlyList<string> paths = FlowPermissions.For(model, current, taken.Order, routedStep);
                 if (route.State == "agent")
                 {
-                    if (paths.Count == 0)
-                    {
-                        return StepProblem(goalId, FlowPermissions.Code, FlowPermissions.Message(key), key, route);
-                    }
-
                     if (route.Assignment is RecordEnvelope previous)
                     {
                         if (FlowPermissions.Carried(paths, previous) is not { } carriedPaths)
                         {
-                            return StepProblem(goalId, FlowPermissions.Code, $"Assignment {previous.Id} of flow step {key} needs a brief with permitted paths within the step's current path declarations.", key, route);
+                            return StepProblem(goalId, FlowPermissions.Code, FlowPermissions.HeldMessage(previous, routedStep.Key), key, route);
                         }
 
                         paths = carriedPaths;
+                    }
+                    else if (paths.Count == 0)
+                    {
+                        return StepProblem(goalId, FlowPermissions.Code, FlowPermissions.Message(taken.Standing is null ? key : routedStep.Key), key, route);
                     }
                 }
 

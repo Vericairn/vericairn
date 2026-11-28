@@ -109,6 +109,8 @@ public sealed partial class ShellViewModel
     {
         await DescribeActingAsync(token).ConfigureAwait(true);
         await RefreshCommunicationAsync(token).ConfigureAwait(true);
+        foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
+            await page.ReadRemoteHandoffsAsync(token).ConfigureAwait(true);
     });
 
     private Task<bool> RefreshCommunicationCommandAsync() => RunCommandAsync("Read communication settings", token => RefreshCommunicationAsync(token));
@@ -419,6 +421,18 @@ public sealed partial class ShellViewModel
     /// <summary>Prepares a hand-over while retaining the previous package until a complete response arrives.</summary>
     public Task PrepareHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
         DocumentCommandAsync(page, "Prepare hand-over", token => page!.PrepareAsync(token), false, cancellationToken: cancellationToken);
+
+    /// <summary>Refreshes handoffs prepared for the acting person in Remote.</summary>
+    public Task ReadRemoteHandoffsAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
+        DocumentCommandAsync(page, "Refresh handoffs from Remote", token => page!.ReadRemoteHandoffsAsync(token), false, cancellationToken: cancellationToken);
+
+    /// <summary>Opens the selected Remote handoff at its retained context.</summary>
+    public Task OpenRemoteHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
+        DocumentCommandAsync(page, "Open handoff from Remote", token => page!.OpenRemoteHandoffAsync(token), false, cancellationToken: cancellationToken, submission: true);
+
+    /// <summary>Removes the selected Remote handoff from this runtime.</summary>
+    public Task RemoveRemoteHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
+        DocumentCommandAsync(page, "Remove handoff from Remote", token => page!.RemoveRemoteHandoffAsync(token), false, cancellationToken: cancellationToken, submission: true);
 
     /// <summary>Compares the retained package without replacing its original basis.</summary>
     public Task CompareHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>

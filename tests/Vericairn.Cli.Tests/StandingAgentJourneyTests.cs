@@ -53,7 +53,7 @@ public class StandingAgentJourneyTests
             Refused(root, "wallMinutes", [.. propose, "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget", "--trigger", schedule, "--period", "runs=4"]);
 
             CliHarness.Outcome proposed = CliHarness.Ok(["--estate", root, .. propose, "--kind", "stewardship", "--standing", "example/researcher@1.0.0", "--subject", "topic=the widget", "--trigger", schedule,
-                "--trigger", """{"key":"asked","kind":"request"}""", "--period", "runs=4", "--period", "wallMinutes=120"]);
+                "--trigger", """{"key":"asked","kind":"request"}""", "--period", "runs=4", "--period", "wallMinutes=120", "--flow-path", "research/notes/**"]);
             Assert.Contains("Standing agent Research the widget", proposed.Out, StringComparison.Ordinal);
             Assert.Contains("State: proposed", proposed.Out, StringComparison.Ordinal);
             // D07-A checks the planned triggers, due occurrence and caps before activation.
@@ -79,7 +79,9 @@ public class StandingAgentJourneyTests
                 "--now", due.GetProperty("asOf").GetString()!).Json.GetProperty("step");
             Assert.Equal(("ask", key, "person"), (first.GetProperty("outcome").GetString(), first.GetProperty("step").GetString(), first.GetProperty("route").GetString()));
             string assignment = first.GetProperty("assignment").GetProperty("id").GetString()!;
-            Assert.Equal(key, CliHarness.Ok("--estate", root, "--json", "records", "show", assignment).Json.GetProperty("body").GetProperty("occurrence").GetProperty("key").GetString());
+            JsonElement assigned = CliHarness.Ok("--estate", root, "--json", "records", "show", assignment).Json.GetProperty("body");
+            Assert.Equal(key, assigned.GetProperty("occurrence").GetProperty("key").GetString());
+            Assert.Equal("path:research/notes/**", Assert.Single(assigned.GetProperty("brief").GetProperty("permittedChanges").EnumerateArray()).GetString());
             Assert.Contains("Nothing to dispatch", CliHarness.Ok("--estate", root, "goal", "step", goal, "--by", op).Out, StringComparison.Ordinal);
 
             // A request is an occurrence of its own; a time ahead of the clock is refused.

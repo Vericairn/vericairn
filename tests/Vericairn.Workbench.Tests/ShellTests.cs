@@ -13,9 +13,9 @@ using Vericairn.Workbench;
 namespace Vericairn.Workbench.Tests;
 
 /// <summary>A test connection: the embedded service stands in for the daemon; the window still only sees the API.</summary>
-internal sealed class ServiceConnection(string root) : IEstateConnection
+internal sealed class ServiceConnection(string root, string? home = null) : IEstateConnection
 {
-    private EstateService? service = EstateService.Open(root);
+    private EstateService? service = EstateService.Open(root, workerOptions: null, home);
 
     public string Root { get; } = root;
 

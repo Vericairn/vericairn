@@ -53,6 +53,10 @@ public static class OpenApiDocument
         ("GET", "/v1/attention"),
         ("POST", "/v1/attention/acknowledge"),
         ("GET", "/v1/handoff"),
+        ("GET", "/v1/handoff/desktop"),
+        ("POST", "/v1/handoff/desktop"),
+        ("POST", "/v1/handoff/desktop/open"),
+        ("POST", "/v1/handoff/desktop/remove"),
         ("POST", "/v1/resume"),
         ("GET", "/v1/context/work/{key}"),
         ("GET", "/v1/context/work/{key}/brief"),
@@ -359,6 +363,10 @@ public static class OpenApiDocument
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "base", ["in"] = "query", ["required"] = false,
                     ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A full local commit of the estate repository to compare with; the head observed now when omitted." });
 
+            if (method == "GET" && path == "/v1/handoff/desktop")
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = true,
+                    ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The acting person; a paired device can read only its own handoffs." });
+
             if (method == "GET" && path == "/v1/attention")
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false,
                     ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The requesting principal; defaults to the device principal or local operator." });
@@ -523,6 +531,13 @@ public static class OpenApiDocument
         {
             string schema = method == "GET" ? "AttentionResponse" : "AttentionAcknowledgeResponse";
             responses["200"] = new JsonObject { ["description"] = "Principal-scoped presentation state only. Acknowledgment signs no record, never resolves or hides an item, and requires the current notice revision. A paired write is kept in the local-network ledger without requiring a presence-free signer.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } } };
+        }
+        else if (path is "/v1/handoff/desktop" or "/v1/handoff/desktop/open" or "/v1/handoff/desktop/remove")
+        {
+            string schema = path == "/v1/handoff/desktop/remove" ? "DesktopHandoffRemoveResponse"
+                : method == "GET" ? "DesktopHandoffsResponse" : "DesktopHandoffResponse";
+            responses["200"] = new JsonObject { ["description"] = Summary(method, path),
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } } };
         }
         else if (path == "/v1/decisions/basis")
@@ -1072,6 +1087,13 @@ public static class OpenApiDocument
             ["CommunicationDelegateRequest"] = Object(("by", "string"), ("recipient", "string"), ("grantee", "string"), ("scope", "string"), ("assignment", "string"), ("status", "string"), ("expected", "string"), ("expires", "string")),
             ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string"), ("template", "object"), ("availability", "object"), ("quietHours", "object"), ("availabilityNow", "object")),
             ["EstateObserveRequest"] = Object(("by", "string")),
+            ["DesktopHandoffRequest"] = Object(("by", "string"), ("requestId", "string"), ("subject", "object"), ("task", "string"), ("reason", "string"), ("draft", "string"), ("evidence", "array")),
+            ["DesktopHandoffOpenRequest"] = Object(("by", "string"), ("id", "string")),
+            ["DesktopHandoffRemoveRequest"] = Object(("by", "string"), ("id", "string")),
+            ["DesktopHandoffRemoveResponse"] = Object(("removed", "boolean"), ("problem", "object")),
+            ["DesktopHandoff"] = Object(("id", "string"), ("estate", "string"), ("node", "string"), ("by", "string"), ("subject", "object"), ("task", "string"), ("reason", "string"), ("draft", "string"), ("evidence", "array"), ("preparedAt", "string"), ("openedAt", "string"), ("subjectState", "string"), ("subjectStatus", "string"), ("expiresAt", "string"), ("preparedByDevice", "string"), ("openedByDevice", "string")),
+            ["DesktopHandoffsResponse"] = Object(("handoffs", "array"), ("problem", "object")),
+            ["DesktopHandoffResponse"] = Object(("handoff", "object"), ("problem", "object")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["RecordPrepareResponse"] = Object(("ok", "boolean"), ("prepared", "object"), ("problem", "object")),
             ["RecordPrepared"] = Object(("plan", "string"), ("id", "string"), ("at", "string"), ("hash", "string"), ("expiresAt", "string"), ("record", "object")),
@@ -1163,7 +1185,7 @@ public static class OpenApiDocument
                 },
             },
             ["GoalProposeRequest"] = Object(("by", "string"), ("body", "object"), ("supersedes", "string")),
-            ["GoalActionRequest"] = Object(("by", "string"), ("note", "string"), ("stopRuns", "boolean")),
+            ["GoalActionRequest"] = Object(("by", "string"), ("note", "string"), ("stopRuns", "boolean"), ("expectedActiveStatusHash", "string")),
             ["GoalEvaluateRequest"] = Object(("by", "string"), ("summary", "string"), ("verdicts", "array")),
             ["GoalVerdict"] = Object(("condition", "integer"), ("verdict", "string"), ("reason", "string"), ("read", "array")),
             ["GoalAcceptRequest"] = Object(("by", "string"), ("statement", "string"), ("reason", "string"), ("stepReasons", "array")),
@@ -1249,13 +1271,13 @@ public static class OpenApiDocument
             ["BriefContextRequest"] = ContextRequestSchema(true),
             ["ContextResponse"] = Required(Object(("text", "string"), ("package", "object"), ("problem", "object")), "text"),
             ["BriefResponse"] = Required(Object(("markdown", "string"), ("json", "object"), ("markdownMeasurement", "object"), ("problem", "object"), ("jsonMeasurement", "object")), "markdown", "json"),
-            ["RunStopRequest"] = Object(("by", "string"), ("reason", "string"), ("graceSeconds", "integer")),
+            ["RunStopRequest"] = Object(("by", "string"), ("reason", "string"), ("graceSeconds", "integer"), ("expectedOperationHash", "string"), ("expectedStopReason", "string")),
             ["RunSettleRequest"] = Object(("by", "string"), ("recordsChecked", "boolean")),
             ["RunSettleResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("problem", "object")),
             ["HarnessQualifyRequest"] = Object(("launcher", "string"), ("by", "string"), ("settings", "object")),
             ["RunResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("cap", "object"), ("workspace", "string"), ("problem", "object"), ("notices", "array")),
             ["RunStopResponse"] = Object(("run", "string"), ("state", "string"), ("message", "string"), ("ok", "boolean"), ("stop", "object"), ("problem", "object")),
-            ["RunRow"] = Object(("run", "string"), ("identity", "string"), ("launcher", "string"), ("agent", "string"), ("assignment", "string"), ("goal", "string"), ("workspace", "string"), ("status", "string"), ("cap", "object"), ("usage", "object"), ("charged", "object"), ("stop", "object"), ("heartbeat", "string"), ("observed", "boolean"), ("generic", "boolean"), ("liveness", "object"), ("scope", "object"), ("signals", "array"), ("execution", "object"), ("executionObserved", "object"), ("requestedProgress", "object")),
+            ["RunRow"] = Object(("run", "string"), ("identity", "string"), ("launcher", "string"), ("agent", "string"), ("assignment", "string"), ("goal", "string"), ("workspace", "string"), ("status", "string"), ("cap", "object"), ("usage", "object"), ("charged", "object"), ("stop", "object"), ("heartbeat", "string"), ("observed", "boolean"), ("generic", "boolean"), ("liveness", "object"), ("scope", "object"), ("signals", "array"), ("execution", "object"), ("executionObserved", "object"), ("requestedProgress", "object"), ("operationHash", "string"), ("operationRevision", "string")),
             ["RunsResponse"] = Object(("runs", "array"), ("goals", "array")),
             ["ReleaseResponse"] = releaseResponse,
             ["ReleaseCheckDetails"] = releaseCheck,
@@ -1325,6 +1347,9 @@ public static class OpenApiDocument
         "/v1/prompts/use" => "PromptUseRequest",
         "/v1/communication/delegations" => "CommunicationDelegateRequest",
         "/v1/status/observations" => "EstateObserveRequest",
+        "/v1/handoff/desktop" => "DesktopHandoffRequest",
+        "/v1/handoff/desktop/open" => "DesktopHandoffOpenRequest",
+        "/v1/handoff/desktop/remove" => "DesktopHandoffRemoveRequest",
         "/v1/resume" => "HandoffPackage",
         "/v1/records" => "NewRecordRequest",
         "/v1/records/prepare" => "NewRecordRequest",
@@ -1449,6 +1474,10 @@ public static class OpenApiDocument
         ("GET", "/v1/status") => "Current status: human text and canonical JSON, identical on every machine for the same records. Its compact attention references are derived from records alone.",
         ("POST", "/v1/status/observations") => "Record a person's explicit observation of estate status, with runtime-supplied timestamp and hashes of the record set, pin and status. Agents cannot author it; ordinary reads remain read-only.",
         ("POST", "/v1/resume") => "Compare a retained hand-over with current records, including every addition and supersession, missing or changed originals, the full estate pin and observed state. The world may have moved; grants no authority and restarts nothing.",
+        ("GET", "/v1/handoff/desktop") => "DesktopHandoffsResponse: desktop handoffs prepared for this person, with observations of opening and current revision.",
+        ("POST", "/v1/handoff/desktop") => "DesktopHandoffResponse: retain exact context idempotently for Workbench without granting authority.",
+        ("POST", "/v1/handoff/desktop/open") => "DesktopHandoffResponse: observe a Workbench opening, independently of the underlying task's outcome.",
+        ("POST", "/v1/handoff/desktop/remove") => "DesktopHandoffRemoveResponse: remove the retained handoff and its opening from Workbench.",
         ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",
         ("GET", "/v1/context/work/{key}/brief") => "BriefResponse: measured agent brief; mandatory originals inline, named optional sources withheld unless a context allocation is given and they fit. Writes nothing.",
         ("GET", "/v1/context/work/{key}") => "ContextResponse: compute a deterministic work context package and exact originals; writes nothing.",

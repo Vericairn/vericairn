@@ -41,12 +41,17 @@ public sealed class PolicyAdoptionApiTests
     {
         private readonly ServiceProvider services;
         private readonly RouteEndpoint[] endpoints;
-        internal RouteHandler(IEstateApi api)
+        private readonly AuthenticatedDevice? device;
+
+        internal RouteHandler(IEstateApi api, RequestScope? scope = null, AuthenticatedDevice? device = null)
         {
             // Route binding needs routing and logging services, not a host, configuration files or file watchers.
             services = new ServiceCollection().AddLogging().AddRouting().BuildServiceProvider();
+            this.device = device;
             var routes = new FixtureRoutes(services);
-            ApiRoutes.Map(routes, api, () => throw new InvalidOperationException("The fixture cannot shut down a host."));
+            RouteGroupBuilder group = routes.MapGroup("");
+            if (scope is not null) group.AddEndpointFilter(scope);
+            ApiRoutes.Map(group, api, () => throw new InvalidOperationException("The fixture cannot shut down a host."));
             endpoints = routes.DataSources.SelectMany(s => s.Endpoints).OfType<RouteEndpoint>().ToArray();
             Assert.NotEmpty(endpoints);
         }
@@ -71,6 +76,7 @@ public sealed class PolicyAdoptionApiTests
             var route = Assert.Single(selected);
             context.Request.RouteValues = route.Values;
             context.SetEndpoint(route.Endpoint);
+            if (device is not null) context.Items[RequestAuthenticator.DeviceItem] = device;
             await route.Endpoint.RequestDelegate!(context).ConfigureAwait(false);
             return new((System.Net.HttpStatusCode)context.Response.StatusCode) { Content = new ByteArrayContent(output.ToArray()) };
         }

@@ -16,7 +16,7 @@ public static class RecordCompanions
         "communication-setting", "credential-reference", "custody-exception", "decision", "device", "discharge", "document-review",
         "document-revision", "estate", "estate-policy", "goal", "goal-status", "harness-qualification", "history-checkpoint", "living-document", "migration",
         "observation", "operation", "operator-request", "operator-request-close", "policy-exception", "possibility", "principal", "product", "qualification", "reconciliation",
-        "prompt-preference", "release", "resource", "result", "retirement", "review", "roster", "saved-prompt", "template-defaults", "verification", "work-order", "work-progress", "work-status", "writing-exception",
+        "prompt-preference", "release", "resource", "result", "retirement", "review", "roster", "run-stop-request", "saved-prompt", "template-defaults", "verification", "work-order", "work-progress", "work-status", "writing-exception",
     ];
 
     /// <summary>Exact descriptors for item and list readers, including nested collections.</summary>

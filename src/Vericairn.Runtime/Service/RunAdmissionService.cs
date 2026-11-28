@@ -360,6 +360,12 @@ internal sealed class RunAdmissionService(
                 return Refused(RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded."));
             }
 
+            if (WorkView.OrderOfAssignment(model, plan.Assignment) is RecordEnvelope order
+                && AssignmentPathRefusal(model, model.Latest(order), plan.Assignment) is string pathRefusal)
+            {
+                return Refused(RunProblem(pending, "not-started", "refused", pathRefusal + " Nothing was recorded."));
+            }
+
             var intentView = RepositoryView.For(model, Providers, session.Manifest.Estate);
             if (AssignmentOverlaps.WaitRefusal(model, plan.Assignment, "its run", intentView) is string waiting)
             {
@@ -672,6 +678,38 @@ internal sealed class RunAdmissionService(
             : null;
     }
 
+    // A standing occurrence names its occurrence key; other flow assignments name the step directly. Both run only within the
+    // current declarations for the step they carry, including when started directly by assignment.
+    private static string? AssignmentPathRefusal(EstateModel model, RecordEnvelope order, RecordEnvelope assignment)
+    {
+        RecordEnvelope? goal;
+        FlowStep? step;
+        if (StandingAgents.KeyOf(assignment) is not null)
+        {
+            goal = StandingAgents.StandingOf(model, order);
+            if (goal is null || StandingAgents.Resolve(model, goal).Flow is not FlowDefinition flow || StandingAgents.WorkStep(flow) is not FlowStep work)
+            {
+                return $"{FlowPermissions.Code}: assignment {assignment.Id}'s current standing flow must resolve to its work step before it can run.";
+            }
+
+            step = work;
+        }
+        else if (FlowRuns.StepOf(assignment) is FlowRuns.StepRef named && FlowRuns.RunOf(model, order) is RecordEnvelope run
+            && FlowRuns.Resolve(model, run).Flow?.Step(named.Key) is FlowStep declared)
+        {
+            goal = run;
+            step = declared;
+        }
+        else
+        {
+            return null;
+        }
+
+        return FlowPermissions.Carried(FlowPermissions.For(model, goal, order, step), assignment) is null
+            ? $"{FlowPermissions.Code}: {FlowPermissions.HeldMessage(assignment, step.Key)}"
+            : null;
+    }
+
     /// <summary>The overlaps of a run's assignment with the active assignments, each a sentence (from 0.9.4, CODE-73); null when none.</summary>
     private static List<string>? Overlaps(EstateModel model, RecordEnvelope assignment, RepositoryView view)
     {
@@ -720,13 +758,9 @@ internal sealed class RunAdmissionService(
             return (null, assignmentRefusal, null);
         }
 
-        // From 0.9.5 (FIX-166): a run's flow step runs only within the step's current path declarations, as goal step checks, however
-        // the run is started. A standing agent's step is not judged here (design/standing-agents.md keeps its brief).
-        if (FlowRuns.StepOf(assignment) is FlowRuns.StepRef pathStep && FlowRuns.RunOf(model, order) is RecordEnvelope pathRun
-            && !StandingAgents.IsStanding(pathRun) && FlowRuns.Resolve(model, pathRun).Flow?.Step(pathStep.Key) is FlowStep declared
-            && FlowPermissions.Carried(FlowPermissions.For(model, pathRun, order, declared), assignment) is null)
+        if (AssignmentPathRefusal(model, order, assignment) is string pathRefusal)
         {
-            return (null, $"{FlowPermissions.Code}: assignment {assignment.Id} of flow step {pathStep} needs a brief with permitted paths within the step's current path declarations; take the step again with 'vericairn goal step'.", null);
+            return (null, pathRefusal, null);
         }
 
         if (!Strings(assignment.Body.GetProperty("brief"), "permittedChanges").Any(entry => PermittedPaths.Pattern(entry) is not null))

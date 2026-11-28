@@ -205,7 +205,7 @@ public static class GoalView
         // From 0.9.4 (GOAL-07): a standing agent's state, next occurrence, deferrals and period spend; goal due lists each occurrence.
         if (StandingAgents.IsStanding(goal))
         {
-            text.Append("Standing agent: ").Append(StandingView.Line(StandingAgents.Derive(model, goal, at))).Append("; vericairn goal due ").Append(goal.Id).Append(" lists each occurrence\n");
+            text.Append("Standing agent: ").Append(StandingView.Line(model, StandingAgents.Derive(model, goal, at))).Append("; vericairn goal due ").Append(goal.Id).Append(" lists each occurrence\n");
         }
 
         if (view.Acceptance is not null)

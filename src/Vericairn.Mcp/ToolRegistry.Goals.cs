@@ -11,10 +11,10 @@ public sealed partial class ToolRegistry
 {
     private static IEnumerable<ToolDefinition> GoalControlTools(string by)
     {
-        yield return Write("goal_propose", "Propose a goal or its revision through the local runtime. A flow run is refused if an agent work step has no permitted path pattern. A proposal grants no budget.",
-            Arguments(("body", "The complete goal record body, including plan.flow.paths for a flow run when supplied."), ("supersedes", "The current goal record id, when proposing a revision.")), ["body"],
+        yield return Write("goal_propose", "Propose a goal or its revision through the local runtime. A flow run or standing goal is refused with flow.permitted-paths if an agent work step has no permitted path pattern. A proposal grants no budget.",
+            Arguments(("body", "The complete goal record body, including optional repository-relative path patterns in plan.flow.paths for a flow run or plan.standing.paths for a standing goal."), ("supersedes", "The current goal record id, when proposing a revision.")), ["body"],
             async (api, arguments, token) => Outcome(await api.GoalProposeAsync(new GoalProposeRequest(by, Body(arguments, "body"), OptionalArg(arguments, "supersedes")), token).ConfigureAwait(false)), ["body"]) with { OperatorOnly = true };
-        yield return Write("goal_activate", "Activate a proposed goal under the same authority as the command line. A flow run is refused if an agent work step has no permitted path pattern.",
+        yield return Write("goal_activate", "Activate a proposed goal under the same authority as the command line. A flow run or standing goal is refused with flow.permitted-paths if an agent work step has no permitted path pattern.",
             Arguments(("goal", "Goal record id (ULID), any revision."), ("note", "Optional activation note.")), ["goal"],
             async (api, arguments, token) => Outcome(await api.GoalActivateAsync(Arg(arguments, "goal"), new GoalActionRequest(by, OptionalArg(arguments, "note")), token).ConfigureAwait(false))) with { OperatorOnly = true };
         yield return Write("goal_step", "Take an active goal's next step under the same authority as the command line. With check true, preview its route and permitted change patterns without signing, recording or dispatching.",
