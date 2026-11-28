@@ -91,7 +91,7 @@ public sealed class DecisionBasisApiTests
             to = person, question = "Keep the current scope?", recommendation = "Keep the current scope.", consequence = "Work waits for the answer.", state = "open",
         }));
         string head = EstateGit.Init(harness.Estate.Root, harness.Host.Service);
-        var presence = new PresenceKeyStandIn(harness.DeviceHome);
+        var presence = harness.AndroidPresence();
         RuntimeConnection phone = harness.Connections.Add(harness.Address, harness.Issue(person).Code, new PairingOptions("Phone") { PresenceKeyStore = presence });
         using VericairnClient client = harness.Connections.Connect(phone);
 

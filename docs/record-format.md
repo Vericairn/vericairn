@@ -314,8 +314,11 @@ Canonical status adds `history`: whether the estate has adopted checkpoints, its
 by id and hash, how many records they witness, the unwitnessed tail and the standing
 problems, identical on every copy with the same records and objects. `estate check
 --expect <checkpoint>` refuses a copy that lacks a checkpoint known elsewhere, and
-warns `history.deleted-in-git` for unwitnessed record files deleted in the clone's
-history ([CLI](cli.md#vericairn-estate-check---expect-092)).
+reports `history.deleted-in-git` for unwitnessed record files deleted in the clone's
+history. From 0.9.5 (ID-19), the finding is informational when a counting checkpoint
+from the root operator's admitted presence device acknowledges that exact deletion and
+the clone can verify the claim on its main line. See the
+[checkpoint entry format](record-format-v3.md#history-checkpoints-092).
 
 A witnessed record that is removed is absent, and every rule reads the copy without it: a
 removed revocation, for example, leaves its device admitted on that copy, bounded only by a
@@ -330,8 +333,8 @@ exempts the exact bytes it lists from the signature requirement, from a closing'
 its author check against that principal's roles and grants as for any record, and its `at` is
 read as any counting record's. A device revision a closing refused changes no key or name,
 anchored or not. The runtime refuses an anchor of bytes not present, of a signed record no
-closing refuses or of a device revision a closing refused, and an acknowledgement of a record
-present with the listed hash or of a version no head witnesses.
+closing refuses or of a device revision a closing refused, and a witnessed-removal
+acknowledgment for a record present with its listed hash or a version no head witnesses.
 
 ## Closings and authority at a record's time (0.9.2)
 

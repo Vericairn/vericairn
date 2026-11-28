@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Service;
 
@@ -91,13 +92,7 @@ internal static class DaemonRoutes
             return Problem(StatusCodes.Status401Unauthorized, "denied", problem!);
         }
 
-        // A presence device is offered only when the device asks for one, so an earlier client's exchange keeps its exact transcript.
-        PairingPlan plan = host.Service.PairingPlan(pairing.Principal, hello.Presence == true);
-        var challenge = new PairingChallenge(hello.Nonce, PairingProtocol.NewNonce(), plan.Estate, plan.EstateName, host.Identity.PublicKey, certificate, plan.Principal, plan.PrincipalName, plan.PrincipalKind, pairing.Profiles, plan.Record, plan.At, plan.Format, RecordParser.FormatTimestamp(pairing.ExpiresAt), string.Empty)
-        {
-            PresenceRecord = plan.PresenceRecord,
-        };
-        challenge = challenge with { Mac = PairingProtocol.ChallengeMac(pairing.RuntimeKey, hello, challenge) };
+        (PairingPlan plan, PairingChallenge challenge) = Challenge(host.Service, pairing, hello, host.Identity.PublicKey, certificate);
         if (host.Pairings.Open(pairing, hello, challenge, plan) is string closed)
         {
             context.Response.Headers.Connection = "close";
@@ -105,6 +100,19 @@ internal static class DaemonRoutes
         }
 
         return Results.Json(challenge, ProtocolJson.Options);
+    }
+
+    internal static (PairingPlan Plan, PairingChallenge Challenge) Challenge(EstateService service, PairingRegistry.Pairing pairing, PairingHello hello, string identity, string certificate)
+    {
+        // Older clients ask for presence but can only declare it under the old rules. Pair their request key alone.
+        bool offerPresence = hello.Presence == true && hello.PresenceAttestation == true;
+        PairingPlan plan = service.PairingPlan(pairing.Principal, offerPresence);
+        var challenge = new PairingChallenge(hello.Nonce, plan.RuntimeNonce, plan.Estate, plan.EstateName, identity, certificate, plan.Principal, plan.PrincipalName, plan.PrincipalKind, pairing.Profiles, plan.Record, plan.At, plan.Format, RecordParser.FormatTimestamp(pairing.ExpiresAt), string.Empty)
+        {
+            PresenceRecord = plan.PresenceRecord,
+            PresenceAttestation = plan.Format >= 2 && hello.PresenceAttestation == true ? true : null,
+        };
+        return (plan, challenge with { Mac = PairingProtocol.ChallengeMac(pairing.RuntimeKey, hello, challenge) });
     }
 
     /// <summary>Records the device a confirmation presents, when its MAC matches the code and its key signed its record: the device record, then its admission.</summary>
@@ -141,7 +149,7 @@ internal static class DaemonRoutes
                 return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "This exchange offered no presence device; nothing was recorded.");
             }
 
-            string note = $"Paired over the local network with a pairing code {pairing.By} issued from device {pairing.Issuer.Device}, under authority {pairing.Issuer.Authority}, at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. Its name, platform, custody and presence are its own statement, which the runtime cannot verify.";
+            string note = $"{DeviceRecords.PairingAdmissionNote}{pairing.By} issued from device {pairing.Issuer.Device}, under authority {pairing.Issuer.Authority}, at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. The device declared its name, platform and custody; its record identifies any verified presence.";
             (WriteOutcome written, WriteOutcome? admitted, WriteOutcome? presence, WriteOutcome? presenceAdmitted) =
                 host.Service.PairDevice(exchange.Plan, pairing.Profiles, confirm.Device, confirm.Signature, pairing.Issuer, note, confirm.PresenceDevice, confirm.PresenceSignature);
             bool withPresence = confirm.PresenceDevice is not null;
