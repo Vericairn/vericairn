@@ -18,9 +18,9 @@ internal static class WorkspaceMetadata
         if (OperatingSystem.IsWindows())
         {
             // Denying delete sharing holds each directory in place until the files have been replaced. Open the reparse point itself.
-            using SafeFileHandle root = OpenWindowsDirectory(workspace);
+            using SafeFileHandle root = DirectoryHandles.OpenWindows(workspace);
             Directory.CreateDirectory(own);
-            using SafeFileHandle metadata = OpenWindowsDirectory(own);
+            using SafeFileHandle metadata = DirectoryHandles.OpenWindows(own);
             RefuseLinks(own, recurse: true);
             ReplaceWindows(".gitignore", "*\n");
             ReplaceWindows("brief.md", brief);
@@ -28,15 +28,14 @@ internal static class WorkspaceMetadata
         else
         {
             int noFollow = OperatingSystem.IsMacOS() ? 0x100 : 0x20000;
-            int directory = OperatingSystem.IsMacOS() ? 0x100000 : 0x10000;
             int closeOnExec = OperatingSystem.IsMacOS() ? 0x1000000 : 0x80000;
-            using SafeFileHandle root = OpenAt(-1, workspace, noFollow | directory | closeOnExec);
+            using SafeFileHandle root = DirectoryHandles.OpenUnix(workspace);
             if (mkdirat(root, ".vericairn", 0x1c0) != 0 && Marshal.GetLastPInvokeError() != 17) // 0700, EEXIST
             {
                 throw Failure();
             }
 
-            using SafeFileHandle metadata = OpenAt((int)root.DangerousGetHandle(), ".vericairn", noFollow | directory | closeOnExec);
+            using SafeFileHandle metadata = DirectoryHandles.OpenUnix(".vericairn", root);
             RefuseLinks(own, recurse: true);
             ReplaceUnix(".gitignore", "*\n");
             ReplaceUnix("brief.md", brief);
@@ -45,7 +44,7 @@ internal static class WorkspaceMetadata
             {
                 int parent = (int)metadata.DangerousGetHandle();
                 int nonblock = OperatingSystem.IsMacOS() ? 4 : 0x800;
-                int existing = openat(parent, name, noFollow | nonblock | closeOnExec, 0);
+                int existing = DirectoryHandles.OpenAt(parent, name, noFollow | nonblock | closeOnExec, 0);
                 if (existing >= 0)
                 {
                     using var prior = new SafeFileHandle(existing, ownsHandle: true);
@@ -72,7 +71,7 @@ internal static class WorkspaceMetadata
                 }
                 finally
                 {
-                    _ = unlinkat(metadata, temporary, 0);
+                    _ = DirectoryHandles.UnlinkAt(metadata, temporary, 0);
                 }
             }
         }
@@ -133,40 +132,16 @@ internal static class WorkspaceMetadata
     private static SafeFileHandle OpenAt(int parent, string name, int flags)
     {
         // openat with an absolute name ignores parent, so no platform-specific AT_FDCWD constant is needed for the root.
-        int descriptor = openat(parent, name, flags, 0x180); // 0600 for a newly created file.
+        int descriptor = DirectoryHandles.OpenAt(parent, name, flags, 0x180); // 0600 for a newly created file.
         return descriptor >= 0 ? new SafeFileHandle(descriptor, ownsHandle: true) : throw Failure();
-    }
-
-    private static SafeFileHandle OpenWindowsDirectory(string path)
-    {
-        SafeFileHandle handle = CreateFileW(path, 0x80, 3, 0, 3, 0x02000000 | 0x00200000, 0);
-        if (handle.IsInvalid)
-        {
-            handle.Dispose();
-            throw Failure();
-        }
-
-        if (!GetFileInformationByHandleEx(handle, 9, out AttributeTag tag, Marshal.SizeOf<AttributeTag>()) || (tag.Attributes & 0x400) != 0)
-        {
-            handle.Dispose();
-            throw new IOException("The workspace metadata directory is a reparse point or could not be verified.");
-        }
-
-        return handle;
     }
 
     private static IOException Failure() => new("Workspace metadata could not be opened without following links.", new Win32Exception(Marshal.GetLastPInvokeError()));
 
 #pragma warning disable SYSLIB1054 // Runtime marshalling keeps the project free of unsafe code.
 #pragma warning disable CA2101 // UTF-8 on Unix, explicit Unicode entry points on Windows.
-    [DllImport("libc", SetLastError = true)] private static extern int openat(int parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, int mode);
     [DllImport("libc", SetLastError = true)] private static extern int mkdirat(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int mode);
     [DllImport("libc", SetLastError = true)] private static extern int renameat(SafeFileHandle from, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, SafeFileHandle to, [MarshalAs(UnmanagedType.LPUTF8Str)] string target);
-    [DllImport("libc", SetLastError = true)] private static extern int unlinkat(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern SafeFileHandle CreateFileW(string path, uint access, uint sharing, nint security, uint creation, uint flags, nint template);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle, int kind, out AttributeTag tag, int size);
 #pragma warning restore CA2101
 #pragma warning restore SYSLIB1054
-
-    [StructLayout(LayoutKind.Sequential)] private struct AttributeTag { public uint Attributes, Tag; }
 }

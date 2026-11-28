@@ -2,9 +2,11 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Buffers;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Estate;
 using Vericairn.Runtime.Providers;
@@ -75,16 +77,53 @@ public sealed partial class WorkerConfigurationStore
         }
     }
 
-    internal bool RemoveClaudeSetupToken()
+    internal (bool Removed, IReadOnlyList<string> Warnings) RemoveClaudeSetupToken()
     {
         string path = ConfigurationPath(ClaudeSetupTokenFile);
         RefuseLink(path);
-        if (!File.Exists(path)) return false;
+        if (!File.Exists(path)) return (false, []);
         RefuseHarnessConfiguration(path, WorkerEnvironment.Current());
-        RequireHomeNotWritableByOthers(path);
-        RequireOwnerOnly(Path.GetDirectoryName(path)!, isDirectory: true);
-        File.Delete(path);
-        return true;
+
+        string worker = Path.GetDirectoryName(path)!;
+        string home = Path.GetDirectoryName(worker)!;
+        using SafeFileHandle homeHandle = OperatingSystem.IsWindows()
+            ? DirectoryHandles.OpenWindows(home)
+            : DirectoryHandles.OpenUnix(home, searchOnly: true);
+        using SafeFileHandle workerHandle = OperatingSystem.IsWindows()
+            ? DirectoryHandles.OpenWindows(worker)
+            : DirectoryHandles.OpenUnix(Path.GetFileName(worker), homeHandle, searchOnly: true);
+
+        RefuseLink(path);
+        if (OperatingSystem.IsWindows())
+        {
+            // The directory handles deny delete sharing, so the path cannot be redirected by a directory swap.
+            if (!File.Exists(path)) return (false, []);
+            File.Delete(path);
+        }
+        else if (DirectoryHandles.UnlinkAt(workerHandle, ClaudeSetupTokenFile, 0) != 0)
+        {
+            // Unlink removes the entry in this directory even if a concurrent rename substitutes a link at the leaf.
+            if (Marshal.GetLastPInvokeError() == 2) return (false, []); // ENOENT
+            throw new IOException("The provisioned Claude Code setup token could not be removed.");
+        }
+
+        List<string> warnings = [];
+        try
+        {
+            bool writableHome = OperatingSystem.IsWindows() ? HomeWritableByOthers(path) : IsWritableByOthers(File.GetUnixFileMode(homeHandle));
+            bool ownerOnlyWorker = OperatingSystem.IsWindows()
+                ? HasOwnerOnlyPermissions(worker, isDirectory: true)
+                : File.GetUnixFileMode(workerHandle) == OwnerOnlyState.DirectoryMode;
+            if (writableHome)
+                warnings.Add("The Vericairn home is writable by other users. Restrict its write access to its owner.");
+            if (!ownerOnlyWorker)
+                warnings.Add("The worker directory must have owner-only permissions. Restrict access to its owner.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            warnings.Add("Could not check the Vericairn home and worker directory permissions. Check their ownership and restrict access.");
+        }
+        return (true, warnings);
     }
 
     internal ClaudeSetupToken? ReadClaudeSetupToken(IReadOnlyDictionary<string, string>? environment = null, bool allowExpired = false)
@@ -125,9 +164,14 @@ public sealed partial class WorkerConfigurationStore
 
     private static void RequireHomeNotWritableByOthers(string provision)
     {
+        if (HomeWritableByOthers(provision))
+            throw SetupTokenProblem("The Vericairn home is writable by other users. Restrict its write access before using a Claude Code setup token.");
+    }
+
+    private static bool HomeWritableByOthers(string provision)
+    {
         string home = Path.GetDirectoryName(Path.GetDirectoryName(provision)!)!;
-        if (!Directory.Exists(home)) return;
-        const string message = "The Vericairn home is writable by other users. Restrict its write access before using a Claude Code setup token.";
+        if (!Directory.Exists(home)) return false;
         if (OperatingSystem.IsWindows())
         {
             const FileSystemRights change = FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories | FileSystemRights.Delete
@@ -139,12 +183,14 @@ public sealed partial class WorkerConfigurationStore
                     && (rule.PropagationFlags & PropagationFlags.InheritOnly) == 0
                     && rule.IdentityReference is SecurityIdentifier identity && (identity.IsWellKnown(WellKnownSidType.WorldSid)
                         || identity.IsWellKnown(WellKnownSidType.AuthenticatedUserSid) || identity.IsWellKnown(WellKnownSidType.BuiltinUsersSid)))
-                    throw SetupTokenProblem(message);
+                    return true;
             }
+            return false;
         }
-        else if ((File.GetUnixFileMode(home) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
-            throw SetupTokenProblem(message);
+        return IsWritableByOthers(File.GetUnixFileMode(home));
     }
+
+    private static bool IsWritableByOthers(UnixFileMode mode) => (mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0;
 
     private void RefuseHarnessConfiguration(string path, IReadOnlyDictionary<string, string> environment)
     {
@@ -218,21 +264,26 @@ public sealed partial class WorkerConfigurationStore
     {
         const string message = "The provisioned Claude Code setup token file and worker directory must have owner-only permissions. Restrict access or import the token again with worker configure.";
         RefuseLink(path);
+        if (!HasOwnerOnlyPermissions(path, isDirectory)) throw SetupTokenProblem(message);
+    }
+
+    private static bool HasOwnerOnlyPermissions(string path, bool isDirectory)
+    {
         if (OperatingSystem.IsWindows())
         {
             using WindowsIdentity identity = WindowsIdentity.GetCurrent();
             FileSystemSecurity security = isDirectory ? new DirectoryInfo(path).GetAccessControl() : new FileInfo(path).GetAccessControl();
             SecurityIdentifier? owner = identity.User;
             if (owner is null || !owner.Equals(security.GetOwner(typeof(SecurityIdentifier))))
-                throw SetupTokenProblem(message);
+                return false;
             foreach (FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
             {
                 if (rule.AccessControlType == AccessControlType.Allow && !owner.Equals(rule.IdentityReference))
-                    throw SetupTokenProblem(message);
+                    return false;
             }
+            return true;
         }
-        else if (File.GetUnixFileMode(path) != (isDirectory ? OwnerOnlyState.DirectoryMode : OwnerOnlyState.FileMode)
-            || OwnerOnlyState.Restriction(path) is not null)
-            throw SetupTokenProblem(message);
+        return File.GetUnixFileMode(path) == (isDirectory ? OwnerOnlyState.DirectoryMode : OwnerOnlyState.FileMode)
+            && OwnerOnlyState.Restriction(path) is null;
     }
 }

@@ -66,9 +66,10 @@ internal sealed class WorkerSettings(CommandContext context)
             return context.Fail("Use --remove-setup-token separately from other worker settings.");
         try
         {
-            bool removed = new WorkerConfigurationStore().RemoveClaudeSetupToken();
+            (bool removed, IReadOnlyList<string> warnings) = new WorkerConfigurationStore().RemoveClaudeSetupToken();
             if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { removed }, ProtocolJson.Options));
             else context.Output.WriteLine(removed ? "Removed the local Claude Code setup token." : "No local Claude Code setup token was provisioned.");
+            foreach (string warning in warnings) context.Error.WriteLine("warning: " + warning);
             return Clean;
         }
         catch (ProviderRefusedException exception)

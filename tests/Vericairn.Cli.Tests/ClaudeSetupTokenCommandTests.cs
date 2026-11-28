@@ -212,6 +212,34 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
     }
 
     [Theory]
+    [InlineData("worker", 0x1ed, "The worker directory must have owner-only permissions. Restrict access to its owner.")] // 0755
+    [InlineData("", 0x1fd, "The Vericairn home is writable by other users. Restrict its write access to its owner.")] // 0775
+    public async Task RemoveDeletesTheProvisionAndWarnsAboutLooseDirectoryPermissions(string widened, int mode, string warning)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This exercises Unix permission bits.");
+            return;
+        }
+        string token = Token();
+        string home = Path.Combine(scratch, "worker-home");
+        Assert.Equal(0, (await Import(home, token, "max")).Code);
+        string provision = Provision(home);
+        Assert.True(File.Exists(provision));
+        string directory = Path.Combine(home, widened);
+        File.SetUnixFileMode(directory, (UnixFileMode)mode);
+
+        CliHarness.Outcome result = await Invoke(home, "", null, "--json", "worker", "configure", "--remove-setup-token");
+
+        Assert.False(File.Exists(provision));
+        Assert.Equal(0, result.Code);
+        Assert.True(result.Json.GetProperty("removed").GetBoolean());
+        Assert.Contains("warning: " + warning, result.Err, StringComparison.Ordinal);
+        Assert.DoesNotContain("import", result.Err, StringComparison.OrdinalIgnoreCase);
+        Assert.False((result.Out + result.Err).Contains(token, StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData("repository")]
     [InlineData("estate")]
     [InlineData("config")]

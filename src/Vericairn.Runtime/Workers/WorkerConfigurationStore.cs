@@ -152,9 +152,15 @@ public sealed partial class WorkerConfigurationStore
 
     private string ConfigurationPath(string name)
     {
-        RefuseLink(directory);
-        RefuseLink(Path.GetDirectoryName(directory)!);
-        string canonical = CanonicalDirectory(directory);
+        DirectoryInfo worker = new(directory);
+        DirectoryInfo home = worker.Parent!;
+        RefuseLink(worker.FullName);
+        RefuseLink(home.FullName);
+        // Resolve only ancestors of the home. A change to the worker or home must not redirect the provision path.
+        string canonicalHome = home.Parent is { } ancestor
+            ? Path.Combine(CanonicalDirectory(ancestor.FullName), home.Name)
+            : home.FullName;
+        string canonical = Path.Combine(canonicalHome, worker.Name);
         for (DirectoryInfo? parent = new(canonical); parent is not null; parent = parent.Parent)
         {
             if (RepositoryOrEstate(parent.FullName))
