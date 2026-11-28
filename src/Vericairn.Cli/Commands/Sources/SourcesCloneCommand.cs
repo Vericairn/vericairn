@@ -13,8 +13,10 @@ internal sealed class SourcesCloneCommand : Command
         var operations = new SourceOperations(context);
         var pathArgument = new Argument<string>("path") { Description = "Path of a git working tree on this machine; never recorded." };
         var resourceOption = new Option<string>("--resource") { Description = "Resource record id of the adopted repository.", Required = true };
+        var boundaryOption = new Option<string?>("--boundary") { Description = "Operator-selected local directory that may contain the repository and its Git metadata. Defaults to the repository root." };
         Arguments.Add(pathArgument);
+        Options.Add(boundaryOption);
         Options.Add(resourceOption);
-        SetAction(parseResult => operations.SourcesClone(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(resourceOption)!, parseResult.GetValue(pathArgument)!, parseResult.GetValue(context.JsonOption)));
+        SetAction(parseResult => operations.SourcesClone(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(resourceOption)!, parseResult.GetValue(pathArgument)!, parseResult.GetValue(boundaryOption), parseResult.GetValue(context.JsonOption)));
     }
 }

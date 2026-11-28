@@ -25,7 +25,10 @@ namespace Vericairn.Daemon;
 /// <param name="Principal">The principal it acts for, and the only one its requests may name as acting.</param>
 /// <param name="PublicKey">The current key that verified its signature, rechecked under the estate's write lock.</param>
 /// <param name="LocalNetwork">Whether the request came over the local network.</param>
-internal sealed record AuthenticatedDevice(string Identity, string Principal, string PublicKey, bool LocalNetwork);
+internal sealed record AuthenticatedDevice(string Identity, string Principal, string PublicKey, bool LocalNetwork)
+{
+    internal string? NetworkProfile { get; init; } = LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null;
+}
 
 /// <summary>
 /// Verifies device-signed requests on profiles without operating-system identity: the device must be admitted now in the estate
@@ -45,6 +48,8 @@ internal sealed class RequestAuthenticator
 
     /// <summary>The profile name a device must be permitted to use the local network.</summary>
     internal const string LocalNetworkProfile = "local-network";
+
+    internal const string RelayProfile = "relay";
 
     /// <summary>The most a pairing message's body may hold: what reaches the runtime without a credential is read only this far.</summary>
     internal const long PairingBodyLimit = 16 * 1024;
@@ -215,11 +220,16 @@ internal sealed class RequestAuthenticator
     /// code authenticates it; every other request comes from a device that is current, admitted now and permitted the local network,
     /// over a TLS connection whose client certificate the device's current key issued, and is signed by that key, fresh and once.
     /// </summary>
-    public async Task<Problem?> VerifyLocalNetworkAsync(HttpContext context)
+    public async Task<Problem?> VerifyLocalNetworkAsync(HttpContext context, string profile = LocalNetworkProfile, string? ticketDevice = null)
     {
         string operation = Operation(context);
         if (PairingRoutes.Contains(operation))
         {
+            if (profile == RelayProfile)
+            {
+                return Denied("Pairing runs over the local network.");
+            }
+
             // The host bounds the exchange before binding, while preserving the original reader for refusal cleanup.
             return null;
         }
@@ -240,7 +250,7 @@ internal sealed class RequestAuthenticator
             return Denied(NotPaired);
         }
 
-        if (Admits(service.Standing(device), certificate) is Problem refused)
+        if (Admits(service.Standing(device), certificate, profile, ticketDevice) is Problem refused)
         {
             return refused;
         }
@@ -277,7 +287,7 @@ internal sealed class RequestAuthenticator
         }
 
         DeviceStanding? standing = service.Standing(device);
-        Problem? changed = Admits(standing, certificate);
+        Problem? changed = Admits(standing, certificate, profile, ticketDevice);
         if (changed is not null || standing is null)
         {
             return changed ?? Denied(NotPaired);
@@ -293,7 +303,7 @@ internal sealed class RequestAuthenticator
             return Denied($"{operation} acts on the runtime's own machine and is refused over the local network; run it on that machine.");
         }
 
-        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: true);
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: true) { NetworkProfile = profile };
         return null;
     }
 
@@ -306,9 +316,9 @@ internal sealed class RequestAuthenticator
     /// a device exists, is revoked, or is permitted the profile; then revocation counts from the next request on, on an open
     /// connection too.
     /// </summary>
-    private Problem? Admits(DeviceStanding? standing, X509Certificate2? certificate)
+    private Problem? Admits(DeviceStanding? standing, X509Certificate2? certificate, string profile, string? ticketDevice)
     {
-        if (standing is null || certificate is null || !IssuedBy(certificate, standing.PublicKey, time.GetUtcNow()))
+        if (standing is null || profile == RelayProfile && standing.Identity != ticketDevice || certificate is null || !IssuedBy(certificate, standing.PublicKey, time.GetUtcNow()))
         {
             return Denied(NotPaired);
         }
@@ -323,9 +333,9 @@ internal sealed class RequestAuthenticator
             return Denied($"Device {standing.Identity} is not admitted now; an administrator admits devices.");
         }
 
-        return standing.Profiles.Contains(LocalNetworkProfile, StringComparer.Ordinal)
+        return standing.Profiles.Contains(profile, StringComparer.Ordinal)
             ? null
-            : Denied($"Device {standing.Identity} is not permitted the local-network profile; its permitted profiles are {(standing.Profiles.Count == 0 ? "none" : string.Join(", ", standing.Profiles))}.");
+            : Denied($"Device {standing.Identity} is not permitted the {profile} profile; its permitted profiles are {(standing.Profiles.Count == 0 ? "none" : string.Join(", ", standing.Profiles))}.");
     }
 
     /// <summary>

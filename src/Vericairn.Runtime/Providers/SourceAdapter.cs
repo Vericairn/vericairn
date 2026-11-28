@@ -23,7 +23,20 @@ public sealed record RecentCommit(string Commit, string At, string Summary);
 /// <param name="Tags">Tags, sorted.</param>
 /// <param name="Recent">Most recent commits, newest first, at most ten.</param>
 /// <param name="AsOf">When the observation was made.</param>
-public sealed record RepositoryObservation(string Commit, string? Branch, string? Remote, string RootCommit, bool Clean, int Modified, int Untracked, IReadOnlyList<string> Tags, IReadOnlyList<RecentCommit> Recent, string AsOf);
+public sealed record RepositoryObservation(string Commit, string? Branch, string? Remote, string RootCommit, bool Clean, int Modified, int Untracked, IReadOnlyList<string> Tags, IReadOnlyList<RecentCommit> Recent, string AsOf)
+{
+    /// <summary>Names of settings ignored during acquisition, without their values.</summary>
+    public IReadOnlyList<string> IgnoredConfiguration { get; init; } = [];
+
+    /// <summary>SHA-256 of the exact observed repository configuration, when reported.</summary>
+    public string? ConfigurationHash { get; init; }
+
+    /// <summary>SHA-256 of the exact observed worktree configuration when it exists.</summary>
+    public string? WorktreeConfigurationHash { get; init; }
+
+    /// <summary>Git metadata members that redirected within the selected operator boundary.</summary>
+    public IReadOnlyList<string> GitRedirections { get; init; } = [];
+}
 
 /// <summary>A local observation used by release admission, never proof of a remote's current state.</summary>
 /// <param name="Clean">Whether staged, tracked and untracked changes are absent.</param>
@@ -100,6 +113,10 @@ public interface ISourceAdapter
     /// <summary>Observes a repository without changing it; throws <see cref="ProviderRefusedException"/> when the path is not a repository with a commit.</summary>
     RepositoryObservation Inspect(string path);
 
+    /// <summary>Observes a repository within an explicitly selected local boundary.</summary>
+    RepositoryObservation Inspect(string path, string? boundary) => boundary is null ? Inspect(path)
+        : throw new ProviderRefusedException("This source adapter cannot apply a repository boundary.");
+
     /// <summary>Reads cleanliness and the locally known default branch head without fetching or modifying the clone. Null when unsupported or unavailable.</summary>
     ReleaseSourceObservation? InspectRelease(string path) => null;
 
@@ -135,6 +152,18 @@ public interface ISourceAdapter
     /// unsupported.
     /// </summary>
     RecordDeletions? DeletedRecordFiles(string root) => null;
+
+    /// <summary>
+    /// The regular record file with this id deleted by the exact commit, with bytes from its parent, only if the commit
+    /// is reachable from the local main line. Null when the source cannot establish a unique match in complete history.
+    /// </summary>
+    SourceFile? DeletedRecordAtCommit(string root, string commit, string id) => null;
+
+    /// <summary>
+    /// The same deletion evidence, provided the commit is a merge and the path is absent in a parent that reaches
+    /// <paramref name="carriedFrom"/>.
+    /// </summary>
+    SourceFile? DeletedRecordAtCommit(string root, string commit, string id, string carriedFrom) => null;
 
     /// <summary>
     /// The commit that added each record file in the checked-out commit's reachable history, the oldest when several did, without fetching

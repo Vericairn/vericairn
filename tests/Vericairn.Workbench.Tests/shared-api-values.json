@@ -404,6 +404,7 @@
   ],
   "Vericairn.Records.Types.DeviceType.Presences": [
     "required",
+    "declared",
     "none"
   ],
   "Vericairn.Records.Types.DeviceType.Profiles": [

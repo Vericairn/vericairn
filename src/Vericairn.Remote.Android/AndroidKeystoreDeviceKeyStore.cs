@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers.Text;
 using System.Runtime.Versioning;
 using Android.Content;
 using Android.Hardware.Biometrics;
@@ -18,7 +19,7 @@ namespace Vericairn.Remote.Android;
 /// keys need the owner's strong biometric or device credential at every signature (per-use authentication, Android 11 and later),
 /// enforced by the keystore, and exist only while the device has a secure lock screen.
 /// </summary>
-public sealed class AndroidKeystoreDeviceKeyStore : IDeviceKeyStore
+public sealed class AndroidKeystoreDeviceKeyStore : IAttestedDeviceKeyStore
 {
     private const string Provider = "AndroidKeyStore";
     private readonly string aliasPrefix;
@@ -44,7 +45,17 @@ public sealed class AndroidKeystoreDeviceKeyStore : IDeviceKeyStore
     public bool Has(string deviceId) => Store().ContainsAlias(Alias(deviceId));
 
     /// <inheritdoc />
-    public byte[] Create(string deviceId)
+    public byte[] Create(string deviceId) => CreateCore(deviceId, null);
+
+    /// <inheritdoc />
+    public byte[] Create(string deviceId, byte[] challenge)
+    {
+        ArgumentNullException.ThrowIfNull(challenge);
+        if (!presence || challenge.Length != 32) throw new ArgumentException("The runtime gives a 32-byte challenge for a presence key.", nameof(challenge));
+        return CreateCore(deviceId, challenge);
+    }
+
+    private byte[] CreateCore(string deviceId, byte[]? challenge)
     {
         if (Has(deviceId)) throw new InvalidOperationException($"This device already holds a key for device {deviceId}.");
         KeyPairGenerator generator = KeyPairGenerator.GetInstance(KeyProperties.KeyAlgorithmEc, Provider)
@@ -56,6 +67,7 @@ public sealed class AndroidKeystoreDeviceKeyStore : IDeviceKeyStore
         {
             if (!OperatingSystem.IsAndroidVersionAtLeast(30)) throw new PlatformNotSupportedException("A presence key needs Android 11 or later.");
             Presence(builder);
+            if (challenge is not null) builder.SetAttestationChallenge(challenge);
         }
 
         try
@@ -68,6 +80,14 @@ public sealed class AndroidKeystoreDeviceKeyStore : IDeviceKeyStore
         {
             throw new InvalidOperationException($"Android Keystore did not create the key: {exception.Message}", exception);
         }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> Attestation(string deviceId)
+    {
+        var certificates = Store().GetCertificateChain(Alias(deviceId));
+        if (certificates is not { Length: > 0 }) throw new InvalidOperationException("Android Keystore gave no attestation chain.");
+        return certificates.Select(certificate => Base64Url.EncodeToString(certificate.GetEncoded()!)).ToArray();
     }
 
     /// <inheritdoc />

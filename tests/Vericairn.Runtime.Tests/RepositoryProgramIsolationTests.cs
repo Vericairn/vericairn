@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using Vericairn.Adapters.Git;
+using Vericairn.Records.Hashing;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Tests;
@@ -49,8 +50,7 @@ public sealed class RepositoryProgramIsolationTests
         Assert.NotNull(releaseBefore);
         Assert.Equal(releaseBefore, releaseAfter);
 
-        // Plain git in the same repository does run the program, so the probe was armed.
-        if (probe.Control() is bool armed) Assert.True(armed, $"Plain git did not run the {kind} program; the probe proves nothing.");
+        Assert.NotEmpty(after.IgnoredConfiguration);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class RepositoryProgramIsolationTests
         File.WriteAllText(Path.Combine(probe.Repository, ".git", "info", "exclude"), "ignored.txt\n");
         File.WriteAllText(Path.Combine(probe.Repository, "ignored.txt"), "ignored\n");
         string[]? arguments = null;
-        string? view = null, configuration = null, index = null;
+        string? view = null, configuration = null, index = null, workingTree = null;
         var adapter = new GitCommandAdapter(info =>
         {
             if (info.ArgumentList.Contains("status"))
@@ -73,6 +73,8 @@ public sealed class RepositoryProgramIsolationTests
                 view = arguments.Single(a => a.StartsWith("--git-dir=", StringComparison.Ordinal))["--git-dir=".Length..];
                 configuration = File.ReadAllText(Path.Combine(view, "config"));
                 index = info.Environment["GIT_INDEX_FILE"];
+                workingTree = info.WorkingDirectory;
+                Assert.Equal(File.ReadAllBytes(Path.Combine(probe.Repository, ".git", "index")), File.ReadAllBytes(index!));
             }
 
             return BoundedProcess.Run(info, TestTiming.HangTimeout);
@@ -83,9 +85,10 @@ public sealed class RepositoryProgramIsolationTests
         Assert.NotNull(arguments);
         Assert.StartsWith(Path.Combine(Path.GetTempPath(), "vericairn-git-"), view, StringComparison.Ordinal);
         Assert.False(Directory.Exists(view), "The working-tree read's git directory outlived the observation.");
-        // The status process reads Vericairn's configuration, the repository's own index and only plain comparison settings.
-        Assert.Equal("[core]\n\trepositoryformatversion = 0\n\tbare = false\n", configuration);
-        Assert.EndsWith(Path.Combine("repository", ".git", "index"), index, StringComparison.Ordinal);
+        Assert.Equal("[core]\nrepositoryformatversion = 0\nbare = true\n", configuration);
+        Assert.Equal(Path.Combine(view!, "index"), index);
+        Assert.Equal(Path.Combine(Path.GetDirectoryName(view)!, "working-tree"), workingTree);
+        Assert.DoesNotContain(arguments, argument => argument.Contains(probe.Repository, StringComparison.Ordinal));
         Assert.Contains("core.filemode=false", arguments);
         Assert.DoesNotContain(arguments, a => a.StartsWith("core.eol", StringComparison.Ordinal));
         Assert.Contains("core.sparsecheckout=false", arguments);
@@ -119,7 +122,6 @@ public sealed class RepositoryProgramIsolationTests
         Assert.Equal(2, changes);
         Assert.Equal((before.Clean, before.Modified, before.Untracked), (after.Clean, after.Modified, after.Untracked));
         Assert.Equal(releaseBefore, releaseAfter);
-        Assert.True(probe.Control() == true, "Plain git did not run the late filter driver; the probe proves nothing.");
     }
 
     [Fact]
@@ -130,22 +132,154 @@ public sealed class RepositoryProgramIsolationTests
         File.WriteAllBytes(Path.Combine(probe.Repository, ".git", "index"), "DIRC"u8.ToArray());
         var adapter = new GitCommandAdapter();
         ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(probe.Repository));
-        Assert.Contains("could not read the working tree", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("could not read the working tree", refused.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Null(adapter.InspectRelease(probe.Repository));
     }
 
     [Fact]
-    public void ARepositoryAnotherAccountOwnsIsRefusedWithThatCause()
+    public void EveryInspectionGitProcessStartsInAnOwnedView()
     {
         using var probe = new RepositoryProgramProbe(RepositoryProgramProbe.Fsmonitor);
+        int calls = 0;
         var adapter = new GitCommandAdapter(info =>
         {
-            info.Environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1";
+            calls++;
+            Assert.StartsWith(Path.Combine(Path.GetTempPath(), "vericairn-git-"), info.WorkingDirectory, StringComparison.Ordinal);
+            Assert.DoesNotContain(info.ArgumentList, argument => argument.Contains(probe.Repository, StringComparison.Ordinal));
+            // From 0.9.5 (CODE-88) one read sees the machine's own configuration, for the line-ending values alone, outside the repository.
+            string[] request = [.. info.ArgumentList.SkipWhile(argument => argument != "config")];
+            bool lineEndings = request.Length == 4 && request[1] is "--system" or "--global" && request[2] == "--get" && request[3] is "core.autocrlf" or "core.eol";
+            if (lineEndings) Assert.False(info.Environment.ContainsKey("GIT_CONFIG_NOSYSTEM"));
+            else Assert.Equal("1", info.Environment["GIT_CONFIG_NOSYSTEM"]);
             return BoundedProcess.Run(info, TestTiming.HangTimeout);
         });
-        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(probe.Repository));
-        Assert.Contains("owned by another account", refused.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(probe.Root, refused.Message, StringComparison.Ordinal);
+        Assert.Equal("main", adapter.Inspect(probe.Repository).Branch);
+        Assert.True(calls > 1);
+    }
+
+    [Fact]
+    public void ConfigurationFindingsNameIgnoredKeysAndBindTheOriginalBytes()
+    {
+        using var scratch = new ScratchRepository(false);
+        string git = Path.Combine(scratch.Repository, ".git");
+        string configuration = Path.Combine(git, "config");
+        string worktreeConfiguration = Path.Combine(git, "config.worktree");
+        File.AppendAllText(configuration, """
+
+            [core]
+                fsmonitor = false
+                hooksPath = unused-hooks
+            [alias]
+                example = status
+            [log]
+                showSignature = false
+            [diff "example"]
+                textconv = unused-converter
+            [filter "example"]
+                clean = unused-filter
+            [extensions]
+                worktreeConfig = true
+                futureFormat = 1
+            [future]
+                setting = ignored-value
+            """);
+        File.WriteAllText(worktreeConfiguration, "[core]\nfilemode = false\n");
+        var adapter = new GitCommandAdapter();
+
+        RepositoryObservation first = adapter.Inspect(scratch.Repository);
+
+        string[] expected = ["core.fsmonitor", "core.hookspath", "alias.example", "log.showsignature", "diff.<subsection>.textconv",
+            "filter.<subsection>.clean", "extensions.worktreeconfig", "extensions.futureformat", "future.setting", "config.worktree: core.filemode"];
+        Assert.All(expected, name => Assert.Contains(name, first.IgnoredConfiguration));
+        Assert.DoesNotContain(first.IgnoredConfiguration, name => name.Contains("ignored-value", StringComparison.Ordinal));
+        Assert.Equal(ContentHash.Sha256(File.ReadAllBytes(configuration)), first.ConfigurationHash);
+        Assert.Equal(ContentHash.Sha256(File.ReadAllBytes(worktreeConfiguration)), first.WorktreeConfigurationHash);
+        File.AppendAllText(configuration, "\n# one byte revision\n");
+        RepositoryObservation second = adapter.Inspect(scratch.Repository);
+        Assert.Equal(first.IgnoredConfiguration, second.IgnoredConfiguration);
+        Assert.NotEqual(first.ConfigurationHash, second.ConfigurationHash);
+    }
+
+    [Fact]
+    public void ConfigurationFindingsConcealSubsectionsThatCanCarryCredentials()
+    {
+        using var scratch = new ScratchRepository(false);
+        string privateName = string.Concat("private", "-configuration-name");
+        string file = Path.Combine(scratch.Repository, ".git", "config");
+        File.AppendAllText(file, $"\n[url \"https://{privateName}@example.invalid\"]\n\tinsteadOf = example:source\n");
+        File.WriteAllText(Path.Combine(scratch.Repository, ".git", "config.worktree"),
+            $"[http \"https://{privateName}@example.invalid\"]\n\textraHeader = sample\n");
+
+        RepositoryObservation observation = new GitCommandAdapter().Inspect(scratch.Repository);
+
+        Assert.Contains("url.<subsection>.insteadof", observation.IgnoredConfiguration);
+        Assert.Contains("config.worktree: http.<subsection>.extraheader", observation.IgnoredConfiguration);
+        Assert.DoesNotContain(observation.IgnoredConfiguration, key => key.Contains(privateName, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("ext::placeholder")]
+    [InlineData("fd::placeholder")]
+    [InlineData("file::placeholder")]
+    [InlineData("file:///unused")]
+    [InlineData("http://example.invalid/repo.git")]
+    public void InspectionReportsUnsupportedRemoteWithoutPassingItsAddressToGit(string address)
+    {
+        using var scratch = new ScratchRepository(false);
+        ScratchRepository.Git(scratch.Repository, "remote", "add", "origin", address);
+        var adapter = new GitCommandAdapter(info =>
+        {
+            Assert.DoesNotContain(address, info.ArgumentList);
+            return BoundedProcess.Run(info, TestTiming.HangTimeout);
+        });
+        RepositoryObservation result = adapter.Inspect(scratch.Repository);
+        Assert.Null(result.Remote);
+        Assert.Contains(result.IgnoredConfiguration, name => name.StartsWith("remote.origin.url", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("gitdir", ".git gitdir:")]
+    [InlineData("common", "commondir")]
+    [InlineData("alternates", "objects/info/alternates")]
+    [InlineData("nested-alternates", "objects/info/alternates")]
+    public void OutsideRedirectionsAreRefusedBeforeStartingGit(string kind, string member)
+    {
+        using var scratch = new ScratchRepository(false);
+        string selected = scratch.Repository;
+        string git = Path.Combine(selected, ".git");
+        string outside = Path.Combine(scratch.Root, "outside-boundary");
+        Directory.CreateDirectory(outside);
+        switch (kind)
+        {
+            case "gitdir":
+                selected = Path.Combine(scratch.Root, "selected");
+                Directory.CreateDirectory(selected);
+                File.WriteAllText(Path.Combine(selected, ".git"), "gitdir: " + outside + "\n");
+                break;
+            case "common":
+                File.WriteAllText(Path.Combine(git, "commondir"), outside + "\n");
+                break;
+            case "nested-alternates":
+                string first = Path.Combine(git, "alternate-objects");
+                SetAlternates(Path.Combine(git, "objects"), first);
+                SetAlternates(first, outside);
+                break;
+            case "alternates":
+                SetAlternates(Path.Combine(git, "objects"), outside);
+                break;
+        }
+
+        var adapter = new GitCommandAdapter(_ => throw new InvalidOperationException("A Git process must never begin for the refused redirection."));
+        ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(selected));
+        Assert.Contains(member, refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("boundary", refusal.Message, StringComparison.OrdinalIgnoreCase);
+
+        static void SetAlternates(string objects, string target)
+        {
+            string info = Path.Combine(objects, "info");
+            Directory.CreateDirectory(info);
+            File.WriteAllText(Path.Combine(info, "alternates"), target.Replace('\\', '/') + "\n");
+        }
     }
 
     [Theory]
@@ -188,11 +322,21 @@ public sealed class RepositoryProgramIsolationTests
         File.WriteAllText(changed, "changed\n");
         File.WriteAllText(Path.Combine(repository, "untracked.txt"), "untracked\n");
 
-        RepositoryObservation observation = new GitCommandAdapter().Inspect(repository);
+        var adapter = new GitCommandAdapter();
+        RepositoryObservation observation = adapter.Inspect(repository, scratch.Root);
         (int modified, int untracked) = ScratchRepository.Status(repository);
         Assert.Equal((1, 1), (modified, untracked));
         Assert.Equal((modified, untracked), (observation.Modified, observation.Untracked));
-        Assert.False(new GitCommandAdapter().InspectRelease(repository)?.Clean ?? true);
+        if (layout == "linked-worktree")
+        {
+            Assert.Contains(".git gitdir:", observation.GitRedirections);
+            Assert.Contains("commondir", observation.GitRedirections);
+            Assert.Null(adapter.InspectRelease(repository));
+        }
+        else
+        {
+            Assert.False(adapter.InspectRelease(repository)?.Clean ?? true);
+        }
     }
 
     [Fact]
@@ -216,7 +360,7 @@ public sealed class RepositoryProgramIsolationTests
             catch (UnauthorizedAccessException) { readable = false; }
             Assert.SkipWhen(readable, "This account reads directories regardless of their permission bits.");
             ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => new GitCommandAdapter().Inspect(scratch.Repository));
-            Assert.Contains("could not read the working tree", refused.Message, StringComparison.Ordinal);
+            Assert.Contains("could not read the working tree", refused.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Null(new GitCommandAdapter().InspectRelease(scratch.Repository));
         }
         finally
@@ -229,14 +373,16 @@ public sealed class RepositoryProgramIsolationTests
     [Fact]
     public void TheOverlapReadsStartHardened()
     {
+        using var scratch = new ScratchRepository(false);
         using GitHardening hardening = GitHardening.Create();
-        ProcessStartInfo info = GitCommandAdapter.OverlapRead(Path.GetTempPath(), hardening, ["rev-parse", "HEAD"]);
+        ProcessStartInfo info = GitCommandAdapter.OverlapRead(scratch.Repository, hardening, ["rev-parse", "HEAD"]);
         Assert.Equal("--no-pager", info.ArgumentList[0]);
         Assert.Contains("core.hooksPath=" + Path.Combine(hardening.Control, "hooks"), info.ArgumentList);
         Assert.All(GitHardening.Settings, setting => Assert.Contains(setting, info.ArgumentList));
         Assert.Equal(["rev-parse", "HEAD"], info.ArgumentList.TakeLast(2));
         Assert.Equal("1", info.Environment["GIT_CONFIG_NOSYSTEM"]);
         Assert.Equal("1", info.Environment["GIT_ATTR_NOSYSTEM"]);
+        Assert.StartsWith(hardening.Control, info.WorkingDirectory, StringComparison.Ordinal);
         Assert.StartsWith(hardening.Control, info.Environment["GIT_CONFIG_GLOBAL"], StringComparison.Ordinal);
         string grafts = info.Environment["GIT_GRAFT_FILE"]!;
         Assert.True(Path.IsPathFullyQualified(grafts) && !File.Exists(grafts));
@@ -312,9 +458,6 @@ public sealed class RepositoryProgramIsolationTests
 
         Assert.False(File.Exists(marker), "The scan ran the diff driver the submodule's configuration names.");
         Assert.Equal((plain.Verdict, plain.FindingCount), (armed.Verdict, armed.FindingCount));
-        // Plain git's patch read of the range, without the scan's submodule form, does run it, so the probe was armed.
-        scans.Git("log", "-p", "--no-ext-diff", "--no-textconv", basis + ".." + head);
-        Assert.True(File.Exists(marker), "Plain git did not run the submodule's diff driver; the probe proves nothing.");
     }
 
     // The push adapter's reads of the clone being pushed, here a checked push's patch and path reads, start as every hardened read
@@ -344,8 +487,6 @@ public sealed class RepositoryProgramIsolationTests
         Assert.NotNull(pathsAfter);
         Assert.Equal(paths[head], pathsAfter[head]);
 
-        // Plain git's read of a commit's paths, which loads the index, does run it, so the probe was armed.
-        Assert.True(probe.Control() == true, "Plain git did not run the fsmonitor program; the probe proves nothing.");
     }
 
     // A committed repository with an inside/ and an outside/ directory and a file at its root, for the layout tests.

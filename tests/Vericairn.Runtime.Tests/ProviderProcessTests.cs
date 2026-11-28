@@ -4,6 +4,7 @@
 using Vericairn.Adapters.Git;
 using Vericairn.Providers.GitHub;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -31,14 +32,27 @@ public sealed class ProviderProcessTests
     [InlineData("Failed", true)]
     public void GitNeverParsesAnIncompleteObservation(string outcome, bool started)
     {
-        var adapter = new GitCommandAdapter(info =>
+        string repository = Directory.CreateTempSubdirectory("vericairn-source-process-").FullName;
+        try
         {
-            Assert.Equal("git", info.FileName);
-            Assert.Equal("0", info.Environment["GIT_OPTIONAL_LOCKS"]);
-            return Failure(outcome, started);
-        });
-        Assert.Throws<ProviderRefusedException>(() => adapter.IsRepository(Path.GetTempPath()));
-        Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(Path.GetTempPath()));
+            RunEstate.Git(repository, "init", "-q", "--initial-branch=main");
+            RunEstate.Git(repository, "config", "core.autocrlf", "false");
+            RunEstate.Git(repository, "commit", "-qm", "Fixture", "--allow-empty");
+            var adapter = new GitCommandAdapter(info =>
+            {
+                Assert.Equal("git", info.FileName);
+                Assert.Equal("0", info.Environment["GIT_OPTIONAL_LOCKS"]);
+                return info.ArgumentList.Contains("config") ? BoundedProcess.Run(info, TestTiming.HangTimeout) : Failure(outcome, started);
+            });
+
+            Assert.Throws<ProviderRefusedException>(() => adapter.IsRepository(repository));
+            Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(repository));
+        }
+        finally
+        {
+            // Git writes its object files read-only, which a plain recursive delete cannot remove on Windows.
+            WorkspaceCleanup.Delete(repository);
+        }
     }
 
     [Theory]

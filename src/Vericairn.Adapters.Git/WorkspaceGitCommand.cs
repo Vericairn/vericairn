@@ -87,21 +87,27 @@ internal static class WorkspaceGitCommand
 /// <summary>A disposable bare view of objects, with only worker-owned configuration and references.</summary>
 internal sealed class WorkspaceGitView : IDisposable
 {
+    private readonly GitHardening hardening;
+
     internal WorkspaceGitView(string objects, string head)
     {
         if (!WorkspaceGitScope.ObjectId(head)) throw new IOException("The workspace branch head is unavailable.");
-        Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vericairn-git-view-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(System.IO.Path.Combine(Path, "objects", "info"));
-        Directory.CreateDirectory(System.IO.Path.Combine(Path, "refs", "heads"));
-        File.WriteAllText(System.IO.Path.Combine(Path, "HEAD"), "ref: refs/heads/review\n");
-        File.WriteAllText(System.IO.Path.Combine(Path, "refs", "heads", "review"), head + "\n");
-        File.WriteAllText(System.IO.Path.Combine(Path, "objects", "info", "alternates"), objects.Replace('\\', '/') + "\n");
-        File.WriteAllText(System.IO.Path.Combine(Path, "config"), head.Length == 64
-            ? "[core]\nrepositoryformatversion = 1\nbare = true\n[extensions]\nobjectformat = sha256\n"
-            : "[core]\nrepositoryformatversion = 0\nbare = true\n");
+        hardening = GitHardening.Create();
+        try
+        {
+            Path = hardening.Acquire(System.IO.Path.GetDirectoryName(objects)!).Directory;
+            System.IO.Directory.CreateDirectory(System.IO.Path.Combine(Path, "refs", "heads"));
+            File.WriteAllText(System.IO.Path.Combine(Path, "HEAD"), "ref: refs/heads/review\n");
+            File.WriteAllText(System.IO.Path.Combine(Path, "refs", "heads", "review"), head + "\n");
+        }
+        catch
+        {
+            hardening.Dispose();
+            throw;
+        }
     }
 
     internal string Path { get; }
 
-    public void Dispose() => WorkspaceCleanup.Delete(Path);
+    public void Dispose() => hardening.Dispose();
 }

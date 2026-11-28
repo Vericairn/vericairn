@@ -134,7 +134,7 @@ internal sealed class McpEndpoint
             Sessions.Sweep(read);
         }
 
-        string profile = device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : RequestScope.LoopbackProfile;
+        string profile = device.NetworkProfile ?? RequestScope.LoopbackProfile;
         if (Refusal(device, profile, read) is (int status, Problem refused))
         {
             await Problem(context, status, refused).ConfigureAwait(false);
@@ -800,6 +800,12 @@ internal sealed class McpEndpoint
     /// </summary>
     private static bool HostMatches(HttpContext context)
     {
+        if (DaemonHost.OnRelay(context))
+        {
+            // A relay connection has no listening IP. Its authenticated inner request uses the paired address as Host.
+            return context.Request.Host.HasValue;
+        }
+
         HostString named = context.Request.Host;
         IPAddress? local = context.Connection.LocalIpAddress;
         if (!named.HasValue || named.Port is not int port || local is null || port != context.Connection.LocalPort)
