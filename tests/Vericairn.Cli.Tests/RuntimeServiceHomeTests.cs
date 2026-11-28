@@ -2,9 +2,11 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Vericairn.Daemon;
+using Vericairn.Protocol;
 using Vericairn.Records.Signing;
 
 namespace Vericairn.Cli.Tests;
@@ -12,6 +14,80 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class RuntimeServiceHomeTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StatusAndStartUseTheHomeOfAnEndpointFrom094(bool defaultHome)
+    {
+        if (defaultHome)
+            Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows resolves its default home from the account's known folders.");
+
+        string root = CliHarness.TempDirectory("service-094");
+        string scratch = CliHarness.TempDirectory("service-094-homes");
+        string estate = Init(root);
+        string variable = VericairnHome.EnvironmentVariable;
+        string? previous = Environment.GetEnvironmentVariable(variable);
+        string? userHome = Environment.GetEnvironmentVariable("HOME");
+        string? configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("HOME", scratch);
+            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(scratch, "config"));
+            string? explicitHome = defaultHome ? null : Path.Combine(scratch, "estate home");
+            Environment.SetEnvironmentVariable(variable, explicitHome);
+            string requested = VericairnHome.Path();
+            Assert.Equal(explicitHome ?? VericairnHome.DefaultPath(), requested);
+            Assert.StartsWith(scratch + Path.DirectorySeparatorChar, requested, StringComparison.Ordinal);
+
+            string endpoint = DaemonHost.EndpointFilePath(root);
+            Directory.CreateDirectory(Path.GetDirectoryName(endpoint)!);
+            const string startedAt = "2026-11-28T00:00:00Z";
+            const int processId = 1234;
+            File.WriteAllText(endpoint, JsonSerializer.Serialize(new
+            {
+                kind = OperatingSystem.IsWindows() ? "pipe" : "unix",
+                address = "test-endpoint",
+                processId,
+                startedAt,
+                root,
+                api = ApiVersion.Current,
+            }));
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            var lifecycle = new DaemonLifecycle(new CommandContext(output, error), published =>
+            {
+                Assert.Null(published.VericairnHome);
+                return new HealthResponse(ApiVersion.Current, "0.9.4", estate, root, "local-only", 3, startedAt, processId);
+            });
+            Assert.True(lifecycle.RuntimeStatus(root, json: false) == 0, error.ToString());
+            Assert.Contains($"home  {requested}", output.ToString(), StringComparison.Ordinal);
+            output.GetStringBuilder().Clear();
+            Assert.True(lifecycle.RuntimeStatus(root, json: true) == 0, error.ToString());
+            AssertServingJson();
+            output.GetStringBuilder().Clear();
+            Assert.True(lifecycle.RuntimeStart(root, json: true) == 0, error.ToString());
+            AssertServingJson();
+
+            void AssertServingJson()
+            {
+                using JsonDocument document = JsonDocument.Parse(output.ToString());
+                JsonElement status = document.RootElement;
+                Assert.Equal("daemon", status.GetProperty("mode").GetString());
+                Assert.Equal(requested, status.GetProperty("vericairnHome").GetString());
+                Assert.Equal("0.9.4", status.GetProperty("servingRelease").GetString());
+                Assert.Equal(processId, status.GetProperty("daemon").GetProperty("processId").GetInt32());
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+            Environment.SetEnvironmentVariable("HOME", userHome);
+            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", configHome);
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     [Fact]
     public void TheInstallPlanShowsTheHome()
     {

@@ -25,7 +25,7 @@ namespace Vericairn.Cli;
 /// <param name="Warning">What still stands and exactly what to run, when something does.</param>
 internal sealed record RuntimeReplacement(string Outcome, ServingRuntime? Served, ServingRuntime? Started, string? Done, string? Warning);
 
-internal sealed class DaemonLifecycle(CommandContext context)
+internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoint, HealthResponse?>? probe = null)
 {
     internal const string DaemonLogName = "daemon.log";
 
@@ -106,7 +106,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
             }
 
             DaemonEndpoint? existing = DaemonHost.Discover(root);
-            if (existing is not null && context.IsAlive(existing))
+            if (existing is not null && Probe(existing) is not null)
             {
                 return RuntimeStatus(root, json);
             }
@@ -266,19 +266,19 @@ internal sealed class DaemonLifecycle(CommandContext context)
         }
 
         DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-        HealthResponse? health = null;
-        bool alive = endpoint is not null && context.IsAlive(endpoint, out health);
+        HealthResponse? health = endpoint is null ? null : Probe(endpoint);
+        bool alive = health is not null;
+        string requestedHome = VericairnHome.Path();
         string? servingHome = null;
         if (alive)
         {
-            // An older installed service had no home setting and did not publish one.
-            servingHome = endpoint!.VericairnHome ?? VericairnHome.DefaultPath();
-            string requestedHome = VericairnHome.Path();
+            // Older daemons omit the field. Discovery read the endpoint from the requested home's live directory.
+            servingHome = endpoint!.VericairnHome ?? requestedHome;
             if (!VericairnHome.SamePath(servingHome, requestedHome))
                 return context.Fail($"the serving daemon uses Vericairn home '{servingHome}', which differs from the requested home '{requestedHome}'.");
         }
 
-        ServingRuntime? serving = alive && health is not null ? ServingRuntime.Of(root, endpoint!, health) : null;
+        ServingRuntime? serving = health is null ? null : ServingRuntime.Of(root, endpoint!, health);
         EstateManifest? pin = serving is null ? ServingRuntime.Pin(root) : serving.Manifest;
         string? configured = null;
         bool mcpConfigured = false;
@@ -353,6 +353,9 @@ internal sealed class DaemonLifecycle(CommandContext context)
 
         return Clean;
     }
+
+    private HealthResponse? Probe(DaemonEndpoint endpoint) =>
+        probe is null ? (context.IsAlive(endpoint, out HealthResponse? health) ? health : null) : probe(endpoint);
 
     /// <summary>How a stop request reaches a daemon; a test stands in for a daemon that refuses or ignores it.</summary>
     internal static Func<VericairnClient, CancellationToken, Task> AskToStop { get; set; } = (client, token) => client.ShutdownAsync(token);
