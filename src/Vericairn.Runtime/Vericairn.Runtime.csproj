@@ -14,12 +14,14 @@
     <InternalsVisibleTo Include="Vericairn.Remote.Tests" />
     <InternalsVisibleTo Include="Vericairn.Cli.Tests" />
     <InternalsVisibleTo Include="Vericairn.Daemon.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Daemon" />
     <InternalsVisibleTo Include="Vericairn.Adapters.Git" />
     <InternalsVisibleTo Include="Vericairn.Providers.GitHub" />
     <InternalsVisibleTo Include="Vericairn.Packs.Software" />
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Service/Attestation/android-attestation-roots.pem" LogicalName="Vericairn.AndroidAttestationRoots.pem" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
 

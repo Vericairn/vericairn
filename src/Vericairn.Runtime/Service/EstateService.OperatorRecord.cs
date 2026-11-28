@@ -83,6 +83,7 @@ public sealed partial class EstateService
                 if (request.WaitSeconds is < 0 or > 240) throw new ProviderRefusedException("Wait seconds must be between 0 and 240.");
                 if (request.Body.ValueKind != JsonValueKind.Object || string.IsNullOrEmpty(request.Type) || RecordTypeRegistry.Find(request.Type) is null)
                     throw new ProviderRefusedException("Name a known record type and supply its JSON object body.");
+                if (SuppliesPairingEvidence(request.Type, request.Body)) throw new ProviderRefusedException(PairingEvidenceOnly);
                 RecordReference? subject = null;
                 if (request.Subject is not null && (!TryParseSubject(request.Subject, out subject) || RecordTypeRegistry.Find(subject!.Type) is null))
                     throw new ProviderRefusedException("The subject must be type:id or type:id:hash.");

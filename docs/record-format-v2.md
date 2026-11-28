@@ -7,7 +7,7 @@ carries the records goals need, the additions milestone M3 adopted, and the livi
 0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
 candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
 publication. The 0.7.0 candidate was also withdrawn before publication; 0.7.1 carries its work with FIX-12.
-This document describes the format-2 rules retained by 0.9.4. Published 0.7.3 reads formats 1 and 2,
+This document describes the format-2 rules retained by 0.9.5. Published 0.7.3 reads formats 1 and 2,
 writing at most format 2. The additions first present in 0.7.0 are work-progress, communication-setting, communication-delegation and harness-qualification types,
 estate observations, watching settings and execution admission fields. These additions require a 0.7.0-capable
 reader before authoring them, but no format-3 migration; older records retain their original bytes and rules.
@@ -211,7 +211,9 @@ and `harness-qualification` ([exact installed harness admission](#harness-qualif
 | `verification` | `evidenceClass` | `observation`, `report`, `attestation` or `inference`, optional | How the evidence was obtained: `vericairn check run` records an observation, `vericairn check observe` a host's report |
 | `verification` | `observer` | `person`, `agent`, `automation` or `provider`, optional | What kind of observer made the claim |
 | `verification` | `expires` | timestamp, optional | When the claim stops counting as current and needs observing again; it is later than the record |
-| `device` | `presence` | `required` or `none`, required | Whether each signature needs the owner's presence; `required` only where the custody enforces it (`macos-secure-enclave`), and never for an agent's or a service's device. From 0.9.4 `required` means that each signature with the key is covered by a presence check at its machine: its own, or a presence session's whose announced list, shown before the check, names it by exact hash or by kind (see below) |
+| `device` | `presence` | `required`, `none` or, from 0.9.5, `declared`, required | `required` describes custody that enforces a presence check. Desktop presence checks may be per signature or through a presence session (see below). `declared` records a phone's unverified presence requirement. An agent or service uses `none`. |
+| `device` | `presenceVerification` | `android-key-attestation`, optional from 0.9.5 | The attestation method for an initial Android Keystore presence device. The runtime checks the signed admission and its attestation evidence before relying on the claim. |
+| `admission` | `androidAttestation` | object, optional from 0.9.5 | Verified evidence the runtime writes to the initial signed admission of an Android presence device. See [Android presence evidence](#android-presence-evidence-095). |
 | `device` | `purpose` | `signing` or `recovery`, required | Ordinary signing, or the operator's offline recovery device; a recovery device belongs to an operator |
 | `device` | `custody` | gains `macos-secure-enclave` and `offline` | A key generated inside the Secure Enclave and kept as its enclave-wrapped blob, which signs nothing on any other Mac; or a recovery device's key, exported once and kept off every machine |
 | `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
@@ -738,16 +740,15 @@ give a device a new key than to record a new device.
 
 ## A paired device
 
-From 0.6.0 a device on another machine is paired over the local network ([api-v1.md](api-v1.md#pairing)
-describes the exchange). Pairing writes the records `devices create` and `devices admit` write, in the estate's
-own format, and adds no type and no field:
+From 0.6.0 a device on another machine is paired over the local network. Pairing writes `device` and `admission`
+records in the estate's own format. The API guide describes [the exchange](api-v1.md#pairing).
 
 - The device record is authored by the device's principal and names the key the device presented, its
   descriptive name, platform, custody and presence as the device stated them, and the profiles the
   administrator permitted (`local-network` unless others were named). It is signed by that key over its
   content hash, a signature the device made on its own machine, which proves possession as every device's
-  first record does. The name, platform, custody and presence are the device's own statement, which the
-  runtime cannot verify; a name with control or formatting characters is refused.
+  first record does. The runtime refuses a name with control or formatting characters. These fields are descriptive claims.
+  From 0.9.5 the runtime independently verifies Android presence as described below.
 - The admission is the administrator's, the operator's or a principal's holding `administer`, signed by the
   administrator's admitted device on the runtime's machine like every admission in format 2. Its note says
   that the device's descriptive fields are its own statement. From 0.6.1 it also names the device that obtained
@@ -776,15 +777,35 @@ authenticated the request and permitted `local-network`. A revocation, key rotat
 recorded after authentication prevents the request's write, even if another device of its principal can sign
 records on the runtime's machine. The failed request is kept in the local-network ledger; it adds no record.
 
-A paired device's key signs no record after its own. A record it asks for over the local network is authored
-by its principal and signed, as every API write is, by an admitted device of that principal whose key the
-runtime's machine holds, or written unsigned where the charter allows it; the runtime refuses the write when
-that device's every signature needs its owner's presence. So a record's signature names a device on the
-runtime's machine, never the paired device that asked for it. The runtime keeps the paired device behind each
-such write outside the records, in `local-network-writes.jsonl` beside its live store, which `vericairn devices
-writes` lists ([api-v1.md](api-v1.md#the-local-network-profile)). From 0.9.0 a paired device can also sign
-its own records ([api-v1.md](api-v1.md#the-local-network-profile)). WATCH-01 and HANDOFF-01 add no Remote signing,
-transport or run-observation support.
+A paired device can request a write signed by an unattended admitted key of the same principal on the runtime's machine.
+The charter may allow unsigned writes where no local signing key is available. From 0.9.0 a paired device can also sign a
+record the runtime prepared for it, or send a signature from an eligible presence device of the same principal. The record
+names the signing device. The runtime keeps the requesting device behind each write in `local-network-writes.jsonl`, which
+`vericairn devices writes` lists. See [the local-network profile](api-v1.md#the-local-network-profile).
+
+### Android presence evidence (0.9.5)
+
+An Android presence record has `platform: android`, `custody: android-keystore`, `presence: required` and
+`presenceVerification: android-key-attestation`. The runtime sets `androidAttestation` on the signed admission that pins
+the first device record by id and hash. The certificate leaf binds the attestation to that device record's public key
+and to the pairing exchange's challenge. The verified hardware authorizations show that each signature needs its owner's
+authentication. The signed evidence also identifies the boot state, app and patch levels at pairing.
+
+| Evidence fields | Values |
+|---|---|
+| `certificates`, `leafDigest`, `challenge` | Leaf-first base64url DER certificate array, `sha256:<hex>` digest of the leaf DER, and the runtime's base64url-encoded 32-byte pairing nonce |
+| `attestationSecurityLevel`, `keySecurityLevel`, `userAuthType`, `perUse` | Security levels of the attestation and the key (`trusted-environment` or `strongbox`), the hardware user authentication mask, and `true` for authentication at each use |
+| `deviceLocked`, `verifiedBootState` | `true` for a locked bootloader and `verified` for a verified boot |
+| `packageName`, `packageVersion`, `signingDigests` | The attested `com.vericairn.remote` package, Android package version and SHA-256 digests of the app's signing certificates |
+| `osVersion`, `osPatchLevel`, `vendorPatchLevel`, `bootPatchLevel` | The attested Android OS version and patch month (`YYYYMM`), with vendor and boot patch dates (`YYYYMMDD`) or `null` where the proof omits them |
+
+The runtime revalidates the evidence when it lists devices or accepts a signature for a record prepared by another device.
+It validates the historical certificate path at the signed admission's time and checks current revocation against a fresh
+Google status list. Admission note text has no effect on verification. Missing or unverifiable proof reports `declared`, including older phone pairings
+and iOS declarations. A key rotation loses the old key's verification. The original records and signatures remain intact.
+
+These fields and values are additive in formats 2 and 3. Readers before 0.9.5 refuse records carrying them. Upgrade estate
+readers before pairing a device that will write these fields. See [Remote custody](remote.md#keys-and-custody).
 
 ## Emergency access
 

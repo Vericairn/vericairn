@@ -322,7 +322,7 @@ internal sealed partial class EstateTrust
         record.Signatures.Count > 0 && record.DeclaredHash == record.ComputedHash && !VerifyWith(record, Mode.Anchors, bound).HasErrors;
 
     /// <summary>Whether a closing witnesses a record with these bytes: the closing or a checkpoint it follows lists it.</summary>
-    private bool Witnesses(Closing closing, RecordEnvelope record) =>
+    internal bool Witnesses(Closing closing, RecordEnvelope record) =>
         record.Id == closing.Record.Id || listings is not null && listings.TryGetValue(record.Id, out List<(string Checkpoint, string Hash)>? listed) &&
         listed.Any(l => l.Hash == record.ComputedHash && closing.Before.Contains(l.Checkpoint));
 

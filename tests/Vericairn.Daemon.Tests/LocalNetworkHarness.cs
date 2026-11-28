@@ -11,6 +11,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Tests;
 using Vericairn.Sdk;
 
 namespace Vericairn.Daemon.Tests;
@@ -23,6 +24,7 @@ namespace Vericairn.Daemon.Tests;
 internal sealed class LocalNetworkHarness : IAsyncDisposable
 {
     private readonly DaemonOptions options;
+    private readonly SyntheticAndroidAttestation attestation = new();
 
     private LocalNetworkHarness(TestEstate estate, DaemonHost host, VericairnClient socket, ManualTime time, string deviceHome, string operatorDevice, DaemonOptions options)
     {
@@ -35,6 +37,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
         DeviceKeys = new FileKeyStore(deviceHome);
         Connections = new RuntimeConnections(deviceHome, DeviceKeys);
         OperatorDevice = operatorDevice;
+        attestation.UseFor(Host.Service);
     }
 
     public TestEstate Estate { get; }
@@ -107,6 +110,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
         await Host.DisposeAsync();
         Host = await DaemonTestHome.StartAsync(Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken);
         Socket = new VericairnClient(Host.Endpoint);
+        attestation.UseFor(Host.Service);
     }
 
     /// <summary>A pairing code the operator issues for a principal.</summary>
@@ -120,6 +124,8 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     /// <summary>Pairs a new device of the second machine for a principal and keeps its connection.</summary>
     public RuntimeConnection Pair(string principal, string name = "Phone", params string[] profiles) =>
         Connections.Add(Address, Issue(principal, profiles).Code, new PairingOptions(name));
+
+    internal AndroidPresenceKeyStandIn AndroidPresence(string? home = null) => new(home ?? DeviceHome, attestation);
 
     /// <summary>The signer of a paired device, its key held on the second machine.</summary>
     public DeviceRequestSigner Signer(RuntimeConnection connection) => new(DeviceKeys, connection.Device);
@@ -140,6 +146,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     {
         Socket.Dispose();
         await Host.DisposeAsync();
+        attestation.Dispose();
         Estate.Dispose();
         try
         {

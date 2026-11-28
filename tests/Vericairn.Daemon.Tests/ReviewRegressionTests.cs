@@ -357,14 +357,21 @@ public class ReviewRegressionTests
 
         Assert.Single(harness.Socket.Devices());
 
-        // Custody, presence and platform cannot be verified from here: a key in a file, stated as a Secure Enclave key needing Touch ID on
-        // linux, is recorded as stated, and its admission says that what the device stated is its own statement.
-        (HttpStatusCode status, string answer, string record) = await Present("Claims an enclave", "linux", SecureEnclaveCustody.Kind, "required");
+        // From 0.9.5 (REMOTE-12) a pairing records presence required only with verified Android attestation: a key in a file, stated as a
+        // Secure Enclave key needing Touch ID on linux, is refused, and nothing is recorded.
+        (HttpStatusCode claimed, string claim, _) = await Present("Claims an enclave", "linux", SecureEnclaveCustody.Kind, "required");
+        Assert.NotEqual(HttpStatusCode.OK, claimed);
+        Assert.Contains("Android hardware attestation is required to record verified presence", Message(claim), StringComparison.Ordinal);
+        Assert.Single(harness.Socket.Devices());
+
+        // Custody and platform cannot be verified from here: the same key stating a declared presence is recorded as stated, reported
+        // declared, and its admission says the device declared them.
+        (HttpStatusCode status, string answer, string record) = await Present("Claims an enclave", "linux", SecureEnclaveCustody.Kind, "declared");
         Assert.True(status == HttpStatusCode.OK, answer);
         DeviceRow row = Assert.Single(harness.Socket.Devices(), d => d.Id == record);
-        Assert.Equal((SecureEnclaveCustody.Kind, "required", "linux"), (row.Custody, row.Presence, row.Platform));
+        Assert.Equal((SecureEnclaveCustody.Kind, "declared", "linux"), (row.Custody, row.Presence, row.Platform));
         RecordEnvelope admission = Assert.Single(harness.Estate.Load().About(record, "admission"));
-        Assert.Contains("its own statement", EstateModel.BodyString(admission, "note"), StringComparison.Ordinal);
+        Assert.Contains("The device declared its name, platform and custody", EstateModel.BodyString(admission, "note"), StringComparison.Ordinal);
     }
 
     [Fact]
