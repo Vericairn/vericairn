@@ -72,10 +72,12 @@ public sealed class AcquisitionWorkingTreeTests : IDisposable
         File.WriteAllText(outside, "outside\n");
         File.CreateSymbolicLink(Path.Combine(repository, decomposed), outside);
 
-        // The decomposed spelling is the tracked path to Git, so its link is a tracked entry and refuses the read by name; it is
-        // never withheld as an untracked name while the observation says clean.
+        // The decomposed spelling is the tracked path to Git, so the read is refused by name and never withheld as an untracked
+        // name while the observation says clean. Where Unicode folding is available (this test process) the comparison takes it
+        // for the tracked link; the shipped build runs with invariant globalization, where Git's own untracked listing refuses it.
         ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => new GitCommandAdapter().Inspect(repository));
-        Assert.Contains("symbolic link", refusal.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(refusal.Message.Contains("symbolic link", StringComparison.OrdinalIgnoreCase)
+            || refusal.Message.Contains("Git counts it as tracked", StringComparison.Ordinal), refusal.Message);
     }
 
     [Theory]
