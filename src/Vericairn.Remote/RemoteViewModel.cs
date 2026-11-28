@@ -86,7 +86,7 @@ public sealed partial class RemoteViewModel : Observable
         this.clock = clock ?? TimeProvider.System;
         PairCommand = Command(PairAsync, () => !Busy && CanPair);
         RefreshCommand = Command(RefreshAsync, () => !Busy && Selected is not null);
-        AddEstateCommand = Command(() => { Pairing = true; return Task.CompletedTask; }, () => !Busy);
+        AddEstateCommand = Command(() => { SetCompanionsOpen(false); Pairing = true; return Task.CompletedTask; }, () => !Busy);
         CancelPairingCommand = Command(() => { Pairing = false; return Task.CompletedTask; }, () => !Busy && Estates.Count > 0);
         InitializeDecisionCommands();
         InitializeAnswerCommands();
@@ -96,6 +96,7 @@ public sealed partial class RemoteViewModel : Observable
         InitializeInterventionCommands();
         InitializeNodeCommands();
         InitializeHandoffCommands();
+        InitializeCompanionCommands();
         foreach (RuntimeConnection connection in connections.List())
         {
             Estates.Add(Restore(connection));
@@ -130,6 +131,7 @@ public sealed partial class RemoteViewModel : Observable
         set
         {
             if (!Set(ref selected, value)) return;
+            SetCompanionsOpen(false);
             SetHandoff(null);
             RestorePendingHandoffMessage();
             handoffsCurrent = false;
@@ -184,6 +186,7 @@ public sealed partial class RemoteViewModel : Observable
             NotifyActCommands();
             NotifyInterventionCommands();
             NotifyHandoffCommands();
+            NotifyCompanionCommands();
             CheckWorkersCommand?.NotifyCanExecuteChanged();
         }
     }
@@ -413,6 +416,7 @@ public sealed partial class RemoteViewModel : Observable
         AnswersReviewed = false;
         actCurrent = false;
         ActReviewed = false;
+        if (CompanionsOpen) ShowCompanion(null);
         ConnectionState = ConnectionStates.Connecting;
         ConnectionMessage = "Checking the runtime's identity and this phone's access.";
         try
@@ -455,6 +459,11 @@ public sealed partial class RemoteViewModel : Observable
             }
         }
         finally { Busy = false; }
+        if (Selected == estate && CompanionsOpen)
+        {
+            if (estate.Current) await ReadCompanionsAsync(companionRequest).ConfigureAwait(true);
+            else CompanionReadUnavailable();
+        }
         if (Selected == estate && estate.Current && decision is { Attempted: false } draft)
             await OpenDecisionAsync(draft.Review.Subject.Id).ConfigureAwait(true);
     }

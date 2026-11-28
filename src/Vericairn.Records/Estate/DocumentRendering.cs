@@ -9,7 +9,10 @@ namespace Vericairn.Records.Estate;
 
 /// <summary>Versioned derived response data, shared by stored and on-demand renditions. It never asserts acceptance.</summary>
 public sealed record DocumentRendition(int Version, DocumentGenerationStatus Status, ImmutableArray<byte> Bytes,
-    string? InputDigest, string? ContentHash, string? Reason);
+    string? InputDigest, string? ContentHash, string? Reason)
+{
+    internal DocumentPage? Page { get; init; }
+}
 
 /// <summary>The single pure rendering boundary; selection and authorization happen before it, writes after it.</summary>
 public static class DocumentRendering
@@ -45,7 +48,7 @@ public static class DocumentRendering
             byte[] bytes = DocumentMarkdown.Bytes(result.Content);
             if (bytes.Length > descriptor.MaxMemberBytes) return Failed(DocumentGenerationStatus.Error, "A generated member exceeds its declared size bound.");
             if (EstateChecks.Content("generated.md", bytes).HasErrors) return Failed(DocumentGenerationStatus.Error, "Generated content fails the ordinary repository checks.");
-            return new(Version, DocumentGenerationStatus.Success, [.. bytes], context.InputDigest, ContentHash.Sha256(bytes), null);
+            return new(Version, DocumentGenerationStatus.Success, [.. bytes], context.InputDigest, ContentHash.Sha256(bytes), null) { Page = result.Page };
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

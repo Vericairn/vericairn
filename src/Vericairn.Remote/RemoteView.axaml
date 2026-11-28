@@ -433,21 +433,60 @@
         </ScrollViewer>
       </TabItem>
       <TabItem Header="Products" AutomationProperties.Name="Products">
-        <ScrollViewer>
+        <ScrollViewer x:Name="ProductScroll">
           <StackPanel Margin="12" Spacing="8">
-          <ListBox x:Name="ProductList" ItemsSource="{Binding Products}" SelectedItem="{Binding SelectedProduct}" AutomationProperties.Name="Products">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:ProductItem">
-                <Border Classes="card">
-                  <StackPanel Spacing="2">
-                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                    <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{Binding Id}" />
-                  </StackPanel>
-                </Border>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-          <Button Content="Continue in Workbench" Command="{Binding ComposeProductHandoffCommand}" AutomationProperties.Name="Compose a desktop task for the selected product" />
+            <StackPanel IsVisible="{Binding ShowProductList}" Spacing="8">
+              <ListBox x:Name="ProductList" ItemsSource="{Binding Products}" SelectedItem="{Binding SelectedProduct}" AutomationProperties.Name="Products">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ProductItem">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                        <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{Binding Id}" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <Button Content="Continue in Workbench" Command="{Binding ComposeProductHandoffCommand}" AutomationProperties.Name="Compose a desktop task for the selected product" />
+              <Button Content="Readable companions" Command="{Binding OpenCompanionsCommand}" AutomationProperties.Name="Open readable companions" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding CompanionsOpen}" Spacing="8">
+              <TextBlock Classes="heading" Text="Readable companions" />
+              <WrapPanel>
+                <Button Content="Back" Command="{Binding BackCompanionCommand}" AutomationProperties.Name="Back in readable companions" />
+                <Button Content="Refresh" Command="{Binding RefreshCompanionCommand}" AutomationProperties.Name="Refresh readable companion" />
+              </WrapPanel>
+              <TextBlock Text="{Binding CompanionMessage}" />
+              <StackPanel IsVisible="{Binding ShowCompanionCollections}" Spacing="6">
+                <ListBox ItemsSource="{Binding CompanionCollections}" SelectedItem="{Binding SelectedCompanionCollection}"
+                         AutomationProperties.Name="Readable collections">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RemoteCompanionCollectionRow">
+                      <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <Button Content="Open collection" Command="{Binding OpenCompanionCollectionCommand}" AutomationProperties.Name="Open collection" />
+              </StackPanel>
+              <TextBlock Text="{Binding CompanionFreshness}" AutomationProperties.Name="Companion source and freshness" />
+              <StackPanel IsVisible="{Binding ShowCompanionItems}" Spacing="6">
+                <ListBox ItemsSource="{Binding CompanionItems}" SelectedItem="{Binding SelectedCompanionItem}"
+                         AutomationProperties.Name="Items on this page">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RemoteCompanionItem">
+                      <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <Button Content="Read selected item" Command="{Binding OpenCompanionItemCommand}" AutomationProperties.Name="Read selected item" />
+              </StackPanel>
+              <WrapPanel IsVisible="{Binding ShowCompanionPages}">
+                <Button Content="Previous page" Command="{Binding PreviousCompanionPageCommand}" AutomationProperties.Name="Previous page" />
+                <Button Content="Next page" Command="{Binding NextCompanionPageCommand}" AutomationProperties.Name="Next page" />
+              </WrapPanel>
+              <SelectableTextBlock Text="{Binding CompanionText}" TextWrapping="Wrap" />
+            </StackPanel>
           </StackPanel>
         </ScrollViewer>
       </TabItem>

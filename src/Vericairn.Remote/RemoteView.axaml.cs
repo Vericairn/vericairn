@@ -33,6 +33,8 @@ public partial class RemoteView : UserControl
     {
         if (args.PropertyName == nameof(RemoteViewModel.WorkDetail))
             Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("WorkScroll")!.Offset = default);
+        if (args.PropertyName == nameof(RemoteViewModel.CompanionText))
+            Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("ProductScroll")!.Offset = default);
         if (args.PropertyName == nameof(RemoteViewModel.Decision) && model?.Decision?.Review.Subject.Id is var subject && subject != reviewedSubject)
         {
             reviewedSubject = subject;

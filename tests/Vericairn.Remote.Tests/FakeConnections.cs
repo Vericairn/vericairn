@@ -44,6 +44,8 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
     /// <summary>Pairs like a phone whose custody cannot require presence: only the request key is registered.</summary>
     public bool WithoutPresenceKey { get; set; }
 
+    public IRecordSigner? PairAdmissionSigner { get; set; }
+
     public int PresenceKeysAdded { get; private set; }
 
     public Task<RuntimeConnection> PairAsync(string address, string code, string deviceName, CancellationToken cancellationToken)
@@ -61,7 +63,7 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
             AuthoredRecord device = RecordAuthor.Create(new("device", connection.Principal, JsonSerializer.SerializeToElement(body), Id: connection.Device, Format: 3), signer);
             RecordAuthor.Write(root, device);
             RecordAuthor.Write(root, RecordAuthor.Create(new("admission", connection.Principal,
-                JsonSerializer.SerializeToElement(new { principal = connection.Principal, status = "admitted", note = "Test phone is the fixture's first authority." }), device.Envelope.Reference, Format: 3), signer));
+                JsonSerializer.SerializeToElement(new { principal = connection.Principal, status = "admitted", note = "Admit the test phone." }), device.Envelope.Reference, Format: 3), PairAdmissionSigner ?? signer));
             if (!WithoutPresenceKey) connection = WithPresenceDevice(connection);
         }
         Kept.Add(connection);
@@ -133,6 +135,8 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
         ((CountingApi)client).Inner = service;
         ((CountingApi)client).Called = () => ApiCalls++;
         ((CountingApi)client).BeforeCall = name => BeforeApiCall?.Invoke(name);
+        ((CountingApi)client).Companions = token => ReadCompanionAsync(connection, api => api.CompanionsAsync(token));
+        ((CountingApi)client).RenderCompanion = (request, token) => ReadCompanionAsync(connection, api => api.CompanionRenderAsync(request, token));
         ((CountingApi)client).LoseAcknowledgmentResponse = () => LoseAcknowledgmentResponse;
         ((CountingApi)client).LoseRunStopResponse = () => LoseRunStopResponse;
         ((CountingApi)client).PrepareHandoff = (request, token) => PrepareHandoffAsync(connection, request, token);
@@ -145,12 +149,21 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
         return client;
     }
 
+    private async Task<T> ReadCompanionAsync<T>(RuntimeConnection connection, Func<IEstateApi, Task<T>> read)
+    {
+        // Match the verified local-network request context instead of inheriting the embedded caller's authority.
+        using EstateService.RequestDeviceScope device = service.ForDeviceRequest(connection.Device, connection.DevicePublicKey, "local-network");
+        return await read(service).ConfigureAwait(false);
+    }
+
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1852", Justification = "DispatchProxy generates a subclass at runtime.")]
     public class CountingApi : DispatchProxy
     {
         public IEstateApi Inner { get; set; } = null!;
         public Action Called { get; set; } = null!;
         public Action<string> BeforeCall { get; set; } = null!;
+        public Func<CancellationToken, Task<CompanionsResponse>> Companions { get; set; } = null!;
+        public Func<CompanionRequest, CancellationToken, Task<CompanionResponse>> RenderCompanion { get; set; } = null!;
         public Func<bool> LoseAcknowledgmentResponse { get; set; } = null!;
         public Func<bool> LoseRunStopResponse { get; set; } = null!;
         public Func<DesktopHandoffRequest, CancellationToken, Task<DesktopHandoffResponse>> PrepareHandoff { get; set; } = null!;
@@ -160,6 +173,8 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
         {
             Called();
             BeforeCall(targetMethod!.Name);
+            if (targetMethod.Name == nameof(IEstateApi.CompanionsAsync)) return Companions((CancellationToken)args![0]!);
+            if (targetMethod.Name == nameof(IEstateApi.CompanionRenderAsync)) return RenderCompanion((CompanionRequest)args![0]!, (CancellationToken)args[1]!);
             if (targetMethod.Name == nameof(IEstateApi.PrepareDesktopHandoffAsync))
                 return PrepareHandoff((DesktopHandoffRequest)args![0]!, (CancellationToken)args[1]!);
             if (targetMethod!.Name == nameof(IEstateApi.DecisionBasisAsync) && Basis() is DecisionBasisResponse basis) return Task.FromResult(basis);

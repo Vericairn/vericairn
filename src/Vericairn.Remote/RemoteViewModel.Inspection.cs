@@ -21,7 +21,14 @@ public sealed partial class RemoteViewModel
     private int selectedArea;
 
     /// <summary>The selected home area; opening a work subject moves to Work.</summary>
-    public int SelectedArea { get => selectedArea; set => Set(ref selectedArea, value); }
+    public int SelectedArea
+    {
+        get => selectedArea;
+        set
+        {
+            if (Set(ref selectedArea, value)) SetCompanionsOpen(false);
+        }
+    }
 
     /// <summary>The selected notice; selection writes nothing.</summary>
     public AttentionItem? SelectedAttention { get => selectedAttention; set { if (Set(ref selectedAttention, value)) NotifyInspectionCommands(); } }
@@ -122,6 +129,7 @@ public sealed partial class RemoteViewModel
     /// <summary>Advances displayed ages locally. This sends no request, including while offline.</summary>
     public void RefreshFreshness()
     {
+        if (companionPage is not null) Raise(nameof(CompanionFreshness));
         if (Selected?.Observation is not { } observation) return;
         ObservationAge = RemoteFreshness.Age(observation.AsOf, clock);
         // Keep the selected list row and scroll position stable while the shared observation age advances.

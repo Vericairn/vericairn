@@ -161,8 +161,12 @@ internal static class CompanionReader
             if (rendition is not null && rendition.Status != DocumentGenerationStatus.Success)
                 return new(1, Status(rendition.Status), "unavailable", "unavailable", "Internal", snapshot, request.Commit, Describe(descriptor), basis, null, null, null, rendition.Reason);
             string completeness = descriptor.RequiredPattern is not null && request.Revision is not null ? "bounded-overview" : "selected-page";
-            return new(1, "success", currentness, render ? completeness : "source-basis", "Internal", snapshot, request.Commit, Describe(descriptor), basis,
-                context.InputDigest, rendition?.ContentHash, rendition is null ? null : Encoding.UTF8.GetString(rendition.Bytes.AsSpan()), notice);
+            return new CompanionResponse(1, "success", currentness, render ? completeness : "source-basis", "Internal", snapshot, request.Commit, Describe(descriptor), basis,
+                context.InputDigest, rendition?.ContentHash, rendition is null ? null : Encoding.UTF8.GetString(rendition.Bytes.AsSpan()), notice)
+            {
+                Page = rendition?.Page is { } page ? new(page.Number, page.Total, page.Items.Select(item =>
+                    new CompanionPageItem(item.Identity, item.Hash, item.RecordType!, item.Title!)).ToArray()) : null,
+            };
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
