@@ -76,6 +76,9 @@ public sealed record PairedRuntime(string Address, string Estate, string? Estate
 
     /// <summary>How the presence device's key is held.</summary>
     public string? PresenceCustody { get; init; }
+
+    /// <summary>The paired runtime's initial relay route when it has one.</summary>
+    public RelayRoute? Relay { get; init; }
 }
 
 /// <summary>Why a pairing did not complete: the runtime refused (denied, refused), or nothing answered as the runtime (unavailable).</summary>
@@ -217,7 +220,7 @@ public static class RuntimePairing
         {
             string certificate = RuntimeIdentityScheme.CertificateFingerprint(presented ?? []);
             string nonce = PairingProtocol.NewNonce();
-            var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, certificate)) { Presence = options.PresenceKeyStore is null ? null : true, PresenceAttestation = true };
+            var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, certificate)) { Relay = true, Presence = options.PresenceKeyStore is null ? null : true, PresenceAttestation = true };
             PairingChallenge challenge = await SendAsync<PairingHello, PairingChallenge>(tls, address, "/v1/pairing/hello", hello, legacy, mayHaveEffect: false, cancellationToken).ConfigureAwait(false);
             if (!PairingProtocol.Matches(PairingProtocol.ChallengeMac(runtimeKey, hello, challenge), challenge.Mac) || challenge.DeviceNonce != nonce)
             {
@@ -297,6 +300,7 @@ public static class RuntimePairing
                     PresenceDevicePublicKey = confirm.PresenceDevice?.PublicKey,
                     PresenceAdmission = presenceStore is null ? null : completed.PresenceAdmission,
                     PresenceCustody = presenceStore?.Kind,
+                    Relay = completed.Relay,
                 };
             }
             catch

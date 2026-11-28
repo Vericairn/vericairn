@@ -44,6 +44,9 @@ public sealed record PairingHello(string Nonce, string Mac)
     /// </summary>
     public bool? Presence { get; init; }
 
+    /// <summary>Whether the client understands relay tickets in the runtime's completion.</summary>
+    public bool? Relay { get; init; }
+
     /// <summary>Whether this client can pair presence keys under the runtime's attestation rules.</summary>
     public bool? PresenceAttestation { get; init; }
 }
@@ -124,6 +127,9 @@ public sealed record PairingCompleted(string Device, string Admission, string Ha
 
     /// <summary>The presence device record's content hash.</summary>
     public string? PresenceHash { get; init; }
+
+    /// <summary>The first relay ticket for this device, when the runtime has an active registration.</summary>
+    public RelayRoute? Relay { get; init; }
 }
 
 /// <summary>
@@ -263,6 +269,18 @@ public static class PairingProtocol
             transcript.Add(completed.PresenceDevice);
             transcript.Add(completed.PresenceAdmission);
             transcript.Add(completed.PresenceHash);
+        }
+
+        if (completed.Relay is { Ticket: RelayTicket ticket } relay)
+        {
+            transcript.Add("relay");
+            transcript.Add(relay.Url);
+            transcript.Add(ticket.Address);
+            transcript.Add(ticket.Device);
+            transcript.Add(ticket.Issued.ToString(CultureInfo.InvariantCulture));
+            transcript.Add(ticket.Expires.ToString(CultureInfo.InvariantCulture));
+            transcript.Add(ticket.Counter.ToString(CultureInfo.InvariantCulture));
+            transcript.Add(ticket.Signature);
         }
 
         return Mac(runtimeKey, transcript.ToArray());

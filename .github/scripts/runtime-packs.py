@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 RIDS = ("linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64")
-PROJECTS = {"Vericairn.Cli": "vericairn", "Vericairn.Workbench": "vericairn-workbench"}
+PROJECTS = {"Vericairn.Cli": "vericairn", "Vericairn.Workbench": "vericairn-workbench", "Vericairn.Relay": "vericairn-relay"}
 BUNDLED_IN = "vericairn:bundled-in"
 
 
@@ -32,7 +32,7 @@ def packs(directory):
                     raise ValueError(f"Duplicate bundled-pack identity: {project} {rid}")
                 entries.add((name, version))
             required = {f"microsoft.netcore.app.runtime.{rid}", f"microsoft.netcore.app.host.{rid}"}
-            if project == "Vericairn.Cli":
+            if project in ("Vericairn.Cli", "Vericairn.Relay"):
                 required.add(f"microsoft.aspnetcore.app.runtime.{rid}")
             if not required.issubset({name for name, _ in entries}):
                 raise ValueError(f"Incomplete runtime and apphost evidence: {project} {rid}")

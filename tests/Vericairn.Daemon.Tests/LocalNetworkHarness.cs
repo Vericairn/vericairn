@@ -5,6 +5,7 @@ using System.Buffers.Text;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Vericairn.Protocol;
@@ -73,7 +74,8 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
 
     /// <summary>Starts the runtime on loopback's local-network profile, on a clock the test moves, or on the system's when <paramref name="systemClock"/>.</summary>
     public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000, bool systemClock = false, Action<string>? log = null,
-        bool mcp = false, IReadOnlyList<string>? mcpOrigins = null)
+        bool mcp = false, IReadOnlyList<string>? mcpOrigins = null,
+        Uri? relay = null, Func<Uri, CancellationToken, Task<WebSocket>>? connectRelay = null)
     {
         DaemonTestHome.Ensure();
         var estate = new TestEstate(recordFormat);
@@ -81,7 +83,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
         var options = new DaemonOptions
         {
             LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time,
-            ReplayCapacity = replayCapacity, Log = log, Mcp = mcp, McpAllowedOrigins = mcpOrigins,
+            ReplayCapacity = replayCapacity, Log = log, Mcp = mcp, McpAllowedOrigins = mcpOrigins, RelayUrl = relay, ConnectRelay = connectRelay,
         };
         DaemonHost host = await DaemonTestHome.StartAsync(
             estate.Root,

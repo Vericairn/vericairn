@@ -957,6 +957,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>Raised after this runtime records a successful revocation, so its relay can close a device's streams.</summary>
+    internal event Action<string>? DeviceAdmissionRevoked;
+
     /// <inheritdoc />
     public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevoke(request, null);
 
@@ -969,6 +972,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("The revoking principal must be a ULID.");
         }
 
+        WriteOutcome outcome;
         lock (gate)
         {
             EstateModel model = session.Load();
@@ -988,9 +992,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(revokedAt) };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: revokedAt);
-            WriteOutcome outcome = request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
-            return outcome.Written is null ? outcome : outcome with { RevocationReach = [ObserveRevocation("written")] };
+            outcome = request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+            if (outcome.Written is not null) outcome = outcome with { RevocationReach = [ObserveRevocation("written")] };
         }
+
+        if (outcome.Ok)
+        {
+            DeviceAdmissionRevoked?.Invoke(request.Device);
+        }
+
+        return outcome;
     }
 
     /// <inheritdoc />
