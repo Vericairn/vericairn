@@ -458,6 +458,7 @@ public sealed class DaemonHost : IAsyncDisposable
         host.Publish(new DaemonEndpoint(pipe ? "pipe" : "unix", address, Environment.ProcessId, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), root, ApiVersion.Current, loopbackEndpoint, localNetworkEndpoint)
         {
             Mcp = host.Mcp.Enabled && (loopbackEndpoint is not null || localNetworkEndpoint is not null) ? McpEndpoint.Path : null,
+            VericairnHome = VericairnHome.Path(),
         });
         if (certificates is not null)
         {

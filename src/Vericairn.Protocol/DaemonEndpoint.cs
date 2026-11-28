@@ -35,4 +35,7 @@ public sealed record DaemonEndpoint(string Kind, string Address, int ProcessId, 
     /// listeners, /mcp, when the operator turned it on; null when it is off. Older daemons omit it.
     /// </summary>
     public string? Mcp { get; init; }
+
+    /// <summary>The Vericairn home the local daemon opened. Endpoints from before 0.9.5 omit it.</summary>
+    public string? VericairnHome { get; init; }
 }

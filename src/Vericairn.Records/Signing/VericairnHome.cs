@@ -33,6 +33,16 @@ public static class VericairnHome
             return System.IO.Path.GetFullPath(overridden);
         }
 
+        return DefaultPath();
+    }
+
+    internal static bool SamePath(string left, string right) => string.Equals(
+        System.IO.Path.TrimEndingDirectorySeparator(left), System.IO.Path.TrimEndingDirectorySeparator(right),
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    /// <summary>The platform's home when no explicit home or scope is set.</summary>
+    internal static string DefaultPath()
+    {
         if (OperatingSystem.IsWindows())
         {
             return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Vericairn");

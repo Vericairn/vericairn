@@ -268,6 +268,16 @@ internal sealed class DaemonLifecycle(CommandContext context)
         DaemonEndpoint? endpoint = DaemonHost.Discover(root);
         HealthResponse? health = null;
         bool alive = endpoint is not null && context.IsAlive(endpoint, out health);
+        string? servingHome = null;
+        if (alive)
+        {
+            // An older installed service had no home setting and did not publish one.
+            servingHome = endpoint!.VericairnHome ?? VericairnHome.DefaultPath();
+            string requestedHome = VericairnHome.Path();
+            if (!VericairnHome.SamePath(servingHome, requestedHome))
+                return context.Fail($"the serving daemon uses Vericairn home '{servingHome}', which differs from the requested home '{requestedHome}'.");
+        }
+
         ServingRuntime? serving = alive && health is not null ? ServingRuntime.Of(root, endpoint!, health) : null;
         EstateManifest? pin = serving is null ? ServingRuntime.Pin(root) : serving.Manifest;
         string? configured = null;
@@ -289,6 +299,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
             {
                 mode = alive ? "daemon" : "embedded",
                 daemon = alive ? endpoint : null,
+                vericairnHome = servingHome,
                 localNetwork = configured,
                 mcp = mcpConfigured,
                 servingRelease = serving?.Release,
@@ -300,6 +311,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         else if (alive)
         {
             context.Output.WriteLine($"daemon {endpoint!.ProcessId} serves {endpoint.Root} since {endpoint.StartedAt}");
+            context.Output.WriteLine($"  home  {servingHome}");
             context.Output.WriteLine($"  {endpoint.Kind}  {endpoint.Address}");
             if (endpoint.Loopback is LoopbackEndpoint published)
             {
@@ -603,6 +615,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         }
 
         context.Output.WriteLine($"{plan.Platform}: {plan.Label}");
+        context.Output.WriteLine($"  home  {plan.VericairnHome}");
         context.Output.WriteLine($"unit {plan.UnitPath}:");
         context.Output.Write(plan.UnitContent);
         foreach (IReadOnlyList<string> command in plan.Install)
