@@ -1457,7 +1457,7 @@ internal static partial class StandingAgents
             subject.Allow(bound.Name);
             if (!resolved.SubjectFields.ContainsKey(bound.Name))
             {
-                subject.Error("standing.subject", bound.Name, $"Flow {resolved.Pin.Id}'s subject has no field '{bound.Name}'.");
+                subject.RelationshipError("standing.subject", bound.Name, $"Flow {resolved.Pin.Id}'s subject has no field '{bound.Name}'.");
             }
         }
 
@@ -1530,7 +1530,7 @@ internal static partial class StandingAgents
             case "duty":
                 if (trigger.Ulid("policy", true) is string policy && context.Find(policy) is not { Type: "estate-policy" })
                 {
-                    trigger.Error("standing.trigger", "policy", $"'policy' names {policy}, which is not an estate policy of this estate.");
+                    trigger.RelationshipError("standing.trigger", "policy", $"'policy' names {policy}, which is not an estate policy of this estate.");
                 }
 
                 trigger.Text("rule", true, 100);

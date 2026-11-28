@@ -42,6 +42,13 @@ internal sealed class McpOperations
         "POST /v1/documents/{id}/reviews",
     };
 
+    private static readonly IReadOnlySet<string> PresenceOperations = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "POST /v1/presence",
+        "POST /v1/presence/{lease}/heartbeat",
+        "DELETE /v1/presence/{lease}",
+    };
+
     private readonly Route[] routes;
 
     internal McpOperations(IEnumerable<RouteEndpoint> endpoints)
@@ -113,8 +120,12 @@ internal sealed class McpOperations
     /// An HTTP handler that runs the API's routes in this process for one network MCP request, as its authenticated device. Each
     /// request it carries is judged by the route's request scope for that device, under the session's signing rule for the call.
     /// </summary>
-    internal HttpMessageHandler Handler(DaemonHost host, HttpContext outer, AuthenticatedDevice device, Func<DeviceSigning> signing, CancellationToken observing) =>
-        new InProcess(this, host, outer, device, signing, observing);
+    internal HttpMessageHandler Handler(DaemonHost host, HttpContext outer, AuthenticatedDevice device, Func<DeviceSigning> signing,
+        CancellationToken observing) => new InProcess(this, host, outer, device, signing, presence: false, observing);
+
+    /// <summary>The signed transport can register, renew and release its own lease through this handler.</summary>
+    internal HttpMessageHandler PresenceHandler(DaemonHost host, HttpContext outer, AuthenticatedDevice device) =>
+        new InProcess(this, host, outer, device, DeviceSigning.Read, presence: true, CancellationToken.None);
 
     private static bool MoreSpecific(Route candidate, Route current)
     {
@@ -161,7 +172,8 @@ internal sealed class McpOperations
 
     private sealed record Route(RouteEndpoint Endpoint, IReadOnlyList<string> Methods, Segment[] Segments);
 
-    private sealed class InProcess(McpOperations operations, DaemonHost host, HttpContext outer, AuthenticatedDevice device, Func<DeviceSigning> signing, CancellationToken observing)
+    private sealed class InProcess(McpOperations operations, DaemonHost host, HttpContext outer, AuthenticatedDevice device,
+        Func<DeviceSigning> signing, bool presence, CancellationToken observing)
         : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -177,7 +189,7 @@ internal sealed class McpOperations
             (RouteEndpoint endpoint, RouteValueDictionary values) = matched;
 
             string operation = method.ToUpperInvariant() + " /" + (endpoint.RoutePattern.RawText ?? string.Empty).Trim('/');
-            if (!Offered(operation))
+            if (!(presence ? PresenceOperations.Contains(operation) : Offered(operation)))
             {
                 return Refused(HttpStatusCode.Unauthorized, new Problem("denied", $"{operation} is not offered over network MCP.", []));
             }

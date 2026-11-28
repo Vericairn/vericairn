@@ -44,19 +44,19 @@ internal static class ChangeOperationRules
         if (!IsChange(context.Record))
         {
             if (required is not null || checks is not null || scan is not null)
-                context.Error("operation.change-evidence", "Checks and scans belong to repository change operations.");
+                context.BodyError("operation.change-evidence", "Checks and scans belong to repository change operations.");
             return;
         }
 
         if (context.Format < 3)
         {
-            context.Error("operation.format", "Repository change operations belong to record format 3; an estate records them once it is upgraded to a release that writes that format.");
+            context.BodyError("operation.format", "Repository change operations belong to record format 3; an estate records them once it is upgraded to a release that writes that format.");
             return;
         }
 
         JsonElement target = context.Record.Body.TryGetProperty("target", out JsonElement namedTarget) && namedTarget.ValueKind == JsonValueKind.Object ? namedTarget : default;
         string? head = Text(target, "head");
-        if (head is null || !Patterns.Commit.IsMatch(head)) context.Error("operation.change-head", "A repository operation pins its exact head.");
+        if (head is null || !Patterns.Commit.IsMatch(head)) context.BodyError("operation.change-head", "A repository operation pins its exact head.");
         string? productId = Text(target, "product");
         RecordEnvelope? product = context.Find(productId);
         if (product is not { Type: "product" } || product.ComputedHash != Text(target, "productHash"))
@@ -91,11 +91,11 @@ internal static class ChangeOperationRules
             if (action == "change-merge" && (required is not { Count: > 0 } || checks is null
                 || required.Any(name => !checks.Any(c => Text(c.Element, "name") == name))
                 || checks.Any(c => Text(c.Element, "head") != head || Text(c.Element, "status") != "completed" || Text(c.Element, "conclusion") != "success")))
-                context.Error("operation.merge-checks", "A merge requires every declared check and every reported check to succeed at its exact head.");
+                context.BodyError("operation.merge-checks", "A merge requires every declared check and every reported check to succeed at its exact head.");
             if (action == "change-push" && (scan is null || Text(scan.Element, "verdict") != "passed"
                 || Text(scan.Element, "range") != Text(target, "base") + ".." + head
                 || !scan.Element.TryGetProperty("findingCount", out JsonElement count) || !count.TryGetInt32(out int n) || n != 0))
-                context.Error("operation.push-scan", "A push requires a successful zero-finding scan of exactly its range.");
+                context.BodyError("operation.push-scan", "A push requires a successful zero-finding scan of exactly its range.");
         }
 
         if (context.Find(context.Record.Supersedes) is { } previous && IsChange(previous))
@@ -132,7 +132,7 @@ internal static class ChangeOperationRules
         string? basis = Text(target, "basis");
         if (action != "change-push" || basis is null)
         {
-            context.Error(BasisCode, "Only a checked push records a basis.");
+            context.BodyError(BasisCode, "Only a checked push records a basis.");
             return;
         }
         if (basis == "merge-base") return;

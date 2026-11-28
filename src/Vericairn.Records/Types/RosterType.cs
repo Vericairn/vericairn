@@ -93,7 +93,7 @@ public sealed class RosterType : IRecordType
             {
                 if (context.RequireReference(field + ".principals", id, "principal") is not null && name == "decider" && !context.HasRole(id, Types.Roles.Operator))
                 {
-                    role.Error("roster.decider", "principals", "The decider role is held by principals with the operator role: decisions and acceptances stay theirs.");
+                    role.RelationshipError("roster.decider", "principals", "The decider role is held by principals with the operator role: decisions and acceptances stay theirs.");
                 }
             }
         }

@@ -12,6 +12,7 @@
     <Project Path="src/Vericairn.Providers.GitHub.Releases/Vericairn.Providers.GitHub.Releases.csproj" />
     <Project Path="src/Vericairn.Providers.NuGet/Vericairn.Providers.NuGet.csproj" />
     <Project Path="src/Vericairn.Records/Vericairn.Records.csproj" />
+    <Project Path="src/Vericairn.Relay/Vericairn.Relay.csproj" />
     <Project Path="src/Vericairn.Remote/Vericairn.Remote.csproj" />
     <Project Path="src/Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <Project Path="src/Vericairn.Sdk/Vericairn.Sdk.csproj" />

@@ -138,7 +138,7 @@ internal sealed class McpSessionEvents(EstateService service, string device, str
     }
 
     /// <inheritdoc />
-    public Task<McpEventRound> ReadAsync(TimeSpan wait, CancellationToken cancellationToken)
+    public async Task<McpEventRound> ReadAsync(TimeSpan wait, CancellationToken cancellationToken)
     {
         EventSubscription? subscription;
         lock (gate)
@@ -146,8 +146,32 @@ internal sealed class McpSessionEvents(EstateService service, string device, str
             subscription = open;
         }
 
-        // The server stream waits on the journal itself; without one open there is nothing to read.
-        return Task.FromResult(subscription is null ? McpEventRound.Empty : Read(subscription).Round);
+        if (subscription is null)
+        {
+            return McpEventRound.Empty;
+        }
+
+        // The legacy stream drives its own reads. A stateless subscription waits here, at its own journal position.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(wait);
+        while (true)
+        {
+            McpEventRound round = Read(subscription).Round;
+            if (round.Events.Count > 0 || round.Reset || round.Refusal is not null || deadline.IsCancellationRequested)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return round;
+            }
+
+            try
+            {
+                await subscription.WaitAsync(deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+            {
+                return McpEventRound.Empty;
+            }
+        }
     }
 
     private string Head()

@@ -123,6 +123,10 @@ public sealed partial class GitCommandAdapter
             return -1;
         }
 
-        using (hardening) return GitFileSource.Run(OverlapRead(root, hardening, arguments), out output);
+        using (hardening)
+        {
+            try { return GitFileSource.Run(OverlapRead(root, hardening, arguments), out output); }
+            catch (ProviderRefusedException) { output = []; return -1; }
+        }
     }
 }

@@ -650,6 +650,8 @@ internal sealed class McpLines : IAsyncDisposable
 
     public Task<JsonObject> InitializeAsync() => InitializeThenAsync();
 
+    public ValueTask SendAsync(JsonObject message) => input.Writer.WriteAsync(message.ToJsonString(), TestContext.Current.CancellationToken);
+
     public async Task<JsonObject> RequestAsync(string method, JsonObject? parameters = null)
     {
         int id = Interlocked.Increment(ref next);

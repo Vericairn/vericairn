@@ -49,8 +49,8 @@ public sealed class DocumentRevisionType : IRecordType
         long? revision = body.Number("revision", true, 1, 1_000_000);
         body.Text("summary", true, 4000);
         bool authored = body.Since(3, "hashMode") && body.Enum("hashMode", false, RevisionLines.HashMode) == RevisionLines.HashMode;
-        if (authored && mediaType != "text/markdown") context.Error("document.hash-mode", "The generated revision hash mode requires Markdown content.");
-        if (body.Has("revisionHistory") && !authored) context.Error("document.history", "Preserved history belongs to an authored-content revision pin.");
+        if (authored && mediaType != "text/markdown") context.BodyError("document.hash-mode", "The generated revision hash mode requires Markdown content.");
+        if (body.Has("revisionHistory") && !authored) context.BodyError("document.history", "Preserved history belongs to an authored-content revision pin.");
         if (body.Since(3, "decision")) context.RequireReference("decision", body.Ulid("decision", false), "decision");
         if (body.Since(3, "revisionHistory"))
         {

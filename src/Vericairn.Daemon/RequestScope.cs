@@ -57,7 +57,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         // Network MCP's requests (MCP-03) are signed by their own device only, and on loopback need the loopback profile as well.
         DeviceSigning? signing = context.HttpContext.Items.TryGetValue(SigningItem, out object? rule) ? rule as DeviceSigning : null;
-        string? profile = device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : signing is not null ? LoopbackProfile : null;
+        string? profile = device.NetworkProfile ?? (signing is not null ? LoopbackProfile : null);
 
         // These reads carry their input in a POST body, with no signing key or write ledger needed; nor does a write that only
         // prepares its record for its device's signature, which writes nothing.

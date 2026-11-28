@@ -36,6 +36,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../src/Vericairn.Relay/Vericairn.Relay.csproj" />
     <ProjectReference Include="../../src/Vericairn.Daemon/Vericairn.Daemon.csproj" />
     <ProjectReference Include="../../src/Vericairn.Sdk/Vericairn.Sdk.csproj" />
     <ProjectReference Include="../../src/Vericairn.Remote/Vericairn.Remote.csproj" />

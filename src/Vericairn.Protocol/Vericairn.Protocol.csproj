@@ -12,6 +12,9 @@
     <InternalsVisibleTo Include="vericairn-workbench" />
     <InternalsVisibleTo Include="Vericairn.Runtime" />
     <InternalsVisibleTo Include="Vericairn.Sdk" />
+    <InternalsVisibleTo Include="Vericairn.Mcp" />
+    <InternalsVisibleTo Include="Vericairn.Daemon" />
+    <InternalsVisibleTo Include="Vericairn.Daemon.Tests" />
     <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
     <InternalsVisibleTo Include="Vericairn.Workbench.Tests" />
     <InternalsVisibleTo Include="vericairn" />

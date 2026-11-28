@@ -3,6 +3,7 @@
 
 using System.Globalization;
 using System.Text.Json.Serialization;
+using Vericairn.Protocol;
 
 namespace Vericairn.Sdk;
 
@@ -33,6 +34,9 @@ public sealed record RuntimeConnection(string Id, string Address, string Estate,
 
     /// <summary>The presence device's public key, base64url SubjectPublicKeyInfo.</summary>
     public string? PresenceDevicePublicKey { get; init; }
+
+    /// <summary>The most recent ticket received from the paired runtime.</summary>
+    public RelayRoute? Relay { get; init; }
 
     /// <summary>The host part of the address.</summary>
     [JsonIgnore]

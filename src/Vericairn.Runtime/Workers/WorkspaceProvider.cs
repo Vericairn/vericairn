@@ -34,6 +34,9 @@ public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files
     public IReadOnlyList<string>? IgnoreChanges { get; init; }
 }
 
+/// <summary>The exact repository configuration bytes a person's signed review covers.</summary>
+public sealed record RepositoryConfigurationReview(string Config, string? WorktreeConfig);
+
 /// <summary>
 /// The workspace operations exposed by a source adapter, version 1 (vericairn.workspace/1): an isolated working tree on a work branch, made from this
 /// machine's registered clone of it and never the clone's own working tree. The workspace stays after the run, for review.
@@ -58,6 +61,10 @@ public interface IWorkspaceProvider
 
     /// <summary>Prepares at the requested directory, or reuses this branch's existing workspace only within the selected workspace root.</summary>
     PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory, string workspaceRoot) => Prepare(clone, branch, baseReference, directory);
+
+    /// <summary>Prepares a workspace with the supplied signed reviews of its source configuration.</summary>
+    PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory, string workspaceRoot,
+        IReadOnlyList<RepositoryConfigurationReview> configurationReviews) => Prepare(clone, branch, baseReference, directory, workspaceRoot);
 
     /// <summary>Captures tracked and non-ignored workspace files before launch for the settlement's scope audit.</summary>
     WorkspaceSnapshot Capture(PreparedWorkspace workspace) => new(new Dictionary<string, string>(StringComparer.Ordinal), "This workspace provider supplies no file inventory.");

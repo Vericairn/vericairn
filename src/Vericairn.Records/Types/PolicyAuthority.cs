@@ -159,8 +159,8 @@ internal static class PolicyAuthority
     {
         BodyReader body = context.Body;
         string[] governed = ScopesWithBounds.Where(s => PolicyRecords.Contains(PolicyRecords.Property(body.Element, "scope"), s)).ToArray();
-        bool lifecycle = IsPolicyGrant(context.Model, context.Record);
-        if (lifecycle && context.Format < 3) context.Error("authority.format", "Policy authority grants and their revocations require record format 3.");
+        bool lifecycle = governed.Length > 0 || !context.CheckingBody && IsPolicyGrant(context.Model, context.Record);
+        if (lifecycle && context.Format < 3) context.BodyError("authority.format", "Policy authority grants and their revocations require record format 3.");
         IReadOnlyList<BodyReader> bounds = body.Since(3, "bounds") ? body.NestedArray("bounds", governed.Length > 0, false) ?? [] : [];
         PolicyRecords.Unique(body, bounds.Select(b => PolicyRecords.Text(b.Element, "scope")), "bounds");
         foreach (BodyReader bound in bounds)
@@ -216,7 +216,7 @@ internal static class PolicyAuthority
         {
             if (!body.Has("expires")) body.Error("body.missing", "expires", "Policy grants have an explicit expiry.");
         }
-        if (lifecycle && !OperatorAt(context.Model, context.Record)) context.Error("authority.author", "Only the operator grants or revokes bounded policy authority.");
+        if (!context.CheckingBody && lifecycle && !OperatorAt(context.Model, context.Record)) context.Error("authority.author", "Only the operator grants or revokes bounded policy authority.");
     }
 
     internal static RecordEnvelope? Grant(ValidationContext context, BodyReader? reference, string scope, string action, RecordEnvelope subject)

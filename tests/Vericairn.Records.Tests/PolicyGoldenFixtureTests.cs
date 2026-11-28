@@ -54,6 +54,12 @@ public class PolicyGoldenFixtureTests
             ["kind"] = "repository", ["name"] = "Advisories fixture", ["role"] = "Where reports are filed.",
             ["location"] = new JsonObject { ["github"] = "Example/advisories" }, ["visibility"] = "public",
         });
+        // From 0.9.5 (CODE-88) the operator reviews a repository's exact Git configuration by its hashes.
+        lines.Add("review", new JsonObject
+        {
+            ["independence"] = "self", ["outcome"] = "pass", ["summary"] = "Read the exact configuration.", ["findings"] = new JsonArray(),
+            ["repositoryConfiguration"] = new JsonObject { ["config"] = "sha256:" + new string('e', 64), ["worktreeConfig"] = "sha256:" + new string('f', 64) },
+        }, subject: advisories.Reference);
         lines.Add("product", new JsonObject
         {
             ["name"] = "Reported", ["slug"] = "reported", ["summary"] = "Fixture product with security reports.",

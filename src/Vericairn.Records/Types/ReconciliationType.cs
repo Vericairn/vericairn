@@ -45,11 +45,11 @@ public sealed class ReconciliationType : IRecordType
         bool policyFormat = body.Since(3, "policyAuthority");
         if (policy)
         {
-            if (!policyFormat) context.Error("policy.format", "Reconciling a policy or exception requires record format 3 and its bounded authority rules.");
+            if (!policyFormat) context.BodyError("policy.format", "Reconciling a policy or exception requires record format 3 and its bounded authority rules.");
             PolicyAuthority.Reconcile(context, subject!, context.Find(kept));
         }
         else if (policyFormat && body.Has("policyAuthority")) body.Error("policy.authority", "policyAuthority", "Only policy and exception reconciliation uses this grant.");
-        if (policyGrant && !policyFormat) context.Error("policy.format", "Reconciling bounded policy authority requires record format 3.");
+        if (policyGrant && !policyFormat) context.BodyError("policy.format", "Reconciling bounded policy authority requires record format 3.");
         body.Allow("policyAuthority");
         body.NoOtherKeys();
         bool communication = subject?.Type is "communication-setting" or "communication-delegation";
@@ -138,7 +138,7 @@ public sealed class ReconciliationType : IRecordType
 
         if (withdrawn.Contains(kept, StringComparer.Ordinal))
         {
-            context.Error("reconciliation.kept", "The kept successor cannot also be withdrawn.");
+            context.BodyError("reconciliation.kept", "The kept successor cannot also be withdrawn.");
         }
     }
 

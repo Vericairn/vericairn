@@ -17,7 +17,7 @@
          references build libraries portably: a platform name in their intermediate path changes generated source and MVIDs.
          OutputType is declared after these props, so identify the two applications by project name here.
          Distributable lock files also pin the single-file analyzer for libraries; ordinary builds keep packages.lock.json. -->
-    <RuntimeIdentifiers Condition="'$(VericairnDistributable)' == 'true' And ('$(MSBuildProjectName)' == 'Vericairn.Cli' Or '$(MSBuildProjectName)' == 'Vericairn.Workbench')">linux-x64;linux-arm64;osx-x64;osx-arm64;win-x64;win-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifiers Condition="'$(VericairnDistributable)' == 'true' And ('$(MSBuildProjectName)' == 'Vericairn.Cli' Or '$(MSBuildProjectName)' == 'Vericairn.Workbench' Or '$(MSBuildProjectName)' == 'Vericairn.Relay')">linux-x64;linux-arm64;osx-x64;osx-arm64;win-x64;win-arm64</RuntimeIdentifiers>
     <NuGetLockFilePath Condition="'$(VericairnDistributable)' == 'true'">$(MSBuildProjectDirectory)/packages.distributable.lock.json</NuGetLockFilePath>
     <UseArtifactsOutput>true</UseArtifactsOutput>
     <InvariantGlobalization>true</InvariantGlobalization>

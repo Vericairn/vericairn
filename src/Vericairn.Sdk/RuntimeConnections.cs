@@ -57,6 +57,7 @@ public sealed class RuntimeConnections
     {
         var connection = new RuntimeConnection(Ulid.NewUlid().Value, paired.Address, paired.Estate, paired.EstateName, paired.Identity, paired.Device, paired.DevicePublicKey, paired.Principal, paired.PrincipalName, paired.Profiles, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow))
         {
+            Relay = paired.Relay,
             PresenceDevice = paired.PresenceDevice,
             PresenceDevicePublicKey = paired.PresenceDevicePublicKey,
         };

@@ -53,7 +53,7 @@ public sealed class AssignmentType : IRecordType
             string? repository = AssignmentBrief.Repository.Id(brief);
             if (repository is not null && !AssignmentOverlaps.IsRepository(context.Model, repository))
             {
-                brief.Error("assignment.repository", "repository", "The repository is the identity of the estate or of a repository resource: the first record of its lineage.");
+                brief.RelationshipError("assignment.repository", "repository", "The repository is the identity of the estate or of a repository resource: the first record of its lineage.");
             }
         }
 
@@ -107,7 +107,7 @@ public sealed class AssignmentType : IRecordType
 
         if (AssignmentOverlaps.Cycle(context.Model, own, after) is string through)
         {
-            brief.Error("assignment.after", "after", $"Waiting for these assignments makes a cycle through assignment {through}: each would wait for the other.");
+            brief.RelationshipError("assignment.after", "after", $"Waiting for these assignments makes a cycle through assignment {through}: each would wait for the other.");
         }
     }
 
@@ -138,7 +138,7 @@ public sealed class AssignmentType : IRecordType
             AssignmentBrief.Outcome.Text(brief);
             foreach (BodyReader source in AssignmentBrief.Sources.Objects(brief) ?? [])
             {
-                RecordReference? reference = RecordParser.ParseReference(source.Element, source.Location, context.Findings);
+                RecordReference? reference = RecordParser.ParseReference(source.Element, source.Location, context.BodyFindings);
                 if (reference is null)
                 {
                     continue;
@@ -188,7 +188,7 @@ public sealed class AssignmentType : IRecordType
 
                 if (type is not null && context.RequireReference("step.inputs", id, type) is RecordEnvelope pinned && pinned.ComputedHash != hash)
                 {
-                    input.Error("assignment.step", "hash", $"Input {name} does not have the pinned content hash; the brief relied on a different revision.");
+                    input.RelationshipError("assignment.step", "hash", $"Input {name} does not have the pinned content hash; the brief relied on a different revision.");
                 }
             }
 
@@ -211,7 +211,7 @@ public sealed class AssignmentType : IRecordType
                     subject.NoOtherKeys();
                     if (type is not null && context.RequireReference("step.review.subject", id, type) is RecordEnvelope reviewed && reviewed.ComputedHash != hash)
                     {
-                        subject.Error("assignment.step", "hash", "The reviewed subject does not have the pinned content hash; a review names the exact revision it reviews.");
+                        subject.RelationshipError("assignment.step", "hash", "The reviewed subject does not have the pinned content hash; a review names the exact revision it reviews.");
                     }
                 }
 

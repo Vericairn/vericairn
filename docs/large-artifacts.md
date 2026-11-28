@@ -493,7 +493,7 @@ in a repository-synced estate's working tree. The directories' own `.gitignore` 
 | Path | Content | Written by |
 | --- | --- | --- |
 | `.vericairn/record-staging/.gitignore` | Two bytes, `*` and a line feed (hex `2a0a`) | Every record stored, `estate init` included |
-| `.vericairn/write-lock/.gitignore` | Hex `2a0a` | Every write that takes the working tree's write lock, from 0.9.2: a stored record, and a refused one too |
+| `.vericairn/write-lock/.gitignore` | Hex `2a0a` | Every write that takes the working tree's write lock, including a record refused during locked validation |
 | `.vericairn/write-lock/write.lock` | Empty | The same writes; it stays after the lock is released |
 | `.vericairn/write-lock/holder.json` | A JSON object whose `format` is `vericairn.write-lock/1`, with `pid`, `host`, `home` (a digest, never a path) and `since` | The writer that holds the lock. It removes the file on release; a writer stopped while holding the lock leaves it. |
 | `.vericairn/document-staging/.gitignore` | Hex `2a0a` | The first write of a generated document |
@@ -524,11 +524,11 @@ path with other content, nor an operating-system file such as `.DS_Store`.
 
 ### Classify before any write
 
-The restore writes no housekeeping and no `.git`. Any write afterwards adds files: even a refused
-`records new` takes the write lock and leaves `.vericairn/write-lock/`, and a stored record adds its
-own file and `.vericairn/record-staging/.gitignore`. An upgrade, a generated document's refresh or the
-first device's admission can change a member. So classify right after the restore, while every file
-should be a member:
+The restore writes no housekeeping and no `.git`. From 0.9.5, `records new` can refuse an invalid body
+before signing or leaving any housekeeping. A write that reaches locked validation leaves
+`.vericairn/write-lock/`, and a stored record adds its own file and `.vericairn/record-staging/.gitignore`.
+An upgrade, a generated document's refresh or the first device's admission can change a member.
+So classify right after the restore, while every file should be a member:
 
 ```sh
 unzip -p estate-export.zip export/inventory.json

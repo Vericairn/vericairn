@@ -53,7 +53,7 @@ public sealed class QualificationType : IRecordType
         body.NoOtherKeys();
         foreach (BodyReader item in evidence ?? [])
         {
-            RecordReference? reference = RecordParser.ParseReference(item.Element, item.Location, context.Findings);
+            RecordReference? reference = RecordParser.ParseReference(item.Element, item.Location, context.BodyFindings);
             if (reference is null)
             {
                 continue;
@@ -70,7 +70,7 @@ public sealed class QualificationType : IRecordType
 
         if (outcome is "qualified" or "measured-in-part" && evidence is { Count: 0 })
         {
-            context.Error("qualification.evidence", $"A profile is {outcome} only on evidence; without any it is a non-claim.");
+            context.BodyError("qualification.evidence", $"A profile is {outcome} only on evidence; without any it is a non-claim.");
         }
 
         if (context.Principal(context.Record.By) is null)

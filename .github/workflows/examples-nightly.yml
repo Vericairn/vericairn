@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  AVALONIA_TELEMETRY_OPTOUT: '1'
+  AVALONIA_TELEMETRY_OPTOUT: "1"
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:

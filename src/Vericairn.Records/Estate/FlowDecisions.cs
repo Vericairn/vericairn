@@ -391,7 +391,7 @@ public static partial class FlowDecisions
             evidence.NoOtherKeys();
             if (type is not null && context.RequireReference("decision.evidence", id, type) is RecordEnvelope pinned && pinned.ComputedHash != hash)
             {
-                evidence.Error("result.decision", "hash", "The evidence does not have the recorded content hash.");
+                evidence.RelationshipError("result.decision", "hash", "The evidence does not have the recorded content hash.");
             }
         }
 
@@ -537,7 +537,7 @@ public static partial class FlowDecisions
             }
             else if (context.Find(reference.Id) is not RecordEnvelope found || found.Type != reference.Type || found.ComputedHash != reference.Hash)
             {
-                facts.Error("observation.flow-decision", "read", $"{reference.Type} {reference.Id} at {reference.Hash} is not a record of this estate at that hash.");
+                facts.RelationshipError("observation.flow-decision", "read", $"{reference.Type} {reference.Id} at {reference.Hash} is not a record of this estate at that hash.");
             }
         }
 

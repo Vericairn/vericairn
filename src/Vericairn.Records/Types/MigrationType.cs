@@ -58,15 +58,15 @@ public sealed class MigrationType : IRecordType
                 RecordEnvelope? admission = context.Find(id);
                 if (id is not null && admission?.Type != "admission")
                 {
-                    entry.Error("migration.anchored", "id", $"{id} names no admission record.");
+                    entry.RelationshipError("migration.anchored", "id", $"{id} names no admission record.");
                 }
                 else if (admission is not null && admission.Signatures.Count > 0)
                 {
-                    entry.Error("migration.anchored", "id", $"Admission {id} is signed and needs no anchor; only admissions recorded without a signature are listed.");
+                    entry.RelationshipError("migration.anchored", "id", $"Admission {id} is signed and needs no anchor; only admissions recorded without a signature are listed.");
                 }
                 else if (admission is not null && hash is not null && admission.ComputedHash != hash)
                 {
-                    entry.Error("migration.anchored", "hash", $"Admission {id} has the hash {admission.ComputedHash}, not {hash}.");
+                    entry.RelationshipError("migration.anchored", "hash", $"Admission {id} has the hash {admission.ComputedHash}, not {hash}.");
                 }
             }
 
@@ -77,7 +77,7 @@ public sealed class MigrationType : IRecordType
 
             if (context.Record.Signatures.Count == 0)
             {
-                body.Error("migration.anchor-unsigned", "anchored", "A migration that anchors admissions is signed, by the estate's root operator or a principal with the 'administer' scope; unsigned, it anchors nothing.");
+                body.RelationshipError("migration.anchor-unsigned", "anchored", "A migration that anchors admissions is signed, by the estate's root operator or a principal with the 'administer' scope; unsigned, it anchors nothing.");
             }
 
             // Anchors count only for the principals SignatureChecks.Anchored reads them from; a list by any other author, another
@@ -85,7 +85,7 @@ public sealed class MigrationType : IRecordType
             string? rootOperator = context.Model.RootOperator;
             if (context.Record.By != rootOperator && !context.HasScope(context.Record.By, Scopes.Administer))
             {
-                body.Error("migration.anchor-author", "anchored", "Admissions are anchored by the estate's root operator, the operator its charter names, or a principal with the 'administer' scope; no one else's list counts.");
+                body.RelationshipError("migration.anchor-author", "anchored", "Admissions are anchored by the estate's root operator, the operator its charter names, or a principal with the 'administer' scope; no one else's list counts.");
             }
         }
 

@@ -193,7 +193,7 @@ public sealed class OperationType : IRecordType
         }
         else if (context.Record.Supersedes is null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("custodyException", out _))
         {
-            context.Error("operation.custody", "A run names a custody exception only with the goal it is charged to, whose exception it is.");
+            context.BodyError("operation.custody", "A run names a custody exception only with the goal it is charged to, whose exception it is.");
         }
     }
 
@@ -366,7 +366,7 @@ public sealed class OperationType : IRecordType
 
         if ((acknowledgedAt is not null || escalatedAt is not null) && transmittedAt is null)
         {
-            context.Error("operation.stop", "A stop is acknowledged or escalated only once it was transmitted.");
+            context.BodyError("operation.stop", "A stop is acknowledged or escalated only once it was transmitted.");
         }
 
         foreach ((string name, string? at) in new[] { ("acknowledgedAt", acknowledgedAt), ("escalatedAt", escalatedAt) })
@@ -475,7 +475,7 @@ public sealed class OperationType : IRecordType
         {
             if (EstateModel.BodyString(context.Record, "action") != AgentRun)
             {
-                context.Error("operation.liveness", "Event-stream liveness describes agent runs only.");
+                context.BodyError("operation.liveness", "Event-stream liveness describes agent runs only.");
             }
 
             liveness.Number("stallSeconds", true, 1, 86400);

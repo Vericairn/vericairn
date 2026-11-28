@@ -207,26 +207,15 @@ public sealed partial class EstateService
         }
 
         // The same authoring path as every write, with no signature: the exact record the device will sign, or why there is none.
-        (AuthoredRecord? record, string? refusal) = AuthorUnsignedLocked(draft, model);
+        (AuthoredRecord? record, Problem? problem) = AuthorCheckedLocked(draft, model, []);
         if (record is null)
         {
-            return (null, new Problem("refused", refusal!, []));
-        }
-
-        if (record.Envelope.Type == "decision" && DecisionRecordTimeProblem(EstateModel.BodyString(record.Envelope, "decidedAt"),
-            record.Envelope.At, record.RelativePath) is { } timeProblem)
-        {
-            return (null, timeProblem);
+            return (null, problem);
         }
 
         if (record.Envelope.Type == "acceptance" && AcceptanceType.BasisOutcomeFinding(model, record.Envelope, record.RelativePath) is { } outcome)
         {
             return (null, new Problem("rejected", outcome.Message, [new FindingDto("error", outcome.Code, outcome.Location, outcome.Message)]));
-        }
-
-        if (record.Envelope.Type == "result" && ResultType.OutputSchemeFinding(record.Envelope, record.RelativePath) is { } scheme)
-        {
-            return (null, new Problem("rejected", scheme.Message, [new FindingDto("error", scheme.Code, scheme.Location, scheme.Message)]));
         }
 
         if (RecordAuthorship.Unresolved(model, record.Envelope) is { } author)
