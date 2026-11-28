@@ -412,7 +412,8 @@
     "local-socket",
     "loopback",
     "local-network",
-    "relay"
+    "relay",
+    "token"
   ],
   "Vericairn.Records.Types.DeviceType.Purposes": [
     "signing",

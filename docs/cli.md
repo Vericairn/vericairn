@@ -778,6 +778,24 @@ vericairn mcp serve --connection <connection id>
 See [The MCP server](mcp.md#network-mcp-over-streamable-http-092) and the
 [operator's guide](operator-guide.md#an-agent-on-another-machine-network-mcp-092).
 
+## OAuth clients over public MCP (0.9.5)
+
+From the runtime's machine, configure the HTTPS host, certificate and corresponding PEM key, enable MCP, then restart the daemon.
+
+```sh
+vericairn runtime configure --mcp on --public-endpoint mcp.example.com:443 \
+  --public-certificate certificate-chain.pem --public-key private-key.pem
+vericairn mcp authorize --principal <agent-id> --by <administrator-id> --scope read
+vericairn mcp clients
+```
+
+Give the client the `/mcp` URL. Enter the one-time approval code in the client's browser authorization and check the estate,
+principal, client, scope and expiry before confirming. The code lasts ten minutes. `--days <n>` sets the authorization's lifetime
+from 1 to 90 days, defaulting to 30. `--renew <device>` reauthorizes an admitted token device. For work writes use
+`--scope contribute`. `devices revoke <device>` stops that device's access. `runtime status` shows the live public endpoint and
+the certificate's expiry. `--public-bind <address:port>` selects a particular interface, including an overlay interface.
+`--public-endpoint off` removes the listener at the next restart.
+
 ## Preparing a documentation set with the build tooling (0.9.2)
 
 `vericairn-docs`, the build tooling in `tools/Vericairn.DocsTool` and not part of the shipped command line, adds five
