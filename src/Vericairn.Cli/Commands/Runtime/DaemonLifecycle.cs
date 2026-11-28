@@ -339,7 +339,7 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
         }
         else
         {
-            context.Output.WriteLine("no daemon is serving this estate; commands run the embedded runtime");
+            context.Output.WriteLine($"no daemon is serving this estate in Vericairn home '{requestedHome}'. Commands run the embedded runtime.");
             if (configured is not null)
             {
                 context.Output.WriteLine($"  the local-network profile is configured at {configured} and served from the runtime's next start");

@@ -697,6 +697,13 @@ differ, a `mismatch:` line with the commands that settle it. Its `--json` adds `
 serves). Human `vericairn status` ends, when a daemon served it, with `Serving runtime (this machine):` and any `Mismatch:`
 line. `status --json` stays the canonical document, identical on every machine, and a mismatch goes to stderr.
 
+From 0.9.5 (FIX-180), `runtime status` looks for the estate's endpoint in the selected Vericairn home.
+Its `home` line and the JSON field `vericairnHome` give the home of the serving daemon. When a daemon
+from an older release omits its home, status reports the home that contains the endpoint file. If an
+answering endpoint names another home, status exits with an error that names both homes. When no daemon
+answers, text status names the home it checked and JSON reports `mode: "embedded"` with a null
+`vericairnHome`.
+
 ```sh
 vericairn estate upgrade --to <published-version> --by <principal id>
 vericairn runtime status

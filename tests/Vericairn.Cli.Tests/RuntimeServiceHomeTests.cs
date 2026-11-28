@@ -89,6 +89,23 @@ public sealed class RuntimeServiceHomeTests
     }
 
     [Fact]
+    public void StatusNamesTheHomeItCheckedWhenNoDaemonAnswers()
+    {
+        string root = CliHarness.TempDirectory("status-home");
+        try
+        {
+            Init(root);
+            string home = VericairnHome.Path();
+            CliHarness.Outcome status = CliHarness.Ok("--estate", root, "runtime", "status");
+            Assert.Contains($"no daemon is serving this estate in Vericairn home '{home}'", status.Out, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root);
+        }
+    }
+
+    [Fact]
     public void TheInstallPlanShowsTheHome()
     {
         string root = CliHarness.TempDirectory("service-plan");
