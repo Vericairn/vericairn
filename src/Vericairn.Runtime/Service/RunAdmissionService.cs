@@ -744,7 +744,10 @@ internal sealed class RunAdmissionService(
         }
 
         IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
-        if (!model.Current("device").Any(d => EstateModel.BodyString(d, "principal") == request.Agent && SignatureChecks.IsAdmitted(model, d) && stores.Any(s => s.Has(model.Chain(d)[0]))))
+        // A token device's held key is reserved for its authorized MCP client.
+        if (!model.Current("device").Any(d => EstateModel.BodyString(d, "principal") == request.Agent &&
+            !Strings(d.Body, "profiles").Contains("token", StringComparer.Ordinal) && SignatureChecks.IsAdmitted(model, d) &&
+            stores.Any(s => s.Has(model.Chain(d)[0]))))
         {
             return (null, $"Agent {PrincipalName(model, request.Agent)} ({request.Agent}) has no admitted device whose key this machine holds, so its MCP server would list only the read-only tools and it could record no attempt and no result. Create its device here and have it admitted first.", null);
         }
