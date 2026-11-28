@@ -10,7 +10,7 @@ using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
-public sealed class WorkerConfigurationTests : IDisposable
+public sealed partial class WorkerConfigurationTests : IDisposable
 {
     private readonly string home = Path.Combine(Path.GetTempPath(), "worker-config-" + Guid.NewGuid().ToString("N"));
     private static readonly JsonElement Cap = JsonSerializer.SerializeToElement(new { wallMinutes = 1 });
@@ -243,6 +243,47 @@ public sealed class WorkerConfigurationTests : IDisposable
         Assert.Equal(HarnessWorkspace.Canonical(root), store.ReadWorkspaceRoot());
         AssertOwnerOnly(Path.Combine(physical, "local", "worker", "codex.json"));
         AssertOwnerOnly(Path.Combine(physical, "local", "worker", "workspaces.json"));
+    }
+
+    [Fact]
+    public void ConfigurationPathResolvesOnlyAncestorsAboveTheHome()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Skip("Requires a directory symbolic link");
+        string physical = Path.Combine(home, "physical");
+        string alias = Path.Combine(home, "alias");
+        Directory.CreateDirectory(physical);
+        Directory.CreateSymbolicLink(alias, physical);
+        var launcher = new CodexLauncher();
+        new WorkerConfigurationStore(Path.Combine(physical, "local")).Write(launcher, new("model-a", "high"));
+
+        string? resolved = null;
+        var store = new WorkerConfigurationStore(Path.Combine(alias, "local"))
+        {
+            ResolveConfigurationAncestor = path =>
+            {
+                resolved = path;
+                return new DirectoryInfo(alias).ResolveLinkTarget(returnFinalTarget: true)!.FullName;
+            },
+        };
+
+        WorkerConfiguration? configuration = store.Read(launcher);
+        Assert.Equal(alias, resolved);
+        Assert.Equal("model-a", configuration?.Model);
+    }
+
+    [Fact]
+    public void UnixRemovalUnlinksFromTheOpenedDirectoryAfterItMoves()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Skip("Windows pins the directory against rename");
+        string worker = Path.Combine(home, "worker");
+        string moved = Path.Combine(home, "moved");
+        Directory.CreateDirectory(worker);
+        File.WriteAllText(Path.Combine(worker, WorkerConfigurationStore.ClaudeSetupTokenFile), "worker fixture");
+
+        var store = new WorkerConfigurationStore(home);
+        Assert.True(store.RemoveClaudeSetupToken(() => Directory.Move(worker, moved)).Removed);
+        Assert.True(Directory.Exists(moved));
+        Assert.False(File.Exists(Path.Combine(moved, WorkerConfigurationStore.ClaudeSetupTokenFile)));
     }
 
     [Theory]

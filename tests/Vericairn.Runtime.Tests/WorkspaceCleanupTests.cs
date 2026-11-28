@@ -131,7 +131,7 @@ public class WorkspaceCleanupTests
         Assert.Equal(original, File.GetAttributes(marker));
     }
 
-    private static void DirectoryLink(string name, string target)
+    internal static void DirectoryLink(string name, string target)
     {
         if (!OperatingSystem.IsWindows())
         {

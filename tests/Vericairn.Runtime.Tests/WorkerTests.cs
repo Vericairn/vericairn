@@ -526,9 +526,8 @@ public class WorkerTests
         string home = given["environment"]!["CLAUDE_CONFIG_DIR"]!.GetValue<string>();
         Assert.NotEqual(original, home);
         Assert.False(File.Exists(Path.Combine(home, "settings.json")));
-        string login = File.ReadAllText(Path.Combine(home, ".credentials.json"));
-        Assert.Contains("claudeAiOauth", login, StringComparison.Ordinal);
-        Assert.DoesNotContain("mcpOAuth", login, StringComparison.Ordinal);
+        Assert.True(given["oauthOnly"]?.GetValue<bool>());
+        Assert.False(Directory.Exists(home));
         Assert.Null(given["environment"]!["ANTHROPIC_API_KEY"]);
         List<string> args = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         Assert.Equal("", args[args.IndexOf("--setting-sources") + 1]);

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Cli.Tests;
 
@@ -53,6 +55,98 @@ public sealed class SupportBundleTests
             Assert.DoesNotContain("served a status read", errors, StringComparison.Ordinal);
             Assert.True((int?)json["redacted"]!["secrets"] >= 1);
             Assert.True((int?)json["redacted"]!["paths"] >= 3);
+        }
+        finally { CliHarness.Delete(scratch); }
+    }
+
+    [Fact]
+    public void TheBundleRedactsSetupTokensBeforeClippingAndWhenAdjacentToText()
+    {
+        string token = "sk-ant-" + "oat01-" + new string('a', 202);
+        string scratch = CliHarness.TempDirectory("support-bundle-setup-token");
+        using var estate = new TestEstate(2);
+        string log = DaemonLifecycle.DaemonLogPath(estate.Root);
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        File.WriteAllLines(log, [
+            "error: prefix" + token,
+            "error: " + new string('x', 281) + token,
+            @"error: escaped \u0073" + token[1..],
+        ]);
+        try
+        {
+            CliHarness.Outcome bundle = CliHarness.Run("--estate", estate.Root, "support", "bundle");
+            Assert.Equal(0, bundle.Code);
+            Assert.DoesNotContain(token[..12], bundle.Out, StringComparison.Ordinal);
+            JsonArray errors = JsonNode.Parse(bundle.Out)!["recentErrors"]!.AsArray();
+            Assert.Equal("error: prefix<secret>", errors[0]?.GetValue<string>());
+            Assert.EndsWith("<secret>", errors[1]!.GetValue<string>(), StringComparison.Ordinal);
+            Assert.Equal("<secret>", errors[2]?.GetValue<string>());
+        }
+        finally { CliHarness.Delete(scratch); }
+    }
+
+    [Fact]
+    public void AContinuationIsRedactedEvenWhenTheStartWasOutsideTheSelectedErrorLines()
+    {
+        string prefix = "sk" + "-ant-" + "oat01-";
+        string first = prefix + new string('a', 87);
+        string second = "error" + new string('b', 110);
+        string scratch = CliHarness.TempDirectory("support-bundle-wrapped-setup-token");
+        using var estate = new TestEstate(2);
+        string log = DaemonLifecycle.DaemonLogPath(estate.Root);
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        File.WriteAllLines(log, [first, second, "[separator]", "error: independent diagnostic"]);
+        try
+        {
+            CliHarness.Outcome bundle = CliHarness.Run("--estate", estate.Root, "support", "bundle");
+            Assert.Equal(0, bundle.Code);
+            JsonNode output = JsonNode.Parse(bundle.Out)!;
+            JsonArray errors = output["recentErrors"]!.AsArray();
+            Assert.Equal(2, errors.Count);
+            Assert.True(errors[0]?.GetValue<string>() == "<secret>");
+            Assert.Equal("error: independent diagnostic", errors[1]?.GetValue<string>());
+            Assert.Equal(1, (int?)output["redacted"]!["secrets"]);
+        }
+        finally { CliHarness.Delete(scratch); }
+    }
+
+    [Fact]
+    public void TheDaemonWithholdsProvisionFragmentsBeforeTheSupportBundleReadsItsLog()
+    {
+        string prefix = "sk-ant-" + "oat01-";
+        string token = prefix + RandomNumberGenerator.GetHexString(202);
+        string replacement = prefix + RandomNumberGenerator.GetHexString(202);
+        string scratch = CliHarness.TempDirectory("daemon-log-setup-token");
+        using var estate = new TestEstate(2);
+        string log = DaemonLifecycle.DaemonLogPath(estate.Root);
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        var store = new WorkerConfigurationStore(Path.Combine(scratch, "state"));
+        try
+        {
+            store.ImportClaudeSetupToken(token, "max");
+            using (var writer = new DaemonLogWriter(File.CreateText(log), store))
+            {
+                writer.Write("error: (" + token[50..56]);
+                writer.Flush();
+                writer.WriteLine(token[56..62] + ")");
+                using (ClaudeOutputSecrets.Protect(store.ReadClaudeSetupToken()))
+                {
+                    store.ImportClaudeSetupToken(replacement, "max");
+                    writer.WriteLine("> " + token[70..]);
+                    writer.WriteLine("> " + replacement[70..]);
+                }
+                Assert.False(ClaudeOutputSecrets.ContainsFragment(token[70..], store));
+                writer.Write("error: " + replacement[70..]);
+                store.RemoveClaudeSetupToken();
+                writer.WriteLine(" completed");
+                writer.WriteLine("error: independent diagnostic");
+            }
+            Assert.True(File.ReadAllLines(log).SequenceEqual(["<secret>", "<secret>", "<secret>", "<secret>", "error: independent diagnostic"]));
+            CliHarness.Outcome bundle = CliHarness.Run("--estate", estate.Root, "support", "bundle");
+            Assert.Equal(0, bundle.Code);
+            Assert.Contains("error: independent diagnostic", bundle.Out, StringComparison.Ordinal);
+            Assert.False(bundle.Out.Contains(token[70..], StringComparison.Ordinal));
+            Assert.False(bundle.Out.Contains(replacement[70..], StringComparison.Ordinal));
         }
         finally { CliHarness.Delete(scratch); }
     }

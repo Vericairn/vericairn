@@ -108,7 +108,7 @@ internal static class CodexInventory
             ["version"] = HarnessInventory.Digest("codex-cli " + version),
             ["flags"] = HarnessInventory.Digest(new { help, execHelp, mcpHelp }),
             ["tools"] = HarnessInventory.Digest(new { tools = Tools, features = effective.OrderBy(p => p.Key, StringComparer.Ordinal), report = HarnessInventory.Digest(features), binary = HarnessInventory.Binary(context, HarnessProcess.Command(context.Settings, "codex")) }),
-            ["configuration"] = HarnessInventory.Digest(new { configuration, platform = HarnessInventory.Platform }),
+            ["configuration"] = HarnessInventory.Digest(new { configuration, platform = HarnessPlatformProfile.Codex.RuntimeIdentifier }),
             ["login"] = HarnessInventory.Digest(new { boundary = "provisioned-login-only", present = File.Exists(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")) }),
             ["mcp"] = mcp,
         };

@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 53, November 27, 2026. Add Claude Code setup-token import, the non-recording `worker qualify --check` and the Claude Code version check in `doctor`, in the development build.
+
 Revision 52, November 27, 2026. A standing agent's occurrence brief takes permitted paths from the flow step, repeatable `--flow-path` patterns and the work order's explicit `path:` entries.
 
 Revision 51, November 27, 2026. Add `--flow-path` to `goal propose --flow` and `--check` to `goal step` for runs of a flow. An agent work step without a permitted path is refused at proposal or activation in the development build.
@@ -470,6 +472,46 @@ requires prepared markers and any existing migration review. After adoption,
 `docs pin --render-template` refreshes those regions. See the complete
 [adoption workflow](templates.md#adopt-an-existing-estate-document) before
 transferring a hand-maintained table to records.
+
+## Provisioning and checking Claude Code (0.9.5)
+
+In a terminal, generate a headless sign-in with `claude setup-token`. Import it on the worker's machine:
+
+```sh
+vericairn worker configure --launcher claude-code --model <selector> --effort <effort>
+vericairn worker configure --launcher claude-code --import-setup-token --account-type pro
+```
+
+Choose `pro` or `max` for the account and wait for the hidden prompt before entering the bare token. For scripts, add `--token-stdin`
+and supply the token on a single line of standard input. The worker stores the login outside the estate, the
+repository and the harness configuration. Only the worker reads the provisioned token. It holds the bytes to copy
+them into each run or preflight, the copy deleted afterwards, and in memory for that run's lifetime to withhold any
+run of 12 or more of its characters from the run's output and its probes. While the token is provisioned, the daemon
+may read it to withhold it from its own log at any time. The worker records, prints and passes on nothing of those bytes.
+
+A provisioned setup token takes precedence over an existing provisioned `.credentials.json`. The headless sign-in
+carries no account type. The qualification identifies Pro or Max as the operator's statement at import. Importing a
+setup token changes the probe digests and requires a new qualification.
+After removing it, file-based sign-in at the shipped baseline can use baseline admission. Other versions
+require a qualification that matches the file-based probes.
+
+`worker configure` and `worker configure --launcher claude-code` show whether a setup token is provisioned, when it
+was imported, the operator-stated account type and its local expiry. Use `worker configure --remove-setup-token`
+to remove the local provision. To revoke the issuer's authorization, remove the token from your Claude account's
+Settings > Account sessions or Settings > Claude Code, using the trash icon.
+[Claude Help Center](https://support.claude.com/en/articles/10310342-how-do-i-log-out-of-all-active-sessions)
+
+```sh
+vericairn worker qualify --check --launcher claude-code
+vericairn doctor
+```
+
+The check needs no `--by`. It probes inventory with a temporary login copy and reports the sign-in form, version
+and qualification, and any blocked-term matches in the worker's configured model selector. It removes the copy and
+creates no record. It exits with an error when the version lacks a matching qualification or the model setting
+is blocked or missing. For a pinned installation, pass `--setting command=<executable>` to qualification, preflight
+and doctor. To record a qualification, run `worker qualify --launcher claude-code --by <human-principal>` with the
+same command setting. See the [software guide](software.md#native-inventory-qualification-run-02-and-run-03).
 
 ## Preparing a workspace before the agent starts (0.9.1)
 

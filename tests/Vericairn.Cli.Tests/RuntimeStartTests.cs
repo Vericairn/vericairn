@@ -2,8 +2,13 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
+using Vericairn.Daemon;
+using Vericairn.Records.Signing;
+using Vericairn.Records.Tests;
 using Vericairn.Runtime.Store;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Cli.Tests;
 
@@ -60,6 +65,37 @@ public class RuntimeStartTests
         finally
         {
             CliHarness.Delete(root);
+        }
+    }
+
+    [Fact]
+    public void DetachedDaemonRedactsItsStartupDiagnostic()
+    {
+        string scratch = CliHarness.TempDirectory("detached-daemon-log");
+        string? previousHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
+        using var estate = new TestEstate(2);
+        try
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Path.Combine(scratch, "state"));
+            string token = "sk-ant-" + "oat01-" + RandomNumberGenerator.GetHexString(202);
+            string fragment = token[50..62];
+            new WorkerConfigurationStore().ImportClaudeSetupToken(token, "max");
+
+            // The invalid local address is quoted in a startup diagnostic before the daemon binds any listener.
+            string log = DaemonLifecycle.DaemonLogPath(estate.Root);
+            new RuntimeSettings("test-" + fragment).Save(Path.GetDirectoryName(log)!);
+
+            CliHarness.Outcome serve = CliHarness.Run("--estate", estate.Root, "runtime", "serve", "--detached", "--no-loopback");
+
+            Assert.Equal(2, serve.Code);
+            string contents = File.ReadAllText(log);
+            Assert.False(contents.Contains(fragment, StringComparison.Ordinal), "The detached daemon wrote a provision fragment to its log.");
+            Assert.Contains("<secret>", contents, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, previousHome);
+            CliHarness.Delete(scratch);
         }
     }
 

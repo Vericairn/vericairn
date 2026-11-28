@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Records.Estate;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -35,32 +36,32 @@ internal static class ClaudeCodeInventory
 
     internal static RunPreflight Establish(LaunchContext context, bool qualifying = false)
     {
+        HarnessPlatformProfile profile = HarnessPlatformProfile.ClaudeCode;
         HarnessInventory.CommandPrefix(context, "claude");
         IReadOnlyList<RunComponent> instructions = HarnessConfiguration.Inspect(context, codex: false);
-        _ = HarnessInventory.Home(context, "CLAUDE_CONFIG_DIR", "claude", ".credentials.json");
-        Login(context);
+        HarnessSignIn login = Login(context, profile);
         HarnessInventory.McpFile(context);
         IReadOnlyList<string> command = new ClaudeCodeLauncher().Command(context);
         string binding = HarnessInventory.Binding(context, command);
-        string version = HarnessInventory.Version(context, "claude", Version + " (Claude Code)", Version, qualifying);
-        string help = HarnessInventory.Probe(context, "claude", "--help");
+        string version = InstalledVersion(context, qualifying);
+        string help = SecretShapes.RedactOutput(HarnessInventory.Probe(context, "claude", "--help"));
         HarnessInventory.Flags("claude", help, "-p", "--print", "--output-format", "--verbose", "--permission-mode", "--mcp-config",
             "--strict-mcp-config", "--setting-sources", "--settings", "--tools", "--model", "--effort", "--max-budget-usd");
-        _ = HarnessInventory.Home(context, "CLAUDE_CONFIG_DIR", "claude", ".credentials.json");
-        string login = Login(context);
+        if (Login(context, profile) != login)
+            throw new ProviderRefusedException("Claude Code's provisioned login changed during the probes.");
         string configuration = HarnessInventory.Digest(new
         {
             qualification = "run-02-claude-code-v1", version, tools = ToolList, settings = Settings, settingSources = "none",
             efficiency = context.AdapterAddress is null ? "disabled" : "local-lossless-loopback",
             strictMcp = true, home = "run-only-login", goal = "built-in-evaluator", help = HarnessInventory.Digest(help),
             arguments = HarnessInventory.Arguments(context, "claude"),
-            loginPresent = File.Exists(Path.Combine(context.Environment["CLAUDE_CONFIG_DIR"], ".credentials.json")),
+            loginPresent = true,
         });
         // Qualification is of the harness, not the run: the probes keep the base configuration, and a retrieval run's components carry
         // a configuration that names its web tools and their explicit permission.
         bool retrieval = HarnessInventory.Retrieval(context);
         string runConfiguration = retrieval ? HarnessInventory.Digest(new { configuration, retrieval = RetrievalAdmission.Destination, tools = ToolsFor(context), settings = SettingsFor(context) }) : configuration;
-        List<RunComponent> components = HarnessInventory.Components(context, "claude", "claude-code", version, runConfiguration, ToolList.Split(','), "CLAUDE_CONFIG_DIR", "anthropic-inference",
+        List<RunComponent> components = HarnessInventory.Components(context, "claude", "claude-code", version, runConfiguration, ToolList.Split(','), profile.ConfigurationEnvironment, "anthropic-inference",
             retrieval ? RetrievalToolList.Split(',') : null);
         components.Add(new("claude-code-setting-sources-none", "configuration", "none", HarnessInventory.Digest("none"), runConfiguration, [], ["local"], ["claude-code-configuration"]));
         components.Add(new("claude-code-goal-evaluator", "hook", version, HarnessInventory.Digest(new { version, command = "goal", settings = Settings }), runConfiguration,
@@ -68,28 +69,51 @@ internal static class ClaudeCodeInventory
         HarnessInventory.Recheck(context, command, binding, instructions, codex: false);
         var probes = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["version"] = HarnessInventory.Digest(version + " (Claude Code)"),
+            ["version"] = HarnessInventory.Digest(profile.VersionPrefix + version + profile.VersionSuffix),
             ["flags"] = HarnessInventory.Digest(help),
             ["tools"] = HarnessInventory.Digest(new { tools = ToolList, goal = "built-in-evaluator", binary = HarnessInventory.Binary(context, HarnessProcess.Command(context.Settings, "claude")) }),
-            ["configuration"] = HarnessInventory.Digest(new { configuration, platform = HarnessInventory.Platform }),
-            ["login"] = HarnessInventory.Digest(new { boundary = "provisioned-unmanaged-oauth-only", subscription = login }),
+            ["configuration"] = login.Form == "setup-token"
+                ? HarnessInventory.Digest(new { configuration, platform = profile.RuntimeIdentifier, profile = profile.Evidence })
+                : HarnessInventory.Digest(new { configuration, platform = profile.RuntimeIdentifier }),
+            ["login"] = login.Form == "setup-token"
+                ? HarnessInventory.Digest(new { boundary = "provisioned-unmanaged-oauth-only", login.Form, login.AccountType, login.AccountTypeSource })
+                : HarnessInventory.Digest(new { boundary = "provisioned-unmanaged-oauth-only", subscription = login.AccountType }),
             ["mcp"] = HarnessInventory.McpEvidence(context, "strict-explicit-config-help-confirmed"),
         };
-        return new([.. components, .. instructions], true, true, version, LocalBindingHash: binding, Probes: new(Version, probes));
+        return new([.. components, .. instructions], true, true, version, LocalBindingHash: binding, Probes: new(Version, probes)) { SignIn = login };
     }
 
-    private static string Login(LaunchContext context)
+    internal static string InstalledVersion(LaunchContext context, bool qualifying)
     {
+        HarnessPlatformProfile profile = HarnessPlatformProfile.ClaudeCode;
+        return HarnessInventory.Version(context, "claude", profile.VersionPrefix + Version + profile.VersionSuffix, Version, qualifying);
+    }
+
+    private static HarnessSignIn Login(LaunchContext context, HarnessPlatformProfile profile)
+    {
+        string home = HarnessInventory.Home(context, profile.ConfigurationEnvironment, RunDirectory.ClaudeConfigurationDirectoryName, profile.CredentialFile);
         try
         {
-            string path = Path.Combine(context.Environment["CLAUDE_CONFIG_DIR"], ".credentials.json");
-            using JsonDocument login = JsonDocument.Parse(File.ReadAllText(path));
-            if (login.RootElement.EnumerateObject().Count() == 1 && login.RootElement.GetProperty("claudeAiOauth").GetProperty("subscriptionType").GetString() is string subscription && subscription is "pro" or "max") return subscription;
+            using FileStream source = File.OpenRead(Path.Combine(home, profile.CredentialFile));
+            using JsonDocument login = JsonDocument.Parse(source);
+            JsonElement oauth = login.RootElement.GetProperty("claudeAiOauth");
+            if (login.RootElement.EnumerateObject().Count() == 1 && context.SignIn is { } signIn
+                && WorkerConfigurationStore.IsClaudeAccountType(signIn.AccountType)
+                && (signIn.Form == "setup-token" ? IsSetupLogin(oauth) : oauth.GetProperty("subscriptionType").GetString() == signIn.AccountType))
+                return signIn;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or KeyNotFoundException)
         {
-            throw new ProviderRefusedException("Claude Code needs a readable provisioned unmanaged login; implicit keychain login and managed accounts are not qualified.", exception);
+            throw new ProviderRefusedException("Claude Code needs a readable provisioned unmanaged login; run vericairn worker configure --launcher claude-code to import a setup token.");
         }
         throw new ProviderRefusedException("Claude Code's provisioned login does not establish an unmanaged account; managed accounts are not qualified.");
     }
+
+    private static bool IsSetupLogin(JsonElement oauth) =>
+        HarnessInventory.OnlyProperties(oauth, "accessToken", "refreshToken", "expiresAt", "scopes", "subscriptionType")
+        && WorkerConfigurationStore.IsClaudeSetupToken(oauth.GetProperty("accessToken").GetString())
+        && oauth.GetProperty("refreshToken").ValueKind == JsonValueKind.Null
+        && oauth.GetProperty("expiresAt").TryGetInt64(out long expiry) && expiry > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        && oauth.GetProperty("scopes").EnumerateArray().Select(scope => scope.GetString()).SequenceEqual(["user:inference"])
+        && oauth.GetProperty("subscriptionType").ValueKind == JsonValueKind.Null;
 }

@@ -6,6 +6,9 @@ namespace Vericairn.Runtime.Workers;
 /// <summary>How the worker paces and places the runs it supervises on this machine.</summary>
 public sealed record WorkerOptions
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal WorkerConfigurationStore.ClaudeSetupToken? SetupToken { get; init; }
+
     internal Func<System.Text.Json.Nodes.JsonObject>? AdapterMeasurement { get; init; }
     internal Action? StopAdapter { get; init; }
 

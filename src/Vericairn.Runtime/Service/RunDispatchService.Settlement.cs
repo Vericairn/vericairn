@@ -47,6 +47,7 @@ internal sealed partial class RunDispatchService
         {
             long writes = session.Writes;
             EstateModel model = session.Load();
+            RecoverOrphanedClaudeConfigurations(model);
             foreach (AgentRuns.Run run in AgentRuns.All(model).Where(r => r.InFlight))
             {
                 RunSettleResponse response = SettleRetained(run, run.Intent.By, recordsChecked: false);
@@ -54,6 +55,36 @@ internal sealed partial class RunDispatchService
             }
 
             return session.Writes == writes ? model : null;
+        }
+    }
+
+    private void RecoverOrphanedClaudeConfigurations(EstateModel? known = null)
+    {
+        string estate = session.Manifest.Estate;
+        string runs = RunDirectory.RunsDirectory(estate);
+        try
+        {
+            if (!RunDirectory.PlainDirectory(Path.GetDirectoryName(runs)!) || !RunDirectory.PlainDirectory(runs)) return;
+            foreach (string path in Directory.EnumerateDirectories(runs))
+            {
+                string id = Path.GetFileName(path);
+                if (!Ulid.IsValid(id) || known?.ById.ContainsKey(id) == true) continue;
+
+                var directory = new RunDirectory(estate, id);
+                using FileStream? lease = directory.TryAcquireOrphanedClaudeConfiguration();
+                if (lease is null) continue;
+                lock (gate)
+                {
+                    // An admission may have stored the intent after the first lookup and released its lease. Read the
+                    // current record identities with the directory locked, so that a reserved copy never looks abandoned.
+                    if (!session.LoadIdentities().Model.ById.ContainsKey(id))
+                        _ = directory.RemoveHarnessConfiguration("claude-code");
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // An unavailable local directory can be retried at the next start. Recovery still judges recorded runs.
         }
     }
 
@@ -138,6 +169,8 @@ internal sealed partial class RunDispatchService
     private RunSettleResponse RecordSettlement(AgentRuns.Run run, string by, RunDirectory directory, RunObservedState observed, DateTimeOffset launchedAt,
         Action<JsonObject> settle, Func<string, string> settledMessage)
     {
+        if (directory.RemoveHarnessConfiguration(run.Launcher) is string cleanup)
+            return UnresolvedSettlement(run, cleanup);
         WriteOutcome settled;
         string? status = null;
         try

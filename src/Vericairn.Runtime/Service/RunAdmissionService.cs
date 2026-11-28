@@ -41,11 +41,13 @@ internal sealed class RunAdmissionService(
     /// assignment held, signed and not yet stored, the run carries it, and it is stored with the run's intent, so that neither is left
     /// alone: every refusal before the intent records nothing, that assignment included.
     /// </summary>
-    internal RunResponse? Prepare(RunStartRequest request, AuthoredRecord? routed, out AdmittedRun? admitted, out RecordWritten? assigned, bool prepareOnly = false)
+    internal RunResponse? Prepare(RunStartRequest request, AuthoredRecord? routed, out AdmittedRun? admitted, out RecordWritten? assigned, out FileStream? claudeConfigurationLease,
+        bool prepareOnly = false)
     {
         ArgumentNullException.ThrowIfNull(request);
         assigned = null;
         admitted = null;
+        claudeConfigurationLease = null;
         IReadOnlyList<AuthoredRecord> carried = routed is null ? [] : [routed];
         string pending = $"run of assignment {request.Assignment}";
         if (!Ulid.IsValid(request.Assignment) || !Ulid.IsValid(request.Agent) || !Ulid.IsValid(request.By) || !Ulid.IsValid(request.Repository) || (request.Goal is not null && !Ulid.IsValid(request.Goal)))
@@ -165,12 +167,18 @@ internal sealed class RunAdmissionService(
         string brief;
         string? configuredRoot;
         EfficiencyRun? efficiency = null;
+        RunDirectory? runDirectory = null;
         WorkspaceSetupResult? setup = null;
         WorkspacePreparation? prepared = null;
         var preparation = new WorkspacePreparation(plan.Estate, plan.RepositoryIds[0], plan.Branch);
         RunResponse Refused(RunResponse response)
         {
             efficiency?.Dispose();
+            if (runDirectory?.RemoveHarnessConfiguration(launcher.Launcher) is string cleanup)
+            {
+                string failure = response.Message + " " + cleanup;
+                response = response with { Message = failure, Problem = response.Problem is null ? null : response.Problem with { Message = failure } };
+            }
             if (workspace is null) return response;
             string? retained;
             if (setup is not null)
@@ -267,6 +275,7 @@ internal sealed class RunAdmissionService(
 
         string run = Ulid.NewUlid().Value;
         var directory = new RunDirectory(plan.Estate, run);
+        runDirectory = directory;
         // --run lets the server keep the searches it serves this run's agent, which settlement records.
         IReadOnlyList<string> server = [.. WorkerOptions.VericairnCommand(), "--estate", session.Root, "mcp", "serve", "--as", plan.Agent, "--run", run];
         var serverEnvironment = WorkerEnvironment.McpServer.Where(environment.ContainsKey).ToDictionary(n => n, n => environment[n], StringComparer.Ordinal);
@@ -285,6 +294,7 @@ internal sealed class RunAdmissionService(
         try
         {
             directory.Create();
+            if (launcher.Launcher == "claude-code") claudeConfigurationLease = directory.AcquireClaudeConfigurationLease();
             // The run's search log exists from the start, so settlement can tell a run that searched nothing from a missing log.
             Search.ObservedSearches.Start(directory);
             // A retrieval run's source log exists from the start too, so settlement can tell a run that retrieved nothing (RUN-04).
@@ -544,7 +554,7 @@ internal sealed class RunAdmissionService(
     /// command, no record and no dispatch. The run of the same assignment and branch that follows takes the workspace up.
     /// </summary>
     internal RunResponse PrepareOnly(RunStartRequest request) =>
-        Prepare(request, null, out _, out _, prepareOnly: true) ?? throw new InvalidOperationException("A preparation alone admitted a run.");
+        Prepare(request, null, out _, out _, out _, prepareOnly: true) ?? throw new InvalidOperationException("A preparation alone admitted a run.");
 
     /// <summary>
     /// The end of a preparation alone: what changed since an earlier preparation of the same workspace is checked as its run will check

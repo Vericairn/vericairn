@@ -10,7 +10,7 @@ using Vericairn.Records.Model;
 namespace Vericairn.Runtime.Workers;
 
 /// <summary>Bounded rate samples and repeated invocation fingerprints, driven only by worker-observed events and monotonic time.</summary>
-internal sealed class RunWatch(RunWatchSettings settings, long? tokenCap, decimal? historyRate, JsonElement? selection = null)
+internal sealed class RunWatch(RunWatchSettings settings, long? tokenCap, decimal? historyRate, JsonElement? selection = null, Func<string, bool>? containsProvision = null)
 {
     private readonly Queue<string> recent = new();
     private readonly Dictionary<string, int> repeats = new(StringComparer.Ordinal);
@@ -25,7 +25,7 @@ internal sealed class RunWatch(RunWatchSettings settings, long? tokenCap, decima
     public IReadOnlyList<RunSignal> Reported(HarnessExecution report)
     {
         if (execution is null) return [];
-        execution.Add(report);
+        execution.Add(report, containsProvision);
         JsonElement facts = ExecutionObserved!.Value;
         var observations = new List<RunSignal>();
         if (facts.GetProperty("discrepancies").GetArrayLength() > 0)

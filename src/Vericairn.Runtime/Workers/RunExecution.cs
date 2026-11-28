@@ -84,7 +84,18 @@ public sealed record RunEnvironmentPolicy(string Id, IReadOnlyList<RunComponent>
 /// <param name="ModelRevision">Observable resolution of the requested model selector; null means unknown.</param>
 /// <param name="LocalBindingHash">Optional digest of local command, file and environment bindings for the dispatch recheck; never copied into a record.</param>
 /// <param name="Probes">Optional native qualification evidence; does not by itself admit a version.</param>
-public sealed record RunPreflight(IReadOnlyList<RunComponent> Components, bool Complete, bool InheritsEnvironment, string HarnessVersion = "unknown", string? ModelRevision = null, string? LocalBindingHash = null, HarnessProbeEvidence? Probes = null);
+public sealed record RunPreflight(IReadOnlyList<RunComponent> Components, bool Complete, bool InheritsEnvironment, string HarnessVersion = "unknown", string? ModelRevision = null, string? LocalBindingHash = null, HarnessProbeEvidence? Probes = null)
+{
+    /// <summary>Non-secret sign-in facts established by the local probes.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public HarnessSignIn? SignIn { get; init; }
+}
+
+/// <summary>A provisioned sign-in's form, unmanaged account type, and who supplied that account type.</summary>
+public sealed record HarnessSignIn(string Form, string AccountType, string AccountTypeSource);
+
+/// <summary>An installed harness version and the exact baseline shipped with its launcher.</summary>
+public sealed record HarnessVersionObservation(string InstalledVersion, string ShippedVersion);
 
 /// <summary>The launcher's shipped baseline and digests of its successful local probes; no raw output or authority.</summary>
 /// <param name="BaselineVersion">The one exact version shipped as this launcher's baseline.</param>
@@ -123,7 +134,9 @@ public sealed class RunExecutionObservation
     }
 
     /// <summary>Reads a harness report, never narrative or tool output. Invalid identities remain unknown.</summary>
-    public void Add(HarnessExecution report)
+    public void Add(HarnessExecution report) => Add(report, null);
+
+    internal void Add(HarnessExecution report, Func<string, bool>? containsProvision)
     {
         ArgumentNullException.ThrowIfNull(report);
         if (reports.Count >= 128)
@@ -141,7 +154,7 @@ public sealed class RunExecutionObservation
                 continue;
             }
 
-            if (!Safe(value) || value is "unknown" or "provider-default" || (field == "inventoryHash" && !ContentHash.IsValid(value)))
+            if (!SafeField(value) || value is "unknown" or "provider-default" || (field == "inventoryHash" && !ContentHash.IsValid(value)))
             {
                 incomplete = true;
                 continue;
@@ -165,7 +178,7 @@ public sealed class RunExecutionObservation
 
         if (report.Tools is not null)
         {
-            if (report.Tools.Count > 1000 || report.Tools.Any(t => !Safe(t)))
+            if (report.Tools.Count > 1000 || report.Tools.Any(t => !SafeField(t)))
             {
                 incomplete = true;
             }
@@ -184,6 +197,8 @@ public sealed class RunExecutionObservation
         {
             reports.Add(entry);
         }
+
+        bool SafeField(string value) => Safe(value) && containsProvision?.Invoke(value) != true;
     }
 
     /// <summary>Facts still unknown and discrepancies remain explicit even when the process exits successfully.</summary>
@@ -195,6 +210,7 @@ public sealed class RunExecutionObservation
     };
 
     internal static bool Safe(string value) => ExecutionPolicy.IsIdentity(value)
+        && !SecretShapes.HasClaudeSetupToken(value)
         && !EstateChecks.Content("execution.txt", System.Text.Encoding.UTF8.GetBytes(value)).HasErrors;
 
     internal static string Hash(JsonNode value) => ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(value)));

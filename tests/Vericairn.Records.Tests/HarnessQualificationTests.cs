@@ -131,6 +131,21 @@ public class HarnessQualificationTests
         Assert.DoesNotContain(estate.Load().Findings, f => f.Severity == Severity.Error);
     }
 
+    [Fact]
+    public void AClaudeSetupTokenQualificationRecordsTheOperatorsAccountStatement()
+    {
+        using var estate = new TestEstate(recordFormat: 3);
+        JsonObject body = JsonNode.Parse(Body())!.AsObject();
+        body["launcher"] = "claude-code";
+        body["login"] = new JsonObject { ["form"] = "setup-token", ["accountType"] = "max", ["accountTypeSource"] = "operator-statement" };
+        RecordEnvelope qualified = estate.Add("harness-qualification", estate.OperatorId, body.ToJsonString(), format: 3);
+        Assert.DoesNotContain(estate.Load().Findings, finding => finding.Severity == Severity.Error);
+        body["status"] = "revoked";
+        body["login"]!["accountType"] = "pro";
+        RecordEnvelope revoked = estate.Add("harness-qualification", estate.OperatorId, body.ToJsonString(), supersedes: qualified.Id, format: 3);
+        Assert.Contains(estate.Load().Findings, finding => finding.Code == "harness-qualification.revision" && finding.Location == revoked.ExpectedPath);
+    }
+
     internal static string Body() => new JsonObject
     {
         ["launcher"] = "codex", ["version"] = "0.160.0", ["status"] = "qualified",

@@ -1455,10 +1455,43 @@ launcher does not invent an `enabled_tools` allowlist.
 The probe does not start a coding agent or an MCP server. See the [Codex configuration
 documentation](https://learn.chatgpt.com/docs/config-file/config-basic).
 
-Claude Code receives a fresh `CLAUDE_CONFIG_DIR` containing only the provisioned `claudeAiOauth` login from its
-credentials file. Preflight requires its subscription type to be `pro` or `max`, and rechecks that classification before
-dispatch. Missing or unreadable login material, unknown subscription types, implicit keychain login, and managed
-accounts are not qualified. No credential content or credential digest enters the inventory.
+Claude Code receives a fresh `CLAUDE_CONFIG_DIR` containing only a provisioned `.credentials.json`. From 0.9.5 (FIX-167),
+the worker can create that run file from a token the operator generates with `claude setup-token`. At import the operator
+states that the account is Pro or Max. The headless token carries no account type, so the worker classifies the login by
+the operator's statement and passes `subscriptionType: null`, along with the inference scope and a null refresh token,
+to Claude Code. The worker also accepts an existing provisioned `.credentials.json` whose `claudeAiOauth.subscriptionType`
+is `pro` or `max`. A provisioned setup token takes precedence over that file. Importing it changes the login and
+configuration probe digests and requires a new qualification. After removal, the file form can use baseline admission
+at the shipped version. Other versions require a qualification matching the file-based probes. The worker rechecks
+the copy before dispatch and removes its configuration at settlement. Any refresh of a file-based login stays
+in its run directory and expires with that copy. The headless import has no refresh token.
+
+For an import, run `vericairn worker configure --launcher claude-code --import-setup-token --account-type pro` (or `max`).
+The shape check is a local sanity check. Only the issuer can validate the token.
+The token is read at a hidden prompt, or as a single line of redirected standard input with `--token-stdin`. The worker
+stores the token and account statement in the owner-only `worker/claude-code-setup-token.json` under the machine-local
+Vericairn home. The home must be outside repositories, estates and harness configuration directories. The run file lives
+outside the workspace. Sign-in input never passes through a command argument or environment variable, and credential
+content and its digest stay out of inventory evidence. Only the worker reads the provisioned token. It holds the bytes
+to copy them into each run or preflight, the copy deleted afterwards, and in memory for that run's lifetime to withhold
+any run of 12 or more of its characters from the run's output and its probes. While the token is provisioned, the daemon
+may read it to withhold it from its own log at any time. The worker records, prints and passes on nothing of those bytes.
+A probe that would admit matching output as evidence is refused.
+
+The value comparison can leave fragments of 11 characters or fewer, including an 11-column box wrap. A prefix-free
+body can remain visible with a zero-width space, soft hyphen, NUL or combining mark such as U+0301 every 11 characters
+or fewer. The comparison can leave text in escapes it does not decode (octal, `\u{..}`, `\U` and quoted-printable
+`=XX`) or in transformations it does not undo (case changes, reversal, Base64 and hex). When the worker has only shape
+checks, decorated continuations, non-whitespace splits and prefix-free fragments can still pass. Shape checks recognize
+a doubled backslash, caret or backtick before a newline inside the prefix.
+
+`worker configure` shows the provision's import time, operator-stated account type and local expiry, which is
+set to 365 days after import. Use `worker configure --remove-setup-token` to remove the machine's copy and return
+to the file form if a credentials file is provisioned. On Windows and Unix, someone with write access to the
+Vericairn home can swap the `worker` directory before the removal command opens it. To revoke the issuer's
+authorization, remove the token from your Claude account's Settings > Account sessions or Settings > Claude Code,
+using the trash icon.
+[Claude Help Center](https://support.claude.com/en/articles/10310342-how-do-i-log-out-of-all-active-sessions)
 
 `--setting-sources ""` excludes user, project and local settings, and `--strict-mcp-config` restricts MCP to the explicit
 run file. `--settings '{"hooks":{},"enabledPlugins":{}}'` declares no external hooks or enabled plugins. The launcher
@@ -2192,6 +2225,16 @@ its recognizable credential, network, path and inventory checks still run and ca
 
 ### Native inventory qualification (RUN-02 and RUN-03)
 
+The platform profiles show the normal harness configuration, the sign-in relevant to the worker and the exact
+`--version` response qualification parses. The stand-ins are test executables on each platform.
+
+| Launcher and platform | Harness configuration | Sign-in | Version response |
+| --- | --- | --- | --- |
+| Claude Code on macOS | `~/.claude` or `CLAUDE_CONFIG_DIR` | The ordinary interactive sign-in uses the macOS keychain. The FIX-167 probe with 2.1.322 observed that a fresh configuration never reaches that sign-in and that a provisioned `.credentials.json` works in that configuration. The macOS stand-in leaves the ordinary configuration without a credentials file. | `<version> (Claude Code)` |
+| Claude Code on Linux or Windows | `~/.claude` or `CLAUDE_CONFIG_DIR` | The file-based profile imports an explicitly provisioned `.credentials.json`. The stand-in exercises that file form and the portable setup-token import. | `<version> (Claude Code)` |
+| Codex on macOS, Linux or Windows | `~/.codex` or `CODEX_HOME` | The RUN-02 file-based profile imports a provisioned `auth.json` and generates `config.toml` in the isolated directory. The stand-in uses those files. | `codex-cli <version>` |
+
+
 Qualification belongs to a launcher and one exact observed version. These compiled baselines remain admitted:
 
 | Launcher | Shipped baseline | Admission evidence |
@@ -2222,6 +2265,13 @@ Codex launch is refused before intent, naming the version or each feature that d
 - Qualify the new exact version with `worker qualify --launcher codex` when its features are admitted. A version that
   enables a feature no baseline admits stays refused until a release qualifies it; the refusal names the feature.
 
+From 0.9.5 (FIX-167), `worker qualify --check --launcher claude-code` uses the local installation and a temporary copy
+of the sign-in. It reports the sign-in form, the installed version and its qualification, the command to qualify it
+when needed, and whether the locally configured model selector matches any blocked terms in the estate. It accepts
+the same `--setting command=...` binding as qualification, needs no principal, creates no records and makes no
+inference call. The copy is removed after the check. `doctor` also reports the installed Claude Code version and
+its qualification when the launcher is configured or a command override is given.
+
 An operator can qualify an updated installation with either command:
 
 ```sh
@@ -2247,7 +2297,7 @@ MCP server. The signed `harness-qualification` record is available from format 2
 | `flags` | The complete trimmed help responses whose option declarations were checked. |
 | `tools` | The closed built-in tool list, executable and entry-file content identities; Codex also includes its complete observed feature listing. |
 | `configuration` | The isolated configuration policy and platform identity, including disabled extensions and normalized command bindings. |
-| `login` | The permitted login boundary: presence for Codex, unmanaged subscription class for Claude Code. No credential content or credential digest. |
+| `login` | The permitted login boundary: presence for Codex, unmanaged subscription class for Claude Code. The setup-token probe identifies the account type as the operator’s statement. |
 | `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests the estate-only approval policy, whether it was reported, and reported authentication status. |
 
 From 0.9.4 (CODE-82), qualification also plants a marker file in its scratch directory, outside the probe workspace and its
@@ -2255,6 +2305,10 @@ temporary directory, and a test host on the loopback interface, and runs the sam
 place. A format-3 qualification records the outcome as `reach`: `file` (`readable`, `blocked` or `unknown`) and `host`
 (`reachable`, `blocked` or `unknown`). The reach is evidence about the installation, not an admission identity: admission
 still matches the six probe digests, and a revocation may omit it.
+From 0.9.5, a format-3 Claude Code qualification of the setup-token form records its `login` declaration with
+`form: "setup-token"`, `accountType: "pro"` or `"max"`, and `accountTypeSource: "operator-statement"`.
+This sign-in requires a current qualification at every installed version, including the shipped baseline. Upgrade a
+format-2 estate to format 3 or use a provisioned credentials file.
 Raw probe output, command bindings, machine paths and credential values never enter the qualification record.
 The MCP check first compares the actual local command, arguments and environment to the generated configuration;
 only then does its digest normalize run-specific paths and acting-principal bindings. A record from another machine
@@ -2265,7 +2319,7 @@ content inventoried separately under RUN-01.
 Admission repeats the probes before intent and immediately before dispatch. The intent's additive
 `execution.harnessAdmission` names `kind: "baseline"` or `kind: "qualification"`, the launcher, version and probe
 digests. A qualification admission also pins its exact `record` id and `hash`. A missing, superseded, revoked or
-mismatching qualification refuses a non-baseline version. The final record check happens after the dispatch probes,
+mismatching qualification refuses a non-baseline version or a setup-token sign-in. The final record check happens after the dispatch probes,
 so a revocation recorded while they run is also seen. The existing RUN-01 inventory policy and execution restrictions
 still apply; qualifying does not update or bypass that policy. WATCH-01 sees the same admitted inventory and selection.
 
@@ -2274,7 +2328,7 @@ probe digests, `status: "revoked"`, and `supersedes` naming the original record.
 `records new harness-qualification --by <human-principal> --supersedes <qualification-id> --body <body-file>`
 authors that revision; `records describe harness-qualification` describes its fields. A superseding record only
 revokes; requalification creates a new record from fresh probes. Earlier run intents retain their pinned admission
-as historical evidence. Revoking a record does not remove the shipped compiled baseline.
+as historical evidence. Runs on a shipped baseline using other qualified sign-in forms keep the baseline admission.
 
 Qualification establishes agreement with the launcher's checked protocol and isolation boundaries for that exact
 installation. It does not attest vendor provenance, execute the tools, prove a successful login or model call, certify

@@ -39,6 +39,7 @@ public sealed class HarnessQualificationType : IRecordType
         new("status", "qualified|revoked", true, "Qualified initially; revoked only by a superseding record preserving launcher, version and probes.", 2),
         new("probes", "object", true, "SHA-256 digests named version, flags, tools, configuration, login and mcp. No raw probe output.", 2),
         new("reach", "object", false, "From 0.9.4 (CODE-82): what a probe in the harness's place reached during qualification, with the harness's environment and working directory: file, a marker planted outside the workspace and the temporary directory (readable, blocked or unknown), and host, a test host on the loopback interface (reachable, blocked or unknown). Unknown is never blocked. Not an admission identity; a revocation may omit it.", 3),
+        new("login", "object", false, "From 0.9.5 (FIX-167): for Claude Code setup-token, the sign-in form, pro or max account type and its operator-statement source. Contains no credential data.", 3),
     ];
 
     /// <summary>What the reach probe found for the marker file.</summary>
@@ -81,6 +82,15 @@ public sealed class HarnessQualificationType : IRecordType
             reach.Enum("host", true, [.. HostReach]);
             reach.NoOtherKeys();
         }
+        if (body.Since(3, "login") && body.Nested("login", false) is BodyReader login)
+        {
+            login.Enum("form", true, "setup-token");
+            login.Enum("accountType", true, "pro", "max");
+            login.Enum("accountTypeSource", true, "operator-statement");
+            login.NoOtherKeys();
+            if (EstateModel.BodyString(context.Record, "launcher") != "claude-code")
+                body.Error("harness-qualification.login", "login", "The setup-token sign-in declaration is only for Claude Code.");
+        }
         body.NoOtherKeys();
         if (!AuthorizedWhen(context.Model, context.Record))
         {
@@ -94,9 +104,12 @@ public sealed class HarnessQualificationType : IRecordType
         {
             if (status != "revoked" || EstateModel.BodyString(previous, "status") != "qualified"
                 || IdentityFields.Any(name => !previous.Body.TryGetProperty(name, out var prior)
-                    || !context.Record.Body.TryGetProperty(name, out var current) || CanonicalJson.Serialize(prior) != CanonicalJson.Serialize(current)))
+                    || !context.Record.Body.TryGetProperty(name, out var current) || CanonicalJson.Serialize(prior) != CanonicalJson.Serialize(current))
+                || context.Record.Body.TryGetProperty("login", out var loginDeclaration)
+                    && (!previous.Body.TryGetProperty("login", out var originalLogin)
+                        || CanonicalJson.Serialize(originalLogin) != CanonicalJson.Serialize(loginDeclaration)))
             {
-                context.Error("harness-qualification.revision", "A superseding record revokes a qualification and preserves its launcher, version and probe digests; requalification is a new record.");
+                context.Error("harness-qualification.revision", "A superseding record revokes a qualification and preserves its launcher, version and probe digests, and may only repeat its original login declaration; requalification is a new record.");
             }
         }
     }

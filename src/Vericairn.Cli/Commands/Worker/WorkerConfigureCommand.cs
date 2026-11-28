@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class WorkerConfigureCommand : Command
 {
     public WorkerConfigureCommand(CommandContext context)
-        : base("configure", "Show or replace this machine's workspace root, a native launcher's configuration with --launcher, or a workspace setup command for a launcher or a repository. --workspaces sets an absolute root for every launcher. With no choices, show what is configured; setting a launcher requires both model and effort and replaces the allowlists. Stored owner-only under VericairnHome, outside repositories and never in a record; launcher configuration holds no secret values, commands or inventory additions. The CLI and daemon read it for each run; this command calls no API and runs no probes.")
+        : base("configure", "Show or replace this machine's workspace root, a native launcher's configuration with --launcher, or a workspace setup command for a launcher or a repository. --workspaces sets an absolute root for every launcher. With no choices, show what is configured; setting a launcher requires both model and effort and replaces the allowlists. Show, import or remove the separately provisioned Claude Code setup token. Settings and provisioned sign-in have separate owner-only files under VericairnHome. This command calls no API and runs no probes.")
     {
         var operations = new WorkerSettings(context);
         var launcher = new Option<string?>("--launcher") { Description = "The native launcher: codex or claude-code; omitted to show or set the workspace root." };
@@ -24,6 +24,10 @@ internal sealed class WorkerConfigureCommand : Command
         var setupVariables = new Option<string[]>("--setup-variable") { Description = "A variable of the worker's environment that the --setup-command it is given with receives besides a harness's own, as the worker holds it, even a credential; repeatable, never a VERICAIRN_ variable.", AllowMultipleArgumentsPerToken = false };
         var setupTimeout = new Option<int?>("--setup-timeout") { Description = $"The setup command's deadline in seconds, 1 through {Vericairn.Runtime.Workers.WorkspaceSetupConfiguration.MaximumTimeoutSeconds}; {Vericairn.Runtime.Workers.WorkspaceSetupConfiguration.DefaultTimeoutSeconds} when omitted." };
         var clearSetup = new Option<bool>("--clear-setup") { Description = "Remove the setup command of --launcher or --repository." };
+        var importSetupToken = new Option<bool>("--import-setup-token") { Description = "Import the bare token from claude setup-token for --launcher claude-code. Wait for the hidden prompt before entering it, or use --token-stdin. Requires --account-type." };
+        var accountType = new Option<string?>("--account-type") { Description = "State the account type for --import-setup-token: pro or max." };
+        var tokenStdin = new Option<bool>("--token-stdin") { Description = "Read one bare token from redirected standard input for --import-setup-token." };
+        var removeSetupToken = new Option<bool>("--remove-setup-token") { Description = "Remove the locally provisioned Claude Code setup token. Revoke it separately in your Claude account." };
         Options.Add(launcher);
         Options.Add(workspaces);
         Options.Add(model);
@@ -37,13 +41,25 @@ internal sealed class WorkerConfigureCommand : Command
         Options.Add(setupTimeout);
         Options.Add(setupVariables);
         Options.Add(clearSetup);
+        Options.Add(importSetupToken);
+        Options.Add(accountType);
+        Options.Add(tokenStdin);
+        Options.Add(removeSetupToken);
         SetAction(result =>
         {
             bool launcherChoices = result.GetValue(workspaces) is not null || result.GetValue(model) is not null || result.GetValue(effort) is not null
                 || result.GetValue(models) is { Length: > 0 } || result.GetValue(efforts) is { Length: > 0 };
             bool setup = result.GetValue(repository) is not null || result.GetValue(setupCommand) is not null || result.GetValue(setupTimeout) is not null
                 || result.GetValue(setupVariables) is { Length: > 0 } || result.GetValue(clearSetup);
-            if (result.GetValue(adapter) is not null || result.GetValue(adapterLaunchers) is { Length: > 0 })
+            bool adapterChoices = result.GetValue(adapter) is not null || result.GetValue(adapterLaunchers) is { Length: > 0 };
+            bool importing = result.GetValue(importSetupToken) || result.GetValue(accountType) is not null || result.GetValue(tokenStdin);
+            if (result.GetValue(removeSetupToken))
+                return operations.RemoveSetupToken(result.GetValue(launcher), importing || launcherChoices || setup || adapterChoices,
+                    result.GetValue(context.JsonOption));
+            if (importing)
+                return operations.ImportSetupToken(result.GetValue(launcher), result.GetValue(importSetupToken), result.GetValue(accountType),
+                    result.GetValue(tokenStdin), launcherChoices || setup || adapterChoices, result.GetValue(context.JsonOption));
+            if (adapterChoices)
                 return operations.Adapter(result.GetValue(adapter), result.GetValue(adapterLaunchers) ?? [], result.GetValue(launcher) is not null || launcherChoices || setup, result.GetValue(context.JsonOption));
             return setup
                 ? operations.Setup(result.GetValue(launcher), result.GetValue(repository), result.GetValue(setupCommand), result.GetValue(setupTimeout),

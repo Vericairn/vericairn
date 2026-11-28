@@ -112,7 +112,7 @@ public sealed class JsonOutputContractTests : IDisposable
         CliHarness.Outcome json = CliHarness.Ok("--estate", root, "--json", "doctor");
         using JsonDocument document = JsonDocument.Parse(json.Out);
         JsonElement result = document.RootElement;
-        string[] probes = ["version", "runtime", "git", "dotnet", "estate", "custody", "enclave", "helper", "presence", "records", "search", "daemon"];
+        string[] probes = ["version", "runtime", "git", "dotnet", "estate", "custody", "enclave", "helper", "presence", "records", "search", "daemon", "claudeCode"];
         Assert.Equal(probes.Append("stateWarnings").Order(StringComparer.Ordinal), result.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         foreach (string name in probes)
         {

@@ -37,11 +37,20 @@ internal sealed partial class RunDispatchService(
 
     internal RunResponse Start(RunStartRequest request, AuthoredRecord? routed, out RecordWritten? assigned)
     {
-        RunResponse? refusal = runAdmission.Prepare(request, routed, out RunAdmissionService.AdmittedRun? admitted, out assigned);
-        return refusal ?? Dispatch(admitted!);
+        RecoverOrphanedClaudeConfigurations();
+        FileStream? claudeConfigurationLease = null;
+        try
+        {
+            RunResponse? refusal = runAdmission.Prepare(request, routed, out RunAdmissionService.AdmittedRun? admitted, out assigned, out claudeConfigurationLease);
+            return refusal ?? Dispatch(admitted!, claudeConfigurationLease);
+        }
+        finally
+        {
+            claudeConfigurationLease?.Dispose();
+        }
     }
 
-    private RunResponse Dispatch(RunAdmissionService.AdmittedRun admitted)
+    private RunResponse Dispatch(RunAdmissionService.AdmittedRun admitted, FileStream? claudeConfigurationLease)
     {
         RunStartRequest request = admitted.Request;
         RunAdmissionService.RunPlan plan = admitted.Plan;
@@ -64,9 +73,11 @@ internal sealed partial class RunDispatchService(
         IReadOnlyList<(string Device, string Reason)> lapsed = [];
         try
         {
+            if (claudeConfigurationLease is not null) RunDirectory.MarkClaudeConfigurationDispatched(claudeConfigurationLease);
             supervisor = runAdmission.Launch(admitted, command =>
                 RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions with
                 {
+                    SetupToken = admitted.Launch.SetupToken,
                     AdapterMeasurement = admitted.Efficiency is null ? null : admitted.Efficiency.Measurement,
                     StopAdapter = admitted.Efficiency is null ? null : admitted.Efficiency.Dispose,
                 }, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate, signal => RecordSignal(run, request.By, plan.Goal, signal), Element(plan.Selection)), out priorAttempts, out lapsed);
@@ -74,6 +85,7 @@ internal sealed partial class RunDispatchService(
         catch (RunLaunchException exception)
         {
             admitted.Efficiency?.Dispose();
+            ReleaseConfigurationAfterBoundary(directory, launcher.Launcher, exception.BoundaryClosed);
             WriteOutcome uncertain = Revise(run, request.By, previous =>
             {
                 previous["status"] = "uncertain";
@@ -83,6 +95,8 @@ internal sealed partial class RunDispatchService(
         }
         catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
         {
+            if (directory.RemoveHarnessConfiguration(launcher.Launcher) is string cleanup)
+                return Refused(RunProblemAfterCleanup(cleanup));
             // The record says what happened without the reason's words, which can name paths on this machine.
             WriteOutcome failed = Revise(run, request.By, previous =>
             {
@@ -102,6 +116,8 @@ internal sealed partial class RunDispatchService(
 
         if (supervisor is null)
         {
+            if (directory.RemoveHarnessConfiguration(launcher.Launcher) is string cleanup)
+                return Refused(RunProblemAfterCleanup(cleanup));
             // Cancelled before dispatch: the record names the devices and the exception, never the reasons' words, which name this machine's user.
             string ids = string.Join(", ", lapsed.Select(e => e.Device));
             string devices = lapsed.Count == 1 ? $"device {ids} of an operator or of the goal's sponsor signed without its owner's presence" : $"devices {ids} of an operator or of the goal's sponsor signed without their owners' presence";
@@ -134,7 +150,7 @@ internal sealed partial class RunDispatchService(
         session.KeepsJudgment = false;
         supervisions[run] = (Task.Run(() =>
         {
-            try { Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token, admitted.Efficiency, Excluded(plan.Assignment)); }
+            try { Supervise(run, request.By, plan.Goal, supervisor, directory, launcher.Launcher, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token, admitted.Efficiency, Excluded(plan.Assignment)); }
             finally { admitted.Efficiency?.Dispose(); }
         }), abandon);
         string generic = launcher.Generic ? $" The {launcher.Launcher} launcher is labeled: {IAgentLauncher.GenericLabel}." : string.Empty;
@@ -148,6 +164,20 @@ internal sealed partial class RunDispatchService(
         {
             Notices = plan.Notices,
         };
+
+        RunResponse RunProblemAfterCleanup(string cleanup) => new(run, "not-started", cleanup, false, intent, Element(plan.Cap), where, new Problem("provider", cleanup, []));
+    }
+
+    private static void ReleaseConfigurationAfterBoundary(RunDirectory directory, string launcher, Task? boundaryClosed)
+    {
+        if (launcher != "claude-code") return;
+        if (boundaryClosed is null || boundaryClosed.IsCompleted)
+        {
+            directory.RemoveHarnessConfiguration(launcher);
+            return;
+        }
+
+        _ = boundaryClosed.ContinueWith(_ => directory.RemoveHarnessConfiguration(launcher), TaskScheduler.Default);
     }
 
     /// <summary>Returns the current runs and their budget ledgers.</summary>
@@ -608,7 +638,7 @@ internal sealed partial class RunDispatchService(
     private static List<string> Excluded(RecordEnvelope assignment) =>
         assignment.Body.TryGetProperty("brief", out JsonElement brief) && brief.ValueKind == JsonValueKind.Object && brief.TryGetProperty("excludedChanges", out _) ? Strings(brief, "excludedChanges") : [];
 
-    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon, EfficiencyRun? efficiency = null, IReadOnlyList<string>? excluded = null)
+    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, RunDirectory directory, string launcher, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon, EfficiencyRun? efficiency = null, IReadOnlyList<string>? excluded = null)
     {
         RunOutcome? outcome;
         try
@@ -617,6 +647,7 @@ internal sealed partial class RunDispatchService(
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
         {
+            ReleaseConfigurationAfterBoundary(directory, launcher, supervisor.WhenNativeResourcesClosed);
             supervisor.Settled(null, $"The worker lost its observation of the run: {exception.Message}");
             return;
         }
@@ -624,6 +655,7 @@ internal sealed partial class RunDispatchService(
 
         if (outcome is null)
         {
+            ReleaseConfigurationAfterBoundary(directory, launcher, supervisor.WhenNativeResourcesClosed);
             return;
         }
 
@@ -644,6 +676,11 @@ internal sealed partial class RunDispatchService(
             outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal] };
         }
         supervisor.RetainSettlement(outcome, scope);
+        if (directory.RemoveHarnessConfiguration(launcher) is string cleanup)
+        {
+            supervisor.Settled(null, cleanup);
+            return;
+        }
         string? seen = null;
 
         try

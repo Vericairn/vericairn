@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using System.Text.Json.Nodes;
 using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
@@ -27,7 +28,8 @@ internal sealed class SupportBundleCommand : Command
             return context.Fail($"{Path.GetFileName(output)} exists; the bundle never replaces a file. Name a new one.");
         }
 
-        string text = SupportBundle.Render(SupportBundle.Gather(context, root));
+        JsonObject gathered = SupportBundle.Gather(context, root, out int errorSecrets);
+        string text = SupportBundle.Render(gathered, errorSecrets);
         context.Output.Write(text);
         if (output is not null)
         {

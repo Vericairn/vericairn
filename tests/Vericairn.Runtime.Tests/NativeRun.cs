@@ -12,9 +12,9 @@ namespace Vericairn.Runtime.Tests;
 internal sealed class NativeRun : IDisposable
 {
     public NativeRun(string harness, Action<NativeProbe, LaunchContext>? beforeDispatch = null, string? budget = null, bool keepOperatorKey = false,
-        bool newer = false, bool qualify = false, Action? afterProbe = null, long recordFormat = 2, string? brief = null, bool retrieval = false)
+        bool newer = false, bool qualify = false, Action? afterProbe = null, long recordFormat = 2, string? brief = null, bool retrieval = false, string? setupToken = null)
     {
-        Probe = new(harness);
+        Probe = new(harness, setupToken);
         Run = new(budget: budget ?? """{"wallMinutes":60,"attemptsPerStep":3}""", keepOperatorKey: keepOperatorKey || qualify, recordFormat: recordFormat, brief: brief);
         if (newer) Probe.Behavior("version", harness == "codex" ? "codex-cli 0.160.0" : "2.1.297 (Claude Code)");
         var environment = new Dictionary<string, string>(Probe.Context.Environment, WorkerEnvironment.Names) { ["LANG"] = "C" };
@@ -37,7 +37,13 @@ internal sealed class NativeRun : IDisposable
             Qualification = RunEstate.Ok(Run.Service.QualifyHarness(new(Probe.Launcher.Launcher, Run.Estate.OperatorId, Probe.Context.Settings)));
             if (!keepOperatorKey) new FileKeyStore(VericairnHome.Path()).Remove(Run.OperatorDevice);
         }
-        RunPreflight inventory = Probe.Launcher.Probe(Probe.Launcher.Prepare(inspection));
+        RunPreflight inventory;
+        LaunchContext prepared = Probe.Launcher.Prepare(inspection);
+        try { inventory = Probe.Launcher.Probe(prepared); }
+        finally
+        {
+            if (harness == "claude") WorkspaceCleanup.Delete(prepared.Environment["CLAUDE_CONFIG_DIR"]);
+        }
         var configuration = new ReportedLauncher(Probe.Launcher).Configuration with { EnvironmentPolicy = new("native-test-policy", inventory.Components) };
         Run.Service.WorkerOptions = Run.Service.WorkerOptions with { Environment = environment, Vericairn = Probe.Context.McpServer,
             Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal) { [Probe.Launcher.Launcher] = configuration } };

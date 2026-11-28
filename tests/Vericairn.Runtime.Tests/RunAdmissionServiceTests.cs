@@ -137,7 +137,8 @@ public sealed class RunAdmissionServiceTests
     {
         var request = new RunStartRequest(run.Assignment, "generic", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource,
             Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("generic", run.Report("admission")) });
-        RunResponse? refusal = admission.Prepare(request, null, out RunAdmissionService.AdmittedRun? admitted, out RecordWritten? assigned);
+        RunResponse? refusal = admission.Prepare(request, null, out RunAdmissionService.AdmittedRun? admitted, out RecordWritten? assigned, out FileStream? claudeConfigurationLease);
+        Assert.Null(claudeConfigurationLease);
         Assert.Null(refusal);
         Assert.Null(assigned);
         Assert.NotNull(admitted);
