@@ -14,7 +14,9 @@ public sealed partial class WorkerConfigurationStore
 {
     internal const string ClaudeSetupTokenFile = "claude-code-setup-token.json";
     private const string ClaudeSetupTokenPrefix = "sk-ant-" + "oat01-";
-    internal const int ClaudeSetupTokenLength = 215;
+    // The issuer does not promise a fixed length. Bound the input while accepting the observed prefix and alphabet.
+    private const int ClaudeSetupTokenMinimumLength = 100;
+    internal const int ClaudeSetupTokenMaximumLength = 1024;
     private static readonly SearchValues<char> ClaudeSetupTokenCharacters = SearchValues.Create("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-");
     private static readonly string[] HarnessDirectories = [".claude", ".codex", ".gemini", ".agents"];
     private static readonly string[] HarnessDirectoryOverrides = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "GEMINI_CLI_HOME"];
@@ -27,7 +29,7 @@ public sealed partial class WorkerConfigurationStore
         public long ExpiresAt { get; } = expiresAt;
     }
 
-    internal static bool IsClaudeSetupToken(string? token) => token is { Length: ClaudeSetupTokenLength }
+    internal static bool IsClaudeSetupToken(string? token) => token is { Length: >= ClaudeSetupTokenMinimumLength and <= ClaudeSetupTokenMaximumLength }
         && token.StartsWith(ClaudeSetupTokenPrefix, StringComparison.Ordinal)
         && token.AsSpan(ClaudeSetupTokenPrefix.Length).IndexOfAnyExcept(ClaudeSetupTokenCharacters) < 0;
 

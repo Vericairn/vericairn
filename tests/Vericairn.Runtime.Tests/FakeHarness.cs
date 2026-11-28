@@ -35,7 +35,7 @@ internal static class FakeHarness
     internal static string NewClaudeSetupToken()
     {
         string prefix = "sk-ant-" + "oat01-";
-        return prefix + RandomNumberGenerator.GetHexString(WorkerConfigurationStore.ClaudeSetupTokenLength - prefix.Length);
+        return prefix + RandomNumberGenerator.GetHexString(215 - prefix.Length);
     }
 
     /// <summary>The command line that starts the stand-in for a scenario, writing what it was given to the report.</summary>

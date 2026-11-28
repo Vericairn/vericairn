@@ -17,6 +17,21 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
     private readonly string scratch = CliHarness.TempDirectory("claude-token-import");
 
     [Theory]
+    [InlineData(100)]
+    [InlineData(1024)]
+    public async Task ImportAcceptsSetupTokensAtBothLengthBounds(int length)
+    {
+        string token = Token(length);
+        string home = Path.Combine(scratch, "worker-home");
+        CliHarness.Outcome result = await Import(home, token + "\r\n", "pro");
+
+        Assert.Equal(0, result.Code);
+        using var stored = JsonDocument.Parse(File.ReadAllText(Provision(home)));
+        Assert.True(stored.RootElement.GetProperty("accessToken").GetString() == token);
+        Assert.False((result.Out + result.Err).Contains(token, StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData("pro", "\n")]
     [InlineData("max", "\r\n")]
     [InlineData("pro", "")]
@@ -58,6 +73,7 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
     [InlineData("missing", "pro", "bare Claude Code setup-token")]
     [InlineData("wrong-shape", "pro", "bare Claude Code setup-token")]
     [InlineData("short", "pro", "bare Claude Code setup-token")]
+    [InlineData("long", "pro", "bare Claude Code setup-token")]
     [InlineData("extra-line", "pro", "bare Claude Code setup-token")]
     [InlineData("valid", "team", "unmanaged Claude Code account type")]
     [InlineData("valid", "enterprise", "unmanaged Claude Code account type")]
@@ -68,7 +84,8 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         {
             "missing" => "",
             "wrong-shape" => "not-a-setup-token",
-            "short" => token[..^1],
+            "short" => Token(99),
+            "long" => Token(1025),
             "extra-line" => token + "\nanother line",
             _ => token,
         };
@@ -149,7 +166,11 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         }
     }
 
-    private static string Token() => string.Concat("sk-ant-", "oat01-", Convert.ToHexString(RandomNumberGenerator.GetBytes(101)));
+    private static string Token(int length = 215)
+    {
+        string prefix = string.Concat("sk-ant-", "oat01-");
+        return prefix + RandomNumberGenerator.GetHexString(length - prefix.Length);
+    }
 
     private static string Provision(string home) => Path.Combine(home, "worker", "claude-code-setup-token.json");
 

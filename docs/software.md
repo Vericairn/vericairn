@@ -1464,6 +1464,7 @@ is `pro` or `max`. The worker rechecks the copy before dispatch and removes its 
 of a file-based login stays in its run directory and expires with that copy. The headless import has no refresh token.
 
 For an import, run `vericairn worker configure --launcher claude-code --import-setup-token --account-type pro` (or `max`).
+The shape check is a local sanity check. Only the issuer can validate the token.
 The token is read at a hidden prompt, or as a single line of redirected standard input with `--token-stdin`. The worker
 stores the token and account statement in the owner-only `worker/claude-code-setup-token.json` under the machine-local
 Vericairn home. The home must be outside repositories, estates and harness configuration directories. The run file lives
