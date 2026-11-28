@@ -194,6 +194,7 @@ public static class OpenApiDocument
         ("GET", "/v1/objects/{hash}"),
         ("POST", "/v1/shutdown"),
         ("POST", "/v1/pairings"),
+        ("POST", "/v1/runtime/mcp/authorize"),
         ("POST", "/v1/pairing/hello"),
         ("POST", "/v1/pairing/confirm"),
         ("GET", "/v1/runtime/identity"),
@@ -705,7 +706,7 @@ public static class OpenApiDocument
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
             };
         }
-        else if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity" or "/v1/runtime/certificate")
+        else if (path is "/v1/pairings" or "/v1/runtime/mcp/authorize" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity" or "/v1/runtime/certificate")
         {
             DaemonResponses(path, responses);
         }
@@ -845,6 +846,16 @@ public static class OpenApiDocument
     {
         switch (path)
         {
+            case "/v1/runtime/mcp/authorize":
+                responses["200"] = new JsonObject
+                {
+                    ["description"] = "The one-time approval, returned only at issuance.",
+                    ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/McpApprovalIssued" } } },
+                };
+                responses["401"] = new JsonObject { ["description"] = "Only the runtime's local socket or named pipe may issue approvals." };
+                responses["409"] = new JsonObject { ["description"] = "No public MCP listener is running." };
+                responses["422"] = new JsonObject { ["description"] = "The administrator, token device, principal, scope or duration was refused." };
+                break;
             case "/v1/pairings":
                 responses["200"] = new JsonObject { ["description"] = "PairingIssued: the code, shown once, with the principal, the profiles, the expiry, the attempts, the address and the runtime identity's fingerprint." };
                 responses["409"] = new JsonObject { ["description"] = "No local-network profile is served, or too many codes wait (Problem)." };
@@ -1284,6 +1295,9 @@ public static class OpenApiDocument
             ["ReleaseObjection"] = Object(("code", "string"), ("location", "string"), ("message", "string"), ("nextAction", "string")),
             ["UpgradeRequest"] = Object(("version", "string"), ("by", "string"), ("check", "boolean"), ("from", "string"), ("clientBuild", "string"), ("line", "string"), ("channel", "string")),
             ["ExportRequest"] = Object(("output", "string"), ("by", "string")),
+            ["McpAuthorizeRequest"] = Required(Object(("principal", "string"), ("by", "string"), ("scope", "string"), ("days", "integer"), ("renew", "string")), "by", "scope"),
+            ["McpApprovalIssued"] = Required(Object(("code", "string"), ("endpoint", "string"), ("principal", "string"), ("scope", "string"),
+                ("expiresAt", "string"), ("attempts", "integer")), "code", "endpoint", "principal", "scope", "expiresAt", "attempts"),
             ["PairingIssueRequest"] = Object(("principal", "string"), ("by", "string"), ("profiles", "array")),
             ["PairingHello"] = Object(("handle", "string"), ("nonce", "string"), ("presence", "boolean")),
             ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string"), ("presenceDevice", "object"), ("presenceSignature", "string")),
@@ -1423,6 +1437,7 @@ public static class OpenApiDocument
         "/v1/estate/export" => "ExportRequest",
         "/v1/objects" => "ObjectBytes",
         "/v1/pairings" => "PairingIssueRequest",
+        "/v1/runtime/mcp/authorize" => "McpAuthorizeRequest",
         "/v1/pairing/hello" => "PairingHello",
         "/v1/pairing/confirm" => "PairingConfirm",
         "/v1/runtime/certificate" => "CertificateRotateRequest",
@@ -1602,6 +1617,7 @@ public static class OpenApiDocument
         ("GET", "/v1/objects/verify") => "Verify every object against its name.",
         ("GET", "/v1/objects/{hash}") => "An object's verified bytes.",
         ("POST", "/v1/shutdown") => "Ask the daemon to stop; closing a client never stops it.",
+        ("POST", "/v1/runtime/mcp/authorize") => "Issue one administrator's approval code for an MCP token device. Local socket only.",
         ("POST", "/v1/pairings") => "Issue a pairing code under an administrator's authority (the operator, or a principal with the administer scope whose admitted device here signs the admission) for a principal and the connectivity profiles its device will be permitted: 16 characters, 80 secret bits, for ten minutes, five attempts and one device. On the runtime's own machine only.",
         ("POST", "/v1/pairing/hello") => "Start a pairing over the local network with a code's handle and a nonce: the runtime answers with its identity, the certificate on this connection, the device record it will write, and its MAC with the code's runtime key.",
         ("POST", "/v1/pairing/confirm") => "Complete a pairing: the device's key, descriptive identity and signature of its record, with its MAC with the code's device key; the runtime records the device and its admission, and answers with its MAC over the whole exchange. From 0.9.0 a confirmation may also carry the presence device the challenge offered, which is recorded and admitted with it under the same code, or neither is.",

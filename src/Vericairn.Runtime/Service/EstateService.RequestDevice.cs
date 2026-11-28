@@ -21,11 +21,15 @@ public sealed partial class EstateService
     /// mode has it. Under <paramref name="signing"/> no key on this machine signs and no record is written unsigned: an operation
     /// writes nothing, prepares its one record for the device, or writes that record with the device's signature over its plan.
     /// </summary>
-    public RequestDeviceScope ForDeviceRequest(string device, string publicKey, string? profile, DeviceSigning? signing)
+    public RequestDeviceScope ForDeviceRequest(string device, string publicKey, string? profile, DeviceSigning? signing) =>
+        ForDeviceRequest(device, publicKey, profile, signing, null);
+
+    /// <summary>Also rechecks a token authorization under the estate's write gate.</summary>
+    public RequestDeviceScope ForDeviceRequest(string device, string publicKey, string? profile, DeviceSigning? signing, Func<bool>? tokenCurrent)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(device);
         ArgumentException.ThrowIfNullOrWhiteSpace(publicKey);
-        var scope = new RequestDeviceScope(this, requestDevice.Value, device, publicKey, profile) { Signing = signing };
+        var scope = new RequestDeviceScope(this, requestDevice.Value, device, publicKey, profile) { Signing = signing, TokenCurrent = tokenCurrent };
         requestDevice.Value = scope;
         return scope;
     }
@@ -42,6 +46,11 @@ public sealed partial class EstateService
         if (request.Refusal is not null)
         {
             return request.Refusal;
+        }
+
+        if (request.TokenCurrent?.Invoke() == false)
+        {
+            return request.Deny("The MCP access token is no longer valid.");
         }
 
         DeviceStanding? standing = Standing(model, request.Device);
@@ -84,6 +93,8 @@ public sealed partial class EstateService
 
         /// <summary>How the request's records are signed when only its device signs them; null for every other request.</summary>
         internal DeviceSigning? Signing { get; init; }
+
+        internal Func<bool>? TokenCurrent { get; init; }
 
         // A background operation may have captured the execution context. Once the request ends it is the runtime's work;
         // it must not retain the completed request's credential, nor lend it to another request.

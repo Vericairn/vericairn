@@ -35,6 +35,9 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
     /// <summary>The HTTPS relay URL used from the next runtime start, or null when off.</summary>
     public string? Relay { get; init; }
 
+    /// <summary>The separately configured TLS listener for OAuth and MCP. Off by default.</summary>
+    public McpPublicEndpoint? PublicEndpoint { get; init; }
+
     private const string Format = "vericairn.runtime-settings/1";
 
     /// <summary>The settings kept in a directory; the defaults, with the local network off, when there are none.</summary>
@@ -68,7 +71,12 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
                 }
             }
 
-            return new RuntimeSettings(string.IsNullOrWhiteSpace(address) ? null : address, allowPublic) { Mcp = mcp, AllowedOrigins = origins, Relay = relay };
+            McpPublicEndpoint? publicEndpoint = node?["publicEndpoint"]?.Deserialize<McpPublicEndpoint>(Vericairn.Protocol.ProtocolJson.Options);
+            _ = publicEndpoint?.BindAddress();
+            return new RuntimeSettings(string.IsNullOrWhiteSpace(address) ? null : address, allowPublic)
+            {
+                Mcp = mcp, AllowedOrigins = origins, Relay = relay, PublicEndpoint = publicEndpoint,
+            };
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
         {
@@ -87,6 +95,8 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
             ["format"] = Format, ["localNetwork"] = LocalNetwork, ["allowPublic"] = AllowPublic, ["mcp"] = Mcp, ["relay"] = Relay,
             ["allowedOrigins"] = new JsonArray([.. AllowedOrigins.Select(o => (JsonNode)JsonValue.Create(o))]),
         };
+        if (PublicEndpoint is not null)
+            node["publicEndpoint"] = JsonSerializer.SerializeToNode(PublicEndpoint, Vericairn.Protocol.ProtocolJson.Options);
         string temporary = path + ".tmp";
         File.WriteAllText(temporary, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
         if (!OperatingSystem.IsWindows())

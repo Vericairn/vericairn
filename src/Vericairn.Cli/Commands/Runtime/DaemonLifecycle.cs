@@ -282,11 +282,13 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
         EstateManifest? pin = serving is null ? ServingRuntime.Pin(root) : serving.Manifest;
         string? configured = null;
         bool mcpConfigured = false;
+        string? publicMcpConfigured = null;
         try
         {
             RuntimeSettings settings = RuntimeSettings.Load(Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!);
             configured = settings.LocalNetwork;
             mcpConfigured = settings.Mcp;
+            publicMcpConfigured = settings.PublicEndpoint?.Issuer;
         }
         catch (InvalidOperationException exception)
         {
@@ -302,6 +304,7 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
                 vericairnHome = servingHome,
                 localNetwork = configured,
                 mcp = mcpConfigured,
+                publicEndpoint = publicMcpConfigured,
                 servingRelease = serving?.Release,
                 pin = pin?.Describe(),
                 pinnedRelease = pin is { Mode: "release" } ? pin.Version : null,
@@ -328,6 +331,9 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
                 context.Output.WriteLine($"  mcp  {mcp} on {(endpoint.LocalNetwork is null ? "loopback" : "loopback and the local network")}, Streamable HTTP for agents' and services' devices, every request signed");
             }
 
+            if (endpoint.PublicMcp is { } token)
+                context.Output.WriteLine($"  public MCP  {token.Url}; certificate expires {token.CertificateExpiresAt}");
+
             if (serving is not null)
             {
                 context.Output.WriteLine($"  release  {serving.ReleaseLine()}");
@@ -344,6 +350,9 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
             {
                 context.Output.WriteLine($"  the local-network profile is configured at {configured} and served from the runtime's next start");
             }
+
+            if (publicMcpConfigured is not null)
+                context.Output.WriteLine($"  public MCP is configured at {publicMcpConfigured}/mcp");
 
             if (mcpConfigured)
             {

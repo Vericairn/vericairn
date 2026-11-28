@@ -256,6 +256,17 @@ internal sealed class McpSessions(TimeProvider time, EstateService? service = nu
         }
     }
 
+    internal void EndDevice(string device)
+    {
+        lock (gate)
+        {
+            foreach (McpSession session in sessions.Values.Where(s => s.Device == device).ToArray())
+            {
+                EndLocked(session);
+            }
+        }
+    }
+
     /// <summary>
     /// Ends every session that has been idle an hour, and every session whose device is no longer admitted with its key and the
     /// profile the session was opened on, as one reading of the records says now; with <paramref name="device"/>, that device's only.

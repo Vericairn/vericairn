@@ -543,6 +543,12 @@ public sealed partial class VericairnClient
             return true;
         }, true, OperationTimeout?.Invoke(nameof(Shutdown)), cancellationToken);
 
+    /// <summary>Requests a one-time MCP approval code over this runtime's local socket.</summary>
+    public Task<(McpApprovalIssued? Issued, Problem? Problem)> IssueMcpApprovalAsync(McpAuthorizeRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<(McpApprovalIssued? Issued, Problem? Problem)>(nameof(IssueMcpApprovalAsync),
+            token => PostOrProblemAsync<McpAuthorizeRequest, McpApprovalIssued>("/v1/runtime/mcp/authorize", request, token),
+            true, OperationTimeout?.Invoke(nameof(IssueMcpApprovalAsync)), cancellationToken);
+
     /// <summary>The cancellable IssuePairing operation, with a deadline covering the complete response.</summary>
     public Task<(PairingIssued? Issued, Problem? Problem)> IssuePairingAsync(PairingIssueRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<(PairingIssued? Issued, Problem? Problem)>(nameof(IssuePairing), async token => (await PostOrProblemAsync<PairingIssueRequest, PairingIssued>("/v1/pairings", request, cancellationToken: token).ConfigureAwait(false)), true, OperationTimeout?.Invoke(nameof(IssuePairing)), cancellationToken);

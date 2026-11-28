@@ -19,6 +19,56 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class EstateSessionTests
 {
+    // FIX-184, after the Reviewer's review: the live store's own monitor, not only the session's load lock, keeps a file read and a
+    // load of one session from opening transactions on its one connection at once.
+    [Fact]
+    public async Task FilesAndLoadsOfOneSessionNeverShareTheLiveConnectionAtOnce()
+    {
+        using var estate = new TestEstate();
+        using EstateSession session = EstateSession.Open(estate.Root);
+        session.Load();
+        using var start = new Barrier(2);
+        CancellationToken cancellation = TestContext.Current.CancellationToken;
+        Task Loop(Action read) => Task.Factory.StartNew(() =>
+        {
+            Assert.True(start.SignalAndWait(TestTiming.HangTimeout, cancellation));
+            for (int i = 0; i < 300; i++) read();
+        }, cancellation, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+        await Task.WhenAll(Loop(() => session.Files()), Loop(() => session.Load()));
+    }
+
+    [Fact]
+    public async Task ConcurrentLoadsOfOneSessionShareTheParsedRecordsAndReturnCompleteModels()
+    {
+        using var estate = new TestEstate();
+        using EstateSession session = EstateSession.Open(estate.Root);
+        EstateModel opened = session.Load();
+        RecordEnvelope[] added = Enumerable.Range(1, 24).Select(index => estate.Add("work-order", estate.BuilderId,
+            $$"""{"key":"W-{{index}}","kind":"ordinary","title":"Task","intent":"Sync.","scope":["x"],"exitQuestion":"?","inputs":[],"deliverables":["y"]}""")).ToArray();
+        const int callerCount = 8;
+        using var start = new Barrier(callerCount);
+        CancellationToken cancellation = TestContext.Current.CancellationToken;
+
+        EstateModel[] models = await Task.WhenAll(Enumerable.Range(0, callerCount).Select(_ => Task.Factory.StartNew(() =>
+        {
+            Assert.True(start.SignalAndWait(TestTiming.HangTimeout, cancellation));
+            return session.Load();
+        }, cancellation, TaskCreationOptions.LongRunning, TaskScheduler.Default)));
+
+        int recordCount = opened.Records.Count + added.Length;
+        Assert.Equal(recordCount, session.ParsedFiles);
+        Assert.All(models, model =>
+        {
+            Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+            Assert.Equal(recordCount, model.Records.Count);
+            foreach (RecordEnvelope record in added)
+            {
+                Assert.Same(models[0].ById[record.Id], model.ById[record.Id]);
+            }
+        });
+    }
+
     [Fact]
     public void UnchangedHistoryIsParsedOnceWhileEveryLoadRevalidatesItsReferences()
     {
