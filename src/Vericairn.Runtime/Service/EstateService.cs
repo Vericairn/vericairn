@@ -1000,8 +1000,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 string revokedAt = RecordParser.FormatTimestamp(now);
                 if (string.CompareOrdinal(revokedAt, admission.At) < 0) revokedAt = admission.At;
                 var deviceRevisions = model.Chain(device).ToHashSet(StringComparer.Ordinal);
+                // Only a record dated within the authoring tolerance of this clock can move the cutoff: no runtime writes one later,
+                // so a record placed with a later date stays after the revocation and its signature does not count.
+                DateTimeOffset latest = now + global::Vericairn.Records.History.SignedHistory.ClockTolerance;
                 RecordEnvelope? lastSigned = model.CountingRecords
-                    .Where(record => string.CompareOrdinal(record.At, revokedAt) >= 0 &&
+                    .Where(record => string.CompareOrdinal(record.At, revokedAt) >= 0 && record.AtTime <= latest &&
                         record.Signatures.Any(signature => deviceRevisions.Contains(signature.Device)) && SignatureChecks.IsAuthentic(model, record))
                     .MaxBy(record => record.At, StringComparer.Ordinal);
                 if (lastSigned is not null)
@@ -3427,10 +3430,32 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// output no longer has the bytes it claims, a goal recorded impossible without its evaluator's verdict of impossible, and a flow decision that leaves out a record its rules read or whose rules do not hold with the states they name read now. Records not stored yet get the content checks a stored file gets, on their canonical
     /// bytes, since the checks of stored files cannot see them.
     /// </summary>
+    /// <summary>
+    /// Whether <paramref name="finding"/> is a signature a revocation among <paramref name="records"/> invalidates on a record dated beyond
+    /// the authoring tolerance of that revocation's own time. No runtime writes such a record, so it never stops its device's revocation:
+    /// the revocation is stored and the record stays reported as <c>signature.revoked</c> for the operator to remove.
+    /// </summary>
+    private static bool InvalidatedByRevocation(EstateModel model, IReadOnlyList<AuthoredRecord> records, Finding finding)
+    {
+        if (finding.Code != "signature.revoked") return false;
+        string path = finding.Location.Split('#')[0];
+        if (model.Records.FirstOrDefault(r => r.ExpectedPath == path) is not { } signed) return false;
+        foreach (AuthoredRecord authored in records)
+        {
+            if (model.ById.GetValueOrDefault(authored.Envelope.Id) is not { Type: "admission" } revocation || EstateModel.BodyString(revocation, "status") != "revoked"
+                || revocation.Subject is not { } device) continue;
+            var revisions = model.Chain(model.ById.GetValueOrDefault(device.Id) ?? revocation).ToHashSet(StringComparer.Ordinal);
+            if (signed.AtTime > revocation.AtTime + global::Vericairn.Records.History.SignedHistory.ClockTolerance
+                && signed.Signatures.Any(signature => revisions.Contains(signature.Device))) return true;
+        }
+
+        return false;
+    }
+
     private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
     {
         var relevant = new FindingList();
-        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error && !InvalidatedByRevocation(model, records, f)))
         {
             relevant.Add(finding);
         }

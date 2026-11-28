@@ -89,6 +89,33 @@ public class HistoryClosingTests
     }
 
     [Fact]
+    public void ARecordPlacedWithAFutureDateNeverMovesARevocationsCutoffPastTheClocksTolerance()
+    {
+        using var f = new HistoryTriggerTests.Fixture(adopt: false);
+        string builder = f.Records.Estate.BuilderId;
+        string op = f.Records.Estate.OperatorId;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        // A record no runtime would write: placed as a file, signed by the device, and dated ten years ahead.
+        f.Records.Estate.SetClock(now.AddYears(10));
+        RecordEnvelope placed = f.Records.Estate.Add("work-order", builder, HistoryFixture.Order("REVOKE-2"),
+            signer: new StoreSigner(new FileKeyStore(VericairnHome.Path()), f.BuilderDevice));
+
+        WriteOutcome revoked = f.Api.DeviceRevoke(new RevokeRequest(f.BuilderDevice, op, "Retire the device."), now);
+        Assert.True(revoked.Ok, Describe(revoked));
+
+        EstateModel model = f.Api.Session.Load();
+        RecordEnvelope revocation = model.ById[revoked.Written!.Id];
+        RecordEnvelope device = model.ById[f.BuilderDevice];
+        // The cutoff stays at this clock, so the placed record falls after it: the revocation is stored, the device stands no more,
+        // and the placed record is reported as signed after its device's revocation, for the operator to remove.
+        DateTimeOffset cutoff = DateTimeOffset.Parse(EstateModel.BodyString(revocation, "revokedAt")!, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(cutoff, now.AddSeconds(-1), now + SignedHistory.ClockTolerance + TimeSpan.FromSeconds(1));
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.Equal(SignatureChecks.AdmissionState.Revoked, SignatureChecks.AdmissionStateAt(model, device, model.ById[placed.Id].At));
+        Assert.Contains(model.Findings, finding => finding.Code == "signature.revoked" && finding.Location.StartsWith(model.ById[placed.Id].ExpectedPath, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void TheOperatorsRecoveryDeviceSignsTheClosingOfARevocationItSignsAndItsAdmissionsCarryNone()
     {
         using var f = new HistoryTriggerTests.Fixture();
