@@ -57,6 +57,27 @@ public sealed class AcquisitionWorkingTreeTests : IDisposable
         Assert.Equal("outside the repository\n", File.ReadAllText(marker));
     }
 
+    [Fact]
+    public void ATrackedNameRespelledInDecomposedUnicodeIsStillTracked()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Git precomposes Unicode names on macOS.");
+        string repository = Repository();
+        string composed = "caf\u00e9.txt", decomposed = "cafe\u0301.txt";
+        File.WriteAllText(Path.Combine(repository, composed), string.Empty);
+        RunEstate.Git(repository, "add", composed);
+        RunEstate.Git(repository, "commit", "-qm", "Track the composed name");
+        File.Delete(Path.Combine(repository, composed));
+        string outside = Path.Combine(scratch, "outside.txt");
+        Directory.CreateDirectory(scratch);
+        File.WriteAllText(outside, "outside\n");
+        File.CreateSymbolicLink(Path.Combine(repository, decomposed), outside);
+
+        // The decomposed spelling is the tracked path to Git, so its link is a tracked entry and refuses the read by name; it is
+        // never withheld as an untracked name while the observation says clean.
+        ProviderRefusedException refusal = Assert.Throws<ProviderRefusedException>(() => new GitCommandAdapter().Inspect(repository));
+        Assert.Contains("symbolic link", refusal.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("hard-link", "hard links")]
     [InlineData("oversize", "file size")]

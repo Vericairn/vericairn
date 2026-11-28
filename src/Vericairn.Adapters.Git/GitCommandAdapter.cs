@@ -186,7 +186,19 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         // Untracked files keep their names, which is all status reads of them; their content is copied only within the limits.
         var withheld = new HashSet<string>(tracked.Comparer);
         view.CopyWorkingTree(mirror, submodules, tracked, withheld);
-        return new GitWorkingTree(mirror, Path.Combine(view.Directory, "index"), options, withheld);
+        var tree = new GitWorkingTree(mirror, Path.Combine(view.Directory, "index"), options, withheld);
+        if (withheld.Count > 0)
+        {
+            // Git itself must count every withheld name as untracked (ignored ones included); a name it takes for a tracked path,
+            // through a spelling the comparison above did not fold, refuses the read instead of hiding that path's change.
+            if (Git(hardening, mirror, tree, out string others, out _, "ls-files", "--others", "-z") != 0)
+                throw new ProviderRefusedException("Git could not read the working tree completely: its untracked files could not be listed.");
+            var untracked = new HashSet<string>(others.Split('\0', StringSplitOptions.RemoveEmptyEntries), tracked.Comparer);
+            if (withheld.FirstOrDefault(path => !untracked.Contains(path)) is string counted)
+                throw new ProviderRefusedException($"Could not read the working tree at {System.Text.Json.JsonSerializer.Serialize(counted)}: Git counts it as tracked, and it is a link, a special or hard-linked file, or exceeds the acquisition limit.");
+        }
+
+        return tree;
 
         (HashSet<string> Gitlinks, bool Sparse, HashSet<string> Tracked) ReadIndexNames(params string[] extra)
         {
@@ -199,8 +211,12 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
                 throw new ProviderRefusedException("Git could not read the working tree completely: its copied index is unavailable.");
 
             bool insensitive = OperatingSystem.IsWindows() || settings.Comparison.Contains("core.ignorecase=true", StringComparer.OrdinalIgnoreCase);
-            var gitlinks = new HashSet<string>(insensitive ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-            var files = new HashSet<string>(insensitive ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            // Git on macOS precomposes names unless the repository turns it off.
+            bool precompose = OperatingSystem.IsMacOS() && !settings.Comparison.Contains("core.precomposeunicode=false", StringComparer.OrdinalIgnoreCase)
+                || settings.Comparison.Contains("core.precomposeunicode=true", StringComparer.OrdinalIgnoreCase);
+            var names = new GitPathComparer(precompose, insensitive);
+            var gitlinks = new HashSet<string>(names);
+            var files = new HashSet<string>(names);
             bool sparseIndex = false;
             foreach (string entry in index.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
             {

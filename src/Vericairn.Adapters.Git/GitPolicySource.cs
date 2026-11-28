@@ -49,9 +49,11 @@ internal sealed class GitPolicySource : IPolicyRepositorySource
                 var start = GitFileSource.WorkingStartInfo(clone, hardening, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
                 if (GitFileSource.Run(start, out byte[] names) != 0) return Missing();
                 string mirror = start.WorkingDirectory;
+                IReadOnlySet<string> withheld = hardening.AcquireWorkingTree(clone).Withheld;
                 foreach (string path in Encoding.UTF8.GetString(names).Split('\0', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
                 {
-                    if (!PolicyInputs.Path(path)) return Missing();
+                    // An untracked file the copy withheld (a link, special or hard-linked file, or oversized) has no content to read.
+                    if (!PolicyInputs.Path(path) || withheld.Contains(path)) return Missing();
                     string full = Path.Combine(mirror, path);
                     if (!File.Exists(full)) continue;
                     byte[] bytes = File.ReadAllBytes(full);
