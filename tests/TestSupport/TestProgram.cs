@@ -15,6 +15,9 @@ internal static class TestProgram
 #if PROCESS_HARNESS
         ProcessHarness.Intercept();
 #endif
+#if EXAMPLE_HARNESS
+        if (Vericairn.Cli.Tests.ServicesSchedulerHarness.Run(arguments) is int example) return example;
+#endif
         FakeHarness.Intercept();
         return arguments.Any(argument => argument is "-automated" or "@@")
             ? await Xunit.Runner.InProc.SystemConsole.ConsoleRunner.Run(arguments)

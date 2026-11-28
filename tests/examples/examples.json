@@ -29,6 +29,29 @@
       "legs": ["read"],
       "platforms": ["linux", "macos", "windows"],
       "liveLaunchers": []
+    },
+    {
+      "key": "E3",
+      "name": "A service request on the starter flow",
+      "journeys": ["J160"],
+      "journey": "e3-services.json",
+      "guideRegion": "docs/templates.md",
+      "repositories": [],
+      "release": null,
+      "guidedSteps": null,
+      "expectedReadFindings": [],
+      "legs": ["tier1", "tier2"],
+      "variants": ["agents"],
+      "pending": [
+        {
+          "id": "agent-exposure-verdict",
+          "after": ["RUN-06", "GOAL-15"],
+          "steps": ["preview-draft"],
+          "assert": "In tier 2, assert operation.exposure for uncovered workspace history alongside the exact path:appointments/** brief."
+        }
+      ],
+      "platforms": ["linux", "macos", "windows"],
+      "liveLaunchers": []
     }
   ]
 }
