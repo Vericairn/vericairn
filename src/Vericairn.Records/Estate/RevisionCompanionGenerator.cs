@@ -103,8 +103,8 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
             + context.SnapshotIdentity + ". Selection: " + context.Parameters["selection"] + ".\n\nGenerator: " + DocumentMarkdown.Text(context.Generator.Id)
             + "; contract 1. Input digest: " + context.InputDigest + ".\n\nSelected revisions: " + context.Sources.Length.ToString(CultureInfo.InvariantCulture)
             + ". Current selection means the owning record model's lineage choice at this snapshot; it is not a live health, readiness or policy verdict.\n\n";
-        return RecordCompanionGenerator.Pages(header, context.Sources.IsEmpty ? ["None (complete authorized selection).\n\n"]
-            : context.Sources.Select(source => "- " + DocumentMarkdown.Link(source.Identity, source.Path!) + ": " + DocumentMarkdown.Text(source.Title!)
-                + "; " + source.At + "; " + source.Hash + ". Inspect this exact source or its registered item reader for all recorded fields.\n\n"), context.Page);
+        return RecordCompanionGenerator.CollectionPages(header, context.Sources, "None (complete authorized selection).\n\n",
+            source => "- " + DocumentMarkdown.Link(source.Identity, source.Path!) + ": " + DocumentMarkdown.Text(source.Title!)
+                + "; " + source.At + "; " + source.Hash + ". Inspect this exact source or its registered item reader for all recorded fields.\n\n", context.Page);
     }
 }

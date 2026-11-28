@@ -32,10 +32,10 @@ internal sealed class RecordCompanionGenerator : IDocumentGenerator
         if (field == "body" && context.Selection == "list")
         {
             if (context.Parameters["index"] != "all") return DocumentRenderResult.Error("A record list has no item index.");
-            return Pages("# Recorded revisions\n\nComplete authorized snapshot; historical facts, not current lineage selection. Input digest: " + context.InputDigest + ".\n\n",
-                context.Sources.IsEmpty ? ["None (complete selected list).\n\n"] : context.Sources.Select(s =>
+            return CollectionPages("# Recorded revisions\n\nComplete authorized snapshot; historical facts, not current lineage selection. Input digest: " + context.InputDigest + ".\n\n",
+                context.Sources, "None (complete selected list).\n\n", s =>
                     "- " + DocumentMarkdown.Link(s.RecordType + " " + s.Identity, s.Path!) + ": " + DocumentMarkdown.Text(s.Title!) + "; " + s.At + "; " + s.Hash
-                    + ". " + RecordCompanionText.Notice(s.RecordType) + " Inspect the exact revision for full fields and nested lists.\n\n"), page);
+                    + ". " + RecordCompanionText.Notice(s.RecordType) + " Inspect the exact revision for full fields and nested lists.\n\n", page);
         }
         if (context.Sources.Length != 1) return DocumentRenderResult.Error("Item and nested collection readers require one exact parent revision.");
         DocumentSourceSnapshot source = context.Sources[0];
@@ -66,23 +66,36 @@ internal sealed class RecordCompanionGenerator : IDocumentGenerator
             : items.SelectMany(i => RecordCompanionText.Value(i.Value, i.Path)), page);
     }
 
-    internal static DocumentRenderResult Pages(string header, IEnumerable<string> blocks, int page)
+    internal static DocumentRenderResult Pages(string header, IEnumerable<string> blocks, int page) =>
+        Pages(header, blocks.Select(text => (text, (DocumentSourceSnapshot?)null)), page);
+
+    internal static DocumentRenderResult CollectionPages(string header, ImmutableArray<DocumentSourceSnapshot> sources, string empty,
+        Func<DocumentSourceSnapshot, string> render, int page) => sources.IsEmpty ? Pages(header, [empty], page)
+        : Pages(header, sources.Select(source => (render(source), (DocumentSourceSnapshot?)source)), page);
+
+    private static DocumentRenderResult Pages(string header, IEnumerable<(string Text, DocumentSourceSnapshot? Source)> blocks, int page)
     {
         const int pageBytes = 262144;
-        var pages = new List<string>();
         var body = new StringBuilder();
+        var items = ImmutableArray.CreateBuilder<DocumentSourceSnapshot>();
+        int number = 1;
         int bytes = 0;
-        foreach (string block in blocks)
+        foreach (var (text, source) in blocks)
         {
-            int size = Encoding.UTF8.GetByteCount(block);
+            int size = Encoding.UTF8.GetByteCount(text);
             if (size > pageBytes) return DocumentRenderResult.Error("A reader block exceeds the pagination bound.");
-            if (bytes + size > pageBytes) { pages.Add(body.ToString()); body.Clear(); bytes = 0; }
-            body.Append(block); bytes += size;
+            if (bytes + size > pageBytes) { number++; bytes = 0; }
+            if (number == page)
+            {
+                body.Append(text);
+                if (source is not null) items.Add(source);
+            }
+            bytes += size;
         }
-        pages.Add(body.ToString());
-        if (page > pages.Count) return DocumentRenderResult.Unavailable("The selected page is outside this exact rendition.");
-        return DocumentRenderResult.Success(header + "Page " + page.ToString(CultureInfo.InvariantCulture) + " of " + pages.Count.ToString(CultureInfo.InvariantCulture)
-            + (pages.Count > 1 ? ". Partial page; read every page at this same source basis for full detail.\n\n" : ". Complete selected detail.\n\n") + pages[page - 1]);
+        if (page > number) return DocumentRenderResult.Unavailable("The selected page is outside this exact rendition.");
+        return DocumentRenderResult.Success(header + "Page " + page.ToString(CultureInfo.InvariantCulture) + " of " + number.ToString(CultureInfo.InvariantCulture)
+            + (number > 1 ? ". Partial page; read every page at this same source basis for full detail.\n\n" : ". Complete selected detail.\n\n") + body)
+            with { Page = new(page, number, items.ToImmutable()) };
     }
 
     internal static IEnumerable<(JsonElement Value, string Path)> Select(JsonElement value, string[] segments, int at, string path)

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json.Serialization;
+
 namespace Vericairn.Protocol;
 
 /// <summary>An explicit reader selection. Audience is a requested projection, never a grant of access.</summary>
@@ -31,11 +33,21 @@ public sealed record CompanionsResponse(int Version, string Status, string? Snap
 public sealed record CompanionSource(string Kind, string Identity, string Hash, string? Path, string? Repository,
     string? RecordType, string? At, bool? Current, long? Bytes);
 
+/// <summary>An authorized exact revision appearing on the rendered collection page.</summary>
+public sealed record CompanionPageItem(string Revision, string Hash, string RecordType, string Title);
+
+/// <summary>Pagination and exact item navigation supplied by the generator that rendered this page.</summary>
+public sealed record CompanionPage(int Number, int Total, IReadOnlyList<CompanionPageItem> Items);
+
 /// <summary>A generated view or inspected source basis, with explicit scope and freshness. No response is a record.</summary>
 public sealed record CompanionResponse(int Version, string Status, string Currentness, string Completeness,
     string? Audience, string? Snapshot, string? Commit, CompanionGeneratorRow? Generator,
     IReadOnlyList<CompanionSource> Sources, string? InputDigest, string? ContentHash, string? Text, string? Reason)
 {
+    /// <summary>Present for rendered selections that report their page boundaries; source-only reads omit it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CompanionPage? Page { get; init; }
+
     /// <summary>A safe failure with no selected source metadata.</summary>
     public static CompanionResponse Unavailable(string reason) => new(1, "unavailable", "unavailable", "unavailable", null, null, null, null, [], null, null, null, reason);
 }

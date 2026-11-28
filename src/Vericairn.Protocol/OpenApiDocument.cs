@@ -1032,6 +1032,10 @@ public static class OpenApiDocument
         progressClaim["properties"]!["statusText"] = ProgressSchemas.StatusText();
         JsonObject progressResponse = Object(("claim", "object"), ("written", "object"), ("problem", "object"), ("ok", "boolean"));
         progressResponse["properties"]!["claim"] = new JsonObject { ["$ref"] = "#/components/schemas/WorkProgressClaim" };
+        JsonObject companionPage = Object(("number", "integer"), ("total", "integer"), ("items", "array"));
+        companionPage["properties"]!["items"]!["items"] = SchemaReference("CompanionPageItem");
+        JsonObject companionResponse = Object(("version", "integer"), ("status", "string"), ("currentness", "string"), ("completeness", "string"), ("audience", "string"), ("snapshot", "string"), ("commit", "string"), ("generator", "object"), ("sources", "array"), ("inputDigest", "string"), ("contentHash", "string"), ("text", "string"), ("reason", "string"));
+        companionResponse["properties"]!["page"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["allOf"] = new JsonArray(SchemaReference("CompanionPage")) };
         JsonObject attentionRequest = Object(("by", "string"), ("kind", "string"), ("subjectType", "string"), ("subjectId", "string"), ("expected", "string"));
         attentionRequest["required"] = new JsonArray("by", "kind", "subjectType", "subjectId", "expected");
         JsonObject attentionResponse = Object(("principal", "string"), ("asOf", "string"), ("items", "array"));
@@ -1075,7 +1079,9 @@ public static class OpenApiDocument
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
             ["CompanionCompareRequest"] = Object(("selection", "string"), ("commit", "string"), ("audience", "string")),
             ["CompanionsResponse"] = Object(("version", "integer"), ("status", "string"), ("snapshot", "string"), ("manifestSnapshot", "string"), ("coverage", "array"), ("generators", "array"), ("destinations", "array"), ("reason", "string")),
-            ["CompanionResponse"] = Object(("version", "integer"), ("status", "string"), ("currentness", "string"), ("completeness", "string"), ("audience", "string"), ("snapshot", "string"), ("commit", "string"), ("generator", "object"), ("sources", "array"), ("inputDigest", "string"), ("contentHash", "string"), ("text", "string"), ("reason", "string")),
+            ["CompanionResponse"] = companionResponse,
+            ["CompanionPage"] = companionPage,
+            ["CompanionPageItem"] = Object(("revision", "string"), ("hash", "string"), ("recordType", "string"), ("title", "string")),
             ["CompanionComparison"] = Object(("version", "integer"), ("status", "string"), ("currentness", "string"), ("snapshot", "string"), ("commit", "string"), ("differences", "array"), ("problems", "array")),
             ["CompanionSource"] = Object(("kind", "string"), ("identity", "string"), ("hash", "string"), ("path", "string"), ("repository", "string"), ("recordType", "string"), ("at", "string"), ("current", "boolean"), ("bytes", "integer")),
             ["PolicyChangeRequest"] = Object(("by", "string"), ("body", "object"), ("expected", "string")),

@@ -87,6 +87,46 @@ public sealed class CompanionReadTests
         Assert.Empty(stale.Sources);
     }
 
+    [Theory]
+    [InlineData("vericairn.records/items")]
+    [InlineData("vericairn.records/decisions")]
+    public void CollectionNavigationNamesOnlyTheExactRevisionsRenderedOnEachPage(string generator)
+    {
+        using var fixture = new PolicyFixture();
+        foreach (int number in Enumerable.Range(0, 230))
+        {
+            JsonObject body = fixture.DecisionBody();
+            body["title"] = number.ToString("D3", System.Globalization.CultureInfo.InvariantCulture) + new string('&', 196);
+            fixture.Add("decision", body);
+        }
+        using EstateService service = EstateService.Open(fixture.Estate.Root);
+        var request = new CompanionRequest(generator, "current", Snapshot: service.Companions().Snapshot);
+        CompanionResponse first = service.CompanionRender(request);
+        CompanionResponse second = service.CompanionRender(request with { Page = 2 });
+        CompanionPage firstPage = Assert.IsType<CompanionPage>(first.Page);
+        CompanionPage secondPage = Assert.IsType<CompanionPage>(second.Page);
+        Assert.Equal((1, 2), (firstPage.Number, firstPage.Total));
+        Assert.Equal((2, 2), (secondPage.Number, secondPage.Total));
+        Assert.NotEmpty(firstPage.Items);
+        Assert.NotEmpty(secondPage.Items);
+        Assert.Empty(firstPage.Items.Intersect(secondPage.Items));
+        Assert.Equal(first.Sources.Select(s => s.Identity).Order(StringComparer.Ordinal),
+            firstPage.Items.Concat(secondPage.Items).Select(item => item.Revision).Order(StringComparer.Ordinal));
+        foreach ((CompanionPage page, CompanionResponse response) in new[] { (firstPage, first), (secondPage, second) })
+        {
+            string rendered = WebUtility.HtmlDecode(response.Text)!;
+            foreach (CompanionPageItem item in page.Items)
+            {
+                Assert.Contains(item.Revision, rendered, StringComparison.Ordinal);
+                Assert.Contains(item.Hash, rendered, StringComparison.Ordinal);
+                Assert.Contains(item.Title, rendered, StringComparison.Ordinal);
+                Assert.Contains(response.Sources, s => s.Identity == item.Revision && s.Hash == item.Hash && s.RecordType == item.RecordType);
+            }
+        }
+        Assert.Null(service.CompanionSources(request).Page);
+        Assert.Null(service.CompanionRender(request with { Audience = "Public" }).Page);
+    }
+
     [Fact]
     [Trait("Journey", "D19-A")]
     [Trait("Journey", "D19-F")]

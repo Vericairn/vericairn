@@ -132,6 +132,8 @@ public enum DocumentGenerationStatus
 /// <summary>One rendition, or a safe reason why it could not be produced.</summary>
 public sealed record DocumentRenderResult(DocumentGenerationStatus Status, string? Content, string? Reason)
 {
+    internal DocumentPage? Page { get; init; }
+
     /// <summary>A complete rendition.</summary>
     public static DocumentRenderResult Success(string content) => new(DocumentGenerationStatus.Success, content, null);
     /// <summary>A missing capability or source, never an empty successful list.</summary>
@@ -139,6 +141,8 @@ public sealed record DocumentRenderResult(DocumentGenerationStatus Status, strin
     /// <summary>A failed generation with no output.</summary>
     public static DocumentRenderResult Error(string reason) => new(DocumentGenerationStatus.Error, null, reason);
 }
+
+internal sealed record DocumentPage(int Number, int Total, ImmutableArray<DocumentSourceSnapshot> Items);
 
 /// <summary>A complete authorized snapshot from an adapter, including the exact repository commit inspected.</summary>
 public sealed record DocumentSourceSelection(DocumentGenerationStatus Status, ImmutableArray<DocumentSourceSnapshot> Sources, string? Commit, string? Reason)

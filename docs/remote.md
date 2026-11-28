@@ -39,7 +39,7 @@ worker observations and prepare desktop tasks for Workbench.
     ([goals](operator-guide.md#17-goals-predicates-and-evaluation)).
   - **Work:** work orders that are not accepted or retired, and assignments that are not accepted. Open either to inspect
     the goal, admitted scope, attempts, results, runs and requested progress; **Back to work** returns to the list.
-  - **Products:** the estate's products, with the option to prepare a desktop task for the selected revision.
+  - **Products:** the estate's products, desktop tasks for a selected revision and [readable companions](#readable-companions).
   - **Nodes:** the runtime's direct connection, identity, address, current access and last successful check. **Check workers**
     reads how that runtime sees each in-flight run and shows the last heartbeat when available.
   - **Handoffs:** desktop tasks prepared for the acting person, with separate observations of preparation, Workbench opening
@@ -94,6 +94,28 @@ review keeps the original request identity. Refused, failed and superseded reque
 In **Nodes**, **Reconnect** checks the pinned runtime identity and this phone's current access. **Check workers** reads a
 separately dated view of the work in flight, with every heartbeat and stop observation that runtime can supply. A current
 connection and an unavailable worker observation can appear together. Cached worker facts keep the time they were read.
+
+## Readable companions
+
+From 0.9.5 (READ-05), choose **Readable companions** in **Products**. Select a permitted collection and choose **Open
+collection** to read the **Estate manifest** or browse a list of current record revisions at the runtime's selected snapshot.
+Each record row shows a title, record type, the end of the revision ID and the start of its hash. Select a row and choose
+**Read selected item** to open that exact revision.
+The reader shows the source basis, currentness at observation and audience. Both readers use the same runtime generator
+as Workbench. See [Readable companion contracts](readable-companions.md).
+
+Remote keeps the last collection page and the last item page in memory. Before reusing a page, Remote asks the runtime
+to confirm current access and match the saved source and generator basis. A reused page says **Cached** and shows its
+original observation time and age. Choose **Refresh** to request a fresh rendition. If the phone is offline or its access
+has been revoked, the reader reports that the companion is unavailable and hides its text, item rows and source details.
+A refused or unavailable read or home refresh discards both cached pages.
+
+If the runtime confirms access to the exact item but its rendition is unavailable, choose **Continue in Workbench** to
+prepare a [desktop task](#desktop-tasks) for the pinned revision. Workbench checks access and availability again when you
+open the task in **From Remote**.
+
+When a record collection has no page metadata, Remote still shows its text. If the runtime reports a version older than
+0.9.5, Remote says item navigation requires a newer runtime. Otherwise it says the generator reports no pages.
 
 ## Desktop tasks
 
@@ -256,6 +278,8 @@ The app keeps the last successful home observation and each work detail you open
 connection, estate, runtime identity, principal and device. The cache includes attention, work, products and communication
 settings, policy attention, opened policy histories and prepared policy context. It contains no pairing code or signing key.
 Clearing the app's cached observations removes those local copies; it changes no record, acknowledgment or running work on the runtime.
+
+The [readable companion cache](#readable-companions) lives in memory and requires a runtime check before a page can be reused.
 
 When the runtime cannot be reached, the retained view is labeled **cached**, with its observation time and age. Its age continues
 to advance without sending requests. A detail that was never opened says it was not cached. Restored observations start cached;

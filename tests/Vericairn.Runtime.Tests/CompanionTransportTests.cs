@@ -42,6 +42,7 @@ public sealed class CompanionTransportTests
     public async Task SdkSyncAndAsyncReadsUseTheSameEscapedRoutesWithoutSendingSourceBytes()
     {
         var seen = new List<string>();
+        var item = new CompanionPageItem("revision", "hash", "decision", "Selected decision");
         using var client = new VericairnClient(new HttpClient(new Handler((request, _) =>
         {
             Assert.Equal(HttpMethod.Get, request.Method);
@@ -51,6 +52,8 @@ public sealed class CompanionTransportTests
             {
                 "/v1/companions" => new CompanionsResponse(1, "success", "basis", [], [], [], null),
                 "/v1/companions/compare" => new CompanionComparison(1, "success", "current", "basis", null, [], []),
+                "/v1/companions/render" => new CompanionResponse(1, "success", "current", "selected-page", "Internal", "basis", null, null,
+                    [], "digest", "rendition", "Selected material", null) { Page = new(1, 1, [item]) },
                 _ => CompanionResponse.Unavailable("Fixture source unavailable."),
             };
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(value, value.GetType(), options: ProtocolJson.Options) });
@@ -58,8 +61,8 @@ public sealed class CompanionTransportTests
         var selection = new CompanionRequest("example.reader/items", "item", "revision", Field: "field.with spaces", Index: "all");
         Assert.Equal("success", client.Companions().Status);
         Assert.Equal("success", (await client.CompanionsAsync(TestContext.Current.CancellationToken)).Status);
-        client.CompanionRender(selection);
-        await client.CompanionRenderAsync(selection, TestContext.Current.CancellationToken);
+        Assert.Equal(item, Assert.Single(client.CompanionRender(selection).Page!.Items));
+        Assert.Equal(item, Assert.Single((await client.CompanionRenderAsync(selection, TestContext.Current.CancellationToken)).Page!.Items));
         client.CompanionSources(selection);
         await client.CompanionSourcesAsync(selection, TestContext.Current.CancellationToken);
         client.CompanionCompare(new("docs/example.md"));
