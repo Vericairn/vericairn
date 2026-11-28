@@ -51,6 +51,7 @@ public sealed partial class WorkerConfigurationStore
 
         string path = ConfigurationPath(ClaudeSetupTokenFile);
         RefuseHarnessConfiguration(path, WorkerEnvironment.Current());
+        RequireHomeNotWritableByOthers(path);
         // The headless form has no expiry field. Keep the probe's one-year timestamp fixed across every copy.
         WriteFile(path, new ClaudeSetupToken(token!, accountType,
             DateTimeOffset.UtcNow.AddDays(ClaudeSetupTokenLifetimeDays).ToUnixTimeMilliseconds()), requireOwnerOnly: true);
@@ -78,6 +79,7 @@ public sealed partial class WorkerConfigurationStore
         RefuseLink(path);
         if (!File.Exists(path)) return false;
         RefuseHarnessConfiguration(path, WorkerEnvironment.Current());
+        RequireHomeNotWritableByOthers(path);
         RequireOwnerOnly(Path.GetDirectoryName(path)!, isDirectory: true);
         File.Delete(path);
         return true;
@@ -92,6 +94,7 @@ public sealed partial class WorkerConfigurationStore
             if (Directory.Exists(path)) throw new JsonException();
             if (!File.Exists(path)) return null;
             RefuseHarnessConfiguration(path, environment ?? WorkerEnvironment.Current());
+            RequireHomeNotWritableByOthers(path);
             RequireOwnerOnly(Path.GetDirectoryName(path)!, isDirectory: true);
             RequireOwnerOnly(path, isDirectory: false);
             if (OwnerOnlyState.IsOwnRegularFile(path) == false) throw new JsonException();
@@ -117,6 +120,29 @@ public sealed partial class WorkerConfigurationStore
     private static bool SetupTokenExpired(ClaudeSetupToken setup) => setup.ExpiresAt <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
     private static ProviderRefusedException SetupTokenProblem(string message) => new(message) { SafeForQualification = true };
+
+    private static void RequireHomeNotWritableByOthers(string provision)
+    {
+        string home = Path.GetDirectoryName(Path.GetDirectoryName(provision)!)!;
+        if (!Directory.Exists(home)) return;
+        const string message = "The Vericairn home is writable by other users. Restrict its write access before using a Claude Code setup token.";
+        if (OperatingSystem.IsWindows())
+        {
+            const FileSystemRights change = FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories | FileSystemRights.Delete
+                | FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+            DirectorySecurity security = new DirectoryInfo(home).GetAccessControl();
+            foreach (FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
+            {
+                if (rule.AccessControlType == AccessControlType.Allow && (rule.FileSystemRights & change) != 0
+                    && (rule.PropagationFlags & PropagationFlags.InheritOnly) == 0
+                    && rule.IdentityReference is SecurityIdentifier identity && (identity.IsWellKnown(WellKnownSidType.WorldSid)
+                        || identity.IsWellKnown(WellKnownSidType.AuthenticatedUserSid) || identity.IsWellKnown(WellKnownSidType.BuiltinUsersSid)))
+                    throw SetupTokenProblem(message);
+            }
+        }
+        else if ((File.GetUnixFileMode(home) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+            throw SetupTokenProblem(message);
+    }
 
     private void RefuseHarnessConfiguration(string path, IReadOnlyDictionary<string, string> environment)
     {

@@ -162,6 +162,26 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         Assert.Empty(keys);
     }
 
+    [Fact]
+    public async Task ImportRefusesAWorldWritableVericairnHome()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This exercises Unix write permission bits.");
+            return;
+        }
+        string token = Token();
+        string home = Directory.CreateDirectory(Path.Combine(scratch, "worker-home")).FullName;
+        File.SetUnixFileMode(home, File.GetUnixFileMode(home) | UnixFileMode.OtherWrite);
+
+        CliHarness.Outcome result = await Import(home, token, "pro");
+
+        Assert.Equal(2, result.Code);
+        Assert.Contains("The Vericairn home is writable by other users", result.Err, StringComparison.Ordinal);
+        Assert.False((result.Out + result.Err).Contains(token, StringComparison.Ordinal));
+        Assert.False(File.Exists(Provision(home)));
+    }
+
     [Theory]
     [InlineData("missing", "pro", "bare Claude Code setup-token")]
     [InlineData("wrong-shape", "pro", "bare Claude Code setup-token")]
