@@ -57,15 +57,7 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
             await OpenItemAsync(model);
             Assert.Contains("A private fixture detail.", model.CompanionText, StringComparison.Ordinal);
 
-            RuntimeConnection phone = Assert.Single(connections.Kept);
-            RecordEnvelope admission = Assert.Single(estate.Load().Current("admission"), record => record.Subject?.Id == phone.Device);
-            estate.SetClock(DateTimeOffset.Parse(admission.At, CultureInfo.InvariantCulture));
-            var revoked = PolicyFixture.Body(admission);
-            revoked["status"] = "revoked";
-            revoked["revokedAt"] = RecordParser.FormatTimestamp(estate.Clock.AddSeconds(1));
-            policy.Add("admission", revoked, subject: admission.Subject, supersedes: admission.Id);
-            policy.AssertValid();
-            Assert.Equal("revoked", connections.Service.Standing(phone.Device)?.Admission);
+            RevokePhone(policy, connections);
 
             // The last connection probe still reports current. The reader must recheck the phone's admission itself.
             await model.RefreshCompanionCommand.ExecuteAsync();
@@ -80,6 +72,56 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
             await model.OpenCompanionsCommand.ExecuteAsync();
             Assert.Empty(model.CompanionCollections);
             Assert.Empty(model.CompanionItems);
+            return true;
+        });
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Journey", "D19-E")]
+    public async Task ARevokedReaderCannotReopenACachedPageWithoutRefresh(bool reopenItem)
+    {
+        using var policy = new PolicyFixture();
+        RecordEnvelope order = policy.Add("work-order", JsonNode.Parse("""
+            {"key":"REMOTE-READ","kind":"ordinary","title":"Private fixture title","intent":"A private fixture detail.","scope":["tests"],"exitQuestion":"Readable?","inputs":[],"deliverables":["evidence"]}
+            """)!.AsObject());
+        using var connections = CompanionConnections(policy.Estate);
+        connections.PairAdmissionSigner = policy.OperatorSigner;
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            await OpenWorkOrdersAsync(model);
+            Assert.Contains("Private fixture title", model.CompanionText, StringComparison.Ordinal);
+            await OpenItemAsync(model);
+            Assert.Contains("A private fixture detail.", model.CompanionText, StringComparison.Ordinal);
+
+            if (reopenItem)
+            {
+                await model.BackCompanionCommand.ExecuteAsync();
+                Assert.StartsWith("Cached", model.CompanionFreshness, StringComparison.Ordinal);
+                RevokePhone(policy, connections);
+            }
+
+            bool rechecked = false;
+            connections.BeforeApiCall = name =>
+            {
+                if (name != nameof(IEstateApi.CompanionSourcesAsync) || rechecked) return;
+                rechecked = true;
+                // The catalog can succeed before the collection's separate source read is refused.
+                if (!reopenItem) RevokePhone(policy, connections);
+            };
+            if (reopenItem) await OpenItemAsync(model);
+            else await model.BackCompanionCommand.ExecuteAsync();
+
+            Assert.True(rechecked);
+            Assert.Empty(model.CompanionText);
+            Assert.Empty(model.CompanionItems);
+            Assert.Empty(model.CompanionFreshness);
+            Assert.False(model.CanHandOffCompanion);
+            Assert.Contains("unavailable", model.CompanionMessage, StringComparison.Ordinal);
+            Assert.DoesNotContain(order.Id, model.CompanionMessage, StringComparison.Ordinal);
+            Assert.DoesNotContain(order.ComputedHash, model.CompanionMessage, StringComparison.Ordinal);
             return true;
         });
     }
@@ -152,6 +194,20 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
             Assert.DoesNotContain(nameof(IEstateApi.CompanionRenderAsync), calls);
             return true;
         });
+    }
+
+    private static void RevokePhone(PolicyFixture policy, FakeConnections connections)
+    {
+        TestEstate estate = policy.Estate;
+        RuntimeConnection phone = Assert.Single(connections.Kept);
+        RecordEnvelope admission = Assert.Single(estate.Load().Current("admission"), record => record.Subject?.Id == phone.Device);
+        estate.SetClock(DateTimeOffset.Parse(admission.At, CultureInfo.InvariantCulture));
+        var revoked = PolicyFixture.Body(admission);
+        revoked["status"] = "revoked";
+        revoked["revokedAt"] = RecordParser.FormatTimestamp(estate.Clock.AddSeconds(1));
+        policy.Add("admission", revoked, subject: admission.Subject, supersedes: admission.Id);
+        policy.AssertValid();
+        Assert.Equal("revoked", connections.Service.Standing(phone.Device)?.Admission);
     }
 
     private static FakeConnections CompanionConnections(TestEstate estate) =>
