@@ -39,6 +39,8 @@ public sealed partial class EstateService
             (LaunchContext prepared, RunPreflight observed) = ProbeHarness(launcher, settings, scratch, request.By);
             if (observed.Probes is not { } probes || !HarnessAdmission.CompleteProbes(observed, probes))
                 return Refuse("The launcher did not establish all six qualification probes.");
+            if (HarnessAdmission.SetupTokenFormatProblem(session.Manifest.RecordFormat, observed.SignIn) is string formatProblem)
+                return Refuse(formatProblem);
             var body = new JsonObject
             {
                 ["launcher"] = launcher.Launcher, ["version"] = observed.HarnessVersion, ["status"] = "qualified",
@@ -106,6 +108,8 @@ public sealed partial class EstateService
                 InventoryEstablished = true, SignIn = observed.SignIn,
                 Version = HarnessAdmission.CompareVersions(model, launcherName, observed.HarnessVersion, probes.BaselineVersion),
             };
+            if (HarnessAdmission.SetupTokenFormatProblem(session.Manifest.RecordFormat, observed.SignIn) is string formatProblem)
+                return check with { Problem = formatProblem, RequiresFormatUpgrade = true };
             // Reuse dispatch's full exact-version and digest comparison. Version equality alone only tells what doctor can infer.
             try
             {
@@ -182,4 +186,4 @@ public sealed partial class EstateService
 /// <summary>What the local, non-recording qualification check established. No raw output or credential values.</summary>
 internal sealed record HarnessQualificationCheck(string Launcher, bool InventoryEstablished = false,
     HarnessSignIn? SignIn = null, HarnessVersionComparison? Version = null, string? Model = null, string ModelStatus = "unconfigured",
-    bool Qualified = false, string? Problem = null);
+    bool Qualified = false, string? Problem = null, bool RequiresFormatUpgrade = false);

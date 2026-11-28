@@ -15,7 +15,7 @@ public class ClaudeSetupTokenRunTests
     public void RunRemovesItsSignInAndAnyHarnessCopyOnSettlement(string scenario, string outcome)
     {
         string token = FakeHarness.NewClaudeSetupToken();
-        using var fixture = new NativeRun("claude", setupToken: token);
+        using var fixture = new NativeRun("claude", qualify: true, recordFormat: 3, setupToken: token);
         fixture.Probe.Behavior("setupToken", scenario);
         RunResponse started = fixture.Start();
         Assert.True(started.Ok, started.Message);
@@ -36,7 +36,7 @@ public class ClaudeSetupTokenRunTests
     public void TokenEchoNeverEntersTheLogBriefRecordsOrEstateExport()
     {
         string token = FakeHarness.NewClaudeSetupToken();
-        using var fixture = new NativeRun("claude", setupToken: token);
+        using var fixture = new NativeRun("claude", qualify: true, recordFormat: 3, setupToken: token);
         fixture.Probe.Behavior("setupToken", "echo");
         RunResponse started = fixture.Start();
         Assert.True(started.Ok, started.Message);

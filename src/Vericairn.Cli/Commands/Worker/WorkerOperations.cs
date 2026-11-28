@@ -84,7 +84,8 @@ internal sealed class WorkerOperations(CommandContext context)
             return context.Fail("The local estate could not be read for the harness check.");
         }
 
-        string? qualify = (check.InventoryEstablished && !check.Qualified || check.Version is { Matches: false }) ? WorkerQualifyCommand.RecordCommand(launcher) : null;
+        string? qualify = !check.RequiresFormatUpgrade && (check.InventoryEstablished && !check.Qualified || check.Version is { Matches: false })
+            ? WorkerQualifyCommand.RecordCommand(launcher) : null;
         if (json)
         {
             context.Output.WriteLine(JsonSerializer.Serialize(new

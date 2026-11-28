@@ -2285,6 +2285,8 @@ place. A format-3 qualification records the outcome as `reach`: `file` (`readabl
 still matches the six probe digests, and a revocation may omit it.
 From 0.9.5, a format-3 Claude Code qualification of the setup-token form records its `login` declaration with
 `form: "setup-token"`, `accountType: "pro"` or `"max"`, and `accountTypeSource: "operator-statement"`.
+This sign-in requires a current qualification at every installed version, including the shipped baseline. Upgrade a
+format-2 estate to format 3 or use a provisioned credentials file.
 Raw probe output, command bindings, machine paths and credential values never enter the qualification record.
 The MCP check first compares the actual local command, arguments and environment to the generated configuration;
 only then does its digest normalize run-specific paths and acting-principal bindings. A record from another machine
@@ -2295,7 +2297,7 @@ content inventoried separately under RUN-01.
 Admission repeats the probes before intent and immediately before dispatch. The intent's additive
 `execution.harnessAdmission` names `kind: "baseline"` or `kind: "qualification"`, the launcher, version and probe
 digests. A qualification admission also pins its exact `record` id and `hash`. A missing, superseded, revoked or
-mismatching qualification refuses a non-baseline version. The final record check happens after the dispatch probes,
+mismatching qualification refuses a non-baseline version or a setup-token sign-in. The final record check happens after the dispatch probes,
 so a revocation recorded while they run is also seen. The existing RUN-01 inventory policy and execution restrictions
 still apply; qualifying does not update or bypass that policy. WATCH-01 sees the same admitted inventory and selection.
 
@@ -2304,7 +2306,7 @@ probe digests, `status: "revoked"`, and `supersedes` naming the original record.
 `records new harness-qualification --by <human-principal> --supersedes <qualification-id> --body <body-file>`
 authors that revision; `records describe harness-qualification` describes its fields. A superseding record only
 revokes; requalification creates a new record from fresh probes. Earlier run intents retain their pinned admission
-as historical evidence. Revoking a record does not remove the shipped compiled baseline.
+as historical evidence. Runs on a shipped baseline using other qualified sign-in forms keep the baseline admission.
 
 Qualification establishes agreement with the launcher's checked protocol and isolation boundaries for that exact
 installation. It does not attest vendor provenance, execute the tools, prove a successful login or model call, certify

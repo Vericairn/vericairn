@@ -38,15 +38,18 @@ public sealed class ClaudeQualificationCheckTests : IDisposable
     }
 
     [Fact]
-    public void CheckEstablishesTheProvisionedInventoryWithoutAnActingPrincipalOrARecord()
+    public void CheckEstablishesTheProvisionedInventoryAndRequiresQualificationAtTheBaseline()
     {
         Provision();
         var before = Snapshot();
         CliHarness.Outcome result = Check("--json");
-        Assert.True(result.Code == 0, result.Out + result.Err);
+        Assert.Equal(1, result.Code);
         JsonElement json = result.Json;
         Assert.True(json.GetProperty("inventoryEstablished").GetBoolean());
-        Assert.True(json.GetProperty("qualified").GetBoolean());
+        Assert.False(json.GetProperty("qualified").GetBoolean());
+        Assert.True(json.GetProperty("version").GetProperty("matches").GetBoolean());
+        Assert.Contains("operator's account type statement", json.GetProperty("problem").GetString(), StringComparison.Ordinal);
+        Assert.Equal("vericairn worker qualify --launcher claude-code --by <human-principal>", json.GetProperty("qualification").GetString());
         JsonElement signIn = json.GetProperty("signIn");
         Assert.Equal("setup-token", signIn.GetProperty("form").GetString());
         Assert.Equal("max", signIn.GetProperty("accountType").GetString());
@@ -81,6 +84,28 @@ public sealed class ClaudeQualificationCheckTests : IDisposable
     }
 
     [Fact]
+    public void CheckInRecordFormatTwoDirectsTheOperatorToUpgradeOrChangeSignIn()
+    {
+        using var formatTwo = new PolicyFixture(format: 2);
+        Provision();
+        var before = Snapshot();
+
+        CliHarness.Outcome result = CliHarness.Run("--estate", formatTwo.Estate.Root, "--json", "worker", "qualify",
+            "--check", "--launcher", Launcher, "--setting", Command());
+
+        Assert.Equal(1, result.Code);
+        JsonElement json = result.Json;
+        Assert.True(json.GetProperty("inventoryEstablished").GetBoolean());
+        Assert.False(json.GetProperty("qualified").GetBoolean());
+        string problem = json.GetProperty("problem").GetString()!;
+        Assert.Contains("Upgrade the estate to format 3", problem, StringComparison.Ordinal);
+        Assert.Contains("provisioned credentials file", problem, StringComparison.Ordinal);
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("qualification").ValueKind);
+        Assert.Empty(formatTwo.Estate.Load().OfType("harness-qualification"));
+        Assert.Equal(before, Snapshot());
+    }
+
+    [Fact]
     public void DoctorReportsTheVersionDifferenceUsingTheSameOverrideWithoutReadingASignIn()
     {
         Version(Newer);
@@ -111,7 +136,9 @@ public sealed class ClaudeQualificationCheckTests : IDisposable
             ["parameters"] = new JsonObject { ["terms"] = new JsonArray("fixture-selector") },
         });
         estate.Policy(policy);
-        Provision(model);
+        CliHarness.Ok("worker", "configure", "--launcher", Launcher, "--model", model, "--effort", "high");
+        string config = Directory.CreateDirectory(Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")!).FullName;
+        File.WriteAllText(Path.Combine(config, ".credentials.json"), """{"claudeAiOauth":{"subscriptionType":"max"}}""");
         var before = Snapshot();
 
         CliHarness.Outcome result = Check("--json");
@@ -123,10 +150,10 @@ public sealed class ClaudeQualificationCheckTests : IDisposable
         Assert.Equal(before, Snapshot());
     }
 
-    private void Provision(string model = "fixture-selector")
+    private void Provision()
     {
-        string token = string.Concat("sk-", "ant-", "oat", "01-", new string('a', 202));
-        CliHarness.Ok("worker", "configure", "--launcher", Launcher, "--model", model, "--effort", "high");
+        string token = FakeHarness.NewClaudeSetupToken();
+        CliHarness.Ok("worker", "configure", "--launcher", Launcher, "--model", "fixture-selector", "--effort", "high");
         CliHarness.OkWithInput(token + "\n", "worker", "configure", "--launcher", Launcher,
             "--import-setup-token", "--account-type", "max", "--token-stdin");
         Version(Shipped);
