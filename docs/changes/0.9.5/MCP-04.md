@@ -6,8 +6,8 @@
 
 > From 0.9.5, an OAuth-only client can work as an admitted agent or service over a separate HTTPS MCP listener. Configure it
 > with `vericairn runtime configure --mcp on --public-endpoint <host:port> --public-certificate <pem> --public-key <pem>`,
-> then restart the runtime. Supply a certificate chain the client trusts. To listen on a private overlay, name its interface's
-> address and matching port with `--public-bind`. `runtime status` shows the endpoint and its certificate's expiry.
+> then restart the runtime. Supply a certificate chain the client trusts and set the Unix key file mode to `600` or `400`.
+> To listen on a private overlay, name its interface's address and matching port with `--public-bind`. `runtime status` shows the endpoint and its certificate's expiry.
 > Attention alerts the operator in the last 14 days. An expired or unreadable certificate takes only the public HTTPS
 > endpoint out of service. Keep the renewed certificate and key at the configured paths and run
 > `vericairn runtime stop` followed by `vericairn runtime start` to load them.

@@ -35,6 +35,9 @@ public sealed record McpPublicEndpoint(string Authority, string CertificatePath,
     public X509Certificate2 LoadCertificate(DateTimeOffset now)
     {
         Uri address = Address();
+        const UnixFileMode ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(KeyPath) & ~ownerOnly) != 0)
+            throw new InvalidOperationException("The public MCP private key file must be readable only by its owner. Set its mode to 600 or 400.");
         using X509Certificate2 pem = X509Certificate2.CreateFromPemFile(CertificatePath, KeyPath);
         if (!pem.MatchesHostname(address.IdnHost, allowWildcards: true, allowCommonName: false)
             || pem.NotBefore.ToUniversalTime() > now.UtcDateTime || pem.NotAfter.ToUniversalTime() <= now.UtcDateTime)

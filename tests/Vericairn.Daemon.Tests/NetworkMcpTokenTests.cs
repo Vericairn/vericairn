@@ -278,6 +278,8 @@ public sealed partial class NetworkMcpTokenTests
                 using X509Certificate2 made = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(2));
                 File.WriteAllText(certificate, made.ExportCertificatePem());
                 File.WriteAllText(key, ecdsa.ExportPkcs8PrivateKeyPem());
+                if (!OperatingSystem.IsWindows())
+                    File.SetUnixFileMode(key, UnixFileMode.UserRead | UnixFileMode.UserWrite);
                 string fingerprint = RuntimeCertificate.Fingerprint(made);
                 host = await DaemonTestHome.StartAsync(estate.Root, options: new DaemonOptions
                 {

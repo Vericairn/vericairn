@@ -92,6 +92,19 @@ public sealed class McpPublicCertificateTests
         Assert.Equal("expired", McpPublicEndpoint.ExpiryAttention(now, now)!.Value.State);
     }
 
+    [Fact]
+    public void ThePublicPrivateKeyMustBeOwnerOnlyOnUnix()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var estate = new TestEstate(3);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        McpPublicEndpoint endpoint = Endpoint(estate, 8443);
+        WriteCertificate(endpoint, now.AddDays(-1), now.AddDays(1));
+        File.SetUnixFileMode(endpoint.KeyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+        InvalidOperationException refusal = Assert.Throws<InvalidOperationException>(() => endpoint.LoadCertificate(now));
+        Assert.Contains("readable only by its owner", refusal.Message, StringComparison.Ordinal);
+    }
+
     private static McpPublicEndpoint Endpoint(TestEstate estate, int port) =>
         new("localhost:" + port, Path.Combine(estate.Root, "public.pem"), Path.Combine(estate.Root, "key.pem"), "127.0.0.1:" + port);
 
