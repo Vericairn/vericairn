@@ -148,10 +148,10 @@ public sealed class RemoteDecisionJourneyTests
 
     internal sealed class PhoneJourney(LocalNetworkHarness harness, FileKeyStore runtimeKeys, string presenceDevice, string person,
         RecordEnvelope order, RecordEnvelope ask, RecordEnvelope result, RecordEnvelope review, JourneyConnections connections, RemoteViewModel remote,
-        PresenceKeyStandIn presence, string head) : IAsyncDisposable
+        AndroidPresenceKeyStandIn presence, string head) : IAsyncDisposable
     {
         internal LocalNetworkHarness Harness { get; } = harness;
-        internal PresenceKeyStandIn Presence { get; } = presence;
+        internal AndroidPresenceKeyStandIn Presence { get; } = presence;
         internal string Head { get; } = head;
         internal string Person { get; } = person;
         internal RecordEnvelope Order { get; } = order;
@@ -191,7 +191,7 @@ public sealed class RemoteDecisionJourneyTests
                     """{"independence":"operator","outcome":"pass","summary":"Read the exact result and evidence.","findings":[]}""", result.Reference);
                 // The estate's clone is a repository the runtime observes: the basis an answer states is its head.
                 string head = EstateGit.Init(harness.Estate.Root, harness.Host.Service);
-                var presence = new PresenceKeyStandIn(harness.DeviceHome);
+                var presence = harness.AndroidPresence();
                 var connections = new JourneyConnections(new(harness.DeviceHome, harness.DeviceKeys, presence));
                 var remote = new RemoteViewModel(connections) { Address = harness.Address, Code = harness.Issue(person).Code };
                 await remote.PairCommand.ExecuteAsync();

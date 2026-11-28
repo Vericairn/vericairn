@@ -32,6 +32,9 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
     /// </summary>
     public IReadOnlyList<string> AllowedOrigins { get; init; } = [];
 
+    /// <summary>The HTTPS relay URL used from the next runtime start, or null when off.</summary>
+    public string? Relay { get; init; }
+
     private const string Format = "vericairn.runtime-settings/1";
 
     /// <summary>The settings kept in a directory; the defaults, with the local network off, when there are none.</summary>
@@ -49,6 +52,12 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
             JsonNode? node = JsonNode.Parse(File.ReadAllText(path));
             string? address = node?["localNetwork"]?.GetValue<string>();
             bool allowPublic = node?["allowPublic"]?.GetValue<bool>() ?? false;
+            string? relay = node?["relay"]?.GetValue<string>();
+            if (relay is not null && !Protocol.RelayProtocol.TryUrl(relay, out _))
+            {
+                throw new InvalidOperationException("Relay must be an HTTPS origin without credentials, a path or a query.");
+            }
+
             bool mcp = node?["mcp"]?.GetValue<bool>() ?? false;
             string[] origins = node?["allowedOrigins"] is JsonArray listed ? [.. listed.Select(o => o!.GetValue<string>())] : [];
             foreach (string origin in origins)
@@ -59,7 +68,7 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
                 }
             }
 
-            return new RuntimeSettings(string.IsNullOrWhiteSpace(address) ? null : address, allowPublic) { Mcp = mcp, AllowedOrigins = origins };
+            return new RuntimeSettings(string.IsNullOrWhiteSpace(address) ? null : address, allowPublic) { Mcp = mcp, AllowedOrigins = origins, Relay = relay };
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
         {
@@ -75,7 +84,7 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
         string path = Path.Combine(directory, FileName);
         var node = new JsonObject
         {
-            ["format"] = Format, ["localNetwork"] = LocalNetwork, ["allowPublic"] = AllowPublic, ["mcp"] = Mcp,
+            ["format"] = Format, ["localNetwork"] = LocalNetwork, ["allowPublic"] = AllowPublic, ["mcp"] = Mcp, ["relay"] = Relay,
             ["allowedOrigins"] = new JsonArray([.. AllowedOrigins.Select(o => (JsonNode)JsonValue.Create(o))]),
         };
         string temporary = path + ".tmp";

@@ -31,7 +31,7 @@ public sealed record PairingOptions(string Name)
     /// <summary>
     /// From 0.9.0 (REMOTE-11): a store in which to make a second key, the presence device, whose every signature needs its owner's
     /// presence. A runtime that offers one records and admits it with the paired device under the same code, for the same principal
-    /// and profiles, stating presence required; it signs records, never requests. Its custody must enforce presence, or nothing is
+    /// and profiles. From 0.9.5 its record distinguishes verified and declared presence. Its custody must enforce presence, or nothing is
     /// made. Null pairs one device, as before; so does a runtime that does not offer one (an earlier release, an agent's or a
     /// service's principal, or record format 1), and so does a presence key that cannot be made or whose prompt the person declines;
     /// <see cref="PairedRuntime.PresenceDevice"/> then shows null.
@@ -62,7 +62,7 @@ public sealed record PairingOptions(string Name)
 /// <param name="PrincipalName">Its name.</param>
 /// <param name="Profiles">The profiles the device is permitted.</param>
 /// <param name="Custody">How its key is held.</param>
-/// <param name="Presence">required or none from record format 2.</param>
+/// <param name="Presence">required, declared or none from record format 2.</param>
 public sealed record PairedRuntime(string Address, string Estate, string? EstateName, string Identity, string Certificate, string Device, string DevicePublicKey, string Admission, string Principal, string? PrincipalName, IReadOnlyList<string> Profiles, string Custody, string? Presence)
 {
     /// <summary>From 0.9.0 (REMOTE-11): the presence device's id, when one was recorded and admitted with the paired device; its key is held under this id in the presence store.</summary>
@@ -76,6 +76,9 @@ public sealed record PairedRuntime(string Address, string Estate, string? Estate
 
     /// <summary>How the presence device's key is held.</summary>
     public string? PresenceCustody { get; init; }
+
+    /// <summary>The paired runtime's initial relay route when it has one.</summary>
+    public RelayRoute? Relay { get; init; }
 }
 
 /// <summary>Why a pairing did not complete: the runtime refused (denied, refused), or nothing answered as the runtime (unavailable).</summary>
@@ -217,7 +220,7 @@ public static class RuntimePairing
         {
             string certificate = RuntimeIdentityScheme.CertificateFingerprint(presented ?? []);
             string nonce = PairingProtocol.NewNonce();
-            var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, certificate)) { Presence = options.PresenceKeyStore is null ? null : true };
+            var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, certificate)) { Relay = true, Presence = options.PresenceKeyStore is null ? null : true, PresenceAttestation = true };
             PairingChallenge challenge = await SendAsync<PairingHello, PairingChallenge>(tls, address, "/v1/pairing/hello", hello, legacy, mayHaveEffect: false, cancellationToken).ConfigureAwait(false);
             if (!PairingProtocol.Matches(PairingProtocol.ChallengeMac(runtimeKey, hello, challenge), challenge.Mac) || challenge.DeviceNonce != nonce)
             {
@@ -241,12 +244,14 @@ public static class RuntimePairing
 
             (IDeviceKeyStore store, bool presence) = Custody(challenge, options);
             IDeviceKeyStore? presenceStore = PresenceCustody(challenge, options);
-            byte[] publicKey = store.Create(challenge.Record);
+            bool requestMade = false;
             bool presenceMade = false;
             try
             {
-                var device = new PairingDevice(options.Name.Trim(), VericairnHome.Platform(), store.Kind, RecordSigning.EncodePublicKey(publicKey), challenge.Format >= 2 ? (presence ? "required" : "none") : null);
-                JsonObject body = DeviceRecords.Body(challenge.Principal, device.Name, device.Platform, device.Custody, device.PublicKey, challenge.Profiles, challenge.Format, device.Presence);
+                byte[] publicKey = CreatePairingKey(store, challenge.Record, challenge, presence);
+                requestMade = true;
+                PairingDevice device = DescribePairingKey(options.Name.Trim(), store, challenge.Record, publicKey, challenge, presence);
+                JsonObject body = PairedDeviceBody(challenge, device);
                 string hash = DeviceRecords.Hash(DeviceRecords.Draft(challenge.Principal, challenge.Record, at, challenge.Format, body));
                 string signature = Base64Url.EncodeToString(store.Sign(challenge.Record, RecordSigning.Digest(hash)));
                 var confirm = new PairingConfirm(challenge.RuntimeNonce, device, signature, string.Empty);
@@ -256,10 +261,10 @@ public static class RuntimePairing
                     // The presence key signs its own record, so its owner's presence is asked for once here, before anything is recorded.
                     try
                     {
-                        byte[] presenceKey = presenceStore.Create(challenge.PresenceRecord!);
+                        byte[] presenceKey = CreatePairingKey(presenceStore, challenge.PresenceRecord!, challenge, presence: true);
                         presenceMade = true;
-                        var second = new PairingDevice(options.Name.Trim() + " (presence key)", VericairnHome.Platform(), presenceStore.Kind, RecordSigning.EncodePublicKey(presenceKey), "required");
-                        JsonObject secondBody = DeviceRecords.Body(challenge.Principal, second.Name, second.Platform, second.Custody, second.PublicKey, challenge.Profiles, challenge.Format, second.Presence);
+                        PairingDevice second = DescribePairingKey(options.Name.Trim() + " (presence key)", presenceStore, challenge.PresenceRecord!, presenceKey, challenge, presence: true);
+                        JsonObject secondBody = PairedDeviceBody(challenge, second);
                         presenceHash = DeviceRecords.Hash(DeviceRecords.Draft(challenge.Principal, challenge.PresenceRecord!, at, challenge.Format, secondBody));
                         confirm = confirm with { PresenceDevice = second, PresenceSignature = Base64Url.EncodeToString(presenceStore.Sign(challenge.PresenceRecord!, RecordSigning.Digest(presenceHash))) };
                     }
@@ -295,15 +300,41 @@ public static class RuntimePairing
                     PresenceDevicePublicKey = confirm.PresenceDevice?.PublicKey,
                     PresenceAdmission = presenceStore is null ? null : completed.PresenceAdmission,
                     PresenceCustody = presenceStore?.Kind,
+                    Relay = completed.Relay,
                 };
             }
             catch
             {
-                store.Remove(challenge.Record);
+                if (requestMade) store.Remove(challenge.Record);
                 if (presenceMade) presenceStore!.Remove(challenge.PresenceRecord!);
                 throw;
             }
         }
+    }
+
+    private static byte[] CreatePairingKey(IDeviceKeyStore store, string id, PairingChallenge challenge, bool presence)
+    {
+        if (!presence || challenge.PresenceAttestation != true || store.Kind != DeviceKeyStores.AndroidKeystoreKind)
+            return store.Create(id);
+        if (store is not IAttestedDeviceKeyStore attested || !PairingProtocol.IsMac(challenge.RuntimeNonce))
+            throw new InvalidOperationException("This Android Keystore does not offer the key attestation required by the runtime.");
+        return attested.Create(id, Base64Url.DecodeFromChars(challenge.RuntimeNonce));
+    }
+
+    private static PairingDevice DescribePairingKey(string name, IDeviceKeyStore store, string id, byte[] publicKey, PairingChallenge challenge, bool presence)
+    {
+        var device = new PairingDevice(name, VericairnHome.Platform(), store.Kind, RecordSigning.EncodePublicKey(publicKey), challenge.Format >= 2 ? (presence ? "required" : "none") : null);
+        if (!presence || challenge.PresenceAttestation != true) return device;
+        return store.Kind == DeviceKeyStores.AndroidKeystoreKind
+            ? device with { Platform = "android", AndroidAttestation = ((IAttestedDeviceKeyStore)store).Attestation(id) }
+            : device with { Presence = "declared" };
+    }
+
+    private static JsonObject PairedDeviceBody(PairingChallenge challenge, PairingDevice device)
+    {
+        JsonObject body = DeviceRecords.Body(challenge.Principal, device.Name, device.Platform, device.Custody, device.PublicKey, challenge.Profiles, challenge.Format, device.Presence);
+        if (device.AndroidAttestation is not null) body["presenceVerification"] = DeviceRecords.AndroidKeyAttestation;
+        return body;
     }
 
     /// <summary>The store the device's key is made in: the strongest custody here unless named, in the record format the estate writes; presence by default for a person's device where the custody enforces it.</summary>

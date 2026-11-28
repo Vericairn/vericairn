@@ -12,7 +12,7 @@ namespace Vericairn.Cli;
 
 internal sealed class RuntimeNetworkConfiguration(CommandContext context)
 {
-    public int RuntimeConfigure(string root, string? localNetwork, bool allowPublic, bool json, string? mcp = null, string[]? origins = null)
+    public int RuntimeConfigure(string root, string? localNetwork, bool allowPublic, bool json, string? mcp = null, string[]? origins = null, string? relay = null)
     {
         try
         {
@@ -97,7 +97,18 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                 settings = settings with { AllowedOrigins = allowed };
             }
 
-            bool changed = localNetwork is not null || serveMcp is not null || allowed is not null;
+            if (relay is not null)
+            {
+                Uri? url = null;
+                if (!relay.Equals("off", StringComparison.OrdinalIgnoreCase) && !RelayProtocol.TryUrl(relay, out url))
+                {
+                    return context.Fail("--relay takes an HTTPS origin without credentials, a path or a query, or 'off'. Nothing was changed.");
+                }
+
+                settings = settings with { Relay = url?.AbsoluteUri };
+            }
+
+            bool changed = localNetwork is not null || serveMcp is not null || allowed is not null || relay is not null;
             if (changed)
             {
                 settings.Save(directory);
@@ -110,7 +121,7 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(new
                 {
-                    localNetwork = settings.LocalNetwork, allowPublic = settings.AllowPublic, mcp = settings.Mcp, allowedOrigins = settings.AllowedOrigins,
+                    localNetwork = settings.LocalNetwork, allowPublic = settings.AllowPublic, mcp = settings.Mcp, allowedOrigins = settings.AllowedOrigins, relay = settings.Relay,
                     served = alive ? served : null, mcpServed = alive ? running!.Mcp is not null : (bool?)null, restart = alive && changed,
                 }, ProtocolJson.Options));
                 return Clean;
@@ -132,6 +143,9 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                     ? "  origins allowed for /mcp: none, so a request naming an origin is refused"
                     : $"  origins allowed for /mcp: {string.Join(", ", settings.AllowedOrigins)}");
             }
+            context.Output.WriteLine(settings.Relay is null
+                ? "the relay profile is off"
+                : $"the runtime registers with {settings.Relay} from its next start");
             if (alive)
             {
                 context.Output.WriteLine(served is null ? $"  daemon {running!.ProcessId} serves no local-network profile now" : $"  daemon {running!.ProcessId} serves it now at {served}");
