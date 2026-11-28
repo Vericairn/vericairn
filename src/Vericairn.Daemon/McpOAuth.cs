@@ -270,8 +270,8 @@ internal sealed class McpOAuth
 
         string? state = One(query["state"]);
         string? challenge = One(query["code_challenge"]);
-        string? scope = ParseScope(One(query["scope"]));
-        var request = new McpAuthorizationRequest(client, redirect, challenge ?? string.Empty, scope, state is { Length: <= 1024 } ? state : null);
+        string? scope = ParseScope(One(query["scope"]), out bool includesRead);
+        var request = new McpAuthorizationRequest(client, redirect, challenge ?? string.Empty, scope, state is { Length: <= 1024 } ? state : null, includesRead);
         string? error = query.Any(p => p.Value.Count != 1) || challenge is not { Length: 43 } || !McpTokenStore.IsUrlValue(challenge)
             || One(query["code_challenge_method"]) != "S256" || One(query["resource"]) != Resource || state is { Length: > 1024 }
             ? "invalid_request" : One(query["response_type"]) != "code" ? "unsupported_response_type" : scope == "invalid" ? "invalid_scope" : null;
@@ -312,9 +312,9 @@ internal sealed class McpOAuth
                 return;
             }
 
-            if (flow.Request.Scope == "contribute" && approval.Scope != "contribute")
+            if (flow.Request.Scope == "contribute" && approval.Scope != "contribute" && !flow.Request.IncludesRead)
             {
-                await browser.RedirectAsync(http, flow.Request, null, "insufficient_scope").ConfigureAwait(false);
+                await browser.RedirectAsync(http, flow.Request, null, "access_denied").ConfigureAwait(false);
                 return;
             }
 
@@ -383,7 +383,7 @@ internal sealed class McpOAuth
                 break;
             case "refresh_token":
                 McpTokenRefresh? refresh = tokens.RefreshGrant(One(form["refresh_token"]) ?? string.Empty, client, Resource);
-                string? requestedScope = ParseScope(One(form["scope"]));
+                string? requestedScope = ParseScope(One(form["scope"]), out _);
                 if (refresh is not null && (requestedScope is null || requestedScope == "read" || requestedScope == refresh.Grant.Scope))
                 {
                     (response, bool reused) = host.Service.WithMcpTokenDevice(refresh.Grant.Device, refresh.Grant.Admission, refresh.Grant.PublicKey,
@@ -414,10 +414,11 @@ internal sealed class McpOAuth
 
     private static string? One(StringValues values) => values.Count == 1 && !string.IsNullOrEmpty(values[0]) ? values[0] : null;
 
-    private static string? ParseScope(string? scope)
+    private static string? ParseScope(string? scope, out bool includesRead)
     {
+        string[] scopes = scope?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
+        includesRead = scopes.Contains("read", StringComparer.Ordinal);
         if (scope is null) return null;
-        string[] scopes = scope.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         return scopes.Length == 0 || scopes.Any(s => !Scopes.Contains(s, StringComparer.Ordinal)) ? "invalid"
             : scopes.Contains("contribute", StringComparer.Ordinal) ? "contribute" : "read";
     }

@@ -150,4 +150,5 @@ internal sealed class McpBrowserAuthorization(TimeProvider clock, string issuer)
 
 internal sealed record McpBrowserFlow(McpAuthorizationRequest Request, string Cookie, DateTimeOffset Until, McpApproval? Approval = null);
 internal sealed record McpCodeExchange(McpAuthorizationRequest Request, McpTokenGrant Grant, DateTimeOffset Until);
-internal sealed record McpAuthorizationRequest(McpClientMetadata Client, string Redirect, string Challenge, string? Scope, string? State);
+internal sealed record McpAuthorizationRequest(
+    McpClientMetadata Client, string Redirect, string Challenge, string? Scope, string? State, bool IncludesRead = false);

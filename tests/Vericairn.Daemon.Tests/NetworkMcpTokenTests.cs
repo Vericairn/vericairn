@@ -104,7 +104,7 @@ public sealed partial class NetworkMcpTokenTests
     {
         await using PublicHarness fixture = await PublicHarness.StartAsync();
         string clientId = await RegisterAsync(fixture.Http);
-        TokenPair first = await AuthorizeAsync(fixture, clientId, "read");
+        TokenPair first = await AuthorizeAsync(fixture, clientId, "read", requestedScope: "read contribute");
         fixture.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", first.Access);
         using var wire = new McpWire(fixture.Http);
         JsonObject tools = await ModernAsync(wire, "tools/list");
@@ -137,7 +137,7 @@ public sealed partial class NetworkMcpTokenTests
         return (await JsonAsync(registered))["client_id"]!.GetValue<string>();
     }
 
-    private static async Task<TokenPair> AuthorizeAsync(PublicHarness fixture, string clientId, string wanted)
+    private static async Task<TokenPair> AuthorizeAsync(PublicHarness fixture, string clientId, string wanted, string? requestedScope = null)
     {
         (McpApprovalIssued? issued, Problem? problem) = await fixture.Socket.IssueMcpApprovalAsync(
             new McpAuthorizeRequest(fixture.Estate.BuilderId, fixture.Estate.OperatorId, wanted), Stop);
@@ -150,6 +150,7 @@ public sealed partial class NetworkMcpTokenTests
             ["client_id"] = clientId, ["redirect_uri"] = Redirect, ["code_challenge"] = McpTokenStore.Hash(verifier),
             ["code_challenge_method"] = "S256", ["state"] = state, ["response_type"] = "code", ["resource"] = fixture.Resource,
         };
+        if (requestedScope is not null) parameters["scope"] = requestedScope;
         HttpClient client = fixture.Http;
         using HttpResponseMessage landing = await client.GetAsync(QueryHelpers.AddQueryString("/oauth/authorize", parameters), Stop);
         Assert.Equal(HttpStatusCode.OK, landing.StatusCode);
@@ -160,7 +161,9 @@ public sealed partial class NetworkMcpTokenTests
         using HttpResponseMessage proved = await PostBrowserFormAsync(client, landing,
             ("transaction", transaction), ("action", "prove"), ("approval_code", issued.Code));
         Assert.Equal(HttpStatusCode.OK, proved.StatusCode);
-        Assert.Contains("Tool results go to this client", await proved.Content.ReadAsStringAsync(Stop), StringComparison.Ordinal);
+        string consent = await proved.Content.ReadAsStringAsync(Stop);
+        Assert.Contains("Tool results go to this client", consent, StringComparison.Ordinal);
+        Assert.Contains("<dt>Scope</dt><dd>" + wanted + "</dd>", consent, StringComparison.Ordinal);
         using HttpResponseMessage approved = await PostBrowserFormAsync(client, proved,
             ("transaction", transaction), ("action", "approve"));
         Assert.Equal(HttpStatusCode.Redirect, approved.StatusCode);
