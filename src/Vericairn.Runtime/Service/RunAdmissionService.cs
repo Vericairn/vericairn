@@ -100,6 +100,7 @@ internal sealed class RunAdmissionService(
         }
 
         RunPlan plan;
+        IReadOnlyList<RepositoryConfigurationReview> configurationReviews;
         lock (gate)
         {
             List<RecordFile> files = session.Files().Concat(carried.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
@@ -123,6 +124,7 @@ internal sealed class RunAdmissionService(
             }
 
             plan = planned;
+            configurationReviews = ConfigurationReviews(model, plan);
         }
 
         RunLimits limits = RunLimits.For(Element(plan.Cap), WorkerOptions);
@@ -193,7 +195,6 @@ internal sealed class RunAdmissionService(
             configuredRoot = new WorkerConfigurationStore().ReadWorkspaceRoot();
             string root = configuredRoot ?? Path.Combine(VericairnHome.Path(), "estates", plan.Estate, "workspaces");
             string path = configuredRoot is null ? Path.Combine(root, Slug(plan.Branch)) : Path.Combine(root, plan.Estate, Slug(plan.Branch));
-            IReadOnlyList<RepositoryConfigurationReview> configurationReviews = ConfigurationReviews(session.Load(), plan);
             workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, configurationReviews);
             brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
             baseline = workspaces.Capture(workspace);
@@ -232,7 +233,7 @@ internal sealed class RunAdmissionService(
                     }
 
                     // It ran as the person, with Git at hand: the workspace must still be this branch's own repository, at the head it left.
-                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, ConfigurationReviews(session.Load(), plan));
+                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, configurationReviews);
                     if (!string.Equals(rechecked.Path, workspace.Path, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                     {
                         throw new ProviderRefusedException($"The branch's workspace moved from '{workspace.Path}' to '{rechecked.Path}' while its setup command ran.");
