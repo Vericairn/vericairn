@@ -64,9 +64,9 @@ public sealed class OperatorRequestType : IRecordType
             item.Text("name", kind == "file", 500);
             item.NoOtherKeys();
             if (text is not null && hash != ContentHash.Sha256(Encoding.UTF8.GetBytes(text)))
-                context.Error("operator-request.content", "The content hash must match the exact UTF-8 text or command.");
+                context.BodyError("operator-request.content", "The content hash must match the exact UTF-8 text or command.");
             if (kind == "file" && text is not null)
-                context.Error("operator-request.content", "A file item names its file and byte hash; inline content uses text or command.");
+                context.BodyError("operator-request.content", "A file item names its file and byte hash; inline content uses text or command.");
         }
         string? source = body.Ulid("sourceAsk", false);
         string? sourceHash = body.Hash("sourceAskHash", source is not null);
@@ -79,7 +79,7 @@ public sealed class OperatorRequestType : IRecordType
         StandingOutputs.RaisedBy? raised = StandingOutputs.ValidateRaisedBy(context, body.Nested("raisedBy", false));
         // From 0.9.4 (OPS-22): an optional request is a possible todo; a run's reserved step is required or not by its step alone.
         if (body.Flag("optional", false) is true && flowStep is not null)
-            context.Error("operator-request.optional", "A step's request is not marked optional: its step says whether it is required.");
+            context.BodyError("operator-request.optional", "A step's request is not marked optional: its step says whether it is required.");
         body.NoOtherKeys();
         StandingOutputs.ValidateOperatorRequest(context, raised);
         context.RequireReference("to", to, "principal");
@@ -114,7 +114,7 @@ public sealed class OperatorRequestType : IRecordType
             // The requester is the author of the request's first revision, whoever wrote this one (the operator may revise its mark).
             string requester = previous is { Type: "operator-request" } && context.Model.ById.TryGetValue(context.Model.Chain(previous)[0], out RecordEnvelope? opened) ? opened.By : context.Record.By;
             if (sourceHash is not null || askedBy != requester)
-                context.Error("operator-request.requester", "Without a source ask, askedBy is the author and sourceAskHash is absent.");
+                context.BodyError("operator-request.requester", "Without a source ask, askedBy is the author and sourceAskHash is absent.");
             return;
         }
         RecordEnvelope? ask = context.RequireReference("sourceAsk", source, "ask");
@@ -147,10 +147,10 @@ public sealed class OperatorRequestType : IRecordType
         string? instance = step.Text("instance", false, 100, Patterns.Slug, "an instance name");
         step.NoOtherKeys();
         if (source is not null)
-            context.Error("operator-request.flow-step", "A step's request is its own; it carries no ask over.");
+            context.BodyError("operator-request.flow-step", "A step's request is its own; it carries no ask over.");
         List<JsonElement> content = TJson.Array(context.Record.Body, "content").ToList();
         if (content.Count != 1 || TJson.Text(content[0], "kind") != "command")
-            context.Error("operator-request.flow-step", "A step's request carries one content item, of kind command: the step's exact command.");
+            context.BodyError("operator-request.flow-step", "A step's request carries one content item, of kind command: the step's exact command.");
         RecordEnvelope? run = context.RequireReference("flowStep.goal", goal, "goal");
         if (run is null || key is null)
             return;

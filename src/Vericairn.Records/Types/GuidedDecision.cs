@@ -15,7 +15,7 @@ internal static class GuidedDecision
         BodyReader? change = body.Since(2, "changeSet") ? body.Nested("changeSet", false) : null;
         if (answer is null && change is null) return;
         if (answer is null || change is null)
-            context.Error("decision.guided", "A guided decision keeps both its answer basis and its document change set.");
+            context.BodyError("decision.guided", "A guided decision keeps both its answer basis and its document change set.");
         if (answer is not null)
         {
             string? ask = answer.Ulid("ask", true);
@@ -30,7 +30,7 @@ internal static class GuidedDecision
             // into an error through the guided ordering checks; admission promotes the shared finding for a new decision.
             if (!decisionAfterRecord && at is not null && (string.CompareOrdinal(at, context.Record.At) > 0
                 || RecordParser.IsTimestamp(decided) && string.CompareOrdinal(decided, at) > 0))
-                context.Error("decision.time", "The decision time cannot follow the answer, and the answer cannot follow its recording.");
+                context.BodyError("decision.time", "The decision time cannot follow the answer, and the answer cannot follow its recording.");
             if (source is not null && at is not null && string.CompareOrdinal(at, context.Model.ById[context.Model.Chain(source)[0]].At) < 0)
                 context.Error("decision.time", "The answer time cannot precede the ask.");
         }
@@ -47,12 +47,12 @@ internal static class GuidedDecision
             string? hash = pin.Hash("hash", true);
             pin.NoOtherKeys();
             if (path is not null && (!path.StartsWith("design/", StringComparison.Ordinal) || !DocumentPatterns.IsSafePath(path) || !paths.Add(path)))
-                context.Error("decision.documents", "Guided document pins name each changed design path exactly once.");
+                context.BodyError("decision.documents", "Guided document pins name each changed design path exactly once.");
             RecordEnvelope? revision = context.RequireReference("changeSet.pins", id, "document-revision");
             if (revision is not null && (revision.ComputedHash != hash || EstateModel.BodyString(revision, "path") != path))
                 context.Error("decision.pin", "Each document pin must match the exact revision record and document path.");
         }
         if (!paths.SetEquals(documents ?? []) || paths.Count != (documents?.Count ?? 0))
-            context.Error("decision.documents", "The decision's documents must equal its complete pinned change set.");
+            context.BodyError("decision.documents", "The decision's documents must equal its complete pinned change set.");
     }
 }

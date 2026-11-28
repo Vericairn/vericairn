@@ -60,6 +60,8 @@
       "Vericairn.Cli.Tests.EstateLineCommandsTests": 0.06,
       "Vericairn.Cli.Tests.EstateVerifyCommandTests": 1.89,
       "Vericairn.Cli.Tests.EventsWatchCommandTests": 4.12,
+      "Vericairn.Cli.Tests.ExamplesJourneyTests": 1.5,
+      "Vericairn.Cli.Tests.ExamplesRegionTests": 0.02,
       "Vericairn.Cli.Tests.FlowCliJourneyTests": 0.55,
       "Vericairn.Cli.Tests.FrozenSetTests": 0.51,
       "Vericairn.Cli.Tests.GeneratedRevisionCommandTests": 0.01,

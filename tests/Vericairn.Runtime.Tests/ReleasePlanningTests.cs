@@ -287,6 +287,23 @@ public sealed class ReleasePlanningTests
     }
 
     [Fact]
+    public void WithdrawalContentRefusalNamesBothRecordsInTheBatch()
+    {
+        using var f = new ReleasePlanningFixture();
+        int before = f.Model.Records.Count;
+        string reason = "Replace the candidate. " + "ghp" + "_" + new string('a', 36);
+
+        ReleaseResponse refused = f.Api.ReleaseWithdraw(f.Withdraw with { Reason = reason });
+
+        Assert.False(refused.Ok);
+        Assert.Equal("rejected", refused.Problem!.Code);
+        Assert.StartsWith("Not written: the estate would be invalid with these records (", refused.Message, StringComparison.Ordinal);
+        Assert.Contains(refused.Problem.Findings, finding => finding.Code == "secrets.pattern" && finding.Location.StartsWith("records/release/", StringComparison.Ordinal));
+        Assert.Contains(refused.Problem.Findings, finding => finding.Code == "secrets.pattern" && finding.Location.StartsWith("records/operation/", StringComparison.Ordinal));
+        Assert.Equal(before, f.Model.Records.Count);
+    }
+
+    [Fact]
     public void BuildObservationKeepsAWithdrawalEvenWhenTheProviderShowsPublication()
     {
         using var f = new ReleasePlanningFixture();

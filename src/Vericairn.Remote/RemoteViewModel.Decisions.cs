@@ -28,9 +28,9 @@ public sealed partial class RemoteViewModel
     /// <summary>The open review and its retained original draft or submission.</summary>
     public RemoteDecisionDraft? Decision => decision;
     /// <summary>Whether the decision review replaces the home areas.</summary>
-    public bool HasDecisionReview => ShowHome && decision is not null;
+    public bool HasDecisionReview => ShowHome && !HasHandoffForm && decision is not null;
     /// <summary>The five home areas remain available behind the review.</summary>
-    public bool ShowAreas => ShowHome && !HasDecisionReview && !HasPolicyDetail;
+    public bool ShowAreas => ShowHome && !HasHandoffForm && !HasDecisionReview && !HasPolicyDetail;
     /// <summary>Drafts and original submissions retained for this exact connection.</summary>
     public IReadOnlyList<RemoteDecisionDraft> DecisionDrafts { get => decisionDrafts; private set => Set(ref decisionDrafts, value); }
     /// <summary>The stored draft to reopen. Selecting never submits it.</summary>
@@ -162,6 +162,7 @@ public sealed partial class RemoteViewModel
             nameof(DecisionQuestion), nameof(DecisionOptions), nameof(SelectedDecisionOption), nameof(DecisionMaterial), nameof(OriginalDecisionMaterial), nameof(IsAsk),
             nameof(DecisionStatement), nameof(DecisionStake), nameof(DecisionBasis), nameof(MaterialReviewed), nameof(DecisionPreview), nameof(DecisionReceipt) }) Raise(property);
         NotifyDecisionCommands();
+        NotifyHandoffCommands();
     }
 
     private string Field(string name) => decision is null ? "" : RemoteDecisionReader.Text(RemoteDecisionReader.Body(decision.Review.Subject), name) ?? "not supplied";

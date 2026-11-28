@@ -309,7 +309,7 @@ public static class EstateStatus
             text.Append("Standing agents: ").Append(standing.Count.ToString(CultureInfo.InvariantCulture)).Append('\n');
             foreach (StandingAgents.Agent agent in standing)
             {
-                text.Append("  ").Append(StandingView.Line(agent)).Append('\n');
+                text.Append("  ").Append(StandingView.Line(model, agent)).Append('\n');
             }
         }
 

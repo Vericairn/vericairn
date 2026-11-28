@@ -60,22 +60,22 @@ internal static class DispatchAuthority
             if (bounds.Count > 0) body.Error("authority.bounds", "bounds", "Bounds belong to an explicitly granted scope: this grant does not give dispatch.");
             // A principal that held a valid dispatch grant at or before this one stays a dispatcher, holding no other authority, after its
             // grant expires; one whose dispatch grant is in force is refused the same way.
-            RecordEnvelope? held = grantee is null ? null
+            RecordEnvelope? held = grantee is null || context.CheckingBody ? null
                 : Judge(context.Model).Valid.FirstOrDefault(g => EstateModel.BodyString(g, "grantee") == grantee && string.CompareOrdinal(g.At, context.Record.At) <= 0)
                 ?? OtherGrant(context.Model, grantee, context.Record, dispatch: true);
             if (held is not null)
-                body.Error("authority.dispatch", "scope", $"Principal {grantee} is a dispatcher under grant {held.Id}, during or after its term, and a dispatcher holds no other authority: it is granted dispatch alone.");
+                body.RelationshipError("authority.dispatch", "scope", $"Principal {grantee} is a dispatcher under grant {held.Id}, during or after its term, and a dispatcher holds no other authority: it is granted dispatch alone.");
             return;
         }
 
-        if (context.Format < 3) context.Error("authority.format", "A dispatch grant requires record format 3.");
+        if (context.Format < 3) context.BodyError("authority.format", "A dispatch grant requires record format 3.");
         if (PolicyRecords.Items(scopes).Any(s => s.ValueKind != JsonValueKind.String || s.GetString() != Scopes.Dispatch))
             body.Error("authority.dispatch", "scope", "A dispatch grant gives dispatch alone: a dispatcher holds no other authority.");
         if (PolicyRecords.Items(PolicyRecords.Property(body.Element, "conditions")).Any())
             body.Error("authority.dispatch", "conditions", "A dispatch grant states no prose conditions: its typed bound is all that limits it.");
         if (grantee is not null && PrincipalAt(context.Model, grantee, context.Record.At) is { } principal &&
             (EstateModel.BodyString(principal, "kind") != "service" || !OnlyService(principal)))
-            body.Error("authority.dispatch", "grantee", "A dispatch grant is made to a service principal whose only role is service, which signs unattended dispatch and nothing else.");
+            body.RelationshipError("authority.dispatch", "grantee", "A dispatch grant is made to a service principal whose only role is service, which signs unattended dispatch and nothing else.");
 
         string? expires = EstateModel.BodyString(context.Record, "expires");
         if (expires is null)
@@ -100,7 +100,7 @@ internal static class DispatchAuthority
                     if (!Identity.Ulid.IsValid(goal))
                         bound.Error("authority.bounds", "goals", "Goals are named by the id of their first revision.");
                     else if (!context.Model.ById.TryGetValue(goal, out RecordEnvelope? named) || named.Type != "goal" || context.Model.Chain(named)[0] != goal)
-                        bound.Error("authority.bounds", "goals", $"Goal {goal} is not the first revision of a goal recorded here.");
+                        bound.RelationshipError("authority.bounds", "goals", $"Goal {goal} is not the first revision of a goal recorded here.");
                 }
 
                 bound.Number("maxAssignmentsPerDay", true, 1, MaxPerDay);
@@ -110,10 +110,10 @@ internal static class DispatchAuthority
         }
 
         if (grantee is not null && OtherGrant(context.Model, grantee, context.Record, dispatch: false) is { } other)
-            body.Error("authority.dispatch", "grantee", $"Principal {grantee} holds grant {other.Id} of another scope, and a dispatcher holds no other authority.");
+            body.RelationshipError("authority.dispatch", "grantee", $"Principal {grantee} holds grant {other.Id} of another scope, and a dispatcher holds no other authority.");
         if (!shapeOnly && grantee is not null && Judge(context.Model) is var judged && judged.Shape.Contains(context.Record) && !judged.Valid.Contains(context.Record) &&
             judged.History.TryGetValue(context.Record.Id, out RecordEnvelope? earlier))
-            body.Error("authority.dispatch", "grantee", $"Principal {grantee} has a history before this grant ({earlier.Type} {earlier.Id}, dated {earlier.At}), and a dispatch grant is made only to a principal with none: no earlier grant of any scope and no assignment to it, unless it renews a valid dispatch grant. This grant gives no authority to assign, and still confines what the principal writes from its date on.");
+            body.RelationshipError("authority.dispatch", "grantee", $"Principal {grantee} has a history before this grant ({earlier.Type} {earlier.Id}, dated {earlier.At}), and a dispatch grant is made only to a principal with none: no earlier grant of any scope and no assignment to it, unless it renews a valid dispatch grant. This grant gives no authority to assign, and still confines what the principal writes from its date on.");
     }
 
     /// <summary>Set while a dispatch grant is judged for its shape alone, the history rule aside (<see cref="Judge"/>).</summary>

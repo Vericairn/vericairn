@@ -7,6 +7,7 @@
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CA1707;CA2007;CA1515</NoWarn>
+    <DefineConstants>$(DefineConstants);EXAMPLE_HARNESS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -30,6 +31,7 @@
   <ItemGroup>
     <!-- The stand-in harness: started with its marker, the test executable behaves as a coding agent's harness and exits. -->
     <Compile Include="../Vericairn.Runtime.Tests/FakeHarness.cs" Link="FakeHarness.cs" />
+    <Compile Include="../examples/**/*.Cli.cs" LinkBase="Examples" />
   </ItemGroup>
 
   <ItemGroup>

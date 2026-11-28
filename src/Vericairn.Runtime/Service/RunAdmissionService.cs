@@ -102,6 +102,7 @@ internal sealed class RunAdmissionService(
         }
 
         RunPlan plan;
+        IReadOnlyList<RepositoryConfigurationReview> configurationReviews;
         lock (gate)
         {
             List<RecordFile> files = session.Files().Concat(carried.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
@@ -125,6 +126,7 @@ internal sealed class RunAdmissionService(
             }
 
             plan = planned;
+            configurationReviews = ConfigurationReviews(model, plan);
         }
 
         RunLimits limits = RunLimits.For(Element(plan.Cap), WorkerOptions);
@@ -201,7 +203,6 @@ internal sealed class RunAdmissionService(
             configuredRoot = new WorkerConfigurationStore().ReadWorkspaceRoot();
             string root = configuredRoot ?? Path.Combine(VericairnHome.Path(), "estates", plan.Estate, "workspaces");
             string path = configuredRoot is null ? Path.Combine(root, Slug(plan.Branch)) : Path.Combine(root, plan.Estate, Slug(plan.Branch));
-            IReadOnlyList<RepositoryConfigurationReview> configurationReviews = ConfigurationReviews(session.Load(), plan);
             workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, configurationReviews);
             brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
             baseline = workspaces.Capture(workspace);
@@ -240,7 +241,7 @@ internal sealed class RunAdmissionService(
                     }
 
                     // It ran as the person, with Git at hand: the workspace must still be this branch's own repository, at the head it left.
-                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, ConfigurationReviews(session.Load(), plan));
+                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, configurationReviews);
                     if (!string.Equals(rechecked.Path, workspace.Path, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                     {
                         throw new ProviderRefusedException($"The branch's workspace moved from '{workspace.Path}' to '{rechecked.Path}' while its setup command ran.");
@@ -355,10 +356,24 @@ internal sealed class RunAdmissionService(
             if (WorkspaceRootProblem(configuredRoot) is string rootProblem)
                 return Refused(RunProblem(pending, "not-started", "refused", rootProblem + " Nothing was recorded."));
             EstateModel model = recordAccess.LoadWith(carried);
+            // From 0.9.5 (FIX-184): the workspace was accepted under the configuration reviews judged with the plan. A review withdrawn
+            // or superseded since then refuses the run here, under the gate where its intent is written.
+            List<RepositoryConfigurationReview> currentReviews = ConfigurationReviews(model, plan);
+            if (configurationReviews.Any(review => !currentReviews.Contains(review)))
+            {
+                return Refused(RunProblem(pending, "not-started", "refused", "A repository configuration review changed while the workspace was prepared. Start the run again, so the workspace is judged under the current reviews. Nothing was recorded."));
+            }
+
             RecordEnvelope? goal = AgentRuns.GoalAt(model, plan.Goal);
             if (AssignmentRefusal(model, plan.Assignment, plan.Key) is string assignmentRefusal)
             {
                 return Refused(RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded."));
+            }
+
+            if (WorkView.OrderOfAssignment(model, plan.Assignment) is RecordEnvelope order
+                && AssignmentPathRefusal(model, model.Latest(order), plan.Assignment) is string pathRefusal)
+            {
+                return Refused(RunProblem(pending, "not-started", "refused", pathRefusal + " Nothing was recorded."));
             }
 
             var intentView = RepositoryView.For(model, Providers, session.Manifest.Estate);
@@ -485,10 +500,11 @@ internal sealed class RunAdmissionService(
             else
             {
                 // Routing's assignment and the run's intent are stored together, or neither is.
-                (AuthoredRecord? authored, string? unsigned) = recordAccess.AuthorLocked(draft, model);
+                (AuthoredRecord? authored, Problem? refusal) = recordAccess.AuthorLocked(draft, model);
                 if (authored is null)
                 {
-                    return Refused(RunProblem(pending, "not-started", "refused", $"Not recorded: {unsigned} Nothing was recorded."));
+                    string message = $"Not recorded: {refusal!.Message} Nothing was recorded.";
+                    return Refused(new RunResponse(pending, "not-started", message, false, Problem: refusal with { Message = message }));
                 }
 
                 (IReadOnlyList<RecordWritten> stored, Problem? problem) = recordAccess.StoreTogetherLocked([routed, authored], $"routing's assignment of work order {plan.Key} to {plan.AgentName} and the intent of its run {run}", routed.Envelope.Subject?.Id);
@@ -672,6 +688,38 @@ internal sealed class RunAdmissionService(
             : null;
     }
 
+    // A standing occurrence names its occurrence key; other flow assignments name the step directly. Both run only within the
+    // current declarations for the step they carry, including when started directly by assignment.
+    private static string? AssignmentPathRefusal(EstateModel model, RecordEnvelope order, RecordEnvelope assignment)
+    {
+        RecordEnvelope? goal;
+        FlowStep? step;
+        if (StandingAgents.KeyOf(assignment) is not null)
+        {
+            goal = StandingAgents.StandingOf(model, order);
+            if (goal is null || StandingAgents.Resolve(model, goal).Flow is not FlowDefinition flow || StandingAgents.WorkStep(flow) is not FlowStep work)
+            {
+                return $"{FlowPermissions.Code}: assignment {assignment.Id}'s current standing flow must resolve to its work step before it can run.";
+            }
+
+            step = work;
+        }
+        else if (FlowRuns.StepOf(assignment) is FlowRuns.StepRef named && FlowRuns.RunOf(model, order) is RecordEnvelope run
+            && FlowRuns.Resolve(model, run).Flow?.Step(named.Key) is FlowStep declared)
+        {
+            goal = run;
+            step = declared;
+        }
+        else
+        {
+            return null;
+        }
+
+        return FlowPermissions.Carried(FlowPermissions.For(model, goal, order, step), assignment) is null
+            ? $"{FlowPermissions.Code}: {FlowPermissions.HeldMessage(assignment, step.Key)}"
+            : null;
+    }
+
     /// <summary>The overlaps of a run's assignment with the active assignments, each a sentence (from 0.9.4, CODE-73); null when none.</summary>
     private static List<string>? Overlaps(EstateModel model, RecordEnvelope assignment, RepositoryView view)
     {
@@ -720,13 +768,9 @@ internal sealed class RunAdmissionService(
             return (null, assignmentRefusal, null);
         }
 
-        // From 0.9.5 (FIX-166): a run's flow step runs only within the step's current path declarations, as goal step checks, however
-        // the run is started. A standing agent's step is not judged here (design/standing-agents.md keeps its brief).
-        if (FlowRuns.StepOf(assignment) is FlowRuns.StepRef pathStep && FlowRuns.RunOf(model, order) is RecordEnvelope pathRun
-            && !StandingAgents.IsStanding(pathRun) && FlowRuns.Resolve(model, pathRun).Flow?.Step(pathStep.Key) is FlowStep declared
-            && FlowPermissions.Carried(FlowPermissions.For(model, pathRun, order, declared), assignment) is null)
+        if (AssignmentPathRefusal(model, order, assignment) is string pathRefusal)
         {
-            return (null, $"{FlowPermissions.Code}: assignment {assignment.Id} of flow step {pathStep} needs a brief with permitted paths within the step's current path declarations; take the step again with 'vericairn goal step'.", null);
+            return (null, pathRefusal, null);
         }
 
         if (!Strings(assignment.Body.GetProperty("brief"), "permittedChanges").Any(entry => PermittedPaths.Pattern(entry) is not null))
@@ -753,7 +797,10 @@ internal sealed class RunAdmissionService(
         }
 
         IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
-        if (!model.Current("device").Any(d => EstateModel.BodyString(d, "principal") == request.Agent && SignatureChecks.IsAdmitted(model, d) && stores.Any(s => s.Has(model.Chain(d)[0]))))
+        // A token device's held key is reserved for its authorized MCP client.
+        if (!model.Current("device").Any(d => EstateModel.BodyString(d, "principal") == request.Agent &&
+            !Strings(d.Body, "profiles").Contains("token", StringComparer.Ordinal) && SignatureChecks.IsAdmitted(model, d) &&
+            stores.Any(s => s.Has(model.Chain(d)[0]))))
         {
             return (null, $"Agent {PrincipalName(model, request.Agent)} ({request.Agent}) has no admitted device whose key this machine holds, so its MCP server would list only the read-only tools and it could record no attempt and no result. Create its device here and have it admitted first.", null);
         }

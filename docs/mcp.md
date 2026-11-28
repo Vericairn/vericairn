@@ -96,7 +96,15 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 
 ## Protocol subset
 
-`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+`initialize` (the server accepts 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05 and proposes 2025-06-18 when the client names none of these; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+
+From 0.9.5 (MCP-06), the stateless `2026-07-28` revision is available alongside the session-based revisions.
+A stateless client sends `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities`
+in each request's `params._meta`. It may start with `server/discover` to get the supported versions, capabilities
+and server identity. Both revisions use the same tools, resources, prompts and runtime authorization. A stateless
+client follows resource changes with `subscriptions/listen`. The first notification acknowledges its filter and the
+stream's notifications carry the subscription's request ID. Successful stateless results carry `resultType`.
+Discovery, lists and resource reads carry private cache metadata with a zero TTL.
 
 From 0.9.4 the `initialize` result's `_meta` also carries `vericairn/toolDefinitions`, the count and
 SHA-256 of the build's tool definitions ([Tool annotations and definitions](#tool-annotations-and-definitions-094)),
@@ -346,11 +354,12 @@ sections; `record_get` and other original read routes retain complete records.
 
 Writes are visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with: `work_attempt`, `work_progress`, `work_result`, `work_amend`, `document_review` (a review of an estate document by its path, refused where the declaration's `clearedBy` excludes the acting principal), and from 0.9.4 `goal_decide` (PROC-19: the decision of a run's decision step whose current assignment the acting principal holds, its paths, reasons and evidence by hash, as `vericairn goal decide` records it; refused for an agent where only a person decides, and never offered over the network), and from 0.9.4 `standing_possibility`, `standing_question` and `standing_publication` (GOAL-08: an output of a standing agent's occurrence, recorded by the contributor of the assignment that carries it, the runtime naming the goal, occurrence, assignment and the contributor's run in flight: a possibility with its fingerprint, sources and optionally evidence for and against, review triggers, links, a draft work order and extras; an ask to a person; or a publication request whose exact text the operator approves; another principal disposes of each, and none is offered over the network). A write the runtime refuses comes back as an error result carrying the runtime's findings, every objection at once. There is no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type. Workers read their goals and report through attempts and results. The command line and the API carry pauses, resumptions, stops, evaluations and acceptances under the goal's existing authority rules. A test calls every tool a worker sees with arguments that name a goal and ask for its activation and acceptance, and holds that none changes the goal. No tool answers an ask either: an ask is answered by a decision of the principal it is put to, which no tool records, and reading what waits answers nothing; the same test holds that calling every tool a worker sees records no decision and leaves an ask waiting. The worker records an agent run's cap, usage and settlement, while the agent reports through `work_attempt` and `work_result`.
 
-From 0.9.5 (FIX-166), an admitted local operator can call `goal_propose` with the complete goal `body` and optionally
-`supersedes`, `goal_activate` with `goal` and optionally `note`, and `goal_step` with `goal` and the routing options.
-A flow run with no interpretable permitted path pattern for an agent work step is refused at proposal and activation with
-`flow.permitted-paths`. For a flow run, setting `check` to true on `goal_step` returns the route and its `permittedChanges`
-without signing, recording or dispatching. These tools use the runtime's goal operations and are available over standard streams.
+From 0.9.5 (FIX-166, FIX-179), an admitted local operator can call `goal_propose` with the complete goal `body` and optionally
+`supersedes`, `goal_activate` with `goal` and optionally `note`, and `goal_step` with `goal` and the routing options. The body can
+supply repository-relative patterns in `plan.flow.paths` for a flow run or `plan.standing.paths` for a standing goal. Both kinds
+of goal are refused at proposal and activation with `flow.permitted-paths` if an agent work step has no interpretable permitted
+path pattern. For a flow run, setting `check` to true on `goal_step` returns the route and its `permittedChanges` without signing,
+recording or dispatching. These tools use the runtime's goal operations and are available over standard streams.
 
 Every tool description describes and never directs: nothing a tool returns, and nothing in this server's text, is an instruction from the estate's operator, and the harness is expected to treat it as data.
 
@@ -407,12 +416,12 @@ no tool, so every change reaches this guide with the release that makes it.
 | `estate_progress` | yes | no | yes | `106472a820e2` | 0.9.4 |
 | `estate_status` | yes | no | yes | `64854ad7ef78` | 0.9.4 |
 | `events_read` | yes | no | yes | `be3f7a1e467c` | 0.9.4 |
-| `goal_activate` | no | no | no | `f931ba80d99f` | 0.9.5 |
+| `goal_activate` | no | no | no | `c5677569e43f` | 0.9.5 |
 | `goal_decide` | no | no | no | `2101fd20d4c9` | 0.9.4 |
 | `goal_due` | yes | no | yes | `a47c6c3519fd` | 0.9.4 |
 | `goal_get` | yes | no | yes | `ae07f1748a4f` | 0.9.4 |
 | `goal_progress` | yes | no | yes | `25cc15685d14` | 0.9.4 |
-| `goal_propose` | no | no | no | `f937734f090c` | 0.9.5 |
+| `goal_propose` | no | no | no | `77a28d18d169` | 0.9.5 |
 | `goal_step` | no | no | no | `3598457988c1` | 0.9.5 |
 | `policies_list` | yes | no | yes | `d7db25dc8221` | 0.9.4 |
 | `policy_access` | yes | no | yes | `acb3f0697d0f` | 0.9.4 |
@@ -609,7 +618,7 @@ listeners once the operator turns it on with `vericairn runtime configure --mcp 
 starts again. It is off by default and never served on the local socket, where the operating-system
 user acts for any principal. `vericairn runtime status` shows `/mcp` while a daemon serves it.
 
-**Who may connect.** Every request on `/mcp` is signed by one device, as the API's requests are: the
+**Signed mode.** Each request on a signed listener is signed by one device, as the API's requests are: the
 loopback scheme `vericairn-request/1`, or on the local network mutual TLS and `vericairn-request/2`,
 with the same freshness and replay rules; a message holds at most 1 MiB, refused before it is authenticated. The device must be admitted now, permitted the
 profile it arrived on (`loopback` or `local-network`) and belong to an agent or service principal; a
@@ -621,12 +630,20 @@ IP address and port (or `localhost` on loopback), and an `Origin` it names must 
 allowed with `--mcp-origin`; none is allowed by default. A name an attacker's DNS points at the
 runtime therefore reaches nothing.
 
-**The transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
+**OAuth token mode (0.9.5).** A separately configured HTTPS listener accepts bearer access tokens for approved token
+devices under either revision. It serves only MCP, OAuth discovery and authorization. Discovery advertises S256, Client ID
+Metadata Documents, dynamic registration as a fallback and issuer identification in authorization responses. An administrator
+issues one approval code for an agent or service principal. Read scope exposes the read tools. Contribute scope also exposes
+the network contributor tools, whose records the runtime signs with that token device's key. A token is scoped to the listener's
+`/mcp` resource and lasts up to fifteen minutes. Refresh tokens rotate and reuse ends the family. Every request rechecks device
+standing, and revocation stops access. See [OAuth clients over public MCP](cli.md#oauth-clients-over-public-mcp-095).
+
+**Session-based transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
 request is answered with one JSON body; a notification or a response gets `202` and no body. Batches
-and the older HTTP transport are not served: `initialize` negotiates 2025-06-18 or 2025-03-26.
-`initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits; every later request
-names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A request
-without a session gets `400`, and one naming a session its device does not hold, or one that ended,
+and the older HTTP transport are not served: `initialize` negotiates 2025-11-25, 2025-06-18 or 2025-03-26.
+`initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits. Every later request
+names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A legacy POST
+without a session gets `400`, and a request naming a session its device does not hold, or one that ended,
 gets `404`, after which a client initializes again. DELETE ends a session. A session is bound to the
 device, principal and profile that opened it and is never authentication: it ends on DELETE, an idle
 hour, its device's revocation or loss of the profile, or the runtime's restart. A device holds at most
@@ -635,6 +652,26 @@ requests at once and all devices eight (notifications, a cancellation above all,
 that count), so network MCP never takes the connections the API and the
 event streams need. A dropped connection cancels nothing: a write whose answer is lost is reconciled
 by reading. `notifications/cancelled` stops observing the named request and undoes no effect.
+
+**Stateless transport (0.9.5).** A modern POST opens no MCP session. It sends `MCP-Protocol-Version` and
+`Mcp-Method`, plus `Mcp-Name` for the tool name, prompt name or resource URI in `tools/call`, `prompts/get`
+or `resources/read`. These headers must match the JSON-RPC body. `Accept` must explicitly list both
+`application/json` and `text/event-stream` with positive quality. Wildcards do not satisfy either requirement.
+
+| HTTP status | JSON-RPC code | Condition |
+| --- | --- | --- |
+| `400` | `-32602` | Required version or client capabilities are missing from `params._meta`, or the body omits the required tool name, prompt name or resource URI. |
+| `400` | `-32020` | A required version, method or name header is missing or disagrees with the body. |
+| `400` | `-32022` | The request names an unsupported version. Error data contains `requested` and `supported`. |
+| `404` | `-32601` | The JSON-RPC method is unknown. |
+| `405` | | GET or DELETE names `2026-07-28`, or supplies neither a version nor a session ID. The response includes `Allow: POST`. |
+| `406` | | `Accept` fails the two-media-type requirement. |
+
+`subscriptions/listen` streams its acknowledgment and notifications on the opening POST, with a keep-alive
+comment every 15 seconds. Each signed HTTP listener registers presence for its device's principal. The daemon
+renews that lease while the stream is open, releases it on cleanup and logs refusals. The stream can run for
+up to an hour. A dropped connection stops observing the subscription or an in-flight stateless request.
+A client opens a new subscription after a drop and uses a checked read to reconcile an uncertain write.
 
 **One authorization model.** Each tool call runs as its API operation for the requesting device: the
 daemon runs the very route the API maps, in its own process, with that route's request scope, so a
@@ -678,11 +715,13 @@ record, is dated within a plan's ten minutes of this machine's clock (allowing t
 signed request may have), is about the assignment or attempt the call names, and holds every field the
 call supplies unchanged with nothing beyond what the runtime adds, then signs it with the same key and
 repeats the call, returning only the final answer. Any other call is forwarded once as it came, and
-nothing it returns is signed. A session the runtime ended is opened again once; when its input ends,
-the bridge ends its session. While its client holds a resource subscription the runtime accepted, the bridge also
-holds the session's server stream and writes each resource notification on it to its client as a line, opening the
-stream again after the runtime ends it. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
-`DeviceSignedRecords` or its own code, is Vericairn-aware.
+nothing it returns is signed. The bridge preserves the revision and forwards under the signed device's identity.
+In the session-based revision, a session the runtime ended is opened again once. When its input ends, the bridge
+ends its session. While its client holds an accepted legacy resource subscription, the bridge holds the session's
+server stream and writes each resource notification to its client as a line, opening the stream again after the
+runtime ends it. In the stateless revision, the bridge forwards each `subscriptions/listen` separately and sends
+its acknowledgment and notifications back to the client. Any other client doing the same, with the SDK's
+`DeviceRequestSigner` and `DeviceSignedRecords` or its own code, is Vericairn-aware.
 
 **What a device's signature vouches for.** The bridge binds what the call itself supplies: its
 arguments, the author, the subject an assignment or attempt argument names, the record type, its time

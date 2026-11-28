@@ -882,6 +882,44 @@ public class WorkerTests
     }
 
     [Fact]
+    public void ReviewedContainmentTightensTheGraceOfAnAlreadyTransmittedCancel()
+    {
+        using var run = new RunEstate(options: new WorkerOptions
+        {
+            Clock = new WorkerClock(), Heartbeat = TimeSpan.FromMilliseconds(50), StopWait = TimeSpan.FromMilliseconds(200),
+        });
+        RunResponse started = run.Start("claude-code", "ignore-stop", run.Report("tightened"));
+        Assert.True(started.Ok, started.Message);
+        run.WaitUntil(() => File.Exists(run.Report("tightened")) && run.Row(started.Run).Observed);
+
+        string by = run.Estate.OperatorId;
+        const string prior = "Earlier graceful cancel.";
+        Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(by, prior, 3600)).Ok);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        RunRow reviewed = run.Row(started.Run);
+        Assert.Equal(prior, reviewed.Stop?.Reason);
+        Assert.Null(reviewed.Stop?.EscalatedAt);
+
+        var containment = new RunStopRequest(by, "Tighten the stop now.", 0)
+        {
+            ExpectedOperationHash = reviewed.OperationHash,
+            ExpectedStopReason = prior,
+        };
+        RunStopResponse stale = run.Service.RunStop(started.Run, containment with { ExpectedStopReason = "Different earlier stop." });
+        Assert.False(stale.Ok);
+        Assert.Equal(prior, run.Row(started.Run).Stop?.Reason);
+
+        RunStopResponse tightened = run.Service.RunStop(started.Run, containment);
+        Assert.True(tightened.Ok, tightened.Message);
+        RunStop stop = Assert.IsType<RunStop>(run.Settled(started.Run).Stop);
+        Assert.Equal(containment.Reason, stop.Reason);
+        Assert.Contains("zero-grace containment", stop.Transmission, StringComparison.Ordinal);
+        Assert.NotNull(stop.EscalatedAt);
+        Assert.NotNull(stop.ContainedAt);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void AStopIsTransmittedThoughTheRunsStateIsBeingReplacedWhenItIsAsked()
     {
         using var run = new RunEstate();
@@ -1104,6 +1142,37 @@ public class WorkerTests
         Assert.Empty(run.Service.Records("operation"));
         Assert.False(File.Exists(run.Report("never")));
         Assert.False(File.Exists(run.Report("paused")));
+    }
+
+    [Fact]
+    public void AnMcpTokenDeviceDoesNotGiveTheWorkerALocalSigningDevice()
+    {
+        using var run = new RunEstate(keepOperatorKey: true, recordFormat: 3);
+        string builder = run.Estate.BuilderId;
+        string op = run.Estate.OperatorId;
+        var keys = new FileKeyStore(VericairnHome.Path());
+        PairingAuthority authority = Assert.IsType<PairingAuthority>(run.Service.McpTokenIssuer(builder, op).Authority);
+        McpTokenDevice device = Assert.IsType<McpTokenDevice>(run.Service.CreateMcpTokenDevice(builder, authority, keys).Device);
+        try
+        {
+            keys.Remove(run.BuilderDevice);
+            keys.Remove(run.OperatorDevice);
+            Assert.True(keys.Has(device.Device));
+            Assert.Equal(device, run.Service.CurrentMcpTokenDevice(device.Device));
+            string report = run.Report("only-token-device");
+            var settings = new Dictionary<string, string> { ["command"] = FakeHarness.Setting("claude", report) };
+
+            RunResponse refused = run.Service.RunPrepare(new RunStartRequest(run.Assignment, "generic", builder, op, run.Resource, Settings: settings));
+
+            Assert.False(refused.Ok);
+            Assert.Contains("has no admitted device whose key this machine holds", refused.Message, StringComparison.Ordinal);
+            Assert.Empty(run.Service.Records("operation"));
+            Assert.False(File.Exists(report));
+        }
+        finally
+        {
+            keys.Remove(device.Device);
+        }
     }
 
     [Fact]

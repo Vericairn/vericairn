@@ -30,7 +30,19 @@ public sealed partial class RemoteViewModel
     /// <summary>The selected assignment.</summary>
     public AssignmentItem? SelectedAssignment { get => selectedAssignment; set { if (Set(ref selectedAssignment, value)) NotifyInspectionCommands(); } }
     /// <summary>The current or explicitly cached detail.</summary>
-    public RemoteWorkDetail? WorkDetail { get => workDetail; private set { if (Set(ref workDetail, value)) { Raise(nameof(HasWorkDetail)); Raise(nameof(ShowWorkList)); } } }
+    public RemoteWorkDetail? WorkDetail
+    {
+        get => workDetail;
+        private set
+        {
+            if (!Set(ref workDetail, value)) return;
+            InterventionTarget = null;
+            Raise(nameof(InterventionTargets));
+            Raise(nameof(HasWorkDetail));
+            Raise(nameof(ShowWorkList));
+            NotifyHandoffCommands();
+        }
+    }
     /// <summary>Whether a detail has been observed.</summary>
     public bool HasWorkDetail => WorkDetail is not null;
     /// <summary>The work list is replaced by the opened detail until the reader goes back.</summary>
@@ -126,7 +138,7 @@ public sealed partial class RemoteViewModel
 
     private static string StopObservation(RunStop stop) => $"Stop {stop.State}: requested {stop.RequestedAt} by {stop.RequestedBy}; {stop.Reason ?? "no reason recorded"}"
         + (stop.TransmittedAt is null ? "" : $"\nTransmitted {stop.TransmittedAt}: {stop.Transmission}")
-        + (stop.AcknowledgedAt is null ? "" : $"\nAcknowledged by the worker {stop.AcknowledgedAt}: {stop.Acknowledgment}")
+        + (stop.AcknowledgedAt is null ? "" : $"\nHarness acknowledgment observed {stop.AcknowledgedAt}: {stop.Acknowledgment}")
         + (stop.EscalatedAt is null ? "" : $"\nEscalated {stop.EscalatedAt}: {stop.Escalation}")
         + (stop.ContainedAt is null ? "\nContainment not observed." : $"\nContainment observed {stop.ContainedAt}");
 

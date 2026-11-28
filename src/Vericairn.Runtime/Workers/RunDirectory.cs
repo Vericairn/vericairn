@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
@@ -14,7 +15,12 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="RequestedBy">The principal that asked, or worker for a cap the run reached.</param>
 /// <param name="Reason">Why, when given.</param>
 /// <param name="GraceSeconds">How long the harness has to stop after the stop is transmitted before its process tree is killed; the worker's default when null.</param>
-public sealed record StopRequest(string RequestedAt, string RequestedBy, string? Reason = null, int? GraceSeconds = null);
+public sealed record StopRequest(string RequestedAt, string RequestedBy, string? Reason = null, int? GraceSeconds = null)
+{
+    /// <summary>The reason identifying a pending stop whose grace period this containment request ends.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SupersedesReason { get; init; }
+}
 
 /// <summary>What the worker supervising a run on this machine has observed, written as it observes it.</summary>
 public sealed class RunObservedState
@@ -130,6 +136,8 @@ public sealed class RunDirectory
 
     /// <summary>The stop asked of the run.</summary>
     public string StopRequestFile => System.IO.Path.Combine(Path, "stop-request.json");
+
+    private string ContainmentRequestFile => System.IO.Path.Combine(Path, "containment-request.json");
 
     /// <summary>The file the worker creates to transmit a stop, which the harness is told of in VERICAIRN_STOP_FILE.</summary>
     public string StopFile => System.IO.Path.Combine(Path, "stop");
@@ -371,7 +379,23 @@ public sealed class RunDirectory
     internal void TransmitStop(StopRequest request) => WriteWhole(StopFile, request);
 
     /// <summary>The stop asked of the run, or null when absent. An unreadable request throws after bounded retries of sharing or access failures.</summary>
-    public StopRequest? ReadStop() => ReadJson<StopRequest>(StopRequestFile);
+    public StopRequest? ReadStop() => ReadContainment() ?? ReadJson<StopRequest>(StopRequestFile);
+
+    internal StopRequest? ReadContainment() => ReadJson<StopRequest>(ContainmentRequestFile);
+
+    // The original stop is immutable. Only one follow-on containment may take precedence.
+    internal StopRequest RequestContainment(StopRequest request)
+    {
+        try
+        {
+            WriteWhole(ContainmentRequestFile, request, overwrite: false);
+            return request;
+        }
+        catch (IOException) when (File.Exists(ContainmentRequestFile))
+        {
+            return ReadContainment() ?? throw new IOException("The existing containment request could not be read.");
+        }
+    }
 
     /// <summary>Asks the run to stop; the first completely published request stands and a later one changes nothing. Returns the request that stands.</summary>
     public StopRequest RequestStop(StopRequest request)
@@ -385,7 +409,7 @@ public sealed class RunDirectory
         }
         catch (IOException) when (File.Exists(StopRequestFile))
         {
-            return ReadStop() ?? throw new IOException("The existing stop request could not be read.");
+            return ReadJson<StopRequest>(StopRequestFile) ?? throw new IOException("The existing stop request could not be read.");
         }
     }
 

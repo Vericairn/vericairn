@@ -44,7 +44,11 @@ public sealed record AssignmentItem(string Key, string Contributor, string State
 }
 
 /// <summary>A product of the estate, as its record names it.</summary>
-public sealed record ProductItem(string Name, string Id);
+public sealed record ProductItem(string Name, string Id)
+{
+    /// <summary>The observed original product revision for desktop handoff.</summary>
+    public string? Hash { get; init; }
+}
 
 /// <summary>The runtime this phone reaches, as its connection and last check describe it.</summary>
 public sealed record NodeView(string Runtime, string Address, string Estate, string ActingAs, string Device, string Profiles, string PairedAt, string State, string Message, string LastCurrent);
@@ -89,6 +93,9 @@ public sealed partial class RemoteViewModel : Observable
         InitializeActCommands();
         InitializeInspectionCommands();
         InitializePolicyCommands();
+        InitializeInterventionCommands();
+        InitializeNodeCommands();
+        InitializeHandoffCommands();
         foreach (RuntimeConnection connection in connections.List())
         {
             Estates.Add(Restore(connection));
@@ -99,6 +106,8 @@ public sealed partial class RemoteViewModel : Observable
         pairing = Estates.Count == 0;
         selected = Estates.FirstOrDefault();
         RestoreDecisions();
+        RestoreInterventions();
+        RestorePendingHandoffMessage();
         Show(selected);
     }
 
@@ -121,6 +130,12 @@ public sealed partial class RemoteViewModel : Observable
         set
         {
             if (!Set(ref selected, value)) return;
+            SetHandoff(null);
+            RestorePendingHandoffMessage();
+            handoffsCurrent = false;
+            nodesCurrent = false;
+            SelectedProduct = null;
+            RestoreInterventions();
             SetDecision(null);
             SetPolicyDetail(null);
             SetAnswerChoices([], false);
@@ -143,7 +158,7 @@ public sealed partial class RemoteViewModel : Observable
     public bool Pairing
     {
         get => pairing;
-        set { if (Set(ref pairing, value)) { Raise(nameof(ShowHome)); Raise(nameof(ShowAreas)); Raise(nameof(HasDecisionReview)); Raise(nameof(HasPolicyDetail)); Raise(nameof(ObservationUnavailable)); CancelPairingCommand.NotifyCanExecuteChanged(); } }
+        set { if (Set(ref pairing, value)) { Raise(nameof(ShowHome)); Raise(nameof(ShowAreas)); Raise(nameof(HasHandoffForm)); Raise(nameof(HasDecisionReview)); Raise(nameof(HasPolicyDetail)); Raise(nameof(ObservationUnavailable)); CancelPairingCommand.NotifyCanExecuteChanged(); } }
     }
 
     /// <summary>Whether the home is shown.</summary>
@@ -167,6 +182,9 @@ public sealed partial class RemoteViewModel : Observable
             NotifyDecisionCommands();
             NotifyAnswerCommands();
             NotifyActCommands();
+            NotifyInterventionCommands();
+            NotifyHandoffCommands();
+            CheckWorkersCommand?.NotifyCanExecuteChanged();
         }
     }
 
@@ -299,9 +317,6 @@ public sealed partial class RemoteViewModel : Observable
     /// <summary>What Nodes means, and does not.</summary>
     public static string NodesNote => "This is the runtime this phone reaches. A healthy connection here says nothing about workers running on other machines.";
 
-    /// <summary>Where to prepare the supported policy context and other desktop tasks.</summary>
-    public static string HandoffsLater => "Desktop task delivery and opening are not in Remote yet. Open a policy or duty subject in Attention to prepare its exact desktop context, then continue in Workbench. A context package grants no authority and opening it completes no work.";
-
     /// <summary>Pairs with a runtime.</summary>
     public AsyncCommand PairCommand { get; }
 
@@ -385,6 +400,9 @@ public sealed partial class RemoteViewModel : Observable
         if (Selected is not RemoteEstate estate) return;
         Busy = true;
         estate.Current = false;
+        nodesCurrent = false;
+        handoffsCurrent = false;
+        SetIntervention(null);
         detailCurrent = false;
         policyCurrent = false;
         NotifyPolicy();
@@ -410,7 +428,13 @@ public sealed partial class RemoteViewModel : Observable
                 AttentionResponse observedAttention = await estate.Client.AttentionGetAsync(estate.Connection.Principal, CancellationToken.None).ConfigureAwait(true);
                 CommunicationProfile profile = await estate.Client.CommunicationAsync(estate.Connection.Principal, cancellationToken: CancellationToken.None).ConfigureAwait(true);
                 estate.Observation = new(response, observedAt, observedProducts, observedAttention, profile, estate.Observation?.Details ?? new Dictionary<string, RemoteWorkDetail>())
-                { PolicyDetails = estate.Observation?.PolicyDetails ?? new Dictionary<string, RemotePolicyDetail>() };
+                {
+                    PolicyDetails = estate.Observation?.PolicyDetails ?? new Dictionary<string, RemotePolicyDetail>(),
+                    WorkerRuns = estate.Observation?.WorkerRuns,
+                    WorkersAsOf = estate.Observation?.WorkersAsOf,
+                    DesktopHandoffs = estate.Observation?.DesktopHandoffs,
+                    HandoffsAsOf = estate.Observation?.HandoffsAsOf,
+                };
                 estate.Current = true;
                 Keep(estate);
             }
@@ -491,6 +515,8 @@ public sealed partial class RemoteViewModel : Observable
                 estate.Connection.Observed?.State == ConnectionStates.Denied ? ConnectionStates.Denied : ConnectionStates.Unavailable;
             ShowNode(estate, state, estate.Connection.Observed?.Message ?? string.Empty);
         }
+        ShowWorkers();
+        ShowHandoffs();
         NotifyInspectionCommands();
     }
 
@@ -512,7 +538,7 @@ public sealed partial class RemoteViewModel : Observable
             JsonElement body = product.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
             string? name = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
             string id = product.Envelope.TryGetProperty("id", out JsonElement i) && i.ValueKind == JsonValueKind.String ? i.GetString() ?? "?" : "?";
-            items.Add(new ProductItem(name ?? id, id));
+            items.Add(new ProductItem(name ?? id, id) { Hash = product.Hash });
         }
 
         return items;

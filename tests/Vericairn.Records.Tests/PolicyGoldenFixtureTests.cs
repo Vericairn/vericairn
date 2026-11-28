@@ -77,6 +77,11 @@ public class PolicyGoldenFixtureTests
         Assert.False(lineModel.Findings.HasErrors, string.Join('\n', lineModel.Findings));
         // A run's assignment names its flow step and pins its inputs.
         using FlowFixture flows = FlowFixture.RecordedFixture();
+        EstateModel beforePause = flows.Estate.Load();
+        RecordEnvelope activeGoal = beforePause.Current("goal").First(goal => GoalRules.Status(beforePause, goal) == "active");
+        RecordEnvelope active = GoalRules.Statuses(beforePause, activeGoal)[^1];
+        flows.Estate.Add("goal-status", flows.Estate.OperatorId,
+            $$"""{"status":"paused","note":"Paused from the phone.","activeStatusHash":"{{active.ComputedHash}}"}""", activeGoal.Reference);
         EstateModel flowModel = flows.Estate.Load();
         Assert.False(flowModel.Findings.HasErrors, string.Join('\n', flowModel.Findings));
         // A settled agent run keeps the searches its agent made through the run's MCP server.

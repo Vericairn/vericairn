@@ -363,7 +363,7 @@ public sealed partial class EstateService
         {
             ["outcome"] = Clip($"{orderKey} occurrence {occurrence.Key}: {step.Title}, the {step.Kind} step of flow {flow.Pin.Id} {flow.Pin.Version} that standing agent {EstateModel.BodyString(goal, "title")} carries once for {occurrence.Summary}, as its {step.Role}.{(step.Action is null ? string.Empty : " " + step.Action)}{records}{outputsCaps}{role}", 4000),
             ["sources"] = sources,
-            ["permittedChanges"] = new JsonArray(Strings(order.Body, "scope").Select(s => (JsonNode)Clip(s, 2000)).ToArray()),
+            ["permittedChanges"] = PathArray(Permitted(model, goal, order, step)),
             ["prohibitedEffects"] = new JsonArray(constraints.Select(c => (JsonNode)Clip(c, 2000)).ToArray()),
             ["workspace"] = new JsonArray(Clip(workspace, 500)),
             ["limits"] = new JsonArray(Clip($"within each run's caps, which goal {goal.Id} grants: {perRun}{period}", 2000)),

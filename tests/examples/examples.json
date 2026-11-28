@@ -1,0 +1,57 @@
+{
+  "format": "vericairn.examples/1",
+  "examples": [
+    {
+      "key": "E1",
+      "name": "The software release flow on tally",
+      "journeys": ["J73", "J49", "J162"],
+      "journey": null,
+      "guideRegion": null,
+      "repositories": [
+        {
+          "name": "Vericairn/vericairn-example-estate",
+          "commit": "35e1723760a8123ff37b955ecbd040818fd8571e",
+          "estate": true
+        }
+      ],
+      "release": "0.9.3",
+      "guidedSteps": null,
+      "expectedReadFindings": [
+        {
+          "repository": "Vericairn/vericairn-example-estate",
+          "commit": "35e1723760a8123ff37b955ecbd040818fd8571e",
+          "severity": "error",
+          "code": "readme.relative-link",
+          "location": "README.md:docs/registers/decisions/",
+          "reason": "This published pin links to a decisions register directory that the commit does not contain."
+        }
+      ],
+      "legs": ["read"],
+      "platforms": ["linux", "macos", "windows"],
+      "liveLaunchers": []
+    },
+    {
+      "key": "E3",
+      "name": "A service request on the starter flow",
+      "journeys": ["J160"],
+      "journey": "e3-services.json",
+      "guideRegion": "docs/templates.md",
+      "repositories": [],
+      "release": null,
+      "guidedSteps": null,
+      "expectedReadFindings": [],
+      "legs": ["tier1", "tier2"],
+      "variants": ["agents"],
+      "pending": [
+        {
+          "id": "agent-exposure-verdict",
+          "after": ["RUN-06", "GOAL-15"],
+          "steps": ["preview-draft"],
+          "assert": "In tier 2, assert operation.exposure for uncovered workspace history alongside the exact path:appointments/** brief."
+        }
+      ],
+      "platforms": ["linux", "macos", "windows"],
+      "liveLaunchers": []
+    }
+  ]
+}

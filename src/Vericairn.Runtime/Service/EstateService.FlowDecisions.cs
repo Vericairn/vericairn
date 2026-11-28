@@ -80,10 +80,10 @@ public sealed partial class EstateService
             var authored = new List<AuthoredRecord>();
             foreach (RecordDraft draft in new[] { kinding, attempting }.OfType<RecordDraft>())
             {
-                (AuthoredRecord? record, string? reason) = AuthorLocked(draft, model);
+                (AuthoredRecord? record, Problem? reason) = AuthorLocked(draft, model);
                 if (record is null)
                 {
-                    return Refuse(reason!);
+                    return WriteOutcome.Fail(reason!);
                 }
 
                 authored.Add(record);
@@ -91,10 +91,10 @@ public sealed partial class EstateService
 
             RecordEnvelope answered = attempting is null ? plan.Attempt! : authored[^1].Envelope;
             var deciding = new RecordDraft("result", request.By, JsonSerializer.SerializeToElement(plan.ResultBody()), new RecordReference("attempt", answered.Id, answered.ComputedHash));
-            (AuthoredRecord? result, string? refusal) = AuthorLocked(deciding, model);
+            (AuthoredRecord? result, Problem? refusal) = AuthorLocked(deciding, model);
             if (result is null)
             {
-                return Refuse(refusal!);
+                return WriteOutcome.Fail(refusal!);
             }
 
             authored.Add(result);

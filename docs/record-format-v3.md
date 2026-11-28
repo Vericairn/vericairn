@@ -858,6 +858,47 @@ by the estate's objects is the runtime's to check when it writes the request. A 
 `optional`, since a request admits no other member, so an estate marks requests optional only after every writer upgrades. See
 [operator requests](operator-requests.md#optional-requests-possible-todos-094).
 
+## Reviewed run stops (0.9.5)
+
+REMOTE-04 adds one record type within format 3, `run-stop-request`: a person's signed request to cancel or contain an exact
+run. The worker's observations of the stop are separate facts.
+
+| Field | Contract |
+| --- | --- |
+| `run` | Required ULID: the run's original operation id. |
+| `operation` | Required: `cancel`, with the runtime's normal grace, or `contain`, with no additional grace. |
+| `requestId` | Required: the reviewing device's request identity, 32 lowercase hexadecimal digits, not all zero. |
+| `reason` | Required, at most 512 characters, nonblank with no surrounding whitespace: the reason the run's stop observations carry. |
+| `expectedStopReason` | Optional, for `contain` only, at most 512 characters and nonempty: the earlier stop's reason, which the containment tightens; it differs from `reason`. |
+
+Its subject is the run's operation with its hash. It must be an in-flight revision (`not-started`, `dispatched` or `uncertain`)
+of the run the record names. Validation refuses each of these, with its code:
+
+- any other field;
+- a request identity outside its form (`run-stop-request.identity`);
+- a blank or padded reason (`run-stop-request.reason`);
+- an `expectedStopReason` on a cancellation, or one equal to `reason` (`run-stop-request.containment`);
+- a record that supersedes another (`run-stop-request.supersession`);
+- an author who is not a person (`run-stop-request.person`);
+- a subject that is not an in-flight revision of the named run (`run-stop-request.run`).
+
+A text longer than its limit, an empty one, or an identity of the wrong length is also reported as `body.length`, by the
+shared body reader. A record of this type that states a format earlier than 3 is refused as `record.type-format`, in any
+estate; a format-3 record in a format-2 estate is `record.format-ahead`.
+
+When it writes the record, the runtime also refuses:
+
+- a second record from the same person with the same run, operation and request identity;
+- a stop of a run that has ended;
+- a subject that is no longer the run's latest operation revision;
+- a person who may not stop the run;
+- a containment whose `expectedStopReason` no longer matches the earlier stop: there is none, it has another reason, it
+  already allows no grace, the run has exited, or escalation or containment has begun. When the earlier stop cannot be read, the answer is
+  `unavailable`.
+
+Readers before 0.9.5 refuse the type (`record.unknown-type`). Upgrade every reader of an estate before a phone signs an
+intervention in it.
+
 ## Identifiers more than one record carries (0.9.4)
 
 A record's identifier is its own: the write boundary refuses a record whose

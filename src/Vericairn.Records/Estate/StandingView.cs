@@ -27,6 +27,12 @@ internal static class StandingView
         var text = new StringBuilder();
         text.Append("Standing agent ").Append(EstateModel.BodyString(agent.Goal, "title")).Append(" [goal ").Append(agent.Goal.Id).Append("], as of ").Append(Time(agent.AsOf)).Append('\n');
         text.Append("  State: ").Append(agent.State).Append(": ").Append(agent.Reason).Append('\n');
+        string? pathRefusal = PathRefusal(model, agent);
+        if (pathRefusal is not null)
+        {
+            text.Append("  ").Append(PathRefusalLine(pathRefusal)).Append('\n');
+        }
+
         if (agent.Flow is not null)
         {
             text.Append("  Flow: ").Append(agent.Flow.Pin.Id).Append(' ').Append(agent.Flow.Pin.Version).Append(agent.Step is null ? string.Empty : $", step {agent.Step.Key} in the {agent.Step.Role} role").Append('\n');
@@ -73,7 +79,8 @@ internal static class StandingView
 
         if (agent.Due.FirstOrDefault() is { } first)
         {
-            text.Append("Next: vericairn goal step ").Append(agent.Goal.Id).Append(" --occurrence ").Append(first.Occurrence.Key).Append(" --by <principal> carries it.\n");
+            text.Append("Next: vericairn goal step ").Append(agent.Goal.Id).Append(" --occurrence ").Append(first.Occurrence.Key).Append(" --by <principal>")
+                .Append(pathRefusal is null ? " carries it.\n" : " selects it.\n");
         }
 
         return text.ToString();
@@ -96,12 +103,12 @@ internal static class StandingView
     }
 
     /// <summary>The agent's summary, as status, progress, the goal view, Workbench and Remote show it.</summary>
-    public static JsonObject Summary(EstateModel model, StandingAgents.Agent agent)
+    public static JsonObject Summary(EstateModel model, StandingAgents.Agent agent, string? pathRefusal = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(agent);
         StandingAgents.Period? period = agent.Period;
-        return new JsonObject
+        var json = new JsonObject
         {
             ["goal"] = new JsonObject { ["id"] = agent.Goal.Id, ["title"] = EstateModel.BodyString(agent.Goal, "title"), ["status"] = agent.Status },
             ["asOf"] = Time(agent.AsOf),
@@ -130,10 +137,20 @@ internal static class StandingView
             ["failures"] = new JsonObject { ["consecutive"] = agent.Failures, ["limit"] = agent.FailureLimit, ["latest"] = agent.FailureTrigger is null ? null : Reference(agent.FailureTrigger) },
             ["outputs"] = new JsonObject { ["open"] = agent.OpenOutputs, ["cap"] = agent.OpenCap },
         };
+        pathRefusal ??= PathRefusal(model, agent);
+        if (pathRefusal is not null)
+        {
+            json["pathRefusals"] = new JsonArray(new JsonObject
+            {
+                ["step"] = agent.Step!.Key, ["code"] = FlowPermissions.Code, ["message"] = pathRefusal,
+            });
+        }
+
+        return json;
     }
 
     /// <summary>The agent's summary in one line.</summary>
-    public static string Line(StandingAgents.Agent agent)
+    public static string Line(EstateModel model, StandingAgents.Agent agent)
     {
         ArgumentNullException.ThrowIfNull(agent);
         string next = agent.NextAt is { } at ? $"next {Time(at)}" : "next on a record or a request";
@@ -141,8 +158,17 @@ internal static class StandingView
         int due = agent.Occurrences.Count(o => o.State == "due");
         int deferred = agent.Occurrences.Count(o => o.State == "deferred");
         int settled = agent.Occurrences.Count(o => o.State == "settled");
-        return $"{EstateModel.BodyString(agent.Goal, "title")} [goal {agent.Goal.Id}]: {agent.State}; {due.ToString(CultureInfo.InvariantCulture)} due, {deferred.ToString(CultureInfo.InvariantCulture)} deferred, {settled.ToString(CultureInfo.InvariantCulture)} awaiting review, {agent.OpenOutputs.ToString(CultureInfo.InvariantCulture)} outputs open; {next}{period}";
+        string warning = PathRefusal(model, agent) is string refusal ? $"; {PathRefusalLine(refusal)}" : string.Empty;
+        return $"{EstateModel.BodyString(agent.Goal, "title")} [goal {agent.Goal.Id}]: {agent.State}; {due.ToString(CultureInfo.InvariantCulture)} due, {deferred.ToString(CultureInfo.InvariantCulture)} deferred, {settled.ToString(CultureInfo.InvariantCulture)} awaiting review, {agent.OpenOutputs.ToString(CultureInfo.InvariantCulture)} outputs open; {next}{period}{warning}";
     }
+
+    // The standing plan can lack paths even before a trigger fires. The warning is about the agent route, which can vary by machine.
+    internal static string? PathRefusal(EstateModel model, StandingAgents.Agent agent) =>
+        agent is { State: "active", Flow: { } flow, Order: { } order, Step: { } step }
+            && FlowPermissions.MissingForStanding(model, agent.Goal, flow, order).Count > 0
+                ? FlowPermissions.Message(step.Key) : null;
+
+    internal static string PathRefusalLine(string message) => $"Dispatch to an agent would be refused ({FlowPermissions.Code}). {message}";
 
     private static JsonObject Occurrence(StandingAgents.OccurrenceState state) => new()
     {

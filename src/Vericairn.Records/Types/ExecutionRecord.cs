@@ -45,12 +45,12 @@ internal static class ExecutionRecord
             {
                 if (execution.Element.GetProperty("adapterAddress").ValueKind == JsonValueKind.Null) execution.Allow("adapterAddress");
                 else Loopback(execution, "adapterAddress");
-                if (adapter == "disabled") context.Error("operation.execution", "A disabled adapter has no hook address.");
+                if (adapter == "disabled") context.BodyError("operation.execution", "A disabled adapter has no hook address.");
             }
             string? package = execution.Text("contextPackage", true, 71);
             if (package is not null and not "unknown" && !Hashing.ContentHash.IsValid(package))
             {
-                context.Error("operation.execution", "A context package is its exact content hash or unknown.");
+                context.BodyError("operation.execution", "A context package is its exact content hash or unknown.");
             }
 
             // Dispatch-time searches, fixed at intent with the package they selected for (format 3, additive).
@@ -60,7 +60,7 @@ internal static class ExecutionRecord
                 if (selections.Count > SearchSelections.MaxContextSelections)
                     execution.Error("search.selections", "contextSelections", $"A run's intent records at most {SearchSelections.MaxContextSelections} context selections.");
                 foreach (BodyReader selection in selections) SearchSelections.Validate(selection, recordReaders: true);
-                if (package is null or "unknown") context.Error("operation.execution", "Context selections pin the exact package they selected for.");
+                if (package is null or "unknown") context.BodyError("operation.execution", "Context selections pin the exact package they selected for.");
             }
 
             if (execution.Nested("requested", true) is BodyReader requested)
@@ -71,7 +71,7 @@ internal static class ExecutionRecord
                     if (!requested.Has(required)) requested.Error("body.missing", required, "An admitted execution choice is required.");
                     if (requested.Element.TryGetProperty(required, out JsonElement value) && value.ValueKind == JsonValueKind.String && value.GetString() == "unknown")
                     {
-                        context.Error("operation.execution", "Unknown is not a resolved required execution choice.");
+                        context.BodyError("operation.execution", "Unknown is not a resolved required execution choice.");
                     }
                 }
             }
@@ -85,7 +85,7 @@ internal static class ExecutionRecord
                 if (source.Nested("policy", true) is BodyReader policy) ExecutionPolicy.Validate(policy);
                 if ((scope is "roster" or "goal" or "assignment") != (record is not null))
                 {
-                    context.Error("operation.execution", "Recorded policy scopes pin their source record; launcher and run scopes have no record source.");
+                    context.BodyError("operation.execution", "Recorded policy scopes pin their source record; launcher and run scopes have no record source.");
                 }
                 if (record is not null && scope is not null)
                 {
@@ -116,9 +116,9 @@ internal static class ExecutionRecord
                     }
                     else if (input.Number("maxBytes", true, 1, CanonicalJson.MaxSafeInteger) is long maxBytes && bytes > maxBytes)
                     {
-                        context.Error("operation.execution", "The retained context payload fits its explicit byte allocation.");
+                        context.BodyError("operation.execution", "The retained context payload fits its explicit byte allocation.");
                     }
-                    if (package is null or "unknown") context.Error("operation.execution", "Context accounting pins the exact package identity.");
+                    if (package is null or "unknown") context.BodyError("operation.execution", "Context accounting pins the exact package identity.");
                     input.NoOtherKeys();
                 }
                 allocation.NoOtherKeys();
@@ -153,7 +153,7 @@ internal static class ExecutionRecord
                 reach.NoOtherKeys();
                 if (kinds is not null && (kinds.Any(k => !SecretKinds.Contains(k, StringComparer.Ordinal)) || kinds.Distinct(StringComparer.Ordinal).Count() != kinds.Count
                     || (count == 0) != (kinds.Count == 0) || kinds.Count > count))
-                    context.Error("operation.execution", "A run's reach names each kind of secret-bearing path it counted once, from the known kinds, and counts at least one path for each.");
+                    context.BodyError("operation.execution", "A run's reach names each kind of secret-bearing path it counted once, from the known kinds, and counts at least one path for each.");
             }
             // From 0.9.4 (RUN-04), additive in format 3: the run's web tools retrieve public sources, which only its assignment's brief permits.
             if (execution.Since(3, "retrieval") && execution.Enum("retrieval", false, AssignmentType.PublicRetrieval) is not null
@@ -193,20 +193,20 @@ internal static class ExecutionRecord
                     || address != admittedAddress || (state == "direct-start-fallback") != (address is null)
                     || state == "engaged" && fallbacks != 0
                     || state == "direct-start-fallback" && (requests != 0 || fallbacks != 0 || before != 0 || after != 0))
-                    context.Error("operation.execution", "Adapter measurement agrees with the admitted adapter and counts only observed eligible bytes.");
+                    context.BodyError("operation.execution", "Adapter measurement agrees with the admitted adapter and counts only observed eligible bytes.");
             }
             observed.NoOtherKeys();
-            if (execution is null || status is not ("known-failure" or "observed-success")) context.Error("operation.execution", "Execution observations describe a settled run with an admitted execution snapshot.");
+            if (execution is null || status is not ("known-failure" or "observed-success")) context.BodyError("operation.execution", "Execution observations describe a settled run with an admitted execution snapshot.");
         }
 
         if ((execution is not null || observed is not null) && EstateModel.BodyString(context.Record, "action") != OperationType.AgentRun)
         {
-            context.Error("operation.execution", "Execution describes an agent run only.");
+            context.BodyError("operation.execution", "Execution describes an agent run only.");
         }
 
         if (execution is not null && status is "known-failure" or "observed-success" && observed is null)
         {
-            context.Error("operation.execution", "A settled admitted run records execution observations, including unknowns.");
+            context.BodyError("operation.execution", "A settled admitted run records execution observations, including unknowns.");
         }
 
         if (context.Find(context.Record.Supersedes) is RecordEnvelope previous)
@@ -229,7 +229,7 @@ internal static class ExecutionRecord
         if (!body.Since(3, "searchesObserved") || body.Nested("searchesObserved", false) is not BodyReader observed) return;
         SearchSelections.ValidateObserved(observed);
         if (EstateModel.BodyString(context.Record, "action") != OperationType.AgentRun || status is not ("known-failure" or "observed-success"))
-            context.Error("operation.searches-observed", "Observed searches belong to a settled agent run.");
+            context.BodyError("operation.searches-observed", "Observed searches belong to a settled agent run.");
         if (context.Find(context.Record.Supersedes) is RecordEnvelope previous && EstateModel.BodyString(previous, "status") is "known-failure" or "observed-success"
             && !previous.Body.TryGetProperty("searchesObserved", out _))
             context.Error("operation.searches-observed", "Observed searches are recorded at settlement, never added afterwards.");
@@ -253,15 +253,15 @@ internal static class ExecutionRecord
             string? query = source.Text("query", false, 500);
             bool withheld = source.Flag("withheld", false) == true;
             if ((address is null ? 0 : 1) + (query is null ? 0 : 1) + (withheld ? 1 : 0) != 1)
-                context.Error("operation.sources-observed", "Each source names its address or its query, or says that it is withheld, and only one of these.");
+                context.BodyError("operation.sources-observed", "Each source names its address or its query, or says that it is withheld, and only one of these.");
             if (address is not null && (!Uri.TryCreate(address, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https") || uri.UserInfo.Length != 0))
-                context.Error("operation.sources-observed", "A source's address is an absolute http or https address with no user information.");
+                context.BodyError("operation.sources-observed", "A source's address is an absolute http or https address with no user information.");
             source.Timestamp("at", true);
             bool? retained = source.Flag("retained", true);
             string? hash = source.Hash("hash", false);
             long? bytes = source.Number("bytes", false, 0, CanonicalJson.MaxSafeInteger);
             if ((hash is null) != (bytes is null) || (retained == true && hash is null))
-                context.Error("operation.sources-observed", "A source's content hash and size go together, and a retained source names both.");
+                context.BodyError("operation.sources-observed", "A source's content hash and size go together, and a retained source names both.");
             source.NoOtherKeys();
         }
 
@@ -272,7 +272,7 @@ internal static class ExecutionRecord
         bool retrieval = body.Element.TryGetProperty("execution", out JsonElement execution) && execution.ValueKind == JsonValueKind.Object
             && execution.TryGetProperty("retrieval", out JsonElement value) && value.ValueKind == JsonValueKind.String;
         if (EstateModel.BodyString(context.Record, "action") != OperationType.AgentRun || status is not ("known-failure" or "observed-success") || !retrieval)
-            context.Error("operation.sources-observed", "Retrieved sources belong to a settled agent run whose execution admitted retrieval.");
+            context.BodyError("operation.sources-observed", "Retrieved sources belong to a settled agent run whose execution admitted retrieval.");
         if (context.Find(context.Record.Supersedes) is RecordEnvelope previous && EstateModel.BodyString(previous, "status") is "known-failure" or "observed-success"
             && !previous.Body.TryGetProperty("sourcesObserved", out _))
             context.Error("operation.sources-observed", "Retrieved sources are recorded at settlement, never added afterwards.");
@@ -298,9 +298,9 @@ internal static class ExecutionRecord
         string? version = admission.Text("version", true, 80);
         if (version is not null && (!HarnessQualificationType.ExactVersion(version)
             || !execution.Element.TryGetProperty("harnessVersion", out JsonElement harnessVersion) || harnessVersion.ValueKind != JsonValueKind.String || harnessVersion.GetString() != version))
-            context.Error("operation.harness-admission", "Harness admission names the execution's exact version.");
+            context.BodyError("operation.harness-admission", "Harness admission names the execution's exact version.");
         if (launcher != EstateModel.BodyString(context.Record, "provider"))
-            context.Error("operation.harness-admission", "Harness admission names the operation's launcher.");
+            context.BodyError("operation.harness-admission", "Harness admission names the operation's launcher.");
         BodyReader? probes = admission.Nested("probes", true);
         if (probes is not null)
         {
@@ -312,7 +312,7 @@ internal static class ExecutionRecord
             string? id = admission.Ulid("record", true);
             string? hash = admission.Hash("hash", true);
             RecordEnvelope? qualification = context.RequireReference("execution.harnessAdmission.record", id, "harness-qualification");
-            RecordEnvelope intent = context.Model.ById[context.Model.Chain(context.Record)[0]];
+            RecordEnvelope intent = context.Model.ById.GetValueOrDefault(context.Model.Chain(context.Record)[0]) ?? context.Record;
             if (qualification is not null && (qualification.ComputedHash != hash
                 || EstateModel.BodyString(qualification, "status") != "qualified"
                 || EstateModel.BodyString(qualification, "launcher") != launcher || EstateModel.BodyString(qualification, "version") != version

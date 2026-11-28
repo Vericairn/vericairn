@@ -28,9 +28,16 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     private readonly LocalNetworkCredential? credential;
 
     /// <summary>Connects over the local socket of a published endpoint.</summary>
-    public VericairnClient(DaemonEndpoint endpoint)
+    public VericairnClient(DaemonEndpoint endpoint) : this(endpoint, signer: null)
+    {
+    }
+
+    /// <summary>Connects over the published local socket, optionally signing explicit Workbench handoff requests with the named device.</summary>
+    public VericairnClient(DaemonEndpoint endpoint, IRequestSigner? signer)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
+        if (signer is not null && endpoint.Kind is not ("unix" or "pipe"))
+            throw new ArgumentException("A local socket endpoint is required.", nameof(endpoint));
         Endpoint = endpoint;
         Transport = endpoint.Kind;
         var handler = new SocketsHttpHandler
@@ -66,8 +73,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
                 }
             },
         };
-        http = new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri("http://vericairn/"), Timeout = ClientOperation.EffectDeadline };
-        asyncHttp = AsyncTransport(handler, http.BaseAddress);
+        HttpMessageHandler chain = signer is null ? handler : new SigningHandler(signer, handler);
+        http = new HttpClient(chain, disposeHandler: true) { BaseAddress = new Uri("http://vericairn/"), Timeout = ClientOperation.EffectDeadline };
+        asyncHttp = AsyncTransport(chain, http.BaseAddress);
     }
 
     private VericairnClient(DaemonEndpoint endpoint, LoopbackEndpoint loopback, IRequestSigner? signer)

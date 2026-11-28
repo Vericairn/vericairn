@@ -68,6 +68,30 @@ public class WorkProgressTests
         Assert.Equal(records + 1, service.Session.Load().Records.Count);
     }
 
+    [Theory]
+    [InlineData(false, "body.length", @"\.json#body\.note$")]
+    [InlineData(true, "portability.absolute-path", @"\.json:[1-9][0-9]*$")]
+    public void AnInvalidClaimPreservesTheRejectionAndFinding(bool contentError, string findingCode, string locationPattern)
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        using EstateService service = EstateService.Open(estate.Root);
+        string attempt = Attempt(estate, service);
+        string note = contentError ? "See " + string.Join('/', "", "Users", "example", "work") : new string('x', 2001);
+
+        WorkProgressResponse response = service.WorkProgress(new WorkProgressRequest(attempt, estate.BuilderId, "build", note));
+
+        Assert.False(response.Ok);
+        Assert.Null(response.Written);
+        Problem problem = Assert.IsType<Problem>(response.Problem);
+        Assert.Equal("rejected", problem.Code);
+        Assert.Equal("The progress claim was not stored.", problem.Message);
+        FindingDto finding = Assert.Single(problem.Findings);
+        Assert.Equal("error", finding.Severity);
+        Assert.Equal(findingCode, finding.Code);
+        Assert.StartsWith("records/work-progress/", finding.Location, StringComparison.Ordinal);
+        Assert.Matches(locationPattern, finding.Location);
+    }
+
     [Fact]
     public void ACompletedPhaseIsAnAttributableClaimAndCannotBeRecordedTwice()
     {

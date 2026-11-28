@@ -67,17 +67,20 @@ public sealed class AdmissionType : IRecordType
         if (attestation is not null)
         {
             AndroidAttestationEvidence.Validate(attestation);
-            if (status != "admitted" || context.Record.Supersedes is not null || device is not { Type: "device", Supersedes: null }
+            // The device record a pairing writes in the same batch is not yet in the model the early check reads (FIX-158), so the
+            // device's own fields are judged in the full judgment; the admission's own fields are judged in both.
+            bool judgeDevice = !context.CheckingBody || device is not null;
+            if (status != "admitted" || context.Record.Supersedes is not null || judgeDevice && (device is not { Type: "device", Supersedes: null }
                 || EstateModel.BodyString(device, "platform") != "android"
                 || EstateModel.BodyString(device, "custody") != DeviceKeyStores.AndroidKeystoreKind
                 || EstateModel.BodyString(device, "presence") != "required"
-                || EstateModel.BodyString(device, "presenceVerification") != DeviceRecords.AndroidKeyAttestation)
+                || EstateModel.BodyString(device, "presenceVerification") != DeviceRecords.AndroidKeyAttestation))
                 body.Error("admission.attestation-device", AndroidAttestationEvidence.Field, "Android attestation belongs on an initial admission of the original Android presence device record.");
         }
 
         if (status == "revoked" && context.Record.Supersedes is null)
         {
-            context.Error("admission.revoke", "A revocation supersedes the admission it ends.");
+            context.BodyError("admission.revoke", "A revocation supersedes the admission it ends.");
         }
     }
 }

@@ -9,6 +9,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Workers;
 using static Vericairn.Runtime.Service.EstateServiceValues;
@@ -205,24 +206,24 @@ public sealed partial class EstateService
 
             route = taken.Route;
             key = taken.Key;
-            if (taken.Step is { } routedStep && route.State is not ("rule" or "request" or "attention"))
+            FlowStep? routedStep = taken.Step?.Step ?? taken.Standing?.Step;
+            if (routedStep is not null && route.State is not ("rule" or "request" or "attention"))
             {
-                IReadOnlyList<string> paths = FlowPermissions.For(model, current, taken.Order, routedStep.Step);
+                IReadOnlyList<string> paths = FlowPermissions.For(model, current, taken.Order, routedStep);
                 if (route.State == "agent")
                 {
-                    if (paths.Count == 0)
-                    {
-                        return StepProblem(goalId, FlowPermissions.Code, FlowPermissions.Message(key), key, route);
-                    }
-
                     if (route.Assignment is RecordEnvelope previous)
                     {
                         if (FlowPermissions.Carried(paths, previous) is not { } carriedPaths)
                         {
-                            return StepProblem(goalId, FlowPermissions.Code, $"Assignment {previous.Id} of flow step {key} needs a brief with permitted paths within the step's current path declarations.", key, route);
+                            return StepProblem(goalId, FlowPermissions.Code, FlowPermissions.HeldMessage(previous, routedStep.Key), key, route);
                         }
 
                         paths = carriedPaths;
+                    }
+                    else if (paths.Count == 0)
+                    {
+                        return StepProblem(goalId, FlowPermissions.Code, FlowPermissions.Message(taken.Standing is null ? key : routedStep.Key), key, route);
                     }
                 }
 
@@ -298,10 +299,10 @@ public sealed partial class EstateService
                 // Authored in advance and listed, the assignment is still a single signature: the run's intent is authored by the worker
                 // after its preflight, so it is in no list, and each keeps its own check (design/presence-sessions.md § 5).
                 stepDrafts.Add(assigning);
-                (routed, string? unsigned) = AuthorLocked(SessionDraft(assigning), model);
+                (routed, Problem? refusal) = AuthorLocked(SessionDraft(assigning), model);
                 if (routed is null)
                 {
-                    return StepProblem(goalId, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
+                    return StepAuthoringProblem(goalId, refusal!, key, route);
                 }
 
                 FindingList invalid = Invalid(LoadWith([routed]), [routed]);
@@ -591,16 +592,16 @@ public sealed partial class EstateService
             // The step's list, read at its first signature: the assignment and the ask, by exact hash, in the order they are signed.
             draft = Fixed(draft, SessionNow());
             stepDrafts.AddRange([assigning, draft]);
-            (AuthoredRecord? assignment, string? unsigned) = AuthorLocked(SessionDraft(assigning), model);
+            (AuthoredRecord? assignment, Problem? refusal) = AuthorLocked(SessionDraft(assigning), model);
             if (assignment is null)
             {
-                return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
+                return StepAuthoringProblem(goal.Id, refusal!, key, route);
             }
 
-            (AuthoredRecord? authored, unsigned) = AuthorLocked(SessionDraft(draft), model);
+            (AuthoredRecord? authored, refusal) = AuthorLocked(SessionDraft(draft), model);
             if (authored is null)
             {
-                return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
+                return StepAuthoringProblem(goal.Id, refusal!, key, route);
             }
 
             (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([assignment, authored], $"routing's assignment of {(step.Step is null ? "work order" : "step")} {key} to {PrincipalName(model, route.Principal)} and the ask that gives it to them", step.Order.Id);
@@ -752,6 +753,12 @@ public sealed partial class EstateService
 
     private static GoalStepResponse StepProblem(string goal, string code, string message, string? key = null, NextEligible.Route? route = null) =>
         new(goal, "none", message, false, key, route?.State, route?.Principal, Problem: new Problem(code, message, []));
+
+    private static GoalStepResponse StepAuthoringProblem(string goal, Problem refusal, string key, NextEligible.Route route)
+    {
+        string message = $"Not recorded: {refusal.Message} Nothing was recorded.";
+        return new(goal, "none", message, false, key, route.State, route.Principal, Problem: refusal with { Message = message });
+    }
 
     private static TakeoverResponse TakeoverProblem(string code, string message) => new(message, false, Problem: new Problem(code, message, []));
 

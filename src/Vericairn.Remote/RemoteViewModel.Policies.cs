@@ -17,7 +17,7 @@ public sealed partial class RemoteViewModel
     /// <summary>The original policy notice and its independently dated inspection.</summary>
     public RemotePolicyDetail? PolicyDetail => policyDetail;
     /// <summary>Policy inspection replaces the home areas without opening a phone decision.</summary>
-    public bool HasPolicyDetail => ShowHome && policyDetail is not null;
+    public bool HasPolicyDetail => ShowHome && !HasHandoffForm && policyDetail is not null;
     /// <summary>Whether the inspection was refreshed, refused or retained as cached context.</summary>
     public string PolicyMessage { get => policyMessage; private set => Set(ref policyMessage, value); }
     /// <summary>The inspection's own age; home refresh never renews it.</summary>
@@ -69,6 +69,7 @@ public sealed partial class RemoteViewModel
         Raise(nameof(PolicyDetail)); Raise(nameof(HasPolicyDetail)); Raise(nameof(ShowAreas));
         Raise(nameof(PolicyFreshness)); Raise(nameof(PolicyAuthority)); Raise(nameof(PolicyHandoff)); Raise(nameof(PolicyDestination));
         NotifyPolicyCommands();
+        NotifyHandoffCommands();
     }
 
     private async Task OpenPolicyAsync(AttentionNotice notice)

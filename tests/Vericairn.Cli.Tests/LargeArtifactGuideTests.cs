@@ -269,8 +269,8 @@ public sealed partial class LargeArtifactGuideTests
     }
 
     /// <summary>
-    /// DOCS-32: the housekeeping the guide lists, exactly, is what the writers make: estate init's record staging, a refused write's and
-    /// a stored write's lock, the lock's holder while it is held, and the first generated document's staging. A listed path with other
+    /// DOCS-32: the housekeeping the guide lists, exactly, is what the writers make: estate init's record staging, the lock for writes
+    /// that reach locked validation, its holder while it is held, and the first generated document's staging. A listed path with other
     /// content and an unlisted file under .vericairn/ are not housekeeping.
     /// </summary>
     [Fact]
@@ -285,12 +285,19 @@ public sealed partial class LargeArtifactGuideTests
             string operatorId = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Housekeeping.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
             AssertLocalFiles(root, ".vericairn/record-staging/.gitignore");
 
-            // A refused write takes the write lock too, and leaves its directory; a stored one adds nothing more.
+            // The invalid body is refused before the runtime takes the lock.
             CliHarness.Outcome refused = CliHarness.Run("--estate", root, "--json", "records", "new", "principal", "--by", operatorId, "--body", CliHarness.WriteJson(home, "refused.json", """{"kind":"agent","name":"","roles":[]}"""));
             Assert.NotEqual(0, refused.Code);
+            AssertLocalFiles(root, ".vericairn/record-staging/.gitignore");
+
+            // The draft's missing predecessor is refused under the lock. A stored write adds no further housekeeping.
+            string builder = CliHarness.WriteJson(home, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""");
+            CliHarness.Outcome missing = CliHarness.Run("--estate", root, "--json", "records", "new", "principal", "--by", operatorId, "--body", builder, "--supersedes", Ulid.NewUlid().Value);
+            Assert.NotEqual(0, missing.Code);
+            Assert.Contains("record.supersedes", missing.Out + missing.Err, StringComparison.Ordinal);
             string[] locked = [".vericairn/record-staging/.gitignore", ".vericairn/write-lock/.gitignore", ".vericairn/write-lock/write.lock"];
             AssertLocalFiles(root, locked);
-            CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", operatorId, "--body", CliHarness.WriteJson(home, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}"""));
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", operatorId, "--body", builder);
             AssertLocalFiles(root, locked);
 
             // While a writer holds the lock it describes itself in holder.json, which it removes on release.

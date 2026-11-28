@@ -171,8 +171,8 @@ public sealed partial class EstateService
                     draft = StampRevision(draft, RevisionLines.History(model, document.Path));
                 }
                 draft = Fixed(draft, at);
-                (AuthoredRecord? pin, string? refusal) = AuthorUnsignedLocked(draft, model);
-                if (pin is null) return Failed(refusal!);
+                (AuthoredRecord? pin, Problem? refusal) = AuthorUnsignedLocked(draft, model);
+                if (pin is null) return new(null, [], refusal);
                 drafts.Add(draft);
                 if (RevisionLines.IsAuthored(pin.Envelope))
                 {
@@ -190,8 +190,8 @@ public sealed partial class EstateService
                 ExactSession("decision from ask", "decision from ask:" + ask.Id + ":" + ask.ComputedHash, drafts, redatable: false));
             foreach (RecordDraft planned in drafts)
             {
-                (AuthoredRecord? signed, string? reason) = AuthorLocked(SessionDraft(planned), model);
-                if (signed is null) return Failed(reason!);
+                (AuthoredRecord? signed, Problem? reason) = AuthorLocked(SessionDraft(planned), model);
+                if (signed is null) return new(null, [], reason);
                 records.Add(signed);
             }
 

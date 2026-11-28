@@ -55,7 +55,7 @@ public static partial class ProgressReport
         if (standing.Count > 0)
         {
             text.Append("\nStanding agents, as of the estate's newest record\n");
-            foreach (StandingAgents.Agent agent in standing) text.Append("  ").Append(StandingView.Line(agent)).Append('\n');
+            foreach (StandingAgents.Agent agent in standing) text.Append("  ").Append(StandingView.Line(model, agent)).Append('\n');
         }
 
         Operator(text, report);

@@ -134,8 +134,8 @@ public sealed partial class EstateService
                 }
                 if (regions.Count > 0) body["regions"] = regions;
                 var draft = new RecordDraft("living-document", request.By, JsonSerializer.SerializeToElement(body));
-                (record, string? refusal) = AuthorLocked(draft, model);
-                if (record is null) return NewRefused(refusal!);
+                (record, Problem? refusal) = AuthorLocked(draft, model, scanContent: true);
+                if (record is null) return new(null, null, null, refusal);
                 if (JudgeProposedLocked([record]) is { } rejected) return new(null, null, null, rejected);
                 string content = TemplateDocuments.NewContent(model, record.Envelope);
                 if (BlockedTerms.Introduced(BlockedTerms.In(model, DateTimeOffset.UtcNow), "", content) is string blocked)
