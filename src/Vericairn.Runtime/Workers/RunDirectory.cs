@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Workers;
 
@@ -117,7 +118,7 @@ public sealed class RunDirectory
             throw new ArgumentException("A run is named by a ULID.", nameof(run));
         }
 
-        Path = System.IO.Path.Combine(VericairnHome.Path(), "estates", estate, "runs", run);
+        Path = System.IO.Path.Combine(RunsDirectory(estate), run);
         ReachFile = System.IO.Path.Combine(VericairnHome.Path(), "estates", estate, "reach", run + ".json");
     }
 
@@ -192,6 +193,61 @@ public sealed class RunDirectory
 
     internal static string ClaudeConfigurationDirectory(string mcpConfiguration) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(mcpConfiguration)!, ClaudeConfigurationDirectoryName);
+
+    private string ClaudeConfigurationLease => System.IO.Path.Combine(Path, "claude-configuration.lock");
+
+    internal static string RunsDirectory(string estate) => System.IO.Path.Combine(VericairnHome.Path(), "estates", estate, "runs");
+
+    // Hold the lease before putting any sign-in in this directory. It is also the marker for a copy that reached dispatch,
+    // even when the sweep is opened against another checkout without this run's intent.
+    internal FileStream AcquireClaudeConfigurationLease() => WorkerConfigurationStore.CreateOwnerFile(ClaudeConfigurationLease);
+
+    internal static void MarkClaudeConfigurationDispatched(FileStream lease)
+    {
+        lease.WriteByte(1);
+        lease.Flush(flushToDisk: true);
+    }
+
+    internal FileStream? TryAcquireOrphanedClaudeConfiguration()
+    {
+        FileStream? lease = null;
+        try
+        {
+            if (!PlainDirectory(Path)) return null;
+            if (Attributes(StateFile) is not null || !PlainDirectory(ClaudeConfigurationDirectory(McpConfiguration))) return null;
+            FileAttributes? leaseAttributes = Attributes(ClaudeConfigurationLease);
+            if (leaseAttributes is { } existing && (existing & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) return null;
+
+            // Earlier workers did not leave a lease. Take one for those directories too, so two recoveries agree on who owns the copy.
+            lease = leaseAttributes is null ? AcquireClaudeConfigurationLease()
+                : new FileStream(ClaudeConfigurationLease, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            if ((leaseAttributes is null || lease.Length == 0) && Attributes(StateFile) is null)
+            {
+                FileStream acquired = lease;
+                lease = null;
+                return acquired;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
+        {
+            // Another worker may hold the lease, or another sweep may already have removed the copy.
+        }
+        finally
+        {
+            lease?.Dispose();
+        }
+        return null;
+    }
+
+    internal static bool PlainDirectory(string path) =>
+        Attributes(path) is FileAttributes attributes
+        && (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == FileAttributes.Directory;
+
+    private static FileAttributes? Attributes(string path)
+    {
+        try { return File.GetAttributes(path); }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException) { return null; }
+    }
 
     // This can also run during recovery, before the host registers its launcher providers.
     internal string? RemoveHarnessConfiguration(string? launcher)

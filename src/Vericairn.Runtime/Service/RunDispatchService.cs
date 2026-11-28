@@ -37,11 +37,20 @@ internal sealed partial class RunDispatchService(
 
     internal RunResponse Start(RunStartRequest request, AuthoredRecord? routed, out RecordWritten? assigned)
     {
-        RunResponse? refusal = runAdmission.Prepare(request, routed, out RunAdmissionService.AdmittedRun? admitted, out assigned);
-        return refusal ?? Dispatch(admitted!);
+        RecoverOrphanedClaudeConfigurations();
+        FileStream? claudeConfigurationLease = null;
+        try
+        {
+            RunResponse? refusal = runAdmission.Prepare(request, routed, out RunAdmissionService.AdmittedRun? admitted, out assigned, out claudeConfigurationLease);
+            return refusal ?? Dispatch(admitted!, claudeConfigurationLease);
+        }
+        finally
+        {
+            claudeConfigurationLease?.Dispose();
+        }
     }
 
-    private RunResponse Dispatch(RunAdmissionService.AdmittedRun admitted)
+    private RunResponse Dispatch(RunAdmissionService.AdmittedRun admitted, FileStream? claudeConfigurationLease)
     {
         RunStartRequest request = admitted.Request;
         RunAdmissionService.RunPlan plan = admitted.Plan;
@@ -64,6 +73,7 @@ internal sealed partial class RunDispatchService(
         IReadOnlyList<(string Device, string Reason)> lapsed = [];
         try
         {
+            if (claudeConfigurationLease is not null) RunDirectory.MarkClaudeConfigurationDispatched(claudeConfigurationLease);
             supervisor = runAdmission.Launch(admitted, command =>
                 RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions with
                 {
