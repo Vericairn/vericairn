@@ -869,7 +869,7 @@ run. The worker's observations of the stop are separate facts.
 | `operation` | Required: `cancel`, with the runtime's normal grace, or `contain`, with no additional grace. |
 | `requestId` | Required: the reviewing device's request identity, 32 lowercase hexadecimal digits, not all zero. |
 | `reason` | Required, at most 512 characters, nonblank with no surrounding whitespace: the reason the run's stop observations carry. |
-| `expectedStopReason` | Optional, for `contain` only, at most 512 characters and nonblank: the earlier stop's reason, which the containment tightens; it differs from `reason`. |
+| `expectedStopReason` | Optional, for `contain` only, at most 512 characters and nonempty: the earlier stop's reason, which the containment tightens; it differs from `reason`. |
 
 Its subject is the run's operation with its hash. It must be an in-flight revision (`not-started`, `dispatched` or `uncertain`)
 of the run the record names. Validation refuses each of these, with its code:
