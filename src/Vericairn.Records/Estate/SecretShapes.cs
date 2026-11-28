@@ -125,15 +125,27 @@ internal static partial class SecretShapes
     [GeneratedRegex(@"[\x1b\u0090\u0098\u009b\u009d\u009e\u009f]")]
     private static partial Regex UnresolvedTerminal();
 
+    [GeneratedRegex(@"(?:\\{1,2}|[`^])[ \t\r]*\n")]
+    private static partial Regex PhysicalOutputContinuation();
+
     // Encodings and a line wrap can split the escape itself. The normal pass above preserves boundaries for matching
     // other credential shapes; only the distinctive setup-token prefix is sought after removing those boundaries.
     private static string CompactOutput(string text, string normalized)
     {
         string compact = OutputSeparators().Replace(normalized, "");
-        if (compact.Contains(ClaudeSetupPrefix, StringComparison.Ordinal) || !text.Contains('\n') || !text.Contains('\\') && !text.Contains('%') && !text.Contains('&'))
+        if (compact.Contains(ClaudeSetupPrefix, StringComparison.Ordinal) || !text.Contains('\n'))
             return compact;
-        string joined = OutputSeparators().Replace(text, "");
-        return NormalizeOutput(joined) is string decoded ? OutputSeparators().Replace(decoded, "") : compact;
+        if (text.AsSpan().IndexOfAny('\\', '%', '&') >= 0)
+        {
+            string joined = OutputSeparators().Replace(text, "");
+            if (NormalizeOutput(joined) is string decoded)
+            {
+                compact = OutputSeparators().Replace(decoded, "");
+                if (compact.Contains(ClaudeSetupPrefix, StringComparison.Ordinal)) return compact;
+            }
+        }
+        string unwrapped = PhysicalOutputContinuation().Replace(normalized, "");
+        return unwrapped == normalized ? compact : OutputSeparators().Replace(unwrapped, "");
     }
 
     [GeneratedRegex(@"(?:\\{1,8}(?:u(?:0(?:0[0-7]?)?)?|x[0-7]?)?|%[0-7]?|&(?:a(?:m(?:p)?)?|#(?:[0-9]{0,7}|x[0-9a-f]{0,6}))?)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
@@ -177,12 +189,11 @@ internal static partial class SecretShapes
             {
                 string? joined = compact is not null && NormalizeOutput(prefix + compact) is string decoded
                     ? OutputSeparators().Replace(decoded, "") : null;
-                // A lone trailing backslash may be a physical line continuation rather than the start of an escape.
-                // Prefer a valid shape join below, but try the prefix without the backslash when that join fails.
-                if (joined is not null && !joined.StartsWith(ClaudeSetupPrefix, StringComparison.Ordinal)
-                    && prefix.EndsWith('\\') && !prefix.EndsWith("\\\\", StringComparison.Ordinal))
+                // A trailing marker can be a physical line continuation. Preserve a valid join of a split escape.
+                int markerLength = ContinuationMarkerLength(prefix);
+                if (markerLength > 0 && joined is not null && !joined.StartsWith(ClaudeSetupPrefix, StringComparison.Ordinal))
                 {
-                    string physical = prefix[..^1] + compact;
+                    string physical = prefix[..^markerLength] + compact;
                     if (physical.StartsWith(ClaudeSetupPrefix, StringComparison.Ordinal) || IncompletePrefix(physical) == physical)
                         joined = physical;
                 }
@@ -253,10 +264,17 @@ internal static partial class SecretShapes
         private static string IncompletePrefix(string text)
         {
             Match escape = IncompleteOutputEscape().Match(text);
-            int end = escape.Success ? escape.Index : text.Length;
+            int end = escape.Success ? escape.Index : text.Length - ContinuationMarkerLength(text);
             int length = Math.Min(ClaudeSetupPrefix.Length - 1, end);
             while (length > 0 && !text.AsSpan(end - length, length).SequenceEqual(ClaudeSetupPrefix.AsSpan(0, length))) length--;
+            if (length == 0 && !escape.Success) return "";
             return text[(end - length)..];
+        }
+
+        private static int ContinuationMarkerLength(string text)
+        {
+            if (text.EndsWith("\\\\", StringComparison.Ordinal)) return 2;
+            return text.Length > 0 && text[^1] is '\\' or '^' or '`' ? 1 : 0;
         }
 
         private static bool Continues(string text, int start)

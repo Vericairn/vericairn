@@ -63,6 +63,31 @@ public sealed class ClaudeOutputRedactorTests
         Assert.True(safe.SequenceEqual(["<secret>", "<secret>", "{complete}"]));
     }
 
+    [Theory]
+    [InlineData("\\\\")]
+    [InlineData("^")]
+    [InlineData("`")]
+    public void ADecoratedBreakInThePrefixIsWithheldByShapeAlone(string marker)
+    {
+        string[] ordinary = ["task ends" + marker, "{complete}"];
+        Assert.Equal(ordinary, Redact(new SecretShapes.OutputRedactor(), ordinary));
+
+        string token = Token();
+        for (int split = 1; split < 13; split++)
+        {
+            string first = token[..split] + marker;
+            string second = token[split..];
+            var redactor = new SecretShapes.OutputRedactor();
+            string[] safe = Redact(redactor, [first, second, "{complete}"]);
+
+            bool safeStream = safe.SequenceEqual(["<secret>", "<secret>", "{complete}"]);
+            Assert.True(safeStream, $"Streaming redaction failed for a prefix split at {split}.");
+            string text = first + "\r\n" + second;
+            Assert.True(SecretShapes.HasClaudeSetupToken(text), $"Shape detection failed for a prefix split at {split}.");
+            Assert.True(SecretShapes.RedactOutput(text) == "<secret>", $"Whole-text redaction failed for a prefix split at {split}.");
+        }
+    }
+
     [Fact]
     public void ABackslashCanStillStartAnEscapeSplitAcrossLines()
     {
