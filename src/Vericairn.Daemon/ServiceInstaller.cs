@@ -33,6 +33,8 @@ public sealed record ServicePlan(
 {
     /// <summary>The absolute Vericairn home captured by the service unit.</summary>
     public string? VericairnHome { get; init; }
+
+    internal IReadOnlyList<string> Lookup { get; init; } = [];
 }
 
 /// <summary>
@@ -50,7 +52,7 @@ public static class ServiceInstaller
     internal static ServicePlan PlanHereForInstall(string root) => PlanHere(root, legacy: false, createHome: true);
 
     // A previous installation had one label per estate and ran on the platform default home.
-    internal static ServicePlan? LegacyUninstallHere(string root) =>
+    internal static ServicePlan? LegacyPlanHere(string root) =>
         VericairnHome.SamePath(VericairnHome.Path(), VericairnHome.DefaultPath()) ? PlanHere(root, legacy: true) : null;
 
     private static ServicePlan PlanHere(string root, bool legacy, bool createHome = false)
@@ -157,7 +159,11 @@ public static class ServiceInstaller
                     plist.ToString(),
                     [["launchctl", "bootstrap", domain, unitPath]],
                     [["launchctl", "bootout", domain + "/" + label]],
-                    []) { VericairnHome = vericairnHome };
+                    [])
+                {
+                    VericairnHome = vericairnHome,
+                    Lookup = ["launchctl", "print", domain + "/" + label],
+                };
             }
 
             case "linux":
@@ -177,7 +183,11 @@ public static class ServiceInstaller
                     unit,
                     [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", label + ".service"]],
                     [["systemctl", "--user", "disable", "--now", label + ".service"]],
-                    [["systemctl", "--user", "daemon-reload"]]) { VericairnHome = vericairnHome };
+                    [["systemctl", "--user", "daemon-reload"]])
+                {
+                    VericairnHome = vericairnHome,
+                    Lookup = ["systemctl", "--user", "show", "--property=LoadState", "--property=ActiveState", label + ".service"],
+                };
             }
 
             case "windows":
@@ -207,7 +217,11 @@ public static class ServiceInstaller
                     task,
                     [["schtasks", "/Create", "/F", "/TN", label, "/XML", unitPath], ["schtasks", "/Run", "/TN", label]],
                     [["schtasks", "/End", "/TN", label], ["schtasks", "/Delete", "/F", "/TN", label]],
-                    []) { VericairnHome = vericairnHome };
+                    [])
+                {
+                    VericairnHome = vericairnHome,
+                    Lookup = ["schtasks", "/Query", "/TN", label, "/HRESULT"],
+                };
             }
 
             default:
@@ -222,9 +236,16 @@ public static class ServiceInstaller
     }
 
     /// <summary>Writes the unit and registers the service; throws with the command's output when a command fails.</summary>
-    public static IReadOnlyList<string> Install(ServicePlan plan)
+    public static IReadOnlyList<string> Install(ServicePlan plan) => Install(plan, legacy: null);
+
+    internal static IReadOnlyList<string> Install(ServicePlan plan, ServicePlan? legacy, Func<IReadOnlyList<string>, ServiceCommandResult>? execute = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        execute ??= Execute;
+        // A Windows task can outlive its XML, and XML left behind is not a registered task.
+        if (legacy is not null && (legacy.Platform != "windows" && File.Exists(legacy.UnitPath) || IsRegistered(legacy, execute)))
+            throw new InvalidOperationException($"The legacy runtime service '{legacy.Label}' is installed for the default Vericairn home. Run 'vericairn runtime uninstall' for this estate and home before installing again.");
+
         if (plan.Platform == "macos" && plan.VericairnHome is string home)
             OwnerOnlyState.CreateDirectory(Path.Combine(home, "logs"), home);
         Directory.CreateDirectory(Path.GetDirectoryName(plan.UnitPath)!);
@@ -232,7 +253,7 @@ public static class ServiceInstaller
         var log = new List<string> { $"wrote {plan.UnitPath}" };
         foreach (IReadOnlyList<string> command in plan.Install)
         {
-            log.Add(Run(command));
+            log.Add(Run(command, execute));
         }
 
         return log;
@@ -241,32 +262,93 @@ public static class ServiceInstaller
     /// <summary>Unregisters the service and removes the unit; a missing service is not an error.</summary>
     public static IReadOnlyList<string> Uninstall(ServicePlan plan)
     {
+        var result = Uninstall(plan, legacy: null);
+        return result.Error is null ? result.Log : throw new InvalidOperationException(result.Error);
+    }
+
+    internal static (IReadOnlyList<string> Labels, IReadOnlyList<string> Log, string? Error) Uninstall(ServicePlan plan, ServicePlan? legacy,
+        Func<IReadOnlyList<string>, ServiceCommandResult>? execute = null)
+    {
         ArgumentNullException.ThrowIfNull(plan);
+        execute ??= Execute;
         var log = new List<string>();
-        foreach (IReadOnlyList<string> command in plan.Uninstall)
+        var labels = new List<string>();
+        try
         {
+            Remove(plan, labels, log, execute);
+            if (legacy is not null)
+                Remove(legacy, labels, log, execute);
+            return (labels, log, null);
+        }
+        catch (Exception exception) when (labels.Count > 0 && exception is (IOException or UnauthorizedAccessException or InvalidOperationException
+            or ArgumentException or PlatformNotSupportedException or System.ComponentModel.Win32Exception))
+        {
+            // Keep the report of completed removals if a later step fails.
+            return (labels, log, exception.Message);
+        }
+    }
+
+    private static bool IsRegistered(ServicePlan plan, Func<IReadOnlyList<string>, ServiceCommandResult> execute)
+    {
+        ServiceCommandResult result = execute(plan.Lookup);
+        if (plan.Platform == "linux")
+        {
+            string[] properties = result.Output.Split('\n', StringSplitOptions.TrimEntries);
+            if (properties.Contains("LoadState=not-found", StringComparer.Ordinal) &&
+                properties.Contains("ActiveState=inactive", StringComparer.Ordinal))
+                return false;
+        }
+
+        if (result.ExitCode == 0)
+            return true;
+
+        const int LaunchdServiceNotFound = 113;
+        const int WindowsFileNotFound = unchecked((int)0x80070002);
+        if (plan.Platform == "macos" && result.ExitCode == LaunchdServiceNotFound ||
+            plan.Platform == "windows" && result.ExitCode == WindowsFileNotFound)
+            return false;
+
+        throw new InvalidOperationException($"Could not check whether the runtime service '{plan.Label}' is registered. {result.Failure(plan.Lookup)}");
+    }
+
+    private static void Remove(ServicePlan plan, List<string> labels, List<string> log, Func<IReadOnlyList<string>, ServiceCommandResult> execute)
+    {
+        // The last command removes the registration. Windows first asks the running task to end.
+        bool unregistered = false;
+        for (int index = 0; index < plan.Uninstall.Count; index++)
+        {
+            IReadOnlyList<string> command = plan.Uninstall[index];
             try
             {
-                log.Add(Run(command));
+                log.Add(Run(command, execute));
+                unregistered = true;
             }
             catch (InvalidOperationException exception)
             {
+                if (index == plan.Uninstall.Count - 1 && plan.Lookup.Count > 0 && IsRegistered(plan, execute))
+                    throw;
                 log.Add(exception.Message);
+                unregistered = false;
             }
         }
 
-        if (File.Exists(plan.UnitPath))
+        if (plan.Platform == "windows" && unregistered)
+            labels.Add(plan.Label);
+
+        bool removedUnit = File.Exists(plan.UnitPath);
+        if (removedUnit)
         {
             File.Delete(plan.UnitPath);
             log.Add($"removed {plan.UnitPath}");
         }
 
+        if (plan.Platform != "windows" && (unregistered || removedUnit))
+            labels.Add(plan.Label);
+
         foreach (IReadOnlyList<string> command in plan.AfterUninstall)
         {
-            log.Add(Run(command));
+            log.Add(Run(command, execute));
         }
-
-        return log;
     }
 
     /// <summary>How to start this very program again: the executable, or the dotnet host plus the entry assembly when running from source.</summary>
@@ -287,7 +369,13 @@ public static class ServiceInstaller
         return [executable];
     }
 
-    private static string Run(IReadOnlyList<string> command)
+    private static string Run(IReadOnlyList<string> command, Func<IReadOnlyList<string>, ServiceCommandResult> execute)
+    {
+        ServiceCommandResult result = execute(command);
+        return result.ExitCode == 0 ? $"ran {string.Join(' ', command)}" : throw new InvalidOperationException(result.Failure(command));
+    }
+
+    private static ServiceCommandResult Execute(IReadOnlyList<string> command)
     {
         var info = new ProcessStartInfo(command[0]) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         foreach (string argument in command.Skip(1))
@@ -296,16 +384,10 @@ public static class ServiceInstaller
         }
 
         using Process process = ProgramPath.Start(info) ?? throw new InvalidOperationException($"{command[0]} did not start.");
-        string output = process.StandardOutput.ReadToEnd();
-        string error = process.StandardError.ReadToEnd();
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
         process.WaitForExit();
-        string line = string.Join(' ', command);
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"{line} exited {process.ExitCode}: {(error + output).Trim()}");
-        }
-
-        return $"ran {line}";
+        return new ServiceCommandResult(process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
     }
 
     private static string SystemdQuote(string argument) => "\"" + argument.Replace("%", "%%", StringComparison.Ordinal).Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
@@ -354,4 +436,9 @@ public static class ServiceInstaller
             return null;
         }
     }
+}
+
+internal readonly record struct ServiceCommandResult(int ExitCode, string Output = "", string Error = "")
+{
+    internal string Failure(IReadOnlyList<string> command) => $"{string.Join(' ', command)} exited {ExitCode}: {(Error + Output).Trim()}";
 }

@@ -513,7 +513,7 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
             }
 
             ServicePlan plan = ServiceInstaller.PlanHereForInstall(root);
-            IReadOnlyList<string> log = ServiceInstaller.Install(plan);
+            IReadOnlyList<string> log = ServiceInstaller.Install(plan, ServiceInstaller.LegacyPlanHere(root));
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(new { installed = plan.Label, unit = plan.UnitPath, log }));
@@ -546,12 +546,10 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
             }
 
             ServicePlan plan = ServiceInstaller.PlanHere(root);
-            var log = new List<string>(ServiceInstaller.Uninstall(plan));
-            if (ServiceInstaller.LegacyUninstallHere(root) is { } legacy)
-                log.AddRange(ServiceInstaller.Uninstall(legacy));
+            (IReadOnlyList<string> labels, IReadOnlyList<string> log, string? error) = ServiceInstaller.Uninstall(plan, ServiceInstaller.LegacyPlanHere(root));
             if (json)
             {
-                context.Output.WriteLine(JsonSerializer.Serialize(new { uninstalled = plan.Label, log }));
+                context.Output.WriteLine(JsonSerializer.Serialize(new { uninstalled = labels, log }));
             }
             else
             {
@@ -560,10 +558,13 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
                     context.Output.WriteLine(line);
                 }
 
-                context.Output.WriteLine($"uninstalled {plan.Label}");
+                foreach (string label in labels)
+                {
+                    context.Output.WriteLine($"uninstalled {label}");
+                }
             }
 
-            return Clean;
+            return error is null ? Clean : context.Fail(error);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or PlatformNotSupportedException or System.ComponentModel.Win32Exception)
         {
