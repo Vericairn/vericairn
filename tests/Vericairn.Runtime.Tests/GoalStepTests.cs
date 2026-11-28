@@ -302,8 +302,16 @@ public class GoalStepTests
         int assignments = run.Service.Records("assignment").Count;
         string branch = "work/ghp_" + new string('a', 36);
 
+        bool judgedUnderLock = false;
+        run.Service.BeforeValidatingRecords = records =>
+        {
+            if (records.Select(record => record.Envelope.Type).SequenceEqual(["assignment", "operation"]))
+                judgedUnderLock = run.Service.Session.WriteLock?.Entered == true;
+        };
+
         // A credential-shaped branch name would enter the run's intent: routing's assignment of W-2 and the intent are both kept out.
         GoalStepResponse refused = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "never"), Branch: branch));
+        Assert.True(judgedUnderLock, refused.Message);
         Assert.False(refused.Ok, refused.Message);
         Assert.True(refused.Problem?.Code == "rejected", refused.Message); // Include the full preparation refusal if the content check was never reached.
         Assert.Contains("Not written: the estate would be invalid with these records (", refused.Message, StringComparison.Ordinal);

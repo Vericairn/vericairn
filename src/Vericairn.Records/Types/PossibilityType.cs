@@ -91,7 +91,7 @@ public sealed class PossibilityType : IRecordType
 
         if (adopted is not null)
         {
-            RecordReference? reference = RecordParser.ParseReference(adopted.Element, adopted.Location, context.Findings);
+            RecordReference? reference = RecordParser.ParseReference(adopted.Element, adopted.Location, context.BodyFindings);
             if (reference is not null && Array.IndexOf(AdoptedAs, reference.Type) < 0)
             {
                 adopted.Error("possibility.adopted-as", "type", "An adopted idea becomes a work order, a decision or a goal.");

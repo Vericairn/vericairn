@@ -155,7 +155,7 @@ public sealed class WorkingTreeLockTests : IDisposable
     {
         using var estate = new TestEstate(3);
         using EstateService a = EstateService.Open(estate.Root, null, homeA);
-        WriteOutcome refused = a.NewRecord(new("resource", estate.OperatorId, JsonDocument.Parse("""{"kind":"service"}""").RootElement));
+        WriteOutcome refused = a.NewRecord(Operation(estate, "synthetic:unknown-author") with { By = Ulid.NewUlid().Value });
         Assert.False(refused.Ok);
         WorkingTreeLock tree = a.Session.WriteLock!;
         Assert.False(tree.Held);

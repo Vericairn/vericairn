@@ -270,7 +270,7 @@ public sealed record AmendRequest(string Assignment, string By, JsonElement Body
 /// <param name="Custody">Custody kind.</param>
 /// <param name="Admission">admitted, revoked or not admitted.</param>
 /// <param name="HeldHere">Whether this machine holds its key.</param>
-/// <param name="Presence">required or none: whether each signature needs the owner's presence (record format 2).</param>
+/// <param name="Presence">required, declared or none: whether each signature needs the owner's presence, or a paired key only claimed it (record format 2).</param>
 /// <param name="Purpose">signing or recovery (record format 2).</param>
 /// <param name="Profiles">The connectivity profiles the device is permitted, from 0.6.0.</param>
 public sealed record DeviceRow(string Id, string Principal, string? PrincipalName, string? Name, string? Platform, string? Custody, string Admission, bool HeldHere, string? Presence = null, string? Purpose = null, IReadOnlyList<string>? Profiles = null);

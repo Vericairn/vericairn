@@ -35,6 +35,35 @@ public sealed class SoftwareCompanionGitTests : IDisposable
     }
 
     [Fact]
+    public void AllSelectedFilesUseTheSamePrivateRepositoryView()
+    {
+        using var fixture = new PolicyFixture();
+        RecordEnvelope declaration = fixture.Estate.Add("resource", fixture.Estate.OperatorId,
+            """{"kind":"repository","name":"Fixture","role":"source","location":{"github":"Example/example"},"visibility":"private"}""");
+        Write("docs/first.md", "first\n"u8.ToArray());
+        Write("docs/second.md", "second\n"u8.ToArray());
+        string commit = Commit("Store both selected files");
+        string objects = Path.Combine(repository, ".git", "objects");
+        string moved = objects + "-moved";
+        var source = new GitFileSource(repository, (_, _, basis, read) =>
+        {
+            DocumentSourceSnapshot first = Assert.IsType<DocumentSourceSnapshot>(read("docs/first.md"));
+            Directory.Move(objects, moved);
+            try
+            {
+                DocumentSourceSnapshot second = Assert.IsType<DocumentSourceSnapshot>(read("docs/second.md"));
+                return new(DocumentGenerationStatus.Success, [first, second], basis, null);
+            }
+            finally { Directory.Move(moved, objects); }
+        });
+
+        DocumentSourceSelection selected = source.ReadSelection(fixture.Estate.Load(), declaration, commit, null!);
+
+        Assert.Equal(DocumentGenerationStatus.Success, selected.Status);
+        Assert.Equal(["first\n", "second\n"], selected.Sources.Select(item => Encoding.UTF8.GetString(item.Bytes.AsSpan())));
+    }
+
+    [Fact]
     public void CandidateCommitUsesItsOwnCompleteInputsAndInventoryEvenWhenCloneHeadDiffers()
     {
         using var fixture = new PolicyFixture();

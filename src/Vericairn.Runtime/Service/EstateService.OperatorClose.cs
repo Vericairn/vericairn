@@ -79,8 +79,8 @@ public sealed partial class EstateService
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 RecordDraft draft = SessionDraft(planned);
-                (AuthoredRecord? record, refusal) = AuthorLocked(draft, model, [signer]);
-                if (record is null) return new([], new("refused", refusal!, []));
+                (AuthoredRecord? record, Problem? authoringRefusal) = AuthorLocked(draft, model, [signer]);
+                if (record is null) return new([], authoringRefusal);
                 records.Add(record);
             }
 

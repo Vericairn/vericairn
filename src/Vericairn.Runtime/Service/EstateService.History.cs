@@ -10,6 +10,7 @@ using Vericairn.Records.History;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Types;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Store;
@@ -26,6 +27,66 @@ public sealed partial class EstateService
     private const string Adoption = "adoption";
     private const string Interval = "interval";
     private const string ClosingTrigger = "closing";
+
+    /// <summary>Checks the exact Git evidence before signing and again under the record write lock.</summary>
+    private string? GitDeletionRefusal(EstateModel model, string by, JsonElement body, string checkpoint)
+    {
+        if (by != model.RootOperator)
+            return "Only the root operator may acknowledge a Git deletion of an unwitnessed record.";
+        IReadOnlyList<GitRemoval> removals = HistoryCheckpointType.GitRemovals(body, checkpoint, out FindingList findings);
+        if (findings.HasErrors) return string.Join(" ", findings.Select(finding => finding.Message));
+        ISourceAdapter? git = model.Manifest?.Profile == "repository-synced" ? Providers.Source("git") : null;
+        foreach (GitRemoval removal in removals)
+        {
+            if (git is null || GitDeletionPath(model, git, removal) is not { } path)
+                return $"The main line does not establish the exact deletion of {removal.Id} at {removal.Hash} in commit {removal.Commit}. A complete local history is required.";
+            if (model.FilePaths?.Contains(path) == true || model.ById.ContainsKey(removal.Id))
+                return $"Record {removal.Id} is present here; a Git deletion acknowledgment requires it to be absent.";
+        }
+
+        return null;
+    }
+
+    private static string? GitDeletionPath(EstateModel model, ISourceAdapter git, GitRemoval removal, string? carriedFrom = null)
+    {
+        SourceFile? file = carriedFrom is null
+            ? git.DeletedRecordAtCommit(model.Root, removal.Commit, removal.Id)
+            : git.DeletedRecordAtCommit(model.Root, removal.Commit, removal.Id, carriedFrom);
+        if (file is null) return null;
+        var findings = new FindingList();
+        RecordEnvelope? record = RecordParser.Parse(file.Bytes, file.Path, findings, checkFormatting: false);
+        return !findings.HasErrors && record is not null && record.Id == removal.Id && record.ComputedHash == removal.Hash &&
+            record.ExpectedPath == file.Path ? file.Path : null;
+    }
+
+    private static bool MatchesGitDeletion(EstateModel model, ISourceAdapter git, RecordDeletion deletion, GitRemoval removal)
+    {
+        // A merge may report a deletion already carried by one of its parents. Verify the exact record and canonical
+        // path in both commits, as well as the route through the parent where the path is already absent.
+        return GitDeletionPath(model, git, removal) == deletion.Path &&
+            (removal.Commit == deletion.Commit ||
+                GitDeletionPath(model, git, removal with { Commit = deletion.Commit }, carriedFrom: removal.Commit) == deletion.Path);
+    }
+
+    /// <summary>Candidate acknowledgments indexed by record id. The clone must still prove each deletion.</summary>
+    private static Dictionary<string, List<(GitRemoval Removal, RecordEnvelope Checkpoint)>> GitDeletionAcknowledgments(EstateModel model)
+    {
+        var claims = new Dictionary<string, List<(GitRemoval Removal, RecordEnvelope Checkpoint)>>(StringComparer.Ordinal);
+        foreach (RecordEnvelope checkpoint in model.OfType("history-checkpoint")
+            .Where(record => HistoryCheckpointType.HasGitRemovals(record.Body) && model.Counts(record) && model.Trust.MayAcknowledgeGitDeletion(record))
+            .OrderBy(record => record.Id, StringComparer.Ordinal))
+        {
+            if (model.Findings.Any(finding => finding.Severity == Severity.Error && finding.Location.StartsWith(checkpoint.ExpectedPath, StringComparison.Ordinal)))
+                continue;
+            foreach (GitRemoval removal in HistoryCheckpointType.GitRemovals(checkpoint.Body, checkpoint.Id, out _))
+            {
+                if (!claims.TryGetValue(removal.Id, out var candidates)) claims.Add(removal.Id, candidates = []);
+                candidates.Add((removal, checkpoint));
+            }
+        }
+
+        return claims;
+    }
 
     /// <summary>How long before the commit that added it a record's stated time may be before adoption's check points it out.</summary>
     private static readonly TimeSpan BackdatingNotice = TimeSpan.FromDays(1);
@@ -87,8 +148,8 @@ public sealed partial class EstateService
 
                 // The files the adoption judged, so that its response lists what the at-time reading changes in the copy it signed.
                 IReadOnlyList<RecordFile>? judged = request.Adopt ? session.Files() : null;
-                (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(current, trigger, request.By!, anchored);
-                if (checkpoint is null) return (null, new Problem("refused", skipped ?? "No history checkpoint could be written.", []));
+                (PreparedCheckpoint? checkpoint, Problem? checkpointProblem) = CheckpointLocked(current, trigger, request.By!, anchored);
+                if (checkpoint is null) return (null, checkpointProblem ?? new Problem("refused", "No history checkpoint could be written.", []));
                 (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([checkpoint.Record], request.Adopt ? "Adopt history checkpoints." : "Write a history checkpoint.", null, null, null);
                 if (written.Count == 0)
                 {
@@ -200,15 +261,15 @@ public sealed partial class EstateService
     /// someone who could perform the act signs its closing, and <paramref name="at"/> the act's own time, so that the closing is dated no
     /// later than the act it precedes.
     /// </remarks>
-    private (PreparedCheckpoint? Checkpoint, string? Skipped) CheckpointLocked(EstateModel model, string trigger, string by, IEnumerable<RecordEnvelope>? anchored = null,
+    private (PreparedCheckpoint? Checkpoint, Problem? Problem) CheckpointLocked(EstateModel model, string trigger, string by, IEnumerable<RecordEnvelope>? anchored = null,
         (string Kind, string Id)? closes = null, IRecordSigner? signer = null, DateTimeOffset? at = null)
     {
         if (requestDevice.Value is { Closed: false, Signing: not null })
-            return (null, trigger == Interval ? null : "A device-signed request signs only its own record, so no history checkpoint was written with it; the next checkpoint witnesses it.");
+            return (null, trigger == Interval ? null : new Problem("refused", "A device-signed request signs only its own record, so no history checkpoint was written with it; the next checkpoint witnesses it.", []));
         if (trigger != Adoption && !SignedHistory.Adopted(model)) return (null, null);
         using JsonDocument probe = JsonDocument.Parse("{}");
         if (signer is null && (ResolveSigner(model, new RecordDraft("history-checkpoint", by, probe.RootElement), out signer) is not null || signer is null))
-            return (null, trigger == Interval ? null : $"Principal {by} has no admitted device whose key this machine holds, so no history checkpoint with trigger {trigger} was written; the next checkpoint witnesses what this one would have.");
+            return (null, trigger == Interval ? null : new Problem("refused", $"Principal {by} has no admitted device whose key this machine holds, so no history checkpoint with trigger {trigger} was written; the next checkpoint witnesses what this one would have.", []));
         if (trigger == Interval && model.Current("device").FirstOrDefault(d => model.Chain(d)[0] == signer.DeviceId) is { } device && EstateModel.BodyString(device, "presence") == "required")
             return (null, null);
 
@@ -221,11 +282,11 @@ public sealed partial class EstateService
         catch (InvalidOperationException exception)
         {
             // The history's own refusals, which name records and checkpoints and no path.
-            return (null, $"No history checkpoint with trigger {trigger} was written: {exception.Message}");
+            return (null, new Problem("refused", $"No history checkpoint with trigger {trigger} was written: {exception.Message}", []));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            return (null, $"No history checkpoint with trigger {trigger} was written: the heads' inventory objects could not be read.");
+            return (null, new Problem("refused", $"No history checkpoint with trigger {trigger} was written: the heads' inventory objects could not be read.", []));
         }
 
         try
@@ -242,14 +303,15 @@ public sealed partial class EstateService
         {
             // Described by its kind: an object store's own message may name a path on this machine.
             RemoveObjects(stored);
-            return (null, $"No history checkpoint with trigger {trigger} was written: its inventory could not be stored in the estate's objects ({(exception is UnauthorizedAccessException ? "access was denied" : "the store refused it")}).");
+            return (null, new Problem("refused", $"No history checkpoint with trigger {trigger} was written: its inventory could not be stored in the estate's objects ({(exception is UnauthorizedAccessException ? "access was denied" : "the store refused it")}).", []));
         }
 
-        (AuthoredRecord? checkpoint, string? refusal) = AuthorLocked(new RecordDraft("history-checkpoint", by, draft.Body, At: at), model, [signer]);
+        (AuthoredRecord? checkpoint, Problem? refusal) = AuthorLocked(new RecordDraft("history-checkpoint", by, draft.Body, At: at), model, [signer], scanContent: true);
         if (checkpoint is null || checkpoint.Envelope.Signatures.Count == 0)
         {
             RemoveObjects(stored);
-            return (null, $"No history checkpoint with trigger {trigger} was written: {refusal ?? "it would be unsigned."}");
+            Problem problem = refusal ?? new Problem("refused", "it would be unsigned.", []);
+            return (null, problem with { Message = $"No history checkpoint with trigger {trigger} was written: {problem.Message}" });
         }
 
         return (new PreparedCheckpoint(checkpoint, stored), null);
@@ -326,11 +388,11 @@ public sealed partial class EstateService
             "charter" => CharterAnchors(current, record.Envelope),
             _ => null,
         };
-        (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(withRecord, trigger, by, anchored);
+        (PreparedCheckpoint? checkpoint, Problem? checkpointProblem) = CheckpointLocked(withRecord, trigger, by, anchored);
         if (checkpoint is null)
         {
             WriteOutcome alone = StoreAuthoredLocked(record, current);
-            return skipped is null || alone.Written is null ? alone : alone with { Checkpoint = new TriggeredCheckpoint(trigger, null, skipped) };
+            return checkpointProblem is null || alone.Written is null ? alone : alone with { Checkpoint = new TriggeredCheckpoint(trigger, null, CheckpointSkip(checkpointProblem)) };
         }
 
         (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([record, checkpoint.Record],
@@ -405,8 +467,12 @@ public sealed partial class EstateService
 
         DateTimeOffset at = record.Envelope.AtTime < now ? record.Envelope.AtTime : now;
         if (SelfRevocationRefusal(copy, record.Envelope, closes, at) is string self) return Refuse(self);
-        (PreparedCheckpoint? closing, string? skipped) = CheckpointLocked(copy, ClosingTrigger, record.Envelope.By, closes: closes, signer: closer, at: at);
-        if (closing is null) return Refuse(Unclosed(closes, skipped ?? "no checkpoint could be prepared."));
+        (PreparedCheckpoint? closing, Problem? checkpointProblem) = CheckpointLocked(copy, ClosingTrigger, record.Envelope.By, closes: closes, signer: closer, at: at);
+        if (closing is null)
+        {
+            Problem refused = checkpointProblem ?? new Problem("refused", "no checkpoint could be prepared.", []);
+            return WriteOutcome.Fail(refused with { Message = Unclosed(closes, refused.Message) });
+        }
         (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([closing.Record, record], $"Store the closing and the {Act(closes.Kind)} it precedes.", null, null, null);
         if (written.Count == 0)
         {
@@ -651,24 +717,30 @@ public sealed partial class EstateService
         EstateModel current = LoadWith([]);
         if (!SignedHistory.Adopted(current) || signers is not null)
         {
-            (AuthoredRecord? alone, string? refusal) = AuthorLocked(draft, current, signers);
-            if (alone is null) return EstateServiceValues.Refuse(refusal!);
+            (AuthoredRecord? alone, Problem? refusal) = AuthorCheckedLocked(draft, current, signers);
+            if (alone is null) return WriteOutcome.Fail(refusal!);
             if (!SignedHistory.Adopted(current) && RemovalRefusal(current, alone) is { } refused) return WriteOutcome.Fail(refused);
             return StoreAuthoredLocked(alone, current);
         }
 
-        (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(current, "manual", draft.By);
-        (AuthoredRecord? record, string? why) = AuthorLocked(draft, current);
+        (AuthoredRecord? unsigned, Problem? bodyProblem) = AuthorCheckedLocked(draft, current, []);
+        if (unsigned is null)
+        {
+            return WriteOutcome.Fail(bodyProblem!);
+        }
+
+        (PreparedCheckpoint? checkpoint, Problem? checkpointProblem) = CheckpointLocked(current, "manual", draft.By);
+        (AuthoredRecord? record, Problem? why) = AuthorLocked(draft, current);
         if (record is null)
         {
             if (checkpoint is not null) RemoveObjects(checkpoint);
-            return EstateServiceValues.Refuse(why!);
+            return WriteOutcome.Fail(why!);
         }
 
         if (checkpoint is null)
         {
             WriteOutcome outcome = StoreAuthoredLocked(record, current);
-            return skipped is null || outcome.Written is null ? outcome : outcome with { Checkpoint = new TriggeredCheckpoint("manual", null, skipped) };
+            return checkpointProblem is null || outcome.Written is null ? outcome : outcome with { Checkpoint = new TriggeredCheckpoint("manual", null, CheckpointSkip(checkpointProblem)) };
         }
 
         (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([checkpoint.Record, record],
@@ -740,8 +812,8 @@ public sealed partial class EstateService
         if (!SignedHistory.Adopted(session.Read())) return null;
         return UnderWriteLock(() =>
         {
-            (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(LoadWith([]), trigger, by);
-            if (checkpoint is null) return new TriggeredCheckpoint(trigger, null, skipped ?? "No history checkpoint was asked.");
+            (PreparedCheckpoint? checkpoint, Problem? checkpointProblem) = CheckpointLocked(LoadWith([]), trigger, by);
+            if (checkpoint is null) return new TriggeredCheckpoint(trigger, null, CheckpointSkip(checkpointProblem) ?? "No history checkpoint was asked.");
             (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([checkpoint.Record], $"Write the history checkpoint with trigger {trigger}.", null, null, null);
             if (written.Count == 1) return new TriggeredCheckpoint(trigger, written[0], null);
             RemoveObjects(checkpoint);
@@ -798,6 +870,10 @@ public sealed partial class EstateService
 
     private static string Describe(Problem? problem) => problem is null ? "no reason was given."
         : problem.Findings.Count == 0 ? problem.Message : problem.Message + " " + string.Join(" ", problem.Findings.Where(f => f.Severity == "error").Select(f => $"{f.Code}: {f.Message}"));
+
+    private static string? CheckpointSkip(Problem? problem) => problem is { Findings.Count: > 0 }
+        ? $"{problem.Message} ({problem.Code}) {string.Join(" ", problem.Findings.Select(f => $"{f.Severity} {f.Code} at {f.Location}: {f.Message}"))}"
+        : problem?.Message;
 
     /// <summary>
     /// The machine's memory at check time (design/signed-history.md § 7): warns history.rolled-back when the main line no longer holds the

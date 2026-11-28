@@ -95,8 +95,8 @@ public sealed partial class EstateService
                 string? refusal = ResolveSigner(model, draft, out IRecordSigner? signer);
                 if (refusal is not null || signer is null)
                     return Failed("refused", refusal ?? "The acting principal needs an admitted device whose key this runtime holds.");
-                (AuthoredRecord? record, refusal) = AuthorLocked(draft, model, [signer]);
-                if (record is null) return Failed("refused", refusal!);
+                (AuthoredRecord? record, Problem? authoringRefusal) = AuthorLocked(draft, model, [signer]);
+                if (record is null) return new([], authoringRefusal);
                 records.Add(record);
             }
             if (records.Count == 0) return new([]);

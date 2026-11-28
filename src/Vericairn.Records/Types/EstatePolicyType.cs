@@ -85,15 +85,15 @@ public sealed class EstatePolicyType : IRecordType
         body.NoOtherKeys();
 
         string identity = PolicyRecords.Identity(context.Model, context.Record);
-        RecordEnvelope first = context.Model.ById[identity];
-        if (starts is not null && string.CompareOrdinal(starts, first.At) < 0) body.Error("policy.activation", "startsAt", "Activation cannot precede the declaration.");
-        if (context.Model.OfType(Name).Any(p => p.Id != context.Record.Id && PolicyRecords.Identity(context.Model, p) != identity && EstateModel.BodyString(p, "key") == key)) body.Error("policy.duplicate-key", "key", "A key belongs to one identity, including after retirement.");
+        RecordEnvelope first = context.Find(identity) ?? context.Record;
+        if (starts is not null && string.CompareOrdinal(starts, first.At) < 0) body.RelationshipError("policy.activation", "startsAt", "Activation cannot precede the declaration.");
+        if (context.Model.OfType(Name).Any(p => p.Id != context.Record.Id && PolicyRecords.Identity(context.Model, p) != identity && EstateModel.BodyString(p, "key") == key)) body.RelationshipError("policy.duplicate-key", "key", "A key belongs to one identity, including after retirement.");
         if (previous is not null)
         {
             if (EstateModel.BodyString(previous, "state") == "retired") context.Error("policy.lifecycle", "Retirement is terminal; a renewed requirement needs a new identity.");
             if (!PolicyRecords.SameFields(previous, context.Record, "key", "predecessor")) context.Error("policy.identity", "The policy key and predecessor are fixed through its lineage.");
         }
         else if (state != "active") context.Error("policy.lifecycle", "A declaration starts active.");
-        if (predecessor is not null && (EstateModel.BodyString(predecessor, "state") != "retired" || EstateModel.BodyString(predecessor, "key") == key)) body.Error("policy.predecessor", "predecessor", "A predecessor is an exact retired policy with a different key.");
+        if (predecessor is not null && (EstateModel.BodyString(predecessor, "state") != "retired" || EstateModel.BodyString(predecessor, "key") == key)) body.RelationshipError("policy.predecessor", "predecessor", "A predecessor is an exact retired policy with a different key.");
     }
 }

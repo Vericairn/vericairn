@@ -81,6 +81,27 @@ public static class EstateLoader
     }
 
     /// <summary>
+    /// Checks the proposed record before any signer is asked: its body with the same type validator as the full estate judgment, the
+    /// subject rules the record alone decides, and (FIX-158) its own bytes with the content scan the estate check runs on every file.
+    /// </summary>
+    internal static FindingList CheckRecordBody(EstateModel model, RecordEnvelope record, string? relativePath = null, byte[]? bytes = null)
+    {
+        var bodyFindings = new FindingList();
+        if (FindType(record, bodyFindings) is IRecordType type)
+        {
+            type.Validate(new ValidationContext(model, record, new FindingList(), bodyFindings));
+            ValidateSubjectShape(record, type, bodyFindings);
+        }
+
+        if (relativePath is not null && bytes is not null)
+        {
+            foreach (Finding finding in EstateChecks.Content(relativePath, bytes)) bodyFindings.Add(finding);
+        }
+
+        return bodyFindings;
+    }
+
+    /// <summary>
     /// The records of a file set as identities only: each parsed record with its id, hash and body, supersession and the manifest,
     /// with parse findings alone. No record type, reference, authority, signature or admission is judged, no clock is read, and no
     /// file is read but the record files given and the manifest. A caller that needs any judgment loads the estate with <see cref="Load(string, IReadOnlyList{RecordFile})"/>.
@@ -246,19 +267,7 @@ public static class EstateLoader
 
         foreach (RecordEnvelope record in records)
         {
-            IRecordType? type = RecordTypeRegistry.Find(record.Type);
-            if (type is null)
-            {
-                string hint = RecordTypeRegistry.Reserved.IndexOf(record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
-                findings.Error("record.unknown-type", record.ExpectedPath, $"Unknown record type '{record.Type}'.{hint}");
-                continue;
-            }
-
-            if (record.Format < type.SinceFormat)
-            {
-                findings.Error("record.type-format", record.ExpectedPath, $"Type '{record.Type}' belongs to record format {type.SinceFormat}, and this record states format {record.Format}.");
-                continue;
-            }
+            if (FindType(record, findings) is not IRecordType type) continue;
 
             if (removedBeforeHistory.TryGetValue(record.Id, out IReadOnlyList<RecordEnvelope>? losses))
             {
@@ -613,7 +622,28 @@ public static class EstateLoader
         return supersededBy;
     }
 
-    private static void ValidateSubject(EstateModel model, RecordEnvelope record, IRecordType type, FindingList findings)
+    private static IRecordType? FindType(RecordEnvelope record, FindingList findings)
+    {
+        IRecordType? type = RecordTypeRegistry.Find(record.Type);
+        if (type is null)
+        {
+            string hint = RecordTypeRegistry.Reserved.IndexOf(record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
+            findings.Error("record.unknown-type", record.ExpectedPath, $"Unknown record type '{record.Type}'.{hint}");
+            return null;
+        }
+
+        if (record.Format < type.SinceFormat)
+        {
+            findings.Error("record.type-format", record.ExpectedPath, $"Type '{record.Type}' belongs to record format {type.SinceFormat}, and this record states format {record.Format}.");
+            return null;
+        }
+
+        return type;
+    }
+
+    // The subject rules the record alone decides: whether it has one, its type and whether it pins a hash. From 0.9.5 (FIX-158) they
+    // also run before any signer is asked; false when the record has no subject to look up.
+    private static bool ValidateSubjectShape(RecordEnvelope record, IRecordType type, FindingList findings)
     {
         if (record.Subject is null)
         {
@@ -622,7 +652,7 @@ public static class EstateLoader
                 findings.Error("record.subject", record.ExpectedPath, $"A {record.Type} record needs a subject.");
             }
 
-            return;
+            return false;
         }
 
         if (type.SubjectType is not null && record.Subject.Type != type.SubjectType)
@@ -633,6 +663,16 @@ public static class EstateLoader
         if (type.SubjectHashRequired && record.Subject.Hash is null)
         {
             findings.Error("record.subject", record.ExpectedPath, $"A {record.Type} record pins its subject to an exact hash.");
+        }
+
+        return true;
+    }
+
+    private static void ValidateSubject(EstateModel model, RecordEnvelope record, IRecordType type, FindingList findings)
+    {
+        if (!ValidateSubjectShape(record, type, findings) || record.Subject is null)
+        {
+            return;
         }
 
         if (!model.ById.TryGetValue(record.Subject.Id, out RecordEnvelope? target))

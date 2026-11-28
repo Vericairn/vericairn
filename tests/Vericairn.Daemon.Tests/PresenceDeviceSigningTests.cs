@@ -26,8 +26,8 @@ public class PresenceDeviceSigningTests
         CancellationToken token = TestContext.Current.CancellationToken;
         string person = harness.Estate.Add("principal", harness.Estate.OperatorId, """{"kind":"human","name":"Phone Person","roles":["contributor"]}""").Id;
         string stranger = harness.Estate.Add("principal", harness.Estate.OperatorId, """{"kind":"human","name":"Other Person","roles":["contributor"]}""").Id;
-        var presence = new PresenceKeyStandIn(harness.DeviceHome);
-        var strangerPresence = new PresenceKeyStandIn(Path.Combine(harness.DeviceHome, "stranger"));
+        var presence = harness.AndroidPresence();
+        var strangerPresence = harness.AndroidPresence(Path.Combine(harness.DeviceHome, "stranger"));
         RuntimeConnection phone = harness.Connections.Add(harness.Address, harness.Issue(person).Code, new PairingOptions("Phone") { PresenceKeyStore = presence });
         RuntimeConnection laptop = harness.Pair(person, "Laptop");
         RuntimeConnection strangerPhone = harness.Connections.Add(harness.Address, harness.Issue(stranger).Code, new PairingOptions("Other phone") { PresenceKeyStore = strangerPresence });
@@ -79,7 +79,7 @@ public class PresenceDeviceSigningTests
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(recordFormat: 3);
         CancellationToken token = TestContext.Current.CancellationToken;
         string person = harness.Estate.Add("principal", harness.Estate.OperatorId, """{"kind":"human","name":"Phone Person","roles":["contributor"]}""").Id;
-        var presence = new PresenceKeyStandIn(harness.DeviceHome);
+        var presence = harness.AndroidPresence();
         RuntimeConnection phone = harness.Connections.Add(harness.Address, harness.Issue(person).Code, new PairingOptions("Phone") { PresenceKeyStore = presence });
         using VericairnClient client = harness.Connections.Connect(phone);
 

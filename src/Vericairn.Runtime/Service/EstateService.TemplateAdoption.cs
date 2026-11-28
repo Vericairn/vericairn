@@ -102,13 +102,13 @@ public sealed partial class EstateService
                 if (migration && (evidence is null || !DocumentMigration.IsReviewed(model, preview.Envelope, evidence)))
                     return response with { Problem = new("review-required", "Generated-region changes retain the existing requirement for an exact migration result and independent operator review. Inspect the adoption preview before applying it.", []) };
                 if (preparation is not null) return response with { Problem = preparation };
-                (AuthoredRecord? record, string? refusal) = AuthorLocked(new("living-document", request.By, proposedBody, Supersedes: previous?.Id), model);
-                if (record is null) return response with { Problem = new("refused", refusal!, []) };
+                (AuthoredRecord? record, Problem? refusal) = AuthorLocked(new("living-document", request.By, proposedBody, Supersedes: previous?.Id), model, scanContent: pinDraft is null);
+                if (record is null) return response with { Problem = refusal };
                 AuthoredRecord? pin = null;
                 if (pinDraft is not null)
                 {
                     (pin, refusal) = AuthorLocked(pinDraft, model);
-                    if (pin is null) return response with { Problem = new("refused", refusal!, []) };
+                    if (pin is null) return response with { Problem = refusal };
                 }
                 AuthoredRecord[] batch = pin is null ? [record] : [pin, record];
                 var stored = StoreTogetherLocked(batch, "Attach an exact template while retaining authored document bytes and history.", null, current =>

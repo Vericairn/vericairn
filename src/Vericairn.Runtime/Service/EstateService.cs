@@ -314,13 +314,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The check-time warning for the unwitnessed tail (design/signed-history.md § 7): each record file deleted in the checked-out commit's
-    /// reachable history, absent here, that no counting checkpoint witnessed, since a witnessed one is already an error and an acknowledged
-    /// removal needs no warning. It depends on the clone, so it stays out of the canonical status; a shallow clone reports it unavailable.
+    /// reachable history, absent here, that no counting checkpoint witnessed. A verified acknowledgment of the exact
+    /// Git deletion is informational. It depends on the clone, so it stays out of the canonical status; a shallow clone reports it unavailable.
     /// </summary>
     private FindingList DeletedInGit(EstateModel model)
     {
         var findings = new FindingList();
-        if (model.Manifest?.Profile != "repository-synced" || Providers.Source("git")?.DeletedRecordFiles(model.Root) is not { } deletions) return findings;
+        if (model.Manifest?.Profile != "repository-synced" || Providers.Source("git") is not { } git ||
+            git.DeletedRecordFiles(model.Root) is not { } deletions) return findings;
         if (deletions.Shallow)
         {
             findings.Info("history.deleted-in-git", EstateLayout.RecordsDirectory, "Unavailable: this clone is shallow, so the record files deleted in its history cannot be listed. A full clone lists them.");
@@ -328,11 +329,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         global::Vericairn.Records.History.HistoryState history = global::Vericairn.Records.History.SignedHistory.Of(model);
+        var acknowledgments = GitDeletionAcknowledgments(model);
         foreach (RecordDeletion deletion in deletions.Deleted)
         {
             string id = Path.GetFileNameWithoutExtension(deletion.Path);
             if (model.FilePaths?.Contains(deletion.Path) == true || model.ById.ContainsKey(id) || history.IsWitnessed(id) || history.IsAcknowledgedRemoval(id)) continue;
-            findings.Warning("history.deleted-in-git", deletion.Path, $"Deleted in commit {deletion.Commit}, which the checked-out commit reaches, and absent here. No history checkpoint witnessed it, so nothing else shows that it was removed: restore it from that commit's parent if it belongs here.");
+            if (acknowledgments.TryGetValue(id, out var candidates) &&
+                candidates.FirstOrDefault(candidate => MatchesGitDeletion(model, git, deletion, candidate.Removal)) is { Checkpoint: { } checkpoint, Removal: { } removal })
+            {
+                string namedCommit = removal.Commit == deletion.Commit ? "" : $" The checkpoint names deleting commit {removal.Commit}.";
+                findings.Info("history.deleted-in-git", deletion.Path, $"Deleted in commit {deletion.Commit}. Acknowledged by history checkpoint {checkpoint.Id} at {checkpoint.ComputedHash}.{namedCommit}");
+            }
+            else
+                findings.Warning("history.deleted-in-git", deletion.Path, $"Deleted in commit {deletion.Commit}, which the checked-out commit reaches, and absent here. No history checkpoint witnessed it. Restore it from that commit's parent if it belongs here.");
         }
 
         return findings;
@@ -391,6 +400,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public WriteOutcome NewRecord(NewRecordRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (SuppliesPairingEvidence(request.Type, request.Body)) return Refuse(PairingEvidenceOnly);
         if (RecordTypeRegistry.Find(request.Type) is null)
         {
             return Refuse($"Unknown record type '{request.Type}'.");
@@ -718,7 +728,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     EstateModel.BodyString(device, "custody"),
                     admission is null ? "not admitted" : EstateModel.BodyString(admission, "status") ?? "?",
                     stores.Any(s => s.Has(identity)),
-                    EstateModel.BodyString(device, "presence"),
+                    ReportedPresence(model, device),
                     EstateModel.BodyString(device, "purpose"),
                     ProfilesOf(device));
             }).ToList();
@@ -872,6 +882,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             body["publicKey"] = RecordSigning.EncodePublicKey(publicKey);
             body["custody"] = next.Kind;
             body["presence"] = presence ? "required" : "none";
+            body.Remove("presenceVerification");
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             WriteOutcome outcome = WriteLocked(new RecordDraft("device", EstateModel.BodyString(device!, "principal")!, document.RootElement, Supersedes: device!.Id, At: now, Id: revision), model, [new StoreSigner(current!, identity!), new StoreSigner(next, revision, identity!)]);
             if (!outcome.Ok)
@@ -946,6 +957,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>Raised after this runtime records a successful revocation, so its relay can close a device's streams.</summary>
+    internal event Action<string>? DeviceAdmissionRevoked;
+
     /// <inheritdoc />
     public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevoke(request, null);
 
@@ -958,6 +972,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("The revoking principal must be a ULID.");
         }
 
+        WriteOutcome outcome;
         lock (gate)
         {
             EstateModel model = session.Load();
@@ -977,9 +992,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(revokedAt) };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: revokedAt);
-            WriteOutcome outcome = request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
-            return outcome.Written is null ? outcome : outcome with { RevocationReach = [ObserveRevocation("written")] };
+            outcome = request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+            if (outcome.Written is not null) outcome = outcome with { RevocationReach = [ObserveRevocation("written")] };
         }
+
+        if (outcome.Ok)
+        {
+            DeviceAdmissionRevoked?.Invoke(request.Device);
+        }
+
+        return outcome;
     }
 
     /// <inheritdoc />
@@ -1570,16 +1592,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // The closing and the acceptance are judged together and stored as one batch, both announced before the first presence prompt.
             var closingDraft = new RecordDraft("goal-status", request.By, JsonSerializer.SerializeToElement(closing.Body()), current.Reference);
             using IDisposable counted = presence.Action("goal accept " + current.Id, SignsWithPresence(model, request.By) ? [DescribeRecord(closingDraft, model), DescribeRecord(accepting, model)] : null);
-            (AuthoredRecord? closed, string? refusal) = AuthorLocked(closingDraft, model);
+            (AuthoredRecord? closed, Problem? refusal) = AuthorLocked(closingDraft, model);
             if (closed is null)
             {
-                return Refuse(refusal!);
+                return WriteOutcome.Fail(refusal!);
             }
 
             (AuthoredRecord? accepted, refusal) = AuthorLocked(accepting, model);
             if (accepted is null)
             {
-                return Refuse(refusal!);
+                return WriteOutcome.Fail(refusal!);
             }
 
             (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherLocked([closed, accepted], "Close a goal's run with its unsettled steps and accept the goal.", null);
@@ -1903,9 +1925,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             if (dependency is not null)
             {
-                (AuthoredRecord? signed, string? refusal) = AuthorLocked(new RecordDraft("observation", request.By, dependency.Envelope.Body,
+                (AuthoredRecord? signed, Problem? refusal) = AuthorLocked(new RecordDraft("observation", request.By, dependency.Envelope.Body,
                     dependency.Envelope.Subject, At: dependency.Envelope.AtTime, Id: dependency.Envelope.Id, Format: dependency.Envelope.Format), model);
-                if (signed is null) return (null, new Problem("refused", refusal!, []));
+                if (signed is null) return (null, refusal);
                 dependency = signed;
                 plan = EstateUpgrade.Plan(model, signed.Envelope, request.Line, request.Channel);
             }
@@ -1976,11 +1998,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
             var migrationDraft = new RecordDraft("migration", request.By, body.RootElement,
                 Subject: VericairnReleaseObservation.Is(plan.Release) ? plan.Release.Reference : null, Format: Math.Min(plan.ToFormat, RecordFormats.Current));
-            (AuthoredRecord? migration, string? migrationRefusal) = AuthorLocked(migrationDraft, model);
+            (AuthoredRecord? migration, Problem? migrationRefusal) = AuthorLocked(migrationDraft, model);
             if (migration is null)
             {
                 UpgradeReturns.Discard(restore.Directory);
-                return (null, new Problem("refused", migrationRefusal!, []));
+                return (null, migrationRefusal);
             }
 
             AuthoredRecord[] proposed = dependency is null ? [migration] : [dependency, migration];
@@ -1995,9 +2017,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 TriggeredCheckpoint? upgradeCheckpoint = null;
                 if (global::Vericairn.Records.History.SignedHistory.Adopted(model))
                 {
-                    (PreparedCheckpoint? checkpoint, string? skipped) = context.Staged.Keys.Any(k => k.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal))
-                        ? (null, "The migrations rewrite record files, so no history checkpoint was written with the upgrade; the next checkpoint witnesses them.")
+                    (PreparedCheckpoint? checkpoint, Problem? checkpointProblem) = context.Staged.Keys.Any(k => k.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal))
+                        ? (null, new Problem("refused", "The migrations rewrite record files, so no history checkpoint was written with the upgrade; the next checkpoint witnesses them.", []))
                         : CheckpointLocked(LoadWith(proposed), "upgrade", request.By);
+                    string? skipped = CheckpointSkip(checkpointProblem);
                     upgradePrepared = checkpoint;
                     if (checkpoint is not null && JudgeProposedLocked([.. proposed, checkpoint.Record]) is Problem refusedCheckpoint)
                     {
@@ -2376,7 +2399,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// Records a paired device and, from 0.9.0 (REMOTE-11), the presence device the same phone presented with it: a second key of the
-    /// same principal, stating presence required, with the same profiles, admitted under the same issuer's authority. Both devices'
+    /// same principal, with verified or declared presence, the same profiles and the same issuer's authority. Both devices'
     /// signatures are verified before anything is written; the four records are judged together and stored as one batch, so a refused
     /// presence device records neither. Without a presence device this is the pairing of one device, as before.
     /// </summary>
@@ -2397,6 +2420,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return (Refuse("The device presented no usable P-256 public key."), null, null, null);
         }
 
+        DateTimeOffset admittedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        if (PairingPresenceRefusal(plan, device, admittedAt, out AndroidAttestationEvidence? evidence) is string invalidPresence)
+        {
+            return (Refuse(invalidPresence), null, null, null);
+        }
+
         lock (gate)
         {
             EstateModel model = session.Load();
@@ -2409,7 +2438,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             string hash;
             try
             {
-                JsonObject body = DeviceRecords.Body(plan.Principal, device.Name, device.Platform, device.Custody, device.PublicKey, profiles, plan.Format, device.Presence);
+                JsonObject body = PairedDeviceBody(plan, profiles, device);
                 draft = DeviceRecords.Draft(plan.Principal, plan.Record, ParseAt(plan.At) ?? DateTimeOffset.UtcNow, plan.Format, body);
                 hash = DeviceRecords.Hash(draft);
             }
@@ -2430,9 +2459,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (written, null, null, null);
             }
 
-            var admission = new JsonObject { ["principal"] = plan.Principal, ["status"] = "admitted", ["note"] = note };
+            JsonObject admission = PairedAdmissionBody(plan, note, evidence);
             using JsonDocument document = JsonDocument.Parse(admission.ToJsonString());
-            WriteOutcome admitted = WriteLocked(new RecordDraft("admission", issuer.Principal, document.RootElement, new RecordReference("device", plan.Record, written.Written!.Hash)), session.Load());
+            WriteOutcome admitted = WriteLocked(new RecordDraft("admission", issuer.Principal, document.RootElement,
+                new RecordReference("device", plan.Record, written.Written!.Hash), At: evidence is null ? null : admittedAt), session.Load());
             if (!admitted.Ok)
             {
                 session.Discard(RecordAuthor.Create(draft, [signer]));
@@ -2460,8 +2490,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refused("refused", "Each device presents a usable P-256 public key. Nothing was recorded.");
         if (string.Equals(device.PublicKey, presence.PublicKey, StringComparison.Ordinal))
             return Refused("refused", "The presence device is a second key; it never repeats the paired device's key. Nothing was recorded.");
-        if (presence.Presence != "required" || device.Presence == "required")
-            return Refused("refused", "The presence device states presence required, and the paired device that signs requests does not. Nothing was recorded.");
+        if (presence.Presence is not ("required" or "declared") || device.Presence is "required" or "declared")
+            return Refused("refused", "The presence device states a presence requirement and the paired device that signs requests does not. Nothing was recorded.");
+        DateTimeOffset admittedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        if (PairingPresenceRefusal(plan, device, admittedAt, out _) is string requestRefusal)
+            return Refused("refused", requestRefusal);
+        if (PairingPresenceRefusal(plan, presence, admittedAt, out AndroidAttestationEvidence? evidence) is string presenceRefusal)
+            return Refused("refused", presenceRefusal);
 
         lock (gate)
         {
@@ -2479,9 +2514,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             {
                 DateTimeOffset at = ParseAt(plan.At) ?? DateTimeOffset.UtcNow;
                 draft = DeviceRecords.Draft(plan.Principal, plan.Record, at, plan.Format,
-                    DeviceRecords.Body(plan.Principal, device.Name, device.Platform, device.Custody, device.PublicKey, profiles, plan.Format, device.Presence));
+                    PairedDeviceBody(plan, profiles, device));
                 presenceDraft = DeviceRecords.Draft(plan.Principal, plan.PresenceRecord, at, plan.Format,
-                    DeviceRecords.Body(plan.Principal, presence.Name, presence.Platform, presence.Custody, presence.PublicKey, profiles, plan.Format, presence.Presence));
+                    PairedDeviceBody(plan, profiles, presence));
                 hash = DeviceRecords.Hash(draft);
                 presenceHash = DeviceRecords.Hash(presenceDraft);
             }
@@ -2490,7 +2525,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return Refused("refused", exception.Message);
             }
 
-            // Both keys prove possession before anything is written; the presence key's signature was made with its owner's presence.
+            // Both keys prove possession before anything is written. A signature alone does not prove presence.
             if (!RecordSigning.Verify(device.PublicKey, RecordSigning.Digest(hash), signature)
                 || !RecordSigning.Verify(presence.PublicKey, RecordSigning.Digest(presenceHash), presenceSignature))
             {
@@ -2498,18 +2533,20 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             var records = new List<AuthoredRecord>();
-            foreach ((RecordDraft deviceDraft, string deviceHash, string deviceSignature, string admissionNote) in new[]
+            foreach ((RecordDraft deviceDraft, string deviceHash, string deviceSignature, string admissionNote, AndroidAttestationEvidence? attestation) in new[]
             {
-                (draft, hash, signature, note),
-                (presenceDraft, presenceHash, presenceSignature, note + $" It is the presence device of device {plan.Record}, presented in the same exchange: a second key of that phone whose every signature needs its owner's presence, used to sign records."),
+                (draft, hash, signature, note, null),
+                (presenceDraft, presenceHash, presenceSignature, note + $" It is the presence device of device {plan.Record}, a second key presented for record signing in the same exchange.", evidence),
             })
             {
-                (AuthoredRecord? deviceRecord, string? deviceRefusal) = AuthorLocked(deviceDraft, model, [new PresignedSigner(deviceDraft.Id!, deviceHash, deviceSignature)]);
-                if (deviceRecord is null) return Refused("refused", deviceRefusal! + " Nothing was recorded.");
-                using JsonDocument admission = JsonDocument.Parse(new JsonObject { ["principal"] = plan.Principal, ["status"] = "admitted", ["note"] = admissionNote }.ToJsonString());
-                (AuthoredRecord? admitted, string? admissionRefusal) = AuthorLocked(new RecordDraft("admission", issuer.Principal, admission.RootElement.Clone(),
-                    new RecordReference("device", deviceDraft.Id!, deviceRecord.Envelope.ComputedHash)), model);
-                if (admitted is null) return Refused("refused", "Nothing was recorded: a device's admission was refused. " + admissionRefusal);
+                (AuthoredRecord? deviceRecord, Problem? deviceRefusal) = AuthorLocked(deviceDraft, model, [new PresignedSigner(deviceDraft.Id!, deviceHash, deviceSignature)]);
+                if (deviceRecord is null)
+                    return (WriteOutcome.Fail(deviceRefusal! with { Message = deviceRefusal.Message + " Nothing was recorded." }), null, null, null);
+                using JsonDocument admission = JsonDocument.Parse(PairedAdmissionBody(plan, admissionNote, attestation).ToJsonString());
+                (AuthoredRecord? admitted, Problem? admissionRefusal) = AuthorLocked(new RecordDraft("admission", issuer.Principal, admission.RootElement.Clone(),
+                    new RecordReference("device", deviceDraft.Id!, deviceRecord.Envelope.ComputedHash), At: attestation is null ? null : admittedAt), model);
+                if (admitted is null)
+                    return (WriteOutcome.Fail(admissionRefusal! with { Message = "Nothing was recorded: a device's admission was refused. " + admissionRefusal.Message }), null, null, null);
                 records.Add(deviceRecord);
                 records.Add(admitted);
             }
@@ -2737,10 +2774,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return UnderWriteLock(() => StoreRemovalLocked(draft, signers), WriteOutcome.Fail);
         }
 
-        (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
+        (AuthoredRecord? record, Problem? problem) = AuthorCheckedLocked(draft, current, signers);
         if (record is null)
         {
-            return Refuse(refusal!);
+            return WriteOutcome.Fail(problem!);
         }
 
         // In an estate that has adopted, a revocation, key rotation or narrowing grant revision is stored after its closing, in the same
@@ -2873,13 +2910,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
-    private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
+    private (AuthoredRecord? Record, Problem? Problem) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null, bool scanContent = false) =>
+        AuthorCheckedLocked(draft, current, signers, scanContent);
+
+    private (AuthoredRecord? Record, Problem? Problem) AuthorCheckedLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers, bool scanContent = true)
     {
         // From 0.9.4 (FIX-159): every signature made on this machine, and every record prepared unsigned, passes here; none is made while
         // the estate leaves records unread.
         if (ActingRefusal.BeforeSigning(current, "signing the " + draft.Type + " record") is Problem unread)
         {
-            return (null, unread.Message);
+            return Refused(unread.Message);
         }
 
         // From 0.9.2 (MCP-03): under device signing nothing on this machine signs. A record authored without signers is a candidate
@@ -2892,43 +2932,37 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
             else if (signers.Any(s => s is not PresignedSigner presigned || presigned.DeviceId != requesting.Device || presigned.Hash != signing.Authorized))
             {
-                return (null, "A device-signed request is signed by its own device only; nothing on the runtime's machine signs its record.");
+                return Refused("A device-signed request is signed by its own device only; nothing on the runtime's machine signs its record.");
             }
         }
 
-        if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
+        if (PromptWriteRefusal(draft, current) is string promptRefusal) return Refused(promptRefusal);
         // From 0.9.4 (OPS-16): a decision naming an operator's act answers the current ask with the recommendation the act showed.
-        if (ActWriteRefusal(draft, current) is string actRefusal) return (null, actRefusal);
+        if (ActWriteRefusal(draft, current) is string actRefusal) return Refused(actRefusal);
         // From 0.9.4 (OPS-22): a request pins only files the estate's objects hold.
-        if (RequestFileRefusal(draft) is string fileRefusal) return (null, fileRefusal);
+        if (RequestFileRefusal(draft) is string fileRefusal) return Refused(fileRefusal);
         if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
-            return (null, templateRefusal);
+            return Refused(templateRefusal);
         if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)
         {
-            return (null, communicationRefusal);
+            return Refused(communicationRefusal);
         }
 
         // From 0.9.4 (ID-11): only the step's current holder acts, whatever time its record states, and only a person hands a held step on.
         if ((DisplacedWriteRefusal(draft, current) ?? AssignmentTakesNothingRefusal(draft, current)) is string displacedRefusal)
         {
-            return (null, displacedRefusal);
+            return Refused(displacedRefusal);
         }
 
-        if (BlockedTermRefusal(draft, current) is string blockedRefusal) return (null, blockedRefusal);
+        if (BlockedTermRefusal(draft, current) is string blockedRefusal) return Refused(blockedRefusal);
         // A history checkpoint follows every head of this copy and lists exactly what no head witnesses (design/signed-history.md § 5).
         if (draft.Type == "history-checkpoint" && global::Vericairn.Records.History.SignedHistory.AuthoringRefusal(current, draft.Body) is string historyRefusal)
-            return (null, "Not written: " + historyRefusal);
+            return Refused("Not written: " + historyRefusal);
 
-        if (signers is null)
-        {
-            string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
-            if (refusal is not null)
-            {
-                return (null, refusal);
-            }
+        bool acknowledgesGitDeletion = draft.Type == "history-checkpoint" && HistoryCheckpointType.HasGitRemovals(draft.Body);
+        if (acknowledgesGitDeletion && GitDeletionRefusal(current, draft.By, draft.Body, draft.Id ?? "") is { } gitRefusal)
+            return Refused("Not written: " + gitRefusal);
 
-            signers = signer is null ? [] : [signer];
-        }
 
         // A record is written in its estate's format, never in one this build does not write.
         if (draft.Format is null)
@@ -2942,6 +2976,40 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             draft = draft with { At = predecessor.AtTime };
         }
 
+        AuthoredRecord unsigned;
+        try
+        {
+            unsigned = RecordAuthor.Create(draft);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
+        {
+            return Refused(exception.Message);
+        }
+
+        // FIX-158: a single-record write checks its own bytes before signing. Batch writes scan the signed bytes under the
+        // write lock, where the refusal includes findings for every affected record.
+        if (CheckRecordBody(current, unsigned, scanContent) is Problem rejected)
+        {
+            return (null, rejected);
+        }
+
+        if (signers is null)
+        {
+            string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
+            if (refusal is not null)
+            {
+                return Refused(refusal);
+            }
+
+            signers = signer is null ? [] : [signer];
+        }
+
+        if (acknowledgesGitDeletion && !signers.Any(signer => NeedsPresence(signer, draft, current)))
+            return Refused("Not written: a Git deletion acknowledgment requires the root operator's presence at signing on this machine.");
+
+        if (signers.Count == 0) return (unsigned, null);
+        draft = draft with { At = unsigned.Envelope.AtTime, Id = unsigned.Envelope.Id };
+
         // A signing failure is described by its kind and type, never by its message, which may name a path on this machine and reaches
         // refusals and a checkpoint's skip reason. The record's own refusals name its fields and values, and keep their message, as does
         // a presigned signature's, which is fixed text.
@@ -2950,11 +3018,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         List<IRecordSigner> watched = [.. signers.Select(s => s is PresignedSigner ? s : new WatchedSigner(s, this, signed, current))];
         try
         {
-            if (signers.Count > 0) BeforeSigningRecord?.Invoke();
+            BeforeSigningRecord?.Invoke();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return (null, SigningFailure(exception));
+            return Refused(SigningFailure(exception));
         }
 
         try
@@ -2963,8 +3031,34 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return (null, watched.Any(s => s is WatchedSigner { Failed: true }) ? SigningFailure(exception) : exception.Message);
+            return Refused(watched.Any(s => s is WatchedSigner { Failed: true }) ? SigningFailure(exception) : exception.Message);
         }
+
+        static (AuthoredRecord?, Problem?) Refused(string message) => (null, new Problem("refused", message, []));
+    }
+
+    private static Problem? CheckRecordBody(EstateModel model, AuthoredRecord record, bool scanContent)
+    {
+        var errors = new FindingList();
+        FindingList findings = EstateLoader.CheckRecordBody(model, record.Envelope,
+            scanContent ? record.RelativePath : null, scanContent ? record.Bytes : null);
+        foreach (Finding finding in findings.Where(f => f.Severity == Severity.Error))
+        {
+            errors.Add(finding);
+        }
+
+        // These two rules warn on stored records and reject a new one. Both depend only on the proposed record.
+        RecordEnvelope proposed = record.Envelope;
+        Finding? authoredWarning = proposed.Type switch
+        {
+            "decision" => DecisionType.RecordTimeFinding(EstateModel.BodyString(proposed, "decidedAt"), proposed.At, record.RelativePath),
+            "result" => ResultType.OutputSchemeFinding(proposed, record.RelativePath),
+            _ => null,
+        };
+        if (authoredWarning is not null) errors.Add(authoredWarning with { Severity = Severity.Error });
+        return errors.HasErrors
+            ? new Problem("rejected", $"Not written: the estate would be invalid with this record ({errors.Errors} {(errors.Errors == 1 ? "error" : "errors")}).", ToFindings(errors, "rejected").Findings)
+            : null;
     }
 
     /// <summary>
@@ -3259,6 +3353,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             BeforeValidatingRecords?.Invoke(records);
             EstateModel proposed = LoadWith(records);
+            foreach (RecordEnvelope checkpoint in records.Select(record => record.Envelope)
+                .Where(record => record.Type == "history-checkpoint" && HistoryCheckpointType.HasGitRemovals(record.Body)))
+            {
+                string? refusal = GitDeletionRefusal(proposed, checkpoint.By, checkpoint.Body, checkpoint.Id);
+                if (refusal is not null) return new Problem("refused", "Not written: " + refusal, []);
+                if (!proposed.Trust.MayAcknowledgeGitDeletion(checkpoint))
+                    return new Problem("refused", "Not written: a Git deletion acknowledgment requires a signature from the root operator's admitted presence device.", []);
+            }
+
             if (UnclosedActRefusal(proposed, records, () => LoadWith([])) is Problem unclosed) return unclosed;
             FindingList relevant = Invalid(proposed, records);
             AttemptWaits(proposed, records, relevant);
@@ -3405,6 +3508,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     {
         signer = null;
         IReadOnlyList<IDeviceKeyStore> stores = HeldKeyStores();
+        bool requiresPresence = draft.Type == "history-checkpoint" && HistoryCheckpointType.HasGitRemovals(draft.Body);
         List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => model.Chain(d)[0], StringComparer.Ordinal).ToList();
         // Keys are held under a device's identity, its first record, which signatures name across renames and rotations.
         foreach (string identity in devices.Where(d => SignatureChecks.IsAdmitted(model, d)).Select(d => model.Chain(d)[0]))
@@ -3412,10 +3516,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             IDeviceKeyStore? store = stores.FirstOrDefault(s => s.Has(identity));
             if (store is not null)
             {
-                signer = new StoreSigner(store, identity);
+                var candidate = new StoreSigner(store, identity);
+                if (requiresPresence && !NeedsPresence(candidate, draft, model)) continue;
+                signer = candidate;
                 return null;
             }
         }
+
+        if (requiresPresence) return "A Git deletion acknowledgment requires an admitted key of the root operator that checks presence on this machine.";
 
         RecordEnvelope? estate = model.CurrentEstate;
         string? rootOperator = estate is null ? null : EstateModel.BodyString(estate, "operator");
@@ -3516,7 +3624,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>Authors a record with no signature, for a device to sign or as a candidate the store refuses. Caller holds the gate.</summary>
-    private (AuthoredRecord? Record, string? Refusal) AuthorUnsignedLocked(RecordDraft draft, EstateModel current) => AuthorLocked(draft, current, []);
+    private (AuthoredRecord? Record, Problem? Problem) AuthorUnsignedLocked(RecordDraft draft, EstateModel current) => AuthorLocked(draft, current, []);
 
     /// <summary>A signature a device made elsewhere over the content hash of exactly this record; any other digest is refused.</summary>
     private sealed class PresignedSigner(string deviceId, string hash, string signature) : IRecordSigner
@@ -3557,4 +3665,7 @@ public sealed record PairingPlan(string Record, string At, long Format, string E
     /// principal is a person in an estate of record format 2 or later; null otherwise.
     /// </summary>
     public string? PresenceRecord { get; init; }
+
+    /// <summary>The runtime's per-exchange nonce, also used as the challenge for hardware key attestation.</summary>
+    public string RuntimeNonce { get; } = PairingProtocol.NewNonce();
 }
