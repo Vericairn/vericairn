@@ -81,6 +81,7 @@ internal sealed record McpClientMetadata(string Id, string Name, string[] Redire
         string? suppliedId = ReadString(document, "client_id");
         string? name = ReadString(document, "client_name");
         string? application = ReadString(document, "application_type");
+        if (dynamic && !document.TryGetProperty("application_type", out _)) application = "web";
         if ((!dynamic && suppliedId != id) || (dynamic && application is not ("web" or "native"))
             || string.IsNullOrWhiteSpace(name) || name.Length > 120 || name.Any(c => char.IsControl(c))
             || !SupportsPublicClient(document, dynamic)

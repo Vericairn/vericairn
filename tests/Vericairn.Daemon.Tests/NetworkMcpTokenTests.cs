@@ -26,6 +26,7 @@ public sealed partial class NetworkMcpTokenTests
     private const string Redirect = "https://client.example/redirect?from=mcp";
     private const string DocumentId = "https://client.example/metadata.json";
     private static readonly string[] Redirects = [Redirect];
+    private static readonly string[] LoopbackRedirects = ["http://localhost:3000/callback"];
     private static readonly string[] Revisions = [Modern, Legacy];
     private static CancellationToken Stop => TestContext.Current.CancellationToken;
 
@@ -128,13 +129,15 @@ public sealed partial class NetworkMcpTokenTests
 
     private static async Task<string> RegisterAsync(HttpClient client)
     {
-        string badJson = JsonSerializer.Serialize(new { client_name = "Test client", redirect_uris = Redirects });
+        string badJson = JsonSerializer.Serialize(new { client_name = "Test client", redirect_uris = LoopbackRedirects });
         using HttpResponseMessage invalid = await client.PostAsync("/oauth/register", new StringContent(badJson, Encoding.UTF8, "application/json"), Stop);
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
-        string json = JsonSerializer.Serialize(new { client_name = "Test client", redirect_uris = Redirects, application_type = "web" });
+        string json = JsonSerializer.Serialize(new { client_name = "Test client", redirect_uris = Redirects });
         using HttpResponseMessage registered = await client.PostAsync("/oauth/register", new StringContent(json, Encoding.UTF8, "application/json"), Stop);
         Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
-        return (await JsonAsync(registered))["client_id"]!.GetValue<string>();
+        JsonObject registration = await JsonAsync(registered);
+        Assert.Equal("web", registration["application_type"]!.GetValue<string>());
+        return registration["client_id"]!.GetValue<string>();
     }
 
     private static async Task<TokenPair> AuthorizeAsync(PublicHarness fixture, string clientId, string wanted, string? requestedScope = null)
