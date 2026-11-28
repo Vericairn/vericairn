@@ -114,7 +114,16 @@ internal sealed class WorkerSettings(CommandContext context)
                 string? root = store.ReadWorkspaceRoot();
                 IReadOnlyList<WorkspaceSetupEntry> setup = store.ListSetup();
                 WorkerConfigurationStore.ClaudeSetupTokenStatus setupToken = store.DescribeClaudeSetupToken();
-                if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { root, setup = setup.Select(Row), setupToken }, ProtocolJson.Options));
+                if (json)
+                {
+                    var result = new JsonObject
+                    {
+                        ["root"] = root,
+                        ["setup"] = JsonSerializer.SerializeToNode(setup.Select(Row), ProtocolJson.Options),
+                    };
+                    if (setupToken.Provisioned) result["setupToken"] = JsonSerializer.SerializeToNode(setupToken, ProtocolJson.Options);
+                    context.Output.WriteLine(result.ToJsonString(ProtocolJson.Options));
+                }
                 else
                 {
                     context.Output.WriteLine(root is null
@@ -135,7 +144,7 @@ internal sealed class WorkerSettings(CommandContext context)
             if (json)
             {
                 JsonNode? result = JsonSerializer.SerializeToNode(configuration, ProtocolJson.Options);
-                if (status is not null)
+                if (status is { Provisioned: true })
                 {
                     result ??= new JsonObject();
                     result["setupToken"] = JsonSerializer.SerializeToNode(status, ProtocolJson.Options);

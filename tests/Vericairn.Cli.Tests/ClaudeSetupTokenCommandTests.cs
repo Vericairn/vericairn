@@ -70,6 +70,41 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task ConfigureJsonReturnsNullForAnUnconfiguredClaudeLauncher()
+    {
+        string home = Path.Combine(scratch, "worker-home");
+        CliHarness.Outcome shown = await Invoke(home, "", null, "--json", "worker", "configure", "--launcher", "claude-code");
+
+        Assert.Equal(0, shown.Code);
+        Assert.Equal(JsonValueKind.Null, shown.Json.ValueKind);
+    }
+
+    [Fact]
+    public async Task ConfigureJsonAddsSetupTokenToLauncherDefaultsOnlyWhenProvisioned()
+    {
+        string home = Path.Combine(scratch, "worker-home");
+        Assert.Equal(0, (await Invoke(home, "", null, "worker", "configure", "--launcher", "claude-code",
+            "--model", "fixture-model", "--effort", "high")).Code);
+        string[] arguments = ["--json", "worker", "configure", "--launcher", "claude-code"];
+        CliHarness.Outcome absent = await Invoke(home, "", null, arguments);
+
+        Assert.Equal(0, absent.Code);
+        Assert.False(absent.Json.TryGetProperty("setupToken", out _));
+        Assert.Equal("fixture-model", absent.Json.GetProperty("model").GetString());
+        Assert.Equal("high", absent.Json.GetProperty("effort").GetString());
+
+        string token = Token();
+        Assert.Equal(0, (await Import(home, token, "max")).Code);
+        CliHarness.Outcome provisioned = await Invoke(home, "", null, arguments);
+
+        Assert.Equal(0, provisioned.Code);
+        Assert.Equal("fixture-model", provisioned.Json.GetProperty("model").GetString());
+        Assert.Equal("high", provisioned.Json.GetProperty("effort").GetString());
+        Assert.True(provisioned.Json.GetProperty("setupToken").GetProperty("provisioned").GetBoolean());
+        Assert.False((provisioned.Out + provisioned.Err).Contains(token, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ConfigureShowsOnlyProvisionMetadataAndCanRemoveTheProvision()
     {
         string token = Token();
@@ -79,7 +114,8 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         const string credentials = """{"claudeAiOauth":{"subscriptionType":"pro"}}""";
         File.WriteAllText(credentialsFile, credentials);
         CliHarness.Outcome absent = await Invoke(home, "", config, "--json", "worker", "configure");
-        Assert.False(absent.Json.GetProperty("setupToken").GetProperty("provisioned").GetBoolean());
+        Assert.Equal(0, absent.Code);
+        Assert.False(absent.Json.TryGetProperty("setupToken", out _));
 
         DateTimeOffset before = DateTimeOffset.UtcNow;
         Assert.Equal(0, (await Import(home, token, "max", config)).Code);
@@ -122,7 +158,8 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         Assert.Equal(0, repeated.Code);
         Assert.False(repeated.Json.GetProperty("removed").GetBoolean());
         CliHarness.Outcome afterRemoval = await Invoke(home, "", config, "--json", "worker", "configure", "--launcher", "claude-code");
-        Assert.False(afterRemoval.Json.GetProperty("setupToken").GetProperty("provisioned").GetBoolean());
+        Assert.Equal(0, afterRemoval.Code);
+        Assert.Equal(JsonValueKind.Null, afterRemoval.Json.ValueKind);
     }
 
     [Theory]
