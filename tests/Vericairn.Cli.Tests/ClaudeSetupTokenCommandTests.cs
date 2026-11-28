@@ -143,6 +143,25 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         Assert.False(File.Exists(Provision(home)));
     }
 
+    [Fact]
+    public void TheHiddenPromptIsFlushedBeforeTheFirstKeyIsRead()
+    {
+        using var error = new FlushedWriter();
+        var context = new CommandContext(error: error);
+        const string prompt = "Claude Code setup token: ";
+        var keys = new Queue<ConsoleKeyInfo>([new('a', ConsoleKey.A, false, false, false), new('\r', ConsoleKey.Enter, false, false, false)]);
+
+        string result = context.ReadHidden(prompt, 1, () =>
+        {
+            Assert.True(error.Flushed);
+            Assert.Equal(prompt, error.ToString());
+            return keys.Dequeue();
+        });
+
+        Assert.Equal("a", result);
+        Assert.Empty(keys);
+    }
+
     [Theory]
     [InlineData("missing", "pro", "bare Claude Code setup-token")]
     [InlineData("wrong-shape", "pro", "bare Claude Code setup-token")]
@@ -250,6 +269,13 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
     }
 
     private static string Provision(string home) => Path.Combine(home, "worker", "claude-code-setup-token.json");
+
+    private sealed class FlushedWriter : StringWriter
+    {
+        public bool Flushed { get; private set; }
+
+        public override void Flush() => Flushed = true;
+    }
 
     public void Dispose() => CliHarness.Delete(scratch);
 }

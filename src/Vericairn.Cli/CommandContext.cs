@@ -375,14 +375,16 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         return Failed;
     }
 
-    internal string ReadHidden(string prompt, int maxLength = int.MaxValue)
+    internal string ReadHidden(string prompt, int maxLength = int.MaxValue, Func<ConsoleKeyInfo>? readKey = null)
     {
         Error.Write(prompt);
+        Error.Flush();
+        readKey ??= static () => Console.ReadKey(intercept: true);
         var text = new StringBuilder();
         int excess = 0;
         while (true)
         {
-            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+            ConsoleKeyInfo key = readKey();
             if (key.Key == ConsoleKey.Enter) break;
             if (key.Key == ConsoleKey.Backspace)
             {

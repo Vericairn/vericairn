@@ -480,7 +480,7 @@ vericairn worker configure --launcher claude-code --model <selector> --effort <e
 vericairn worker configure --launcher claude-code --import-setup-token --account-type pro
 ```
 
-Choose `pro` or `max` for the account and enter the bare token at the hidden prompt. For scripts, add `--token-stdin`
+Choose `pro` or `max` for the account and wait for the hidden prompt before entering the bare token. For scripts, add `--token-stdin`
 and supply the token on a single line of standard input. The worker stores the login outside the estate, the
 repository and the harness configuration. A provisioned setup token takes precedence over an existing provisioned
 `.credentials.json`. Importing a setup token changes the probe digests and requires a new qualification.
