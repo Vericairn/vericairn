@@ -1000,6 +1000,7 @@ vericairn goal step '${goal}' --by '${operator}' --repository '${workspaceResour
 vericairn records show '${draftRun}'
 vericairn records show '${draftAssignment}'
 vericairn goal show '${goal}'
+vericairn records show '${attempt}'
 vericairn records show '${draftResult}'
 vericairn goal step '${goal}' --by '${operator}'
 vericairn work observe SR-0001

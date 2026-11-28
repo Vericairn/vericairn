@@ -436,6 +436,7 @@
       },
       "capture": {
         "draftAssignment": "/step/assignment/id",
+        "draftAssignmentHash": "/step/assignment/hash",
         "draftRun": "/step/run/run"
       },
       "surface": "services"
@@ -497,6 +498,21 @@
       }
     },
     {
+      "id": "inspect-draft-attempt",
+      "role": "operator",
+      "arguments": ["records", "show", "${attempt}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/by": "${scheduler}",
+          "/subject/type": "assignment",
+          "/subject/id": "${draftAssignment}",
+          "/subject/hash": "${draftAssignmentHash}",
+          "/signatures/0/device": "${schedulerDevice}"
+        }
+      }
+    },
+    {
       "id": "inspect-draft-author",
       "role": "operator",
       "arguments": [
@@ -510,6 +526,7 @@
           "/by": "${scheduler}",
           "/subject/id": "${attempt}",
           "/subject/hash": "${attemptHash}",
+          "/signatures/0/device": "${schedulerDevice}",
           "/body/outputs/0/hash": "${draftObject}"
         }
       }

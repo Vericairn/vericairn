@@ -41,6 +41,7 @@
       "guidedSteps": null,
       "expectedReadFindings": [],
       "legs": ["tier1", "tier2"],
+      "variants": ["agents"],
       "platforms": ["linux", "macos", "windows"],
       "liveLaunchers": []
     }

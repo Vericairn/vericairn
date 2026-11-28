@@ -284,7 +284,13 @@ public sealed class ExamplesJourneyTests
             string name = entry.GetProperty("key").GetString()!;
             string relative = entry.GetProperty("journey").GetString() ?? throw new InvalidDataException($"Example {name} has no journey.");
             ExampleJourney journey = ExampleJourney.Read(Path.Combine(root, relative));
-            foreach (string variant in binary is null ? new[] { "agents" } : ["agents", "people"])
+            string[] variants = entry.TryGetProperty("variants", out JsonElement declared)
+                ? [.. declared.EnumerateArray().Select(item => item.GetString()!)]
+                : binary is null ? ["agents"] : ["agents", "people"];
+            if (variants.Length == 0 || variants.Distinct(StringComparer.Ordinal).Count() != variants.Length
+                || variants.Any(variant => variant is not ("agents" or "people")))
+                throw new InvalidDataException($"Example {name} needs distinct agents or people variants.");
+            foreach (string variant in variants)
             {
                 ExampleJourneyRun report = ExampleJourneyRunner.Run(journey, variant, binary);
                 reports.Add(new { example = name, variant, report });
