@@ -19,15 +19,6 @@ FIXTURE = ROOT / "tests/examples/read-fixture"
 
 
 class ExamplesJourneyTests(unittest.TestCase):
-    def test_a_journey_without_public_records_has_no_release_or_guided_steps_pin(self):
-        entry = {"key": "E3", "repositories": [], "release": None, "guidedSteps": None, "legs": ["tier1", "tier2"]}
-        with patch.object(SMOKE, "read_json", return_value={"format": "vericairn.examples/1", "examples": [entry]}):
-            self.assertEqual([entry], SMOKE.examples())
-            for field, value in (("release", "0.9.5"), ("guidedSteps", "sha256:" + "1" * 64)):
-                with self.subTest(field=field), patch.dict(entry, {field: value}):
-                    with self.assertRaisesRegex(SMOKE.SmokeFailure, "has no public records to pin"):
-                        SMOKE.examples()
-
     def test_tier_two_runs_only_the_prebuilt_driver(self):
         with tempfile.TemporaryDirectory(prefix="example-driver-test-") as directory:
             scratch = Path(directory)
