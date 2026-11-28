@@ -69,6 +69,62 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task ConfigureShowsOnlyProvisionMetadataAndCanRemoveTheProvision()
+    {
+        string token = Token();
+        string home = Path.Combine(scratch, "worker-home");
+        string config = Directory.CreateDirectory(Path.Combine(scratch, "legacy")).FullName;
+        string credentialsFile = Path.Combine(config, ".credentials.json");
+        const string credentials = """{"claudeAiOauth":{"subscriptionType":"pro"}}""";
+        File.WriteAllText(credentialsFile, credentials);
+        CliHarness.Outcome absent = await Invoke(home, "", config, "--json", "worker", "configure");
+        Assert.False(absent.Json.GetProperty("setupToken").GetProperty("provisioned").GetBoolean());
+
+        DateTimeOffset before = DateTimeOffset.UtcNow;
+        Assert.Equal(0, (await Import(home, token, "max", config)).Code);
+        DateTimeOffset after = DateTimeOffset.UtcNow;
+        foreach (string[] arguments in new[]
+        {
+            new[] { "--json", "worker", "configure" },
+            new[] { "--json", "worker", "configure", "--launcher", "claude-code" },
+        })
+        {
+            CliHarness.Outcome shown = await Invoke(home, "", config, arguments);
+            Assert.Equal(0, shown.Code);
+            Assert.False((shown.Out + shown.Err).Contains(token, StringComparison.Ordinal));
+            JsonElement status = shown.Json.GetProperty("setupToken");
+            Assert.True(status.GetProperty("provisioned").GetBoolean());
+            Assert.Equal("max", status.GetProperty("accountType").GetString());
+            Assert.Equal("operator-statement", status.GetProperty("accountTypeSource").GetString());
+            DateTimeOffset imported = status.GetProperty("importedAt").GetDateTimeOffset();
+            Assert.InRange(imported, before.AddMilliseconds(-1), after);
+            Assert.Equal(imported.AddDays(365), status.GetProperty("expiresAt").GetDateTimeOffset());
+            Assert.False(status.TryGetProperty("accessToken", out _));
+        }
+        CliHarness.Outcome text = await Invoke(home, "", config, "worker", "configure", "--launcher", "claude-code");
+        Assert.Contains("provisioned for an operator-stated max account", text.Out, StringComparison.Ordinal);
+        Assert.Contains("Imported", text.Out, StringComparison.Ordinal);
+        Assert.Contains("Expires", text.Out, StringComparison.Ordinal);
+        Assert.False((text.Out + text.Err).Contains(token, StringComparison.Ordinal));
+
+        CliHarness.Outcome combined = await Invoke(home, "", config, "worker", "configure", "--remove-setup-token", "--import-setup-token");
+        Assert.Equal(2, combined.Code);
+        Assert.True(File.Exists(Provision(home)));
+
+        CliHarness.Outcome removed = await Invoke(home, "", config, "--json", "worker", "configure", "--remove-setup-token");
+        Assert.Equal(0, removed.Code);
+        Assert.True(removed.Json.GetProperty("removed").GetBoolean());
+        Assert.False((removed.Out + removed.Err).Contains(token, StringComparison.Ordinal));
+        Assert.False(File.Exists(Provision(home)));
+        Assert.Equal(credentials, File.ReadAllText(credentialsFile));
+        CliHarness.Outcome repeated = await Invoke(home, "", config, "--json", "worker", "configure", "--remove-setup-token");
+        Assert.Equal(0, repeated.Code);
+        Assert.False(repeated.Json.GetProperty("removed").GetBoolean());
+        CliHarness.Outcome afterRemoval = await Invoke(home, "", config, "--json", "worker", "configure", "--launcher", "claude-code");
+        Assert.False(afterRemoval.Json.GetProperty("setupToken").GetProperty("provisioned").GetBoolean());
+    }
+
     [Theory]
     [InlineData("missing", "pro", "bare Claude Code setup-token")]
     [InlineData("wrong-shape", "pro", "bare Claude Code setup-token")]
@@ -132,7 +188,11 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         Assert.False(File.Exists(Provision(home)));
     }
 
-    private async Task<CliHarness.Outcome> Import(string home, string input, string account, string? config = null)
+    private Task<CliHarness.Outcome> Import(string home, string input, string account, string? config = null) =>
+        Invoke(home, input, config, "--json", "worker", "configure", "--launcher", "claude-code", "--import-setup-token",
+            "--account-type", account, "--token-stdin");
+
+    private async Task<CliHarness.Outcome> Invoke(string home, string input, string? config, params string[] arguments)
     {
         string user = Path.Combine(scratch, "user");
         Directory.CreateDirectory(user);
@@ -140,8 +200,7 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         {
             UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = scratch,
         };
-        foreach (string argument in new[] { "--json", "worker", "configure", "--launcher", "claude-code", "--import-setup-token", "--account-type", account, "--token-stdin" })
-            info.ArgumentList.Add(argument);
+        foreach (string argument in arguments) info.ArgumentList.Add(argument);
         info.Environment[VericairnHome.EnvironmentVariable] = home;
         info.Environment["HOME"] = user;
         info.Environment["USERPROFILE"] = user;

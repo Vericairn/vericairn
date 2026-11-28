@@ -3,6 +3,7 @@
 
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
@@ -57,6 +58,29 @@ internal sealed class WorkerSettings(CommandContext context)
         return new string(characters[..length]);
     }
 
+    public int RemoveSetupToken(string? launcher, bool otherChoices, bool json)
+    {
+        if (Environment.GetEnvironmentVariable("VERICAIRN_RUN") is not null)
+            return context.Fail("Only an operator outside a worker run may remove a Claude Code setup token.");
+        if (launcher is not (null or "claude-code") || otherChoices)
+            return context.Fail("Use --remove-setup-token separately from other worker settings.");
+        try
+        {
+            bool removed = new WorkerConfigurationStore().RemoveClaudeSetupToken();
+            if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { removed }, ProtocolJson.Options));
+            else context.Output.WriteLine(removed ? "Removed the local Claude Code setup token." : "No local Claude Code setup token was provisioned.");
+            return Clean;
+        }
+        catch (ProviderRefusedException exception)
+        {
+            return context.Fail(exception.Message);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return context.Fail("Could not remove the provisioned Claude Code setup token.");
+        }
+    }
+
     public int Adapter(string? adapter, string[] launchers, bool otherChoices, bool json)
     {
         if (Environment.GetEnvironmentVariable("VERICAIRN_RUN") is not null)
@@ -88,7 +112,8 @@ internal sealed class WorkerSettings(CommandContext context)
                 if (workspaces is not null) store.WriteWorkspaceRoot(workspaces);
                 string? root = store.ReadWorkspaceRoot();
                 IReadOnlyList<WorkspaceSetupEntry> setup = store.ListSetup();
-                if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { root, setup = setup.Select(Row) }, ProtocolJson.Options));
+                WorkerConfigurationStore.ClaudeSetupTokenStatus setupToken = store.DescribeClaudeSetupToken();
+                if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { root, setup = setup.Select(Row), setupToken }, ProtocolJson.Options));
                 else
                 {
                     context.Output.WriteLine(root is null
@@ -96,6 +121,7 @@ internal sealed class WorkerSettings(CommandContext context)
                         : "Workspace root: " + root + " (every launcher; <estate>/<branch> beneath it).");
                     if (setup.Count == 0) context.Output.WriteLine("Workspace setup: none. Set one with vericairn worker configure --repository <resource> --setup-command <executable or JSON array>.");
                     foreach (WorkspaceSetupEntry entry in setup) context.Output.WriteLine(Describe(entry));
+                    context.Output.WriteLine(DescribeSetupToken(setupToken));
                 }
 
                 return Clean;
@@ -104,7 +130,17 @@ internal sealed class WorkerSettings(CommandContext context)
             if (implementation is null || launcher is not ("codex" or "claude-code")) return context.Fail("Worker configuration supports only codex and claude-code.");
             if (setting) store.Write(implementation, new(model!, effort!, models.Length == 0 ? null : models, efforts.Length == 0 ? null : efforts));
             WorkerConfiguration? configuration = store.Read(implementation);
-            if (json) context.Output.WriteLine(JsonSerializer.Serialize(configuration, ProtocolJson.Options));
+            WorkerConfigurationStore.ClaudeSetupTokenStatus? status = !setting && launcher == "claude-code" ? store.DescribeClaudeSetupToken() : null;
+            if (json)
+            {
+                JsonNode? result = JsonSerializer.SerializeToNode(configuration, ProtocolJson.Options);
+                if (status is not null)
+                {
+                    result ??= new JsonObject();
+                    result["setupToken"] = JsonSerializer.SerializeToNode(status, ProtocolJson.Options);
+                }
+                context.Output.WriteLine(result?.ToJsonString(ProtocolJson.Options) ?? "null");
+            }
             else if (configuration is null) context.Output.WriteLine($"No configuration for {launcher}. Set it with vericairn worker configure --launcher {launcher} --model <model> --effort <effort>.");
             else
             {
@@ -112,12 +148,21 @@ internal sealed class WorkerSettings(CommandContext context)
                 context.Output.WriteLine("  allowed models: " + string.Join(", ", configuration.AllowedModels ?? [configuration.Model]));
                 context.Output.WriteLine("  allowed efforts: " + (configuration.AllowedEfforts is null ? "the launcher's supported efforts" : string.Join(", ", configuration.AllowedEfforts)));
             }
+            if (!json && status is not null) context.Output.WriteLine(DescribeSetupToken(status));
             return Clean;
         }
         catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException or ArgumentException)
         {
             return context.Fail(exception.Message);
         }
+    }
+
+    private static string DescribeSetupToken(WorkerConfigurationStore.ClaudeSetupTokenStatus status)
+    {
+        if (!status.Provisioned) return "Claude Code setup token: not provisioned.";
+        string summary = status.AccountType is null ? "Claude Code setup token: provisioned."
+            : FormattableString.Invariant($"Claude Code setup token: provisioned for an operator-stated {status.AccountType} account. Imported {status.ImportedAt:u}. Expires {status.ExpiresAt:u}.");
+        return status.Problem is null ? summary : summary + " " + status.Problem;
     }
 
     /// <summary>Sets, clears or shows the workspace setup command of one launcher or one repository resource on this machine.</summary>

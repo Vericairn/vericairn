@@ -17,6 +17,7 @@ public sealed partial class WorkerConfigurationStore
     // The issuer does not promise a fixed length. Bound the input while accepting the observed prefix and alphabet.
     private const int ClaudeSetupTokenMinimumLength = 100;
     internal const int ClaudeSetupTokenMaximumLength = 1024;
+    private const int ClaudeSetupTokenLifetimeDays = 365;
     private static readonly SearchValues<char> ClaudeSetupTokenCharacters = SearchValues.Create("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-");
     private static readonly string[] HarnessDirectories = [".claude", ".codex", ".gemini", ".agents"];
     private static readonly string[] HarnessDirectoryOverrides = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "GEMINI_CLI_HOME"];
@@ -28,6 +29,9 @@ public sealed partial class WorkerConfigurationStore
         public string AccountType { get; } = accountType;
         public long ExpiresAt { get; } = expiresAt;
     }
+
+    internal sealed record ClaudeSetupTokenStatus(bool Provisioned, DateTimeOffset? ImportedAt = null, string? AccountType = null,
+        string? AccountTypeSource = null, DateTimeOffset? ExpiresAt = null, string? Problem = null);
 
     internal static bool IsClaudeSetupToken(string? token) => token is { Length: >= ClaudeSetupTokenMinimumLength and <= ClaudeSetupTokenMaximumLength }
         && token.StartsWith(ClaudeSetupTokenPrefix, StringComparison.Ordinal)
@@ -47,7 +51,34 @@ public sealed partial class WorkerConfigurationStore
         string path = ConfigurationPath(ClaudeSetupTokenFile);
         RefuseHarnessConfiguration(path, WorkerEnvironment.Current());
         // The headless form has no expiry field. Keep the probe's one-year timestamp fixed across every copy.
-        WriteFile(path, new ClaudeSetupToken(token!, accountType, DateTimeOffset.UtcNow.AddDays(365).ToUnixTimeMilliseconds()), requireOwnerOnly: true);
+        WriteFile(path, new ClaudeSetupToken(token!, accountType,
+            DateTimeOffset.UtcNow.AddDays(ClaudeSetupTokenLifetimeDays).ToUnixTimeMilliseconds()), requireOwnerOnly: true);
+    }
+
+    internal ClaudeSetupTokenStatus DescribeClaudeSetupToken()
+    {
+        try
+        {
+            if (ReadClaudeSetupToken() is not { } setup) return new(false);
+            var expiry = DateTimeOffset.FromUnixTimeMilliseconds(setup.ExpiresAt);
+            // The provision's expiry has always been stored as the import time plus this fixed lifetime.
+            return new(true, expiry.AddDays(-ClaudeSetupTokenLifetimeDays), setup.AccountType, "operator-statement", expiry);
+        }
+        catch (ProviderRefusedException exception)
+        {
+            return new(true, Problem: exception.Message);
+        }
+    }
+
+    internal bool RemoveClaudeSetupToken()
+    {
+        string path = ConfigurationPath(ClaudeSetupTokenFile);
+        RefuseLink(path);
+        if (!File.Exists(path)) return false;
+        RefuseHarnessConfiguration(path, WorkerEnvironment.Current());
+        RequireOwnerOnly(Path.GetDirectoryName(path)!, isDirectory: true);
+        File.Delete(path);
+        return true;
     }
 
     internal ClaudeSetupToken? ReadClaudeSetupToken(IReadOnlyDictionary<string, string>? environment = null)
@@ -63,7 +94,8 @@ public sealed partial class WorkerConfigurationStore
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
             if (stream.Length > 4096) throw new JsonException();
             ClaudeSetupToken? setup = JsonSerializer.Deserialize<ClaudeSetupToken>(stream, Json);
-            if (setup is null || !IsClaudeSetupToken(setup.AccessToken) || !IsClaudeAccountType(setup.AccountType) || setup.ExpiresAt <= 0)
+            if (setup is null || !IsClaudeSetupToken(setup.AccessToken) || !IsClaudeAccountType(setup.AccountType)
+                || setup.ExpiresAt <= 0 || setup.ExpiresAt > DateTimeOffset.MaxValue.ToUnixTimeMilliseconds())
                 throw new JsonException();
             return setup;
         }

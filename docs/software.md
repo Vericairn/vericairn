@@ -1460,8 +1460,11 @@ the worker can create that run file from a token the operator generates with `cl
 states that the account is Pro or Max. The headless token carries no account type, so the worker classifies the login by
 the operator's statement and passes `subscriptionType: null`, along with the inference scope and a null refresh token,
 to Claude Code. The worker also accepts an existing provisioned `.credentials.json` whose `claudeAiOauth.subscriptionType`
-is `pro` or `max`. The worker rechecks the copy before dispatch and removes its configuration at settlement. Any refresh
-of a file-based login stays in its run directory and expires with that copy. The headless import has no refresh token.
+is `pro` or `max`. A provisioned setup token takes precedence over that file. Importing it changes the login and
+configuration probe digests and requires a new qualification. After removal, the file form can use baseline admission
+at the shipped version. Other versions require a qualification matching the file-based probes. The worker rechecks
+the copy before dispatch and removes its configuration at settlement. Any refresh of a file-based login stays
+in its run directory and expires with that copy. The headless import has no refresh token.
 
 For an import, run `vericairn worker configure --launcher claude-code --import-setup-token --account-type pro` (or `max`).
 The shape check is a local sanity check. Only the issuer can validate the token.
@@ -1470,6 +1473,12 @@ stores the token and account statement in the owner-only `worker/claude-code-set
 Vericairn home. The home must be outside repositories, estates and harness configuration directories. The run file lives
 outside the workspace. Sign-in input never passes through a command argument or environment variable, and credential
 content and its digest stay out of inventory evidence.
+
+`worker configure` shows the provision's import time, operator-stated account type and local expiry, which is
+set to 365 days after import. Use `worker configure --remove-setup-token` to remove the machine's copy and return
+to the file form if a credentials file is provisioned. To revoke the issuer's authorization, remove the token from
+your Claude account's Settings > Account sessions or Settings > Claude Code, using the trash icon.
+[Claude Help Center](https://support.claude.com/en/articles/10310342-how-do-i-log-out-of-all-active-sessions)
 
 `--setting-sources ""` excludes user, project and local settings, and `--strict-mcp-config` restricts MCP to the explicit
 run file. `--settings '{"hooks":{},"enabledPlugins":{}}'` declares no external hooks or enabled plugins. The launcher

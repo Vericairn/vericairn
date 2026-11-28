@@ -482,7 +482,16 @@ vericairn worker configure --launcher claude-code --import-setup-token --account
 
 Choose `pro` or `max` for the account and enter the bare token at the hidden prompt. For scripts, add `--token-stdin`
 and supply the token on a single line of standard input. The worker stores the login outside the estate, the
-repository and the harness configuration. An existing provisioned `.credentials.json` remains supported.
+repository and the harness configuration. A provisioned setup token takes precedence over an existing provisioned
+`.credentials.json`. Importing a setup token changes the probe digests and requires a new qualification.
+After removing it, file-based sign-in at the shipped baseline can use baseline admission. Other versions
+require a qualification that matches the file-based probes.
+
+`worker configure` and `worker configure --launcher claude-code` show whether a setup token is provisioned, when it
+was imported, the operator-stated account type and its local expiry. Use `worker configure --remove-setup-token`
+to remove the local provision. To revoke the issuer's authorization, remove the token from your Claude account's
+Settings > Account sessions or Settings > Claude Code, using the trash icon.
+[Claude Help Center](https://support.claude.com/en/articles/10310342-how-do-i-log-out-of-all-active-sessions)
 
 ```sh
 vericairn worker qualify --check --launcher claude-code
