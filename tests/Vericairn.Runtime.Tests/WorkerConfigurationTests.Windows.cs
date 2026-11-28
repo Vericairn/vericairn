@@ -33,20 +33,35 @@ public sealed partial class WorkerConfigurationTests
     public void WindowsRemovalDeletesOnlyTheProvisionInTheHeldDirectory()
     {
         if (!OperatingSystem.IsWindows()) Assert.Skip("Windows directory-relative deletion");
-        string worker = Path.Combine(home, "worker");
-        string other = Path.Combine(home, "other");
+        string original = Path.Combine(home, "original");
+        string decoy = Path.Combine(home, "decoy");
+        string alias = Path.Combine(home, "alias");
+        string originalHome = Path.Combine(original, "local");
+        string worker = Path.Combine(originalHome, "worker");
+        string decoyWorker = Path.Combine(decoy, "local", "worker");
         Directory.CreateDirectory(worker);
-        Directory.CreateDirectory(other);
-        string provision = Path.Combine(worker, WorkerConfigurationStore.ClaudeSetupTokenFile);
-        string unrelated = Path.Combine(other, WorkerConfigurationStore.ClaudeSetupTokenFile);
+        Directory.CreateDirectory(decoyWorker);
+        const string name = WorkerConfigurationStore.ClaudeSetupTokenFile;
+        string provision = Path.Combine(worker, name);
+        string unrelated = Path.Combine(decoyWorker, name);
         File.WriteAllText(provision, "worker fixture");
         File.WriteAllText(unrelated, "unrelated fixture");
 
-        var store = new WorkerConfigurationStore(home);
-        Assert.True(store.RemoveClaudeSetupToken().Removed);
+        WorkspaceCleanupTests.DirectoryLink(alias, original);
+        string aliasHome = Path.Combine(alias, "local");
+        string aliasProvision = Path.Combine(aliasHome, "worker", name);
+        // Keep the fixture junction in the resolved path so the callback can retarget it while both handles stay open.
+        var store = new WorkerConfigurationStore(aliasHome) { ResolveConfigurationAncestor = path => path };
+        Assert.True(store.RemoveClaudeSetupToken(() =>
+        {
+            Assert.Equal("worker fixture", File.ReadAllText(aliasProvision));
+            Directory.Delete(alias);
+            WorkspaceCleanupTests.DirectoryLink(alias, decoy);
+            Assert.Equal("unrelated fixture", File.ReadAllText(aliasProvision));
+        }).Removed);
         Assert.False(File.Exists(provision));
         Assert.Equal("unrelated fixture", File.ReadAllText(unrelated));
-        Assert.False(store.RemoveClaudeSetupToken().Removed);
+        Assert.False(new WorkerConfigurationStore(originalHome).RemoveClaudeSetupToken().Removed);
     }
 
     [Fact]

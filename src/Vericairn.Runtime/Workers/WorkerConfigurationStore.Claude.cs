@@ -77,7 +77,7 @@ public sealed partial class WorkerConfigurationStore
         }
     }
 
-    internal (bool Removed, IReadOnlyList<string> Warnings) RemoveClaudeSetupToken(Action? beforeUnixUnlink = null)
+    internal (bool Removed, IReadOnlyList<string> Warnings) RemoveClaudeSetupToken(Action? beforeUnlink = null)
     {
         string path = ConfigurationPath(ClaudeSetupTokenFile);
         RefuseLink(path);
@@ -95,12 +95,13 @@ public sealed partial class WorkerConfigurationStore
 
         if (OperatingSystem.IsWindows())
         {
+            beforeUnlink?.Invoke();
             if (!DirectoryHandles.UnlinkWindows(workerHandle, ClaudeSetupTokenFile)) return (false, []);
         }
         else
         {
             RefuseLink(path);
-            beforeUnixUnlink?.Invoke();
+            beforeUnlink?.Invoke();
             // Unlink removes the entry in this directory even if a concurrent rename substitutes a link at the leaf.
             if (DirectoryHandles.UnlinkAt(workerHandle, ClaudeSetupTokenFile, 0) != 0)
             {
