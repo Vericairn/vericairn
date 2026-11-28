@@ -26,6 +26,9 @@ public sealed partial class RemoteViewModel
     private RemoteCompanionCollectionRow? selectedCompanionCollection;
     private RemoteCompanionItem? selectedCompanionItem;
     private CompanionObservation? companionPage;
+    private CompanionObservation? cachedCollection;
+    private CompanionObservation? cachedItem;
+    private bool showingCachedCompanion;
     private IReadOnlyList<RemoteCompanionCollectionRow> companionCollections = [];
     private IReadOnlyList<RemoteCompanionItem> companionItems = [];
     private string companionMessage = "";
@@ -54,7 +57,7 @@ public sealed partial class RemoteViewModel
     public string CompanionText => WebUtility.HtmlDecode(companionPage?.Response.Text ?? "");
     /// <summary>Source, lineage, and the observation time of the actual displayed rendition.</summary>
     public string CompanionFreshness => companionPage is { } page
-        ? $"Observed {page.AsOf}; {RemoteFreshness.Age(page.AsOf, clock)}\n" +
+        ? $"{(showingCachedCompanion ? "Cached" : "Observed")} {page.AsOf}; {RemoteFreshness.Age(page.AsOf, clock)}\n" +
             $"Source snapshot {page.Response.Snapshot} · {page.Response.Currentness} at observation · {page.Response.Audience}\n" +
             (page.Response.Page is { } paging ? $"Page {paging.Number} of {paging.Total}" : $"Page {page.Request.Page}")
         : "";
@@ -101,7 +104,7 @@ public sealed partial class RemoteViewModel
             return ReadCompanionsAsync(new(RecordCompanion, "item", companionSubject.Id));
         }, () => !Busy && SelectedCompanionItem is not null);
         BackCompanionCommand = Command(BackCompanionAsync, () => !Busy && CompanionsOpen);
-        RefreshCompanionCommand = Command(() => ReadCompanionsAsync(companionRequest), () => !Busy && CompanionsOpen);
+        RefreshCompanionCommand = Command(() => ReadCompanionsAsync(companionRequest, refresh: true), () => !Busy && CompanionsOpen);
         PreviousCompanionPageCommand = Command(() => PageCompanionAsync(-1), () => !Busy && companionPage?.Request.Page > 1);
         NextCompanionPageCommand = Command(() => PageCompanionAsync(1), () => !Busy &&
             companionPage?.Response.Page is { } page && page.Number < page.Total);
@@ -146,10 +149,11 @@ public sealed partial class RemoteViewModel
         ShowCompanion(null);
     }
 
-    private void ShowCompanion(CompanionObservation? page,
+    private void ShowCompanion(CompanionObservation? page, bool cached = false,
         IReadOnlyList<RemoteCompanionCollectionRow>? collections = null)
     {
         companionPage = page;
+        showingCachedCompanion = cached;
         companionCollections = collections ?? [];
         companionItems = page?.Response.Page?.Items
             .Select(item => new RemoteCompanionItem(item.Title, new(item.RecordType, item.Revision, item.Hash))).ToArray() ?? [];
@@ -165,7 +169,7 @@ public sealed partial class RemoteViewModel
         NotifyCompanionCommands();
     }
 
-    private async Task ReadCompanionsAsync(CompanionRequest? request, bool keepSnapshot = false)
+    private async Task ReadCompanionsAsync(CompanionRequest? request, bool refresh = false, bool keepSnapshot = false)
     {
         if (Selected is not { } estate || !CompanionsOpen) return;
         companionRequest = request;
@@ -208,6 +212,19 @@ public sealed partial class RemoteViewModel
                 request = request with { Snapshot = snapshot };
             }
 
+            CompanionObservation? retained = request.Revision is null ? cachedCollection : cachedItem;
+            if (!refresh && retained?.Request == request)
+            {
+                CompanionResponse basis = await api.CompanionSourcesAsync(request).ConfigureAwait(true);
+                if (Selected != estate || !CompanionsOpen) return;
+                if (MatchesCompanionBasis(retained.Response, basis))
+                {
+                    ShowCompanion(retained, cached: true);
+                    CompanionMessage = retained.Response.Reason ?? "";
+                    return;
+                }
+            }
+
             CompanionResponse response = await api.CompanionRenderAsync(request).ConfigureAwait(true);
             if (Selected != estate || !CompanionsOpen) return;
             if (response is not { Version: 1, Status: "success", Text: not null } ||
@@ -218,6 +235,8 @@ public sealed partial class RemoteViewModel
             }
 
             var observation = new CompanionObservation(request, response, Now);
+            if (request.Revision is null) cachedCollection = observation;
+            else cachedItem = observation;
             ShowCompanion(observation);
             CompanionMessage = response.Reason ?? "";
         }
@@ -231,9 +250,17 @@ public sealed partial class RemoteViewModel
 
     private void CompanionReadUnavailable()
     {
+        cachedCollection = cachedItem = null;
         ShowCompanion(null);
         CompanionMessage = CompanionUnavailable;
     }
+
+    private static bool MatchesCompanionBasis(CompanionResponse saved, CompanionResponse basis) =>
+        basis is { Version: 1, Status: "success", Completeness: "source-basis", InputDigest: not null, Generator: not null } &&
+        saved.Generator is { } generator && basis.Generator.Id == generator.Id && basis.Generator.Contract == generator.Contract &&
+        basis.Generator.ImplementationHash == generator.ImplementationHash && basis.Audience == saved.Audience &&
+        basis.Snapshot == saved.Snapshot && basis.Commit == saved.Commit && basis.Currentness == saved.Currentness &&
+        basis.InputDigest == saved.InputDigest && basis.Sources.SequenceEqual(saved.Sources);
 
     private static bool HasCompanionSource(CompanionResponse response, AttentionReference item) =>
         response.Sources.Any(source => source.Kind == "record" && source.RecordType == item.Type &&

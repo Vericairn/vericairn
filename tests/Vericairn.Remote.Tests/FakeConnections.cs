@@ -137,6 +137,7 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
         ((CountingApi)client).BeforeCall = name => BeforeApiCall?.Invoke(name);
         ((CountingApi)client).Companions = token => ReadCompanionAsync(connection, api => api.CompanionsAsync(token));
         ((CountingApi)client).RenderCompanion = (request, token) => ReadCompanionAsync(connection, api => api.CompanionRenderAsync(request, token));
+        ((CountingApi)client).CompanionSources = (request, token) => ReadCompanionAsync(connection, api => api.CompanionSourcesAsync(request, token));
         ((CountingApi)client).LoseAcknowledgmentResponse = () => LoseAcknowledgmentResponse;
         ((CountingApi)client).LoseRunStopResponse = () => LoseRunStopResponse;
         ((CountingApi)client).PrepareHandoff = (request, token) => PrepareHandoffAsync(connection, request, token);
@@ -164,6 +165,7 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
         public Action<string> BeforeCall { get; set; } = null!;
         public Func<CancellationToken, Task<CompanionsResponse>> Companions { get; set; } = null!;
         public Func<CompanionRequest, CancellationToken, Task<CompanionResponse>> RenderCompanion { get; set; } = null!;
+        public Func<CompanionRequest, CancellationToken, Task<CompanionResponse>> CompanionSources { get; set; } = null!;
         public Func<bool> LoseAcknowledgmentResponse { get; set; } = null!;
         public Func<bool> LoseRunStopResponse { get; set; } = null!;
         public Func<DesktopHandoffRequest, CancellationToken, Task<DesktopHandoffResponse>> PrepareHandoff { get; set; } = null!;
@@ -175,6 +177,7 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
             BeforeCall(targetMethod!.Name);
             if (targetMethod.Name == nameof(IEstateApi.CompanionsAsync)) return Companions((CancellationToken)args![0]!);
             if (targetMethod.Name == nameof(IEstateApi.CompanionRenderAsync)) return RenderCompanion((CompanionRequest)args![0]!, (CancellationToken)args[1]!);
+            if (targetMethod.Name == nameof(IEstateApi.CompanionSourcesAsync)) return CompanionSources((CompanionRequest)args![0]!, (CancellationToken)args[1]!);
             if (targetMethod.Name == nameof(IEstateApi.PrepareDesktopHandoffAsync))
                 return PrepareHandoff((DesktopHandoffRequest)args![0]!, (CancellationToken)args[1]!);
             if (targetMethod!.Name == nameof(IEstateApi.DecisionBasisAsync) && Basis() is DecisionBasisResponse basis) return Task.FromResult(basis);

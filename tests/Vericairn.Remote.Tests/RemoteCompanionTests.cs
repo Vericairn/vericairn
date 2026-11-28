@@ -83,6 +83,43 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
         });
     }
 
+    [Fact]
+    [Trait("Journey", "D19-E")]
+    public async Task ReusedCollectionAndItemBytesShowTheirOwnVerifiedCacheAge()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = CompanionConnections(estate);
+        await fixture.UiAsync(async () =>
+        {
+            var clock = new InspectionClock();
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, clock);
+            await OpenWorkOrdersAsync(model);
+            string collection = model.CompanionText;
+            clock.Advance(TimeSpan.FromSeconds(15));
+            await OpenItemAsync(model);
+            string item = model.CompanionText;
+
+            List<string> calls = [];
+            connections.BeforeApiCall = calls.Add;
+            clock.Advance(TimeSpan.FromSeconds(45));
+            await model.BackCompanionCommand.ExecuteAsync();
+            Assert.Equal(collection, model.CompanionText);
+            Assert.StartsWith("Cached", model.CompanionFreshness, StringComparison.Ordinal);
+            Assert.Contains("60 seconds old", model.CompanionFreshness, StringComparison.Ordinal);
+            Assert.Contains(nameof(IEstateApi.CompanionSourcesAsync), calls);
+            Assert.DoesNotContain(nameof(IEstateApi.CompanionRenderAsync), calls);
+
+            calls.Clear();
+            await OpenItemAsync(model);
+            Assert.Equal(item, model.CompanionText);
+            Assert.StartsWith("Cached", model.CompanionFreshness, StringComparison.Ordinal);
+            Assert.Contains("45 seconds old", model.CompanionFreshness, StringComparison.Ordinal);
+            Assert.Contains(nameof(IEstateApi.CompanionSourcesAsync), calls);
+            Assert.DoesNotContain(nameof(IEstateApi.CompanionRenderAsync), calls);
+            return true;
+        });
+    }
+
     private static FakeConnections CompanionConnections(TestEstate estate) =>
         new(estate.Root) { EnableSignedWrites = true, WithoutPresenceKey = true };
 

@@ -132,6 +132,7 @@ public sealed partial class RemoteViewModel : Observable
         {
             if (!Set(ref selected, value)) return;
             SetCompanionsOpen(false);
+            cachedCollection = cachedItem = null;
             SetHandoff(null);
             RestorePendingHandoffMessage();
             handoffsCurrent = false;
@@ -461,7 +462,7 @@ public sealed partial class RemoteViewModel : Observable
         finally { Busy = false; }
         if (Selected == estate && CompanionsOpen)
         {
-            if (estate.Current) await ReadCompanionsAsync(companionRequest).ConfigureAwait(true);
+            if (estate.Current) await ReadCompanionsAsync(companionRequest, refresh: true).ConfigureAwait(true);
             else CompanionReadUnavailable();
         }
         if (Selected == estate && estate.Current && decision is { Attempted: false } draft)
