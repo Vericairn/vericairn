@@ -32,6 +32,9 @@
 > Remote uses `POST /v1/records/prepare` and `POST /v1/records/signed` for interventions in record format 3. The signed
 > `goal-status` pause carries the reviewed `activeStatusHash`. A `run-stop-request` pins the exact operation and names the run,
 > cancellation or containment, and the original request identity. The worker's stop facts are observed separately.
+> A reviewed intervention requires the person's admitted device with verified per-signature presence. The generic
+> `POST /v1/records` route refuses `run-stop-request`. The signed-record path refuses a second stop record for the same
+> author, run, action and request identity.
 >
 > `GET /v1/handoff/desktop` lists a person's retained desktop tasks, with `principal` identifying the authorized person.
 > `POST /v1/handoff/desktop` prepares a task at an exact subject revision, with `by`, `requestId`, `subject`, `task`, `reason`,

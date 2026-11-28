@@ -116,6 +116,80 @@ public sealed class SignedInterventionApiTests
     }
 
     [Fact]
+    public async Task AnUnattendedRequestKeyCannotSignAReviewedStop()
+    {
+        await using RemoteApiFixture f = await RemoteApiFixture.StartAsync(overListener: false);
+        string person = f.Estate.OperatorId;
+        var (client, key, device) = f.UnattendedPhone(person);
+        using var phone = client;
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var (request, directory) = ReviewedCancel(f, person);
+
+        RecordPrepared? prepared = null;
+        WriteOutcome refused = await DeviceSignedRecords.WriteAsync(phone, request, key, device,
+            plan => { prepared = plan; return true; }, token);
+
+        Assert.NotNull(prepared);
+        Assert.Null(refused.Written);
+        Assert.Equal("refused", refused.Problem?.Code);
+        Assert.Contains("admitted presence device", refused.Problem?.Message, StringComparison.Ordinal);
+        Assert.Empty(f.Estate.Load().OfType(request.Type));
+        Assert.Null(directory.ReadStop());
+    }
+
+    [Fact]
+    public async Task TheUnsignedRecordRouteRefusesAReviewedStop()
+    {
+        await using RemoteApiFixture f = await RemoteApiFixture.StartAsync(overListener: false);
+        using var local = new VericairnClient(new HttpClient(new PolicyAdoptionApiTests.RouteHandler(f.Service))
+            { BaseAddress = new Uri("http://fixture.invalid") });
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var (request, directory) = ReviewedCancel(f, f.Estate.OperatorId);
+
+        WriteOutcome refused = await local.NewRecordAsync(request, token);
+
+        Assert.Null(refused.Written);
+        Assert.Equal("refused", refused.Problem?.Code);
+        Assert.Contains("must be prepared and signed", refused.Problem?.Message, StringComparison.Ordinal);
+        Assert.Empty(f.Estate.Load().OfType(request.Type));
+        Assert.Null(directory.ReadStop());
+    }
+
+    [Fact]
+    public async Task TwoSignedPlansForTheSameRequestIdentityCanWriteOnlyOneStopRecord()
+    {
+        await using RemoteApiFixture f = await RemoteApiFixture.StartAsync(overListener: false);
+        string person = f.Estate.OperatorId;
+        var (client, key, device) = f.SignedPhone(person);
+        using var phone = client;
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var (request, directory) = ReviewedCancel(f, person);
+
+        RecordPrepared first = Assert.IsType<RecordPrepared>((await phone.PrepareRecordAsync(request, token)).Prepared);
+        RecordPrepared second = Assert.IsType<RecordPrepared>((await phone.PrepareRecordAsync(request, token)).Prepared);
+        Assert.NotEqual(first.Id, second.Id);
+
+        Task<WriteOutcome> Submit(RecordPrepared plan) => phone.NewSignedRecordAsync(
+            new SignedRecordRequest(plan.Plan, new StoreSigner(key, device).Sign(RecordSigning.Digest(plan.Hash)).Signature)
+            { Device = device }, token);
+
+        RecordWritten written = RemoteApiFixture.Ok(await Submit(first));
+        Assert.Equal(first.Id, written.Id);
+        StopRequest stop = Assert.IsType<StopRequest>(directory.ReadStop());
+
+        WriteOutcome repeated = await Submit(second);
+        Assert.Null(repeated.Written);
+        Assert.Equal("conflict", repeated.Problem?.Code);
+        Assert.Contains("already has a signed record", repeated.Problem?.Message, StringComparison.Ordinal);
+        Assert.Equal(first.Id, Assert.Single(f.Estate.Load().OfType(request.Type)).Id);
+        Assert.Equal(stop, directory.ReadStop());
+
+        RecordPrepareResponse fresh = await phone.PrepareRecordAsync(request, token);
+        Assert.Null(fresh.Prepared);
+        Assert.Equal("conflict", fresh.Problem?.Code);
+    }
+
+    [Fact]
     public async Task APhoneWithoutAPresenceKeyExplainsTheRefusalAndOffersADesktopHandoff()
     {
         await using RemoteApiFixture f = await RemoteApiFixture.StartAsync(overListener: true);
@@ -138,6 +212,14 @@ public sealed class SignedInterventionApiTests
         Assert.DoesNotContain(f.Writes(), w => w.Operation is "POST /v1/records/signed" or "POST /v1/goals/{id}/pause");
     }
 
+    private static (NewRecordRequest Request, RunDirectory Directory) ReviewedCancel(RemoteApiFixture f, string person)
+    {
+        var run = f.SeedRun(f.SeedGoal(person));
+        var request = InterventionRecords.Stop(person, run.Intent.Id, run.Latest.Id, run.Latest.ComputedHash,
+            Guid.NewGuid().ToString("N"), contain: false, "Cancel reviewed run");
+        return (request, new RunDirectory(f.Service.Session.Manifest.Estate, run.Intent.Id));
+    }
+
     private static void AssertSigned(RemoteApiFixture f, WriteOutcome outcome, string device)
     {
         RecordWritten written = RemoteApiFixture.Ok(outcome);
@@ -149,6 +231,13 @@ public sealed class SignedInterventionApiTests
 
 internal sealed partial class RemoteApiFixture
 {
+    internal (VericairnClient Client, FileKeyStore Key, string Device) UnattendedPhone(string person)
+    {
+        var key = new FileKeyStore(Path.Combine(Estate.Root, "phone-fixture"));
+        string device = AdmitFixtureDevice(person, "Phone request device", key, ["local-network"]);
+        return (DeviceClient(device), key, device);
+    }
+
     internal (VericairnClient Client, IDeviceKeyStore Key, string Device) SignedPhone(string person)
     {
         if (listener is not null)
