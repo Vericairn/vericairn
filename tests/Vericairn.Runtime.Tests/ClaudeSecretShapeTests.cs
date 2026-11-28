@@ -115,4 +115,15 @@ public sealed class ClaudeSecretShapeTests
         Assert.Contains("inventory probe failed", refusal.Message, StringComparison.Ordinal);
         Assert.False(refusal.Message.Contains(token[10..], StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void ProbeRefusesPrefixFreeProvisionOutputBeforeItEntersEvidence()
+    {
+        string token = FakeHarness.NewClaudeSetupToken();
+        using var fixture = new NativeProbe("claude", setupToken: token);
+        fixture.Behavior("helpSuffix", "diagnostic: (" + token[13..] + ")");
+        var refusal = Record.Exception(() => fixture.Launcher.Preflight(fixture.Prepare()));
+        Assert.True(refusal is ProviderRefusedException && refusal.Message.Contains("inventory probe failed", StringComparison.Ordinal));
+        Assert.False(refusal!.Message.Contains(token[13..], StringComparison.Ordinal));
+    }
 }

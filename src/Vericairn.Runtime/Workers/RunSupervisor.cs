@@ -97,7 +97,7 @@ public sealed class RunSupervisor
         this.workspace = workspace;
         this.permitted = permitted;
         this.environment = environment;
-        watch = new RunWatch(watchSettings, tokenCap, historyRate, execution);
+        watch = new RunWatch(watchSettings, tokenCap, historyRate, execution, ContainsProvision);
         retrievalTools = RunSources.Tools(execution);
         this.signalAttention = signalAttention;
         state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
@@ -209,6 +209,7 @@ public sealed class RunSupervisor
     /// </summary>
     public RunOutcome? Supervise(CancellationToken abandon)
     {
+        using var outputGuard = ClaudeOutputSecrets.Protect(options.SetupToken);
         try
         {
             return Observe(abandon);
@@ -473,14 +474,15 @@ public sealed class RunSupervisor
 
     private void Pump(StreamReader reader, bool errors)
     {
-        var redactor = launcher.Launcher == "claude-code" ? new SecretShapes.OutputRedactor() : null;
+        using var outputGuard = ClaudeOutputSecrets.Protect(options.SetupToken);
+        var redactor = launcher.Launcher == "claude-code" ? new SecretShapes.OutputRedactor(containsProvision: ContainsProvision) : null;
         try
         {
             while (reader.ReadLine() is string line)
             {
                 if (redactor is null)
                 {
-                    LogLine(line);
+                    LogLine(RedactHarnessText(line));
                 }
                 else
                 {
@@ -675,7 +677,12 @@ public sealed class RunSupervisor
         void LogLine(string safe) => Log(errors ? "[stderr] " + safe : safe);
     }
 
-    private string RedactHarnessText(string text) => launcher.Launcher == "claude-code" ? SecretShapes.RedactOutput(text) : text;
+    private bool ContainsProvision(string text) => options.SetupToken?.ContainsFragment(text) == true
+        || ClaudeOutputSecrets.ContainsActiveFragment(text, except: options.SetupToken);
+
+    private string RedactHarnessText(string text) => launcher.Launcher == "claude-code"
+        ? SecretShapes.RedactOutput(text, containsProvision: ContainsProvision)
+        : ContainsProvision(text) ? "<secret>" : text;
 
     // A source the worker could not retain or log leaves the run's sources incomplete, which settlement records.
     private void SourcesIncomplete()

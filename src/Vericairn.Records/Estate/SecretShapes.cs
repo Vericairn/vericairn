@@ -13,6 +13,7 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 internal static partial class SecretShapes
 {
+    internal const int ProvisionFragmentLength = 12;
     private const string ClaudeSetupStem = "sk-ant-" + "oat01";
     private const string ClaudeSetupPrefix = ClaudeSetupStem + "-";
     private const string ClaudeSetupTokenPattern = ClaudeSetupStem + "[A-Za-z0-9_-]{32,}";
@@ -31,23 +32,25 @@ internal static partial class SecretShapes
     internal static partial Regex ClaudeSetupToken();
 
     /// <summary>Refuses a setup-token shape or terminal text whose safety cannot be established.</summary>
-    internal static bool HasClaudeSetupToken(string text)
+    internal static bool HasClaudeSetupToken(string text, Func<string, bool>? containsProvision = null)
     {
         string? normalized = NormalizeOutput(text);
         return normalized is null || UnresolvedTerminal().IsMatch(normalized) || ClaudeSetupToken().IsMatch(text)
-            || CompactOutput(text, normalized).Contains(ClaudeSetupStem, StringComparison.Ordinal);
+            || CompactOutput(text, normalized).Contains(ClaudeSetupStem, StringComparison.Ordinal)
+            || HasProvision(text, normalized, containsProvision);
     }
 
-    internal static string RedactOutput(string text, string replacement = "<secret>") => RedactOutput(text, replacement, out _);
+    internal static string RedactOutput(string text, string replacement = "<secret>", Func<string, bool>? containsProvision = null) =>
+        RedactOutput(text, replacement, out _, containsProvision);
 
-    internal static string RedactOutput(string text, string replacement, out int secrets)
+    internal static string RedactOutput(string text, string replacement, out int secrets, Func<string, bool>? containsProvision = null)
     {
         string? normalized = NormalizeOutput(text);
         string? compact = normalized is null ? null : CompactOutput(text, normalized);
-        return RedactOutput(text, normalized, compact, replacement, out secrets);
+        return RedactOutput(text, normalized, compact, replacement, out secrets, containsProvision);
     }
 
-    private static string RedactOutput(string text, string? normalized, string? compact, string replacement, out int secrets)
+    private static string RedactOutput(string text, string? normalized, string? compact, string replacement, out int secrets, Func<string, bool>? containsProvision)
     {
         if (compact is null || (normalized is not null && UnresolvedTerminal().IsMatch(normalized))
             || (compact.Contains(ClaudeSetupStem, StringComparison.Ordinal)
@@ -62,9 +65,30 @@ internal static partial class SecretShapes
 
         int count = 0;
         string safe = Secret().Replace(text, _ => { count++; return replacement; });
+        if (HasProvision(safe, normalized != text ? normalized : null, containsProvision))
+        {
+            secrets = 1;
+            return replacement;
+        }
         secrets = count;
         return safe;
     }
+
+    // Compare all 12-character windows, including the prefix. No substring of the provision is allocated or cached.
+    // Searching spans compares ordinally and uses the runtime's vectorized substring search on long lines.
+    internal static bool ContainsProvisionFragment(string text, ReadOnlySpan<char> provision)
+    {
+        ReadOnlySpan<char> output = text;
+        if (output.Length < ProvisionFragmentLength) return false;
+        for (int offset = 0; offset <= provision.Length - ProvisionFragmentLength; offset++)
+        {
+            if (output.IndexOf(provision.Slice(offset, ProvisionFragmentLength), StringComparison.Ordinal) >= 0) return true;
+        }
+        return false;
+    }
+
+    private static bool HasProvision(string text, string? normalized, Func<string, bool>? containsProvision) =>
+        containsProvision is not null && (containsProvision(text) || normalized is not null && normalized != text && containsProvision(normalized));
 
     // Recognize ASCII character escapes and terminal decoration only in the comparison text. Repeating the pass handles
     // encodings nested inside one another. Beyond the bound there is no reliable comparison, so callers withhold the text.
@@ -136,14 +160,16 @@ internal static partial class SecretShapes
 
     // Process physical lines in order. Only a partial setup-token prefix at the end of a line needs lookahead.
     // Once the prefix is known, subsequent token-like text may be continuation and is withheld until a delimiter.
-    internal sealed class OutputRedactor(string replacement = "<secret>")
+    internal sealed class OutputRedactor(string replacement = "<secret>", Func<string, bool>? containsProvision = null)
     {
         private readonly List<(string Text, int Secrets)> pending = [];
         private string prefix = "";
         private bool continuation;
         private bool unresolvedTerminal;
 
-        internal IEnumerable<(string Text, int Secrets)> Push(string line)
+        internal IEnumerable<(string Text, int Secrets)> Push(string line) => Push(line, withhold: false);
+
+        internal IEnumerable<(string Text, int Secrets)> Push(string line, bool withhold)
         {
             string? normalized = NormalizeOutput(line);
             string? compact = normalized is null ? null : CompactOutput(line, normalized);
@@ -151,6 +177,15 @@ internal static partial class SecretShapes
             {
                 string? joined = compact is not null && NormalizeOutput(prefix + compact) is string decoded
                     ? OutputSeparators().Replace(decoded, "") : null;
+                // A lone trailing backslash may be a physical line continuation rather than the start of an escape.
+                // Prefer a valid shape join below, but try the prefix without the backslash when that join fails.
+                if (joined is not null && !joined.StartsWith(ClaudeSetupPrefix, StringComparison.Ordinal)
+                    && prefix.EndsWith('\\') && !prefix.EndsWith("\\\\", StringComparison.Ordinal))
+                {
+                    string physical = prefix[..^1] + compact;
+                    if (physical.StartsWith(ClaudeSetupPrefix, StringComparison.Ordinal) || IncompletePrefix(physical) == physical)
+                        joined = physical;
+                }
                 if (joined is null || joined.StartsWith(ClaudeSetupPrefix, StringComparison.Ordinal))
                 {
                     foreach (var _ in pending) yield return (replacement, 1);
@@ -164,8 +199,8 @@ internal static partial class SecretShapes
                 if (joined.Length > 0 && IncompletePrefix(joined) == joined)
                 {
                     prefix = joined;
-                    string pendingText = RedactOutput(line, normalized, compact, replacement, out int pendingSecrets);
-                    pending.Add((pendingText, pendingSecrets));
+                    string pendingText = RedactOutput(line, normalized, compact, replacement, out int pendingSecrets, containsProvision);
+                    pending.Add(withhold ? (replacement, 1) : (pendingText, pendingSecrets));
                     // Blank lines can extend lookahead indefinitely. Bound it while keeping the candidate prefix in memory.
                     if (pending.Count == ClaudeSetupPrefix.Length)
                     {
@@ -189,8 +224,8 @@ internal static partial class SecretShapes
                 || (wasContinuation && Continues(compact, 0))
                 || (wasUnresolvedTerminal && compact is { Length: > 0 } && TokenCharacters.Contains(compact[^1]));
 
-            string safe = RedactOutput(line, normalized, compact, replacement, out int secrets);
-            if (wasUnresolvedTerminal
+            string safe = RedactOutput(line, normalized, compact, replacement, out int secrets, containsProvision);
+            if (withhold || wasUnresolvedTerminal
                 || (wasContinuation && !string.IsNullOrEmpty(compact) && (TokenCharacters.Contains(compact[0]) || compact[0] is '\\' or '%' or '&')))
             {
                 safe = replacement;

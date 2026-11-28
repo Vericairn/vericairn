@@ -67,6 +67,48 @@ public class ClaudeSetupTokenRunTests
     }
 
     [Fact]
+    public void ProvisionFragmentsStayOutOfBothStreamsAndReportedExecution()
+    {
+        string token = FakeHarness.NewClaudeSetupToken();
+        using var fixture = new NativeRun("claude", qualify: true, recordFormat: 3, setupToken: token);
+        fixture.Probe.Behavior("setupToken", "provision-fragments");
+        RunResponse started = fixture.Start();
+        Assert.True(started.Ok, started.Message);
+        var settled = fixture.Run.Settled(started.Run);
+
+        var directory = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);
+        string output = File.ReadAllText(directory.OutputLog);
+        Assert.Contains("end of synthetic stdout", output, StringComparison.Ordinal);
+        Assert.Contains("[stderr] end of synthetic stderr", output, StringComparison.Ordinal);
+        string state = File.ReadAllText(directory.StateFile);
+        for (int offset = 0; offset <= token.Length - 12; offset++)
+        {
+            Assert.False(output.AsSpan().Contains(token.AsSpan(offset, 12), StringComparison.Ordinal));
+            Assert.False(state.AsSpan().Contains(token.AsSpan(offset, 12), StringComparison.Ordinal));
+        }
+        Assert.Contains("complete-report", state, StringComparison.Ordinal);
+        Assert.Equal("observed-success", settled.Status);
+    }
+
+    [Fact]
+    public void AnotherLauncherWithholdsFragmentsOfAProvisionHeldByTheWorker()
+    {
+        string token = FakeHarness.NewClaudeSetupToken();
+        using var overlap = ClaudeOutputSecrets.Protect(new WorkerConfigurationStore.ClaudeSetupToken(token, "pro", long.MaxValue));
+        using var fixture = new NativeRun("codex");
+        fixture.Probe.Behavior("overlappingFragment", token[60..80]);
+        RunResponse started = fixture.Start();
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", fixture.Run.Settled(started.Run).Status);
+
+        var directory = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);
+        string output = File.ReadAllText(directory.OutputLog);
+        Assert.False(output.Contains(token[60..80], StringComparison.Ordinal));
+        Assert.Contains("<secret>", output, StringComparison.Ordinal);
+        Assert.Contains("[stderr] <secret>", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RefusedRunPreflightRemovesItsCopyBeforeAnyIntentIsRecorded()
     {
         using var fixture = new NativeRun("claude", setupToken: FakeHarness.NewClaudeSetupToken());

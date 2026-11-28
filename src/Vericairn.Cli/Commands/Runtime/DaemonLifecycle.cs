@@ -13,6 +13,7 @@ using Vericairn.Records.Processes;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Updates;
 using Vericairn.Sdk;
+using Vericairn.Runtime.Workers;
 using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
@@ -31,6 +32,8 @@ internal sealed class DaemonLifecycle(CommandContext context)
 
     public int RuntimeServe(string root, bool loopback, bool detached = false)
     {
+        TextWriter? logWriter = null;
+        TextWriter originalOut = Console.Out, originalError = Console.Error;
         try
         {
             if (!IsEstate(root))
@@ -46,8 +49,9 @@ internal sealed class DaemonLifecycle(CommandContext context)
                 string log = DaemonLogPath(root);
                 Directory.CreateDirectory(Path.GetDirectoryName(log)!);
                 var writer = new StreamWriter(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
-                Console.SetOut(writer);
-                Console.SetError(writer);
+                logWriter = TextWriter.Synchronized(new DaemonLogWriter(writer, new WorkerConfigurationStore()));
+                Console.SetOut(logWriter);
+                Console.SetError(logWriter);
             }
 
             DaemonEndpoint? existing = DaemonHost.Discover(root);
@@ -92,6 +96,15 @@ internal sealed class DaemonLifecycle(CommandContext context)
         {
             // Nobody reads a detached daemon's streams: an unexpected failure goes to its log, where 'runtime start' finds it.
             return context.Fail($"the daemon stopped on an unexpected {exception.GetType().Name}: {exception.Message}");
+        }
+        finally
+        {
+            if (logWriter is not null)
+            {
+                Console.SetOut(originalOut);
+                Console.SetError(originalError);
+                logWriter.Dispose();
+            }
         }
     }
 

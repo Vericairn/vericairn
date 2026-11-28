@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Cli.Tests;
 
@@ -104,6 +106,47 @@ public sealed class SupportBundleTests
             Assert.True(errors[0]?.GetValue<string>() == "<secret>");
             Assert.Equal("error: independent diagnostic", errors[1]?.GetValue<string>());
             Assert.Equal(1, (int?)output["redacted"]!["secrets"]);
+        }
+        finally { CliHarness.Delete(scratch); }
+    }
+
+    [Fact]
+    public void TheDaemonWithholdsProvisionFragmentsBeforeTheSupportBundleReadsItsLog()
+    {
+        string prefix = "sk-ant-" + "oat01-";
+        string token = prefix + RandomNumberGenerator.GetHexString(202);
+        string replacement = prefix + RandomNumberGenerator.GetHexString(202);
+        string scratch = CliHarness.TempDirectory("daemon-log-setup-token");
+        using var estate = new TestEstate(2);
+        string log = DaemonLifecycle.DaemonLogPath(estate.Root);
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        var store = new WorkerConfigurationStore(Path.Combine(scratch, "state"));
+        try
+        {
+            store.ImportClaudeSetupToken(token, "max");
+            using (var writer = new DaemonLogWriter(File.CreateText(log), store))
+            {
+                writer.Write("error: (" + token[50..56]);
+                writer.Flush();
+                writer.WriteLine(token[56..62] + ")");
+                using (ClaudeOutputSecrets.Protect(store.ReadClaudeSetupToken()))
+                {
+                    store.ImportClaudeSetupToken(replacement, "max");
+                    writer.WriteLine("> " + token[70..]);
+                    writer.WriteLine("> " + replacement[70..]);
+                }
+                Assert.False(ClaudeOutputSecrets.ContainsFragment(token[70..], store));
+                writer.Write("error: " + replacement[70..]);
+                store.RemoveClaudeSetupToken();
+                writer.WriteLine(" completed");
+                writer.WriteLine("error: independent diagnostic");
+            }
+            Assert.True(File.ReadAllLines(log).SequenceEqual(["<secret>", "<secret>", "<secret>", "<secret>", "error: independent diagnostic"]));
+            CliHarness.Outcome bundle = CliHarness.Run("--estate", estate.Root, "support", "bundle");
+            Assert.Equal(0, bundle.Code);
+            Assert.Contains("error: independent diagnostic", bundle.Out, StringComparison.Ordinal);
+            Assert.False(bundle.Out.Contains(token[70..], StringComparison.Ordinal));
+            Assert.False(bundle.Out.Contains(replacement[70..], StringComparison.Ordinal));
         }
         finally { CliHarness.Delete(scratch); }
     }

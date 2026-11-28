@@ -134,7 +134,9 @@ public sealed class RunExecutionObservation
     }
 
     /// <summary>Reads a harness report, never narrative or tool output. Invalid identities remain unknown.</summary>
-    public void Add(HarnessExecution report)
+    public void Add(HarnessExecution report) => Add(report, null);
+
+    internal void Add(HarnessExecution report, Func<string, bool>? containsProvision)
     {
         ArgumentNullException.ThrowIfNull(report);
         if (reports.Count >= 128)
@@ -152,7 +154,7 @@ public sealed class RunExecutionObservation
                 continue;
             }
 
-            if (!Safe(value) || value is "unknown" or "provider-default" || (field == "inventoryHash" && !ContentHash.IsValid(value)))
+            if (!SafeField(value) || value is "unknown" or "provider-default" || (field == "inventoryHash" && !ContentHash.IsValid(value)))
             {
                 incomplete = true;
                 continue;
@@ -176,7 +178,7 @@ public sealed class RunExecutionObservation
 
         if (report.Tools is not null)
         {
-            if (report.Tools.Count > 1000 || report.Tools.Any(t => !Safe(t)))
+            if (report.Tools.Count > 1000 || report.Tools.Any(t => !SafeField(t)))
             {
                 incomplete = true;
             }
@@ -195,6 +197,8 @@ public sealed class RunExecutionObservation
         {
             reports.Add(entry);
         }
+
+        bool SafeField(string value) => Safe(value) && containsProvision?.Invoke(value) != true;
     }
 
     /// <summary>Facts still unknown and discrepancies remain explicit even when the process exits successfully.</summary>

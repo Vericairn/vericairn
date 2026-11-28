@@ -6,6 +6,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Estate;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Workers;
@@ -29,6 +30,7 @@ public sealed partial class WorkerConfigurationStore
         public string AccessToken { get; } = accessToken;
         public string AccountType { get; } = accountType;
         public long ExpiresAt { get; } = expiresAt;
+        internal bool ContainsFragment(string text) => SecretShapes.ContainsProvisionFragment(text, AccessToken);
     }
 
     internal sealed record ClaudeSetupTokenStatus(bool Provisioned, DateTimeOffset? ImportedAt = null, string? AccountType = null,

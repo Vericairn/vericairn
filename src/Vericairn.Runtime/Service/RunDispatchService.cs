@@ -77,6 +77,7 @@ internal sealed partial class RunDispatchService(
             supervisor = runAdmission.Launch(admitted, command =>
                 RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions with
                 {
+                    SetupToken = admitted.Launch.SetupToken,
                     AdapterMeasurement = admitted.Efficiency is null ? null : admitted.Efficiency.Measurement,
                     StopAdapter = admitted.Efficiency is null ? null : admitted.Efficiency.Dispose,
                 }, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate, signal => RecordSignal(run, request.By, plan.Goal, signal), Element(plan.Selection)), out priorAttempts, out lapsed);

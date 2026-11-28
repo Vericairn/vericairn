@@ -230,6 +230,11 @@ internal static class FakeHarness
             return 0;
         }
         File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (behavior["overlappingFragment"]?.GetValue<string>() is string fragment)
+        {
+            Console.WriteLine("diagnostic (" + fragment + ")");
+            Console.Error.WriteLine("diagnostic [" + fragment + "]");
+        }
         if (!codex && behavior["setupToken"]?.GetValue<string>() is string setup)
         {
             if (ClaudeSetupSignIn() is not string token) return 2;
@@ -245,6 +250,17 @@ internal static class FakeHarness
                 const int split = 9;
                 Console.WriteLine("wrapped output: " + token[..split] + "\n" + token[split..]);
                 Console.Error.WriteLine("wrapped error: " + token[..split] + "\n" + token[split..]);
+            }
+            if (setup == "provision-fragments")
+            {
+                Console.WriteLine("│" + token[..70] + "│");
+                Console.WriteLine("│" + token[70..140] + "│");
+                Console.WriteLine("│" + token[140..] + "│");
+                Console.Error.WriteLine("error: " + token[..60] + "/" + token[60..]);
+                Console.Error.WriteLine("error: (" + token[13..] + ")");
+                Console.WriteLine(JsonSerializer.Serialize(new { type = "system", subtype = "init", model = token[70..84] }));
+                Console.WriteLine("end of synthetic stdout");
+                Console.Error.WriteLine("end of synthetic stderr");
             }
             if (setup == "rewrite")
             {

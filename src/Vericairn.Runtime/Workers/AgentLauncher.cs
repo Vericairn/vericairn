@@ -27,6 +27,10 @@ public sealed record LaunchContext(string Workspace, string Condition, string Br
     /// <summary>Non-secret facts about the sign-in staged by the launcher, for its local probes.</summary>
     [JsonIgnore]
     internal HarnessSignIn? SignIn { get; init; }
+
+    // The same provision used to stage the sign-in, available only to the process supervising or probing it.
+    [JsonIgnore]
+    internal WorkerConfigurationStore.ClaudeSetupToken? SetupToken { get; init; }
 }
 
 /// <summary>What one line of a harness's output told the worker; a field left null told nothing.</summary>

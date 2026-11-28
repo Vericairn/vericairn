@@ -1472,7 +1472,11 @@ The token is read at a hidden prompt, or as a single line of redirected standard
 stores the token and account statement in the owner-only `worker/claude-code-setup-token.json` under the machine-local
 Vericairn home. The home must be outside repositories, estates and harness configuration directories. The run file lives
 outside the workspace. Sign-in input never passes through a command argument or environment variable, and credential
-content and its digest stay out of inventory evidence.
+content and its digest stay out of inventory evidence. The worker withholds any output line containing 12 or more
+consecutive characters of the provisioned token when shape redaction alone would leave those characters. This covers
+both run streams and daemon logging, including decorated wraps and text without the token prefix. A probe that would
+admit such output as evidence is refused. Tokens unknown to the process are handled by shape checks, which can miss
+decorated continuations, non-whitespace splits and prefix-free fragments.
 
 `worker configure` shows the provision's import time, operator-stated account type and local expiry, which is
 set to 365 days after import. Use `worker configure --remove-setup-token` to remove the machine's copy and return

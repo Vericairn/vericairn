@@ -94,18 +94,21 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         string home = RunDirectory.ClaudeConfigurationDirectory(context.McpConfiguration);
         HarnessInventory.FreshHome(home);
         WorkerConfigurationStore.CreateOwnerDirectory(home);
-        HarnessSignIn? signIn = StageSignIn(context, profile, Path.Combine(home, profile.CredentialFile));
+        HarnessSignIn? signIn = StageSignIn(context, profile, Path.Combine(home, profile.CredentialFile), out var setupToken);
         return context with
         {
             Environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { [profile.ConfigurationEnvironment] = home },
             SignIn = signIn,
+            SetupToken = setupToken,
         };
     }
 
-    private static HarnessSignIn? StageSignIn(LaunchContext context, HarnessPlatformProfile profile, string destination)
+    private static HarnessSignIn? StageSignIn(LaunchContext context, HarnessPlatformProfile profile, string destination,
+        out WorkerConfigurationStore.ClaudeSetupToken? setupToken)
     {
         var store = new WorkerConfigurationStore(context.Environment.GetValueOrDefault(VericairnHome.EnvironmentVariable));
-        if (store.ReadClaudeSetupToken(context.Environment) is { } provision)
+        setupToken = store.ReadClaudeSetupToken(context.Environment);
+        if (setupToken is { } provision)
         {
             WriteLogin(destination, new { claudeAiOauth = new
             {
