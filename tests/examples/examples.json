@@ -42,6 +42,14 @@
       "expectedReadFindings": [],
       "legs": ["tier1", "tier2"],
       "variants": ["agents"],
+      "pending": [
+        {
+          "id": "agent-exposure-verdict",
+          "after": ["RUN-06", "GOAL-15"],
+          "steps": ["preview-draft"],
+          "assert": "In tier 2, assert operation.exposure for uncovered workspace history alongside the exact path:appointments/** brief."
+        }
+      ],
       "platforms": ["linux", "macos", "windows"],
       "liveLaunchers": []
     }
