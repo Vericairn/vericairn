@@ -71,6 +71,7 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
             await model.RefreshCompanionCommand.ExecuteAsync();
             Assert.Empty(model.CompanionText);
             Assert.Empty(model.CompanionItems);
+            Assert.False(model.ComposeCompanionHandoffCommand.CanExecute(null));
             string readerStatus = model.CompanionFreshness + model.CompanionMessage;
             Assert.DoesNotContain(order.Id, readerStatus, StringComparison.Ordinal);
             Assert.DoesNotContain(order.ComputedHash, readerStatus, StringComparison.Ordinal);
@@ -79,6 +80,39 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
             await model.OpenCompanionsCommand.ExecuteAsync();
             Assert.Empty(model.CompanionCollections);
             Assert.Empty(model.CompanionItems);
+            return true;
+        });
+    }
+
+    [Fact]
+    [Trait("Journey", "D19-A")]
+    public async Task AnUnavailableRenditionHandsOffItsVerifiedExactSubjectToWorkbench()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        RecordEnvelope order = Assert.Single(estate.Load().Current("work-order"));
+        using var connections = CompanionConnections(estate);
+        connections.CompanionRenditionUnavailable = request => request.Revision == order.Id;
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            int recordCount = estate.Load().Records.Count;
+            await OpenWorkOrdersAsync(model);
+            await OpenItemAsync(model);
+            Assert.Empty(model.CompanionText);
+            Assert.True(model.ComposeCompanionHandoffCommand.CanExecute(null));
+            Assert.Empty(connections.Service.DesktopHandoffs(estate.OperatorId).Handoffs);
+
+            await model.ComposeCompanionHandoffCommand.ExecuteAsync();
+            Assert.Contains(order.ComputedHash, model.HandoffSubject, StringComparison.Ordinal);
+            Assert.Contains("Workbench", model.HandoffTask, StringComparison.Ordinal);
+            Assert.False(string.IsNullOrWhiteSpace(model.HandoffReason));
+            await model.PrepareHandoffCommand.ExecuteAsync();
+
+            DesktopHandoff handoff = Assert.Single(connections.Service.DesktopHandoffs(estate.OperatorId).Handoffs);
+            Assert.Equal(new AttentionReference(order.Type, order.Id, order.ComputedHash), handoff.Subject);
+            Assert.Equal(Assert.Single(connections.Kept).Device, handoff.PreparedByDevice);
+            Assert.Null(handoff.OpenedAt);
+            Assert.Equal(recordCount, estate.Load().Records.Count);
             return true;
         });
     }

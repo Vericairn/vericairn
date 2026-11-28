@@ -485,6 +485,8 @@
                 <Button Content="Previous page" Command="{Binding PreviousCompanionPageCommand}" AutomationProperties.Name="Previous page" />
                 <Button Content="Next page" Command="{Binding NextCompanionPageCommand}" AutomationProperties.Name="Next page" />
               </WrapPanel>
+              <Button Content="Continue in Workbench" Command="{Binding ComposeCompanionHandoffCommand}"
+                      IsVisible="{Binding CanHandOffCompanion}" AutomationProperties.Name="Prepare a desktop task for this exact companion" />
               <SelectableTextBlock Text="{Binding CompanionText}" TextWrapping="Wrap" />
             </StackPanel>
           </StackPanel>

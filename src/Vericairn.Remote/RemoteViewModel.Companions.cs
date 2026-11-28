@@ -23,6 +23,7 @@ public sealed partial class RemoteViewModel
     private CompanionRequest? companionRequest;
     private CompanionRequest? returnToCollection;
     private AttentionReference? companionSubject;
+    private AttentionReference? companionHandoff;
     private RemoteCompanionCollectionRow? selectedCompanionCollection;
     private RemoteCompanionItem? selectedCompanionItem;
     private CompanionObservation? companionPage;
@@ -67,6 +68,8 @@ public sealed partial class RemoteViewModel
     public bool ShowCompanionCollections => CompanionCollections.Count > 0;
     /// <summary>Whether this view includes item navigation.</summary>
     public bool ShowCompanionItems => CompanionItems.Count > 0;
+    /// <summary>Whether there is a permitted exact subject for desktop continuation.</summary>
+    public bool CanHandOffCompanion => companionHandoff is not null;
     /// <summary>Whether the runtime returned multiple readable pages.</summary>
     public bool ShowCompanionPages => companionPage?.Response.Page?.Total > 1;
 
@@ -84,6 +87,8 @@ public sealed partial class RemoteViewModel
     public AsyncCommand PreviousCompanionPageCommand { get; private set; } = null!;
     /// <summary>Read the next page in the same selection.</summary>
     public AsyncCommand NextCompanionPageCommand { get; private set; } = null!;
+    /// <summary>Compose a desktop task for the authorized exact source.</summary>
+    public AsyncCommand ComposeCompanionHandoffCommand { get; private set; } = null!;
 
     private void InitializeCompanionCommands()
     {
@@ -108,6 +113,13 @@ public sealed partial class RemoteViewModel
         PreviousCompanionPageCommand = Command(() => PageCompanionAsync(-1), () => !Busy && companionPage?.Request.Page > 1);
         NextCompanionPageCommand = Command(() => PageCompanionAsync(1), () => !Busy &&
             companionPage?.Response.Page is { } page && page.Number < page.Total);
+        ComposeCompanionHandoffCommand = Command(() =>
+        {
+            if (companionHandoff is { } subject)
+                ComposeHandoff(subject, "Read this exact companion source in Workbench.",
+                    "Remote could not show the complete readable material for this revision.");
+            return Task.CompletedTask;
+        }, () => !Busy && CanHandOffCompanion);
     }
 
     private void NotifyCompanionCommands()
@@ -119,6 +131,7 @@ public sealed partial class RemoteViewModel
         RefreshCompanionCommand?.NotifyCanExecuteChanged();
         PreviousCompanionPageCommand?.NotifyCanExecuteChanged();
         NextCompanionPageCommand?.NotifyCanExecuteChanged();
+        ComposeCompanionHandoffCommand?.NotifyCanExecuteChanged();
     }
 
     private Task BackCompanionAsync()
@@ -150,10 +163,11 @@ public sealed partial class RemoteViewModel
     }
 
     private void ShowCompanion(CompanionObservation? page, bool cached = false,
-        IReadOnlyList<RemoteCompanionCollectionRow>? collections = null)
+        IReadOnlyList<RemoteCompanionCollectionRow>? collections = null, AttentionReference? handoff = null)
     {
         companionPage = page;
         showingCachedCompanion = cached;
+        companionHandoff = handoff;
         companionCollections = collections ?? [];
         companionItems = page?.Response.Page?.Items
             .Select(item => new RemoteCompanionItem(item.Title, new(item.RecordType, item.Revision, item.Hash))).ToArray() ?? [];
@@ -166,6 +180,7 @@ public sealed partial class RemoteViewModel
         Raise(nameof(CompanionText));
         Raise(nameof(CompanionFreshness));
         Raise(nameof(ShowCompanionPages));
+        Raise(nameof(CanHandOffCompanion));
         NotifyCompanionCommands();
     }
 
@@ -219,7 +234,7 @@ public sealed partial class RemoteViewModel
                 if (Selected != estate || !CompanionsOpen) return;
                 if (MatchesCompanionBasis(retained.Response, basis))
                 {
-                    ShowCompanion(retained, cached: true);
+                    ShowCompanion(retained, cached: true, handoff: CompanionHandoff(retained.Response, item));
                     CompanionMessage = retained.Response.Reason ?? "";
                     return;
                 }
@@ -230,14 +245,16 @@ public sealed partial class RemoteViewModel
             if (response is not { Version: 1, Status: "success", Text: not null } ||
                 (item is not null && !HasCompanionSource(response, item)))
             {
-                CompanionReadUnavailable();
+                CompanionResponse? basis = item is null ? null : await api.CompanionSourcesAsync(request).ConfigureAwait(true);
+                if (Selected == estate && CompanionsOpen) CompanionReadUnavailable(item is not null && basis is { Version: 1, Status: "success" } &&
+                    HasCompanionSource(basis, item) ? item : null);
                 return;
             }
 
             var observation = new CompanionObservation(request, response, Now);
             if (request.Revision is null) cachedCollection = observation;
             else cachedItem = observation;
-            ShowCompanion(observation);
+            ShowCompanion(observation, handoff: CompanionHandoff(response, item));
             CompanionMessage = response.Reason ?? "";
         }
         catch (Exception exception) when (ClientFailure.FromException(exception) is not null ||
@@ -248,11 +265,12 @@ public sealed partial class RemoteViewModel
         finally { Busy = false; }
     }
 
-    private void CompanionReadUnavailable()
+    private void CompanionReadUnavailable(AttentionReference? handoff = null)
     {
         cachedCollection = cachedItem = null;
-        ShowCompanion(null);
-        CompanionMessage = CompanionUnavailable;
+        ShowCompanion(null, handoff: handoff);
+        if (handoff is null && handoffForm is { } form && form.Subject == companionSubject) SetHandoff(null);
+        CompanionMessage = handoff is null ? CompanionUnavailable : "Remote could not show the full readable material. Continue in Workbench.";
     }
 
     private static bool MatchesCompanionBasis(CompanionResponse saved, CompanionResponse basis) =>
@@ -265,6 +283,9 @@ public sealed partial class RemoteViewModel
     private static bool HasCompanionSource(CompanionResponse response, AttentionReference item) =>
         response.Sources.Any(source => source.Kind == "record" && source.RecordType == item.Type &&
             source.Identity == item.Id && source.Hash == item.Hash);
+
+    private static AttentionReference? CompanionHandoff(CompanionResponse response, AttentionReference? item) =>
+        item is not null && response.Completeness == "bounded-overview" && HasCompanionSource(response, item) ? item : null;
 
     private static string CollectionName(string id) => id switch
     {

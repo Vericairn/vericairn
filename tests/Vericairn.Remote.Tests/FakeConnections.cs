@@ -123,6 +123,7 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
     public Action? BeforeReview { get; set; }
     public Action? AfterWrite { get; set; }
     public Action<string>? BeforeApiCall { get; set; }
+    public Func<CompanionRequest, bool>? CompanionRenditionUnavailable { get; set; }
     public Func<Task>? WaitBeforeReview { get; set; }
     public Func<RecordPrepared, RecordPrepared>? ChangePrepared { get; set; }
     public int PreparedCalls { get; private set; }
@@ -136,7 +137,7 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
         ((CountingApi)client).Called = () => ApiCalls++;
         ((CountingApi)client).BeforeCall = name => BeforeApiCall?.Invoke(name);
         ((CountingApi)client).Companions = token => ReadCompanionAsync(connection, api => api.CompanionsAsync(token));
-        ((CountingApi)client).RenderCompanion = (request, token) => ReadCompanionAsync(connection, api => api.CompanionRenderAsync(request, token));
+        ((CountingApi)client).RenderCompanion = (request, token) => RenderCompanionAsync(connection, request, token);
         ((CountingApi)client).CompanionSources = (request, token) => ReadCompanionAsync(connection, api => api.CompanionSourcesAsync(request, token));
         ((CountingApi)client).LoseAcknowledgmentResponse = () => LoseAcknowledgmentResponse;
         ((CountingApi)client).LoseRunStopResponse = () => LoseRunStopResponse;
@@ -155,6 +156,14 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
         // Match the verified local-network request context instead of inheriting the embedded caller's authority.
         using EstateService.RequestDeviceScope device = service.ForDeviceRequest(connection.Device, connection.DevicePublicKey, "local-network");
         return await read(service).ConfigureAwait(false);
+    }
+
+    private async Task<CompanionResponse> RenderCompanionAsync(RuntimeConnection connection, CompanionRequest request, CancellationToken token)
+    {
+        CompanionResponse response = await ReadCompanionAsync(connection, api => api.CompanionRenderAsync(request, token)).ConfigureAwait(false);
+        return response.Status == "success" && CompanionRenditionUnavailable?.Invoke(request) == true
+            ? CompanionResponse.Unavailable("The rendition is unavailable on this phone.")
+            : response;
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1852", Justification = "DispatchProxy generates a subclass at runtime.")]
