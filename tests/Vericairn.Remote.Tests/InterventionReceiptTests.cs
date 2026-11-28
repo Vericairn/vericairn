@@ -89,6 +89,158 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task AnUndeliveredPauseCanBeRetriedAfterReconciliation()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
+        RecordEnvelope goal = RemoteInspectionSeed.Goal(estate);
+        RecordEnvelope active = estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Started for the phone check."}""", goal.Reference);
+        _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate), goal);
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await OpenRun(connections);
+            await model.ReviewPauseCommand.ExecuteAsync();
+            connections.BeforeApiCall = name =>
+            {
+                if (name == nameof(IEstateApi.NewSignedRecordAsync)) throw new HttpRequestException("Never delivered.");
+            };
+            await model.SubmitInterventionCommand.ExecuteAsync();
+            RemoteInterventionReceipt original = Assert.Single(model.Interventions);
+            Assert.Equal("uncertain", original.State);
+            Assert.NotNull(original.Record);
+            Assert.Single(estate.Load().About(goal.Id, "goal-status"));
+
+            connections.BeforeApiCall = null;
+            connections.FailRecordRead = true;
+            await model.ReconcileInterventionCommand.ExecuteAsync();
+            Assert.Equal(original, model.SelectedIntervention);
+            connections.FailRecordRead = false;
+            await model.ReconcileInterventionCommand.ExecuteAsync();
+            Assert.Equal("not-delivered", model.SelectedIntervention?.State);
+            await model.ReviewPauseCommand.ExecuteAsync();
+            Assert.Equal(active.ComputedHash, model.Intervention?.Revision);
+            await model.SubmitInterventionCommand.ExecuteAsync();
+
+            RemoteInterventionReceipt retried = Assert.Single(model.Interventions);
+            Assert.Equal(original.Id, retried.Id);
+            Assert.Equal("completed", retried.State);
+            Assert.Equal(2, estate.Load().About(goal.Id, "goal-status").Count());
+            return true;
+        });
+    }
+
+    [Fact]
+    public async Task RestartAtThePresencePromptFindsNoBlockingReceipt()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
+        _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await OpenRun(connections);
+            await model.ReviewCancelCommand.ExecuteAsync();
+            IReadOnlyList<RemoteInterventionReceipt>? savedAtPrompt = null;
+            connections.BeforeInterventionSignature = () =>
+            {
+                savedAtPrompt = connections.LoadInterventions(connections.Kept.Single());
+                throw new IOException("The application closed at the presence prompt.");
+            };
+            await model.SubmitInterventionCommand.ExecuteAsync();
+            Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<RemoteInterventionReceipt>>(savedAtPrompt));
+            Assert.Empty(estate.Load().OfType("run-stop-request"));
+
+            connections.BeforeInterventionSignature = null;
+            var restarted = new RemoteViewModel(connections, new InspectionClock());
+            await restarted.RefreshCommand.ExecuteAsync();
+            await OpenAssignmentRun(restarted);
+            await restarted.ReviewCancelCommand.ExecuteAsync();
+            Assert.NotNull(restarted.Intervention);
+            await restarted.SubmitInterventionCommand.ExecuteAsync();
+            Assert.Equal("requested", restarted.SelectedIntervention?.State);
+            Assert.Single(estate.Load().OfType("run-stop-request"));
+            return true;
+        });
+    }
+
+    [Fact]
+    public async Task ALostStopResponseIsReconciledFromTheSignedRecordBeforeObservingTheWorker()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true, LoseRunStopResponse = true };
+        _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await OpenRun(connections);
+            await model.ReviewCancelCommand.ExecuteAsync();
+            await model.SubmitInterventionCommand.ExecuteAsync();
+            RemoteInterventionReceipt original = Assert.Single(model.Interventions);
+            RecordEnvelope signed = Assert.Single(estate.Load().OfType("run-stop-request"));
+            Assert.Equal("uncertain", original.State);
+            Assert.Equal(signed.Id, original.Record);
+            Assert.Equal(signed.ComputedHash, original.RecordHash);
+
+            var restarted = new RemoteViewModel(connections, new InspectionClock());
+            await restarted.RefreshCommand.ExecuteAsync();
+            await OpenAssignmentRun(restarted);
+            restarted.SelectedIntervention = Assert.Single(restarted.Interventions);
+            connections.FailRecordRead = true;
+            await restarted.ReconcileInterventionCommand.ExecuteAsync();
+            Assert.Equal(original, restarted.SelectedIntervention);
+
+            connections.FailRecordRead = false;
+            await restarted.ReconcileInterventionCommand.ExecuteAsync();
+            Assert.Equal(original.Id, restarted.SelectedIntervention?.Id);
+            Assert.Equal(signed.Id, restarted.SelectedIntervention?.Record);
+            Assert.Equal("requested", restarted.SelectedIntervention?.State);
+            await restarted.ReviewCancelCommand.ExecuteAsync();
+            Assert.Null(restarted.Intervention);
+            Assert.False(restarted.SubmitInterventionCommand.CanExecute(null));
+            Assert.Equal(signed.Id, Assert.Single(estate.Load().OfType("run-stop-request")).Id);
+            return true;
+        });
+    }
+
+    [Fact]
+    public async Task ADelayedStopAndItsRetryCannotBothWriteARecord()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
+        _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await OpenRun(connections);
+            Func<WriteOutcome>? delayed = null;
+            connections.DispatchSignedIntervention = send =>
+            {
+                delayed = send;
+                throw new HttpRequestException("The old request has not arrived yet.");
+            };
+            await model.ReviewCancelCommand.ExecuteAsync();
+            await model.SubmitInterventionCommand.ExecuteAsync();
+            RemoteInterventionReceipt original = Assert.Single(model.Interventions);
+            Assert.Empty(estate.Load().OfType("run-stop-request"));
+            await model.ReconcileInterventionCommand.ExecuteAsync();
+            Assert.Equal("not-delivered", model.SelectedIntervention?.State);
+
+            await model.ReviewCancelCommand.ExecuteAsync();
+            connections.DispatchSignedIntervention = send =>
+            {
+                Assert.True(Assert.IsAssignableFrom<Func<WriteOutcome>>(delayed)().Ok);
+                return send();
+            };
+            await model.SubmitInterventionCommand.ExecuteAsync();
+
+            RemoteInterventionReceipt observed = Assert.Single(model.Interventions);
+            RecordEnvelope signed = Assert.Single(estate.Load().OfType("run-stop-request"));
+            Assert.Equal(original.Id, observed.Id);
+            Assert.Equal(original.Record, signed.Id);
+            Assert.Equal(signed.Id, observed.Record);
+            Assert.Equal("requested", observed.State);
+            return true;
+        });
+    }
+
+    [Fact]
     public async Task AnUncertainCancelBlocksOnlyAnotherCancelAcrossRestart()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);

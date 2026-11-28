@@ -84,10 +84,12 @@ goal status or run operation revision when the phone submits its signature. The 
 key. If signing or submission is refused, the app explains why. Inspect the current state and use **Continue in Workbench**
 to prepare a desktop handoff if the intervention is still needed.
 
-The original request stays on this phone, including after restart. The result shows the pause record or the observed request,
-transmission, harness acknowledgment, escalation and containment facts. If a request is refused, failed or superseded,
-read the current state and review a new request. If its outcome is pending or uncertain, select the original under
-**Intervention requests** and choose **Reconcile request** to read what the runtime has observed.
+The phone keeps the original request after signing and before submission, including across restarts. The result shows the
+recorded pause or the worker's observed request, transmission, harness acknowledgment, escalation and containment.
+If the outcome is pending or uncertain, select the original under **Intervention requests** and choose **Reconcile request**.
+Remote looks for the signed record on the runtime. A stop record confirms receipt, and the worker observations show its effect.
+If the runtime holds no record, Remote shows **not-delivered** and lets you review the current target again. A retry of the same
+review keeps the original request identity. Refused, failed and superseded requests also allow a fresh review.
 
 In **Nodes**, **Reconnect** checks the pinned runtime identity and this phone's current access. **Check workers** reads a
 separately dated view of the work in flight, with every heartbeat and stop observation that runtime can supply. A current

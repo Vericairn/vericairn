@@ -14,9 +14,10 @@
 > [Remote](remote.md#interventions-and-nodes) can request a pause of an active goal, a graceful cancellation of one run or a
 > containment request with no additional grace before escalation. Review pins the exact operation and target. The phone
 > signs the prepared record with the person's admitted presence key. A refused intervention explains why and offers
-> inspection and a desktop handoff. The intervention list preserves each original and shows the receipt and effect observed.
-> **Nodes** checks the direct
-> connection separately from the serving runtime's observations of in-flight work.
+> inspection and a desktop handoff. Remote keeps a receipt after signing and before submission. **Reconcile request** looks
+> for the signed record on the runtime and reads worker observations separately. If the record is missing, Remote marks the
+> request **not-delivered** and permits a fresh review. A retry of the same review keeps the original request identity.
+> **Nodes** checks the direct connection separately from the serving runtime's observations of in-flight work.
 
 ## docs/api-v1.md
 

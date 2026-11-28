@@ -207,7 +207,6 @@ public sealed partial class RemoteViewModel
     {
         if (Selected is not { Current: true } estate || intervention is not { } review || InterventionTarget is not { } run) return;
         Busy = true;
-        RemoteInterventionReceipt? receipt = null;
         try
         {
             if (await CheckRuntimeAsync(estate).ConfigureAwait(true) is not { } api ||
@@ -217,38 +216,23 @@ public sealed partial class RemoteViewModel
                 if (Selected == estate) InterventionMessage = "The reviewed target changed or could not be confirmed. Review it again. Nothing was sent.";
                 return;
             }
-            receipt = new(review, Guid.NewGuid().ToString("N"), "uncertain", "Submission reserved on this phone. The runtime's receipt and effect have yet to be observed.");
-            if (!KeepIntervention(estate, receipt)) return;
-            receipt = await SendSignedInterventionAsync(estate, api, receipt).ConfigureAwait(true);
-            KeepIntervention(estate, receipt);
-            if (Selected == estate) InterventionMessage = receipt.Observation;
+
+            // A missing record can be followed by a late arrival. Competing plans for the same review
+            // keep one request identity and the same pin, which the runtime checks at the write boundary.
+            RemoteInterventionReceipt? retry = Interventions.LastOrDefault(r => r.State == "not-delivered" && r.Request.SameReviewedOperation(review));
+            RemoteInterventionReceipt receipt = retry ?? new(review, Guid.NewGuid().ToString("N"), "not-delivered", "");
+            if (await SendSignedInterventionAsync(estate, api, review, receipt, retry is not null).ConfigureAwait(true) is not { } result) return;
+            if (KeepIntervention(estate, result) && Selected == estate) InterventionMessage = result.Observation;
         }
         catch (Exception exception) when (InterventionReadFailure(exception))
         {
-            string message = receipt is null ? "The live review could not be refreshed. Nothing was sent." :
-                ClientFailure.FromException(exception)?.Code == "refused" ? "The runtime refused the intervention. " + ClientFailure.FromException(exception)!.Message + InterventionHandoff :
-                "The runtime outcome is uncertain. Reconcile this original request before taking further action.";
-            if (receipt is not null)
-                KeepIntervention(estate, receipt with { State = ClientFailure.FromException(exception)?.Code == "refused" ? "rejected" : "uncertain", Observation = message });
-            if (Selected == estate) InterventionMessage = message;
+            if (Selected == estate) InterventionMessage = "The live review could not be refreshed. Nothing was sent.";
         }
         finally
         {
             if (Selected == estate) SetIntervention(null);
             Busy = false;
         }
-    }
-
-    private static RemoteInterventionReceipt ObserveRunStop(RemoteInterventionReceipt receipt, RunStop facts)
-    {
-        if (facts.Reason == receipt.Marker)
-            return receipt with { State = facts.State, Observation = StopObservation(facts) };
-        if (!receipt.Pending) return receipt;
-        return receipt with
-        {
-            State = facts.Reason == receipt.Request.ExpectedStopReason && facts.ContainedAt is null ? "uncertain" : "superseded",
-            Observation = "A different stop request was observed. This original request has no matching receipt.\n" + StopObservation(facts),
-        };
     }
 
     private async Task ReconcileInterventionAsync()
@@ -258,11 +242,8 @@ public sealed partial class RemoteViewModel
         try
         {
             if (await CheckRuntimeAsync(estate).ConfigureAwait(true) is not { } api) return;
-            RemoteInterventionReceipt observed = receipt.Request.Operation == PauseGoal
-                ? await ObservePauseAsync(api, receipt).ConfigureAwait(true)
-                : await ObserveStopAsync(api, receipt).ConfigureAwait(true);
-            KeepIntervention(estate, observed);
-            if (Selected == estate) InterventionMessage = observed.Observation;
+            RemoteInterventionReceipt observed = await ObserveInterventionAsync(api, estate.Connection.Principal, receipt).ConfigureAwait(true);
+            if (KeepIntervention(estate, observed) && Selected == estate) InterventionMessage = observed.Observation;
         }
         catch (Exception exception) when (InterventionReadFailure(exception))
         {
@@ -271,33 +252,73 @@ public sealed partial class RemoteViewModel
         finally { Busy = false; }
     }
 
-    private static async Task<RemoteInterventionReceipt> ObservePauseAsync(IEstateApi api, RemoteInterventionReceipt receipt)
+    private static async Task<RemoteInterventionReceipt> ObserveInterventionAsync(IEstateApi api, string principal, RemoteInterventionReceipt receipt)
     {
-        GoalResponse? goal = await api.GoalAsync(receipt.Request.Target).ConfigureAwait(true);
-        if (goal is null) return receipt;
-        string currentId = RemoteWorkDetail.Text(RemoteWorkDetail.Property(goal.Json, "goal"), "id");
-        string state = RemoteWorkDetail.Text(goal.Json, "status");
-        IReadOnlyList<RecordResponse> statuses = await api.RecordsAsync("goal-status").ConfigureAwait(true);
-        RecordResponse? match = statuses.FirstOrDefault(record =>
+        RecordResponse? record = await FindInterventionRecordAsync(api, principal, receipt).ConfigureAwait(true);
+        if (record is null)
+            return receipt.State is "pending" or "uncertain"
+                ? receipt with { State = "not-delivered", Observation = "The runtime holds no signed record for this request. Review the current target before trying again." }
+                : receipt;
+
+        receipt = receipt with { Record = record.Id, RecordHash = record.Hash };
+        if (receipt.Request.Operation == PauseGoal)
         {
-            JsonElement body = RemoteWorkDetail.Property(record.Envelope, "body");
-            JsonElement subject = RemoteWorkDetail.Property(record.Envelope, "subject");
-            return record.Type == "goal-status" && RemoteWorkDetail.Text(subject, "id") == receipt.Request.Target &&
-                RemoteWorkDetail.Text(body, "status") == "paused" && RemoteWorkDetail.Text(body, "note") == receipt.Marker &&
-                (receipt.Record is null || record.Id == receipt.Record) && (receipt.RecordHash is null || record.Hash == receipt.RecordHash);
-        });
-        string current = $"Current goal revision {currentId} was observed as {state}.";
-        return match is null
-            ? receipt with { Observation = $"No matching pause record was found for the original request. {current}" }
-            : receipt with { State = "completed", Record = match.Id, Observation = $"The runtime recorded a paused goal in {match.Id} at {match.Hash}. {current} Check the run separately for any run stopped." };
+            GoalResponse? goal = await api.GoalAsync(receipt.Request.Target).ConfigureAwait(true);
+            string current = goal is null ? "" : $" The goal is currently {RemoteWorkDetail.Text(goal.Json, "status")}.";
+            return receipt with
+            {
+                State = "completed",
+                Observation = $"The runtime recorded a paused goal in {record.Id} at {record.Hash}.{current} Check the run separately for any run stopped.",
+            };
+        }
+
+        RunRow? run = (await api.RunsAsync().ConfigureAwait(true)).Runs.SingleOrDefault(r => r.Run == receipt.Request.Target);
+        if (run?.Stop is { } facts)
+        {
+            if (facts.Reason == receipt.Marker)
+                return receipt with { State = facts.State, Observation = StopObservation(facts) };
+            if (receipt.Pending || receipt.State == "not-delivered")
+            {
+                bool predecessor = facts.Reason == receipt.Request.ExpectedStopReason && facts.ContainedAt is null;
+                return receipt with
+                {
+                    State = predecessor ? "recorded" : "superseded",
+                    Observation = $"The runtime holds the signed record {record.Id}. A different worker stop was observed.\n" + StopObservation(facts),
+                };
+            }
+        }
+
+        return receipt.State is "pending" or "uncertain" or "not-delivered"
+            ? receipt with { State = "recorded", Observation = $"The runtime holds the signed record {record.Id}. No worker stop was observed." }
+            : receipt;
     }
 
-    private static async Task<RemoteInterventionReceipt> ObserveStopAsync(IEstateApi api, RemoteInterventionReceipt receipt)
+    private static async Task<RecordResponse?> FindInterventionRecordAsync(IEstateApi api, string principal, RemoteInterventionReceipt receipt)
     {
-        RunRow? run = (await api.RunsAsync().ConfigureAwait(true)).Runs.SingleOrDefault(r => r.Run == receipt.Request.Target);
-        return run?.Stop is { } facts ? ObserveRunStop(receipt, facts) :
-            receipt with { Observation = run is null ? "The runtime did not return the original run." :
-                $"The run was observed as {StateLanguage.Label("operation", run.Status)}. No new stop facts were observed." };
+        bool pause = receipt.Request.Operation == PauseGoal;
+        string type = pause ? "goal-status" : "run-stop-request";
+        if (receipt.Record is { } id && await api.RecordAsync(id).ConfigureAwait(true) is { } exact)
+        {
+            if (exact.Id != id || (receipt.RecordHash is { } hash && exact.Hash != hash) || !Matches(exact))
+                throw new InvalidDataException("The runtime returned a different record for the prepared intervention.");
+            return exact;
+        }
+
+        // Old receipts can lack a prepared id. A retry can also race an earlier plan for the same request.
+        return (await api.RecordsAsync(type).ConfigureAwait(true)).FirstOrDefault(Matches);
+
+        bool Matches(RecordResponse record)
+        {
+            if (record.Type != type || RemoteWorkDetail.Text(record.Envelope, "by") != principal) return false;
+            JsonElement body = RemoteWorkDetail.Property(record.Envelope, "body");
+            if (!pause)
+                return RemoteWorkDetail.Text(body, "run") == receipt.Request.Target &&
+                    RemoteWorkDetail.Text(body, "operation") == (receipt.Request.Operation == ContainRun ? "contain" : "cancel") &&
+                    RemoteWorkDetail.Text(body, "requestId") == receipt.Id;
+            JsonElement subject = RemoteWorkDetail.Property(record.Envelope, "subject");
+            return RemoteWorkDetail.Text(subject, "id") == receipt.Request.Target &&
+                RemoteWorkDetail.Text(body, "status") == "paused" && RemoteWorkDetail.Text(body, "note") == receipt.Marker;
+        }
     }
 
     private bool KeepIntervention(RemoteEstate estate, RemoteInterventionReceipt receipt)
@@ -314,15 +335,17 @@ public sealed partial class RemoteViewModel
         }
         catch (Exception exception) when (StorageFailure(exception))
         {
-            if (Selected == estate)
-            {
-                InterventionStorageProblem = "The original intervention could not be kept. Recover app storage before sending.";
-                NotifyInterventionCommands();
-            }
+            if (Selected == estate) ShowInterventionStorageProblem();
             return false;
         }
     }
 
+    private void ShowInterventionStorageProblem()
+    {
+        InterventionStorageProblem = "The original intervention could not be kept. Recover app storage before sending.";
+        NotifyInterventionCommands();
+    }
+
     private static bool InterventionReadFailure(Exception exception) =>
-        ClientFailure.FromException(exception) is not null || exception is NotSupportedException or JsonException or IOException or UnauthorizedAccessException;
+        ClientFailure.FromException(exception) is not null || exception is NotSupportedException or JsonException or IOException or InvalidDataException or UnauthorizedAccessException;
 }

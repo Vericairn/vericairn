@@ -20,6 +20,10 @@ public sealed record RemoteIntervention(string Operation, string Target, string 
     /// <summary>The target, review basis and expected effect.</summary>
     [JsonIgnore]
     public string Review => $"{Operation}\nTarget {Target}\n{KnownState}\n{Effect}";
+
+    internal bool SameReviewedOperation(RemoteIntervention other) =>
+        Operation == other.Operation && Target == other.Target && Revision == other.Revision &&
+        ReviewedSubject == other.ReviewedSubject && ExpectedStopReason == other.ExpectedStopReason;
 }
 
 /// <summary>The original submission, kept before sending, and the last observed result of that submission.</summary>
@@ -31,7 +35,7 @@ public sealed record RemoteInterventionReceipt(RemoteIntervention Request, strin
 
     internal (string Target, string Operation, string Id) Key => (Request.Target, Request.Operation, Id);
 
-    internal bool Pending => State is "pending" or "uncertain" or "requested" or "transmitted" or "acknowledged" or "escalated";
+    internal bool Pending => State is "pending" or "uncertain" or "recorded" or "requested" or "transmitted" or "acknowledged" or "escalated";
 
     internal bool Blocks(RemoteIntervention review) =>
         Pending && Request.Target == review.Target && Request.Operation == review.Operation;
