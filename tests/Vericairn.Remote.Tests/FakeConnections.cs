@@ -19,7 +19,7 @@ namespace Vericairn.Remote.Tests;
 /// Stands in for the phone's connections: pairing either keeps a connection or fails as told, each check reports the next state
 /// queued (current by default), and the client is the estate's in-process service. The real path is covered by the Daemon tests.
 /// </summary>
-internal sealed class FakeConnections(string root) : IRemoteConnections, IDisposable
+internal sealed partial class FakeConnections(string root) : IRemoteConnections, IDisposable
 {
     private readonly EstateService service = EstateService.Open(root);
     private readonly DirectoryInfo phoneHome = Directory.CreateTempSubdirectory("vericairn-test-phone-");
@@ -37,8 +37,8 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
 
     public IReadOnlyList<RuntimeConnection> List() => Kept;
 
-    /// <summary>The phone's presence store: file keys recorded as the iPhone Secure Enclave custody, asking nobody.</summary>
-    public PresenceKeyStandIn PresenceKeys => presenceKeys ??= new(phoneHome.FullName);
+    /// <summary>File-backed stand-in for an admitted presence key. Real phone attestation is tested by the daemon.</summary>
+    public PresenceKeyStandIn PresenceKeys => presenceKeys ??= new(phoneHome.FullName, SecureEnclaveCustody.Kind);
     private PresenceKeyStandIn? presenceKeys;
 
     /// <summary>Pairs like a phone whose custody cannot require presence: only the request key is registered.</summary>
@@ -68,13 +68,13 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         return Task.FromResult(connection);
     }
 
-    // The presence device as a pairing records it: a second key of the same principal, stating presence required in a phone custody,
-    // signed by its own key and admitted by the operator through the request device that is the fixture's authority.
+    // Use the runtime's trusted desktop-presence admission to exercise signing without a real phone or attestation.
+    // The second key is still held by the test client and admitted for the same person.
     private RuntimeConnection WithPresenceDevice(RuntimeConnection connection)
     {
         string id = Ulid.NewUlid().Value;
         string publicKey = RecordSigning.EncodePublicKey(PresenceKeys.Create(id));
-        var body = DeviceRecords.Body(connection.Principal, "Test phone (presence key)", "ios", PresenceKeys.Kind, publicKey, ["local-network"], 3, "required");
+        var body = DeviceRecords.Body(connection.Principal, "Test presence key", "macos", PresenceKeys.Kind, publicKey, ["local-network"], 3, "required");
         AuthoredRecord device = RecordAuthor.Create(new("device", connection.Principal, JsonSerializer.SerializeToElement(body), Id: id, Format: 3), new StoreSigner(PresenceKeys, id));
         RecordAuthor.Write(root, device);
         RecordAuthor.Write(root, RecordAuthor.Create(new("admission", connection.Principal,
@@ -107,6 +107,8 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     public int ConnectionsMade { get; private set; }
     public int ApiCalls { get; private set; }
     public bool LoseAcknowledgmentResponse { get; set; }
+    public bool LoseRunStopResponse { get; set; }
+    public bool LoseDesktopHandoffResponse { get; set; }
     public bool CannotKeepObservation { get; set; }
     public bool EnableSignedWrites { get; set; }
     public bool CannotKeepDecision { get; set; }
@@ -132,6 +134,8 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         ((CountingApi)client).Called = () => ApiCalls++;
         ((CountingApi)client).BeforeCall = name => BeforeApiCall?.Invoke(name);
         ((CountingApi)client).LoseAcknowledgmentResponse = () => LoseAcknowledgmentResponse;
+        ((CountingApi)client).LoseRunStopResponse = () => LoseRunStopResponse;
+        ((CountingApi)client).PrepareHandoff = (request, token) => PrepareHandoffAsync(connection, request, token);
         ((CountingApi)client).Basis = () => { BasisReads++; return Basis; };
         ((CountingApi)client).RecordRead = record =>
         {
@@ -148,30 +152,84 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         public Action Called { get; set; } = null!;
         public Action<string> BeforeCall { get; set; } = null!;
         public Func<bool> LoseAcknowledgmentResponse { get; set; } = null!;
+        public Func<bool> LoseRunStopResponse { get; set; } = null!;
+        public Func<DesktopHandoffRequest, CancellationToken, Task<DesktopHandoffResponse>> PrepareHandoff { get; set; } = null!;
         public Func<RecordResponse?, RecordResponse?> RecordRead { get; set; } = null!;
         public Func<DecisionBasisResponse?> Basis { get; set; } = null!;
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             Called();
             BeforeCall(targetMethod!.Name);
+            if (targetMethod.Name == nameof(IEstateApi.PrepareDesktopHandoffAsync))
+                return PrepareHandoff((DesktopHandoffRequest)args![0]!, (CancellationToken)args[1]!);
             if (targetMethod!.Name == nameof(IEstateApi.DecisionBasisAsync) && Basis() is DecisionBasisResponse basis) return Task.FromResult(basis);
             try
             {
                 object? result = targetMethod!.Invoke(Inner, args);
                 if (targetMethod.Name == nameof(IEstateApi.RecordAsync) && result is Task<RecordResponse?> record) return ReadRecord(record);
-                return result is Task<AttentionAcknowledgeResponse> acknowledgment && LoseAcknowledgmentResponse()
-                    ? LostResponse(acknowledgment) : result;
+                return result switch
+                {
+                    Task<AttentionAcknowledgeResponse> acknowledgment when LoseAcknowledgmentResponse() => LostResponse(acknowledgment),
+                    Task<RunStopResponse> requested when LoseRunStopResponse() => LostResponse(requested),
+                    _ => result,
+                };
             }
             catch (TargetInvocationException exception) when (exception.InnerException is not null)
             { ExceptionDispatchInfo.Capture(exception.InnerException).Throw(); throw; }
         }
         private async Task<RecordResponse?> ReadRecord(Task<RecordResponse?> response) => RecordRead(await response.ConfigureAwait(false));
-        private static async Task<AttentionAcknowledgeResponse> LostResponse(Task<AttentionAcknowledgeResponse> response)
+        private static async Task<T> LostResponse<T>(Task<T> response)
         {
             _ = await response.ConfigureAwait(false);
             throw new HttpRequestException("The response was lost.");
         }
     }
+    private string? handoffDevice;
+
+    private async Task<DesktopHandoffResponse> PrepareHandoffAsync(RuntimeConnection connection, DesktopHandoffRequest request, CancellationToken token)
+    {
+        using EstateService.RequestDeviceScope device = ForHandoffDevice(connection);
+        DesktopHandoffResponse response = await ((IEstateApi)service).PrepareDesktopHandoffAsync(request, token).ConfigureAwait(false);
+        return LoseDesktopHandoffResponse ? throw new HttpRequestException("The response was lost.") : response;
+    }
+
+    internal DesktopHandoffResponse OpenHandoff(DesktopHandoffOpenRequest request)
+    {
+        using EstateService.RequestDeviceScope device = ForHandoffDevice(Kept.Single(c => c.Principal == request.By));
+        using IDisposable socket = service.ForLocalSocketRequest();
+        return service.OpenDesktopHandoff(request);
+    }
+
+    private EstateService.RequestDeviceScope ForHandoffDevice(RuntimeConnection connection)
+    {
+        if (service.Standing(connection.Device) is { } paired)
+            return service.ForDeviceRequest(paired.Identity, paired.PublicKey);
+        if (handoffDevice is null)
+        {
+            WriteOutcome created = service.DeviceCreate(new(connection.Principal, "Handoff fixture phone", "file"));
+            Assert.True(created.Ok, created.Problem?.Message);
+            handoffDevice = created.Written!.Id;
+            WriteOutcome admitted = service.DeviceAdmit(new(handoffDevice, connection.Principal, "Handoff fixture admission."));
+            Assert.True(admitted.Ok, admitted.Problem?.Message);
+        }
+        return service.ForDeviceRequest(handoffDevice, service.Standing(handoffDevice)!.PublicKey);
+    }
+
+    public IReadOnlyList<RemoteInterventionReceipt> LoadInterventions(RuntimeConnection connection) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).LoadInterventions(connection);
+
+    public void SaveIntervention(RuntimeConnection connection, RemoteInterventionReceipt request) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).SaveIntervention(connection, request);
+
+    public IReadOnlyList<DesktopHandoffRequest> LoadPendingHandoffs(RuntimeConnection connection) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).LoadPendingHandoffs(connection);
+
+    public void KeepPendingHandoff(RuntimeConnection connection, DesktopHandoffRequest request) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).KeepPendingHandoff(connection, request);
+
+    public void ForgetPendingHandoff(RuntimeConnection connection, string requestId) =>
+        new LocalNetworkConnections(phoneHome.FullName, new FileKeyStore(phoneHome.FullName)).ForgetPendingHandoff(connection, requestId);
+
     private readonly Dictionary<string, RemoteObservation> observations = [];
     public RemoteObservation? LoadObservation(RuntimeConnection connection) => observations.GetValueOrDefault(connection.Id);
     public void SaveObservation(RuntimeConnection connection, RemoteObservation observation)
@@ -200,6 +258,10 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     public async Task<WriteOutcome> WriteSignedAsync(RuntimeConnection connection, NewRecordRequest request, Func<RecordPrepared, bool> review, Func<RecordPrepared, bool> beforeSend,
         CancellationToken cancellationToken = default)
     {
+        if (request.Type == "run-stop-request" ||
+            request.Type == "goal-status" && request.Body.TryGetProperty("activeStatusHash", out _))
+            return WriteSignedIntervention(connection, request, review, beforeSend);
+
         // As on the phone: without the presence key nothing is prepared, signed or sent; the request key never signs a decision.
         if (!HasPresenceKey(connection)) return WriteOutcome.Fail(new("presence-required", "This phone holds no presence key for this connection.", []));
         PreparedCalls++;

@@ -101,7 +101,8 @@
         <TextBlock Text="This inspection grants no approval or effect. Acknowledgment does not discharge a duty. Review and any action require the desktop's current material and authority." />
         <WrapPanel Orientation="Horizontal">
           <Button Content="Refresh policy" Command="{Binding RefreshPolicyCommand}" AutomationProperties.Name="Refresh the policy basis and authority without writing" />
-          <Button Content="Prepare desktop handoff" Command="{Binding PolicyHandoffCommand}" AutomationProperties.Name="Read desktop context for the exact original subject without approving or writing" />
+          <Button Content="Read context package" Command="{Binding PolicyHandoffCommand}" AutomationProperties.Name="Read desktop context for the exact original subject without approving or writing" />
+          <Button Content="Send task to Workbench" Command="{Binding ComposePolicyHandoffCommand}" AutomationProperties.Name="Compose a desktop task for this exact policy condition" />
         </WrapPanel>
         <Expander Header="Desktop context and original material" AutomationProperties.Name="Complete desktop handoff or refusal">
           <TextBlock Text="{Binding PolicyHandoff}" />
@@ -154,9 +155,27 @@
           <Button Content="Reconcile" Command="{Binding ReconcileDecisionCommand}" AutomationProperties.Name="Read the original submitted record without resending" />
           <Button Content="Defer" Command="{Binding DeferDecisionCommand}" AutomationProperties.Name="Defer by acknowledging this notice only" />
           <Button Content="Request changes" Command="{Binding RequestDecisionChangesCommand}" AutomationProperties.Name="Show the desktop route for requesting changes" />
+          <Button Content="Continue in Workbench" Command="{Binding ComposeDecisionHandoffCommand}" AutomationProperties.Name="Compose a desktop task from this original decision and draft" />
         </WrapPanel>
         <TextBlock x:Name="DecisionOutcome" Text="{Binding DecisionMessage}" AutomationProperties.Name="Observed submission outcome" />
         <TextBlock Text="{Binding DecisionReceipt}" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <ScrollViewer Grid.Row="1" IsVisible="{Binding HasHandoffForm}">
+      <StackPanel Margin="12" Spacing="10">
+        <Button Content="Back" Command="{Binding CloseHandoffCommand}" AutomationProperties.Name="Close desktop task preparation" />
+        <TextBlock Classes="heading" Text="Prepare a desktop task" />
+        <SelectableTextBlock Text="{Binding HandoffSubject}" TextWrapping="Wrap" />
+        <TextBlock Text="Next task" />
+        <TextBox Text="{Binding HandoffTask}" IsEnabled="{Binding HandoffEditable}" AutomationProperties.Name="Intended next task" TextWrapping="Wrap" />
+        <TextBlock Text="Reason to continue on the desktop" />
+        <TextBox Text="{Binding HandoffReason}" IsEnabled="{Binding HandoffEditable}" AutomationProperties.Name="Reason for this handoff" TextWrapping="Wrap" />
+        <TextBlock Text="Draft to carry to Workbench" />
+        <TextBox Text="{Binding HandoffDraft}" AcceptsReturn="True" TextWrapping="Wrap" IsEnabled="{Binding HandoffEditable}" AutomationProperties.Name="Optional draft for the desktop" />
+        <Button Content="{Binding PrepareHandoffLabel}" Command="{Binding PrepareHandoffCommand}" AutomationProperties.Name="Keep this task for opening in Workbench" />
+        <Button Content="Refresh handoffs" Command="{Binding RefreshHandoffsCommand}" AutomationProperties.Name="Check the handoff list for this original request" />
+        <TextBlock Text="{Binding HandoffMessage}" />
       </StackPanel>
     </ScrollViewer>
 
@@ -369,16 +388,55 @@
                 <TextBlock Text="{Binding RunObservations}" />
                 <TextBlock FontWeight="SemiBold" Text="Agent progress claims beside worker observations" />
                 <TextBlock Text="{Binding ProgressClaims}" />
+                <Button Content="Continue in Workbench" Command="{Binding ComposeWorkHandoffCommand}" AutomationProperties.Name="Compose a handoff for this exact work revision" />
+                <Expander Header="Intervene on a run" AutomationProperties.Name="Review a pause, cancellation or containment request">
+                  <StackPanel Spacing="8">
+                    <ComboBox ItemsSource="{Binding InterventionTargets}" SelectedItem="{Binding InterventionTarget}"
+                              AutomationProperties.Name="Select the exact run to review" HorizontalAlignment="Stretch">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RemoteInterventionTarget">
+                          <TextBlock Text="{Binding Label}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <WrapPanel Orientation="Horizontal">
+                      <Button Content="Review pause" Command="{Binding ReviewPauseCommand}" AutomationProperties.Name="Review the effect of pausing the run’s goal" />
+                      <Button Content="Review cancel" Command="{Binding ReviewCancelCommand}" AutomationProperties.Name="Review the effect of requesting this run to stop" />
+                      <Button Content="Review containment" Command="{Binding ReviewContainCommand}" AutomationProperties.Name="Review the effect of requesting containment for this run" />
+                    </WrapPanel>
+                    <StackPanel IsVisible="{Binding HasIntervention}" Spacing="6">
+                      <TextBlock Text="{Binding Intervention.Review}" />
+                      <Button Content="Request reviewed action" Command="{Binding SubmitInterventionCommand}" AutomationProperties.Name="Submit this exact reviewed intervention once" />
+                    </StackPanel>
+                  </StackPanel>
+                </Expander>
               </StackPanel>
             </Border>
+            <Expander Header="Intervention requests" AutomationProperties.Name="Original requests and their observed results">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{Binding InterventionStorageProblem}" />
+                <ComboBox ItemsSource="{Binding Interventions}" SelectedItem="{Binding SelectedIntervention}"
+                          HorizontalAlignment="Stretch" AutomationProperties.Name="Select an original intervention request">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RemoteInterventionReceipt">
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="{Binding SelectedIntervention.Observation, FallbackValue=''}" />
+                <Button Content="Reconcile request" Command="{Binding ReconcileInterventionCommand}" AutomationProperties.Name="Read the original intervention outcome without resending" />
+              </StackPanel>
+            </Expander>
+            <TextBlock Text="{Binding InterventionMessage}" AutomationProperties.Name="Most recent intervention observation" />
             <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{x:Static vm:RemoteViewModel.WorkLater}" />
           </StackPanel>
         </ScrollViewer>
       </TabItem>
       <TabItem Header="Products" AutomationProperties.Name="Products">
         <ScrollViewer>
-          <ItemsControl x:Name="ProductList" Margin="12" ItemsSource="{Binding Products}">
-            <ItemsControl.ItemTemplate>
+          <StackPanel Margin="12" Spacing="8">
+          <ListBox x:Name="ProductList" ItemsSource="{Binding Products}" SelectedItem="{Binding SelectedProduct}" AutomationProperties.Name="Products">
+            <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:ProductItem">
                 <Border Classes="card">
                   <StackPanel Spacing="2">
@@ -387,8 +445,10 @@
                   </StackPanel>
                 </Border>
               </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <Button Content="Continue in Workbench" Command="{Binding ComposeProductHandoffCommand}" AutomationProperties.Name="Compose a desktop task for the selected product" />
+          </StackPanel>
         </ScrollViewer>
       </TabItem>
       <TabItem Header="Nodes" AutomationProperties.Name="Nodes">
@@ -405,11 +465,50 @@
             <TextBlock Text="{Binding Node.PairedAt, StringFormat='Paired: {0}', FallbackValue=''}" />
             <TextBlock Text="{Binding Node.LastCurrent, StringFormat='Last current: {0}', FallbackValue=''}" />
             <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{x:Static vm:RemoteViewModel.NodesNote}" />
+            <TextBlock Text="{x:Static vm:RemoteViewModel.NodePath}" />
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Reconnect" Command="{Binding RefreshCommand}" AutomationProperties.Name="Recheck runtime identity and current access" />
+              <Button Content="Check workers" Command="{Binding CheckWorkersCommand}" AutomationProperties.Name="Read worker liveness for in-flight work as seen by this runtime" />
+            </WrapPanel>
+            <TextBlock Text="{Binding WorkersMessage}" AutomationProperties.Name="Worker observation availability and work impact" />
+            <ItemsControl ItemsSource="{Binding Workers}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:RemoteWorkerNode">
+                  <Border Classes="card">
+                    <StackPanel Spacing="4">
+                      <SelectableTextBlock Text="{Binding Run}" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding State}" />
+                      <TextBlock Text="{Binding Observation}" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
           </StackPanel>
         </ScrollViewer>
       </TabItem>
       <TabItem Header="Handoffs" AutomationProperties.Name="Handoffs">
-        <TextBlock Margin="12" Text="{x:Static vm:RemoteViewModel.HandoffsLater}" />
+        <ScrollViewer>
+          <StackPanel Margin="12" Spacing="8">
+            <Button Content="Refresh handoffs" Command="{Binding RefreshHandoffsCommand}" AutomationProperties.Name="Read desktop tasks and observed Workbench openings" />
+            <TextBlock Text="{Binding HandoffFreshness}" />
+            <TextBlock Text="{Binding HandoffMessage}" />
+            <ItemsControl ItemsSource="{Binding Handoffs}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:RemoteHandoffRow">
+                  <Border Classes="card">
+                    <StackPanel Spacing="4">
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Task}" />
+                      <SelectableTextBlock Text="{Binding Context}" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding State}" />
+                      <SelectableTextBlock Text="{Binding Draft}" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
       </TabItem>
     </TabControl>
   </Grid>

@@ -300,9 +300,13 @@ public sealed class RunSupervisor
                         Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the reported currency reached its operational threshold below the reserved cap"));
                     }
                 }
-                else if (transmitted is not null && options.Clock.GetElapsedTime(transmittedTick) >= grace)
+                else
                 {
-                    Escalate(now);
+                    ApplyContainment(now);
+                    if (transmitted is not null && options.Clock.GetElapsedTime(transmittedTick) >= grace)
+                    {
+                        Escalate(now);
+                    }
                 }
 
                 Save();
@@ -424,6 +428,24 @@ public sealed class RunSupervisor
         transmittedTick = options.Clock.GetTimestamp();
         transmitted = options.Clock.GetUtcNow();
         state.Stop = state.Stop with { TransmittedAt = RecordParser.FormatTimestamp(transmitted.Value), Transmission = transmission.ToString() };
+    }
+
+    private void ApplyContainment(DateTimeOffset now)
+    {
+        if (grace == TimeSpan.Zero || state.Stop is not { Reason: string previous, EscalatedAt: null }) return;
+        StopRequest? containment;
+        try { containment = directory.ReadContainment(); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // The original stop remains in force. A failed read cannot postpone its escalation.
+            return;
+        }
+        if (containment is not { GraceSeconds: 0 } || containment.SupersedesReason != previous) return;
+
+        grace = TimeSpan.Zero;
+        state.Stop = new RunStop(containment.RequestedAt, containment.RequestedBy, containment.Reason,
+            TransmittedAt: RecordParser.FormatTimestamp(now),
+            Transmission: "the worker applied the zero-grace containment request to the earlier stop");
     }
 
     private StopRequest? ReadStopOrContain(DateTimeOffset now)

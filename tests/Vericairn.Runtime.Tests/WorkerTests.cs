@@ -883,6 +883,44 @@ public class WorkerTests
     }
 
     [Fact]
+    public void ReviewedContainmentTightensTheGraceOfAnAlreadyTransmittedCancel()
+    {
+        using var run = new RunEstate(options: new WorkerOptions
+        {
+            Clock = new WorkerClock(), Heartbeat = TimeSpan.FromMilliseconds(50), StopWait = TimeSpan.FromMilliseconds(200),
+        });
+        RunResponse started = run.Start("claude-code", "ignore-stop", run.Report("tightened"));
+        Assert.True(started.Ok, started.Message);
+        run.WaitUntil(() => File.Exists(run.Report("tightened")) && run.Row(started.Run).Observed);
+
+        string by = run.Estate.OperatorId;
+        const string prior = "Earlier graceful cancel.";
+        Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(by, prior, 3600)).Ok);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        RunRow reviewed = run.Row(started.Run);
+        Assert.Equal(prior, reviewed.Stop?.Reason);
+        Assert.Null(reviewed.Stop?.EscalatedAt);
+
+        var containment = new RunStopRequest(by, "Tighten the stop now.", 0)
+        {
+            ExpectedOperationHash = reviewed.OperationHash,
+            ExpectedStopReason = prior,
+        };
+        RunStopResponse stale = run.Service.RunStop(started.Run, containment with { ExpectedStopReason = "Different earlier stop." });
+        Assert.False(stale.Ok);
+        Assert.Equal(prior, run.Row(started.Run).Stop?.Reason);
+
+        RunStopResponse tightened = run.Service.RunStop(started.Run, containment);
+        Assert.True(tightened.Ok, tightened.Message);
+        RunStop stop = Assert.IsType<RunStop>(run.Settled(started.Run).Stop);
+        Assert.Equal(containment.Reason, stop.Reason);
+        Assert.Contains("zero-grace containment", stop.Transmission, StringComparison.Ordinal);
+        Assert.NotNull(stop.EscalatedAt);
+        Assert.NotNull(stop.ContainedAt);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void AStopIsTransmittedThoughTheRunsStateIsBeingReplacedWhenItIsAsked()
     {
         using var run = new RunEstate();

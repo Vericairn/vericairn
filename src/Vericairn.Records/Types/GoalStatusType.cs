@@ -38,6 +38,7 @@ public sealed class GoalStatusType : IRecordType
     [
         new("status", string.Join('|', Statuses), true, "The new status of the exact goal revision; a revised goal starts again from its activation. Active is recorded by the sponsor, a person who holds the operator role or a grant of the 'spending' scope in force, or by an operator when an agent sponsors the goal; impossible and abandoned by the sponsor or, for a goal an agent sponsors, an operator, and from 0.9.3 impossible only when the goal's current evaluation, by a principal who authored none of its steps, judges a condition impossible. From 0.9.4, closed, in record format 3, closes a run of a flow with its unsettled steps: recorded only by who decides for the goal when that is a person, after the goal was activated, and followed by no status but impossible or abandoned; the goal may still be accepted.", 2),
         new("note", "string", true, "Why, and what remains.", 2),
+        new("activeStatusHash", "sha256", false, "On a reviewed pause, the exact active status the person reviewed.", 3),
         new("unsettled", "object[]", false, "With status closed, and only then: each step instance of the run that was not done or off when it was closed, once, as key, instance (for a step that runs over a list) and reason, the closer's reason for it; never empty. A step named here is never done by its closing.", 3),
     ];
 
@@ -48,6 +49,9 @@ public sealed class GoalStatusType : IRecordType
         BodyReader body = context.Body;
         string? status = body.Enum("status", true, Statuses);
         body.Text("note", true, 4000);
+        string? activeStatusHash = body.Since(3, "activeStatusHash") ? body.Hash("activeStatusHash", false) : null;
+        if (activeStatusHash is not null && status != "paused")
+            context.Error("goal-status.pause", "The reviewed active status is recorded only on a pause.");
         IReadOnlyList<BodyReader>? unsettled = body.Since(3, "unsettled") ? body.NestedArray("unsettled", status == "closed", allowEmpty: false) : null;
         var named = new List<(string Key, string? Instance, BodyReader Entry)>();
         foreach (BodyReader entry in unsettled ?? [])
@@ -132,6 +136,9 @@ public sealed class GoalStatusType : IRecordType
         // The statuses before this one that count: a status its author could not record changes nothing.
         IReadOnlyList<RecordEnvelope> before = GoalRules.Statuses(context.Model, goal, context.Record);
         RecordEnvelope? previous = before.Count == 0 ? null : before[^1];
+        if (activeStatusHash is not null && (previous is null || previous.ComputedHash != activeStatusHash ||
+            EstateModel.BodyString(previous, "status") != "active" || !GoalRules.MayEnd(context.Model, goal, context.Record.By, context.Record)))
+            context.Error("goal-status.pause", "A reviewed pause is written by the goal's sponsor, or an operator for a goal an agent sponsors, against its exact active status.");
         if (previous is null && status is not ("active" or "abandoned"))
         {
             context.Error("goal-status.first", "A goal starts when its sponsor activates it, or ends unstarted when its sponsor abandons it.");

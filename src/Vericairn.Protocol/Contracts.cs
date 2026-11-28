@@ -397,6 +397,10 @@ public sealed record GoalResponse(string Text, JsonElement Json)
     /// <summary>The event journal's position as of this read, sealed for the reader, so a stream from it leaves no gap (0.9.2); null when the runtime keeps no journal.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? EventsCursor { get; init; }
+
+    /// <summary>The exact status record for an active goal, if the runtime supports a pinned transition.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ActiveStatusHash { get; init; }
 }
 
 /// <summary>
@@ -573,6 +577,10 @@ public sealed record GoalActionRequest(string By, string? Note = null)
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool StopRuns { get; init; }
+
+    /// <summary>For a reviewed pause, require this active status on the exact goal revision before writing.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExpectedActiveStatusHash { get; init; }
 }
 
 /// <summary>Evaluate a goal: the runtime gives each record predicate its verdict, and the evaluator each evidence statement.</summary>
@@ -818,7 +826,16 @@ public sealed record HarnessQualifyRequest(string Launcher, string By, IReadOnly
 /// <param name="By">The principal asking.</param>
 /// <param name="Reason">Why.</param>
 /// <param name="GraceSeconds">How long the harness has to stop once the stop is transmitted before its process tree is killed; the worker's default when omitted.</param>
-public sealed record RunStopRequest(string By, string? Reason = null, int? GraceSeconds = null);
+public sealed record RunStopRequest(string By, string? Reason = null, int? GraceSeconds = null)
+{
+    /// <summary>The operation revision required for a stop requested from a reviewed observation.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExpectedOperationHash { get; init; }
+
+    /// <summary>The exact reason marking the earlier stop, when reviewed zero-grace containment follows a cancel.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExpectedStopReason { get; init; }
+}
 
 /// <summary>Settle an exited run from the worker's retained observation.</summary>
 /// <param name="By">A principal permitted to stop the run.</param>
@@ -938,6 +955,14 @@ public sealed record RunRow(string Run, string Identity, string Launcher, string
     /// <summary>The agent's reporting status beside, never substituted for, worker liveness.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public RequestedProgress? RequestedProgress { get; init; }
+
+    /// <summary>The exact operation revision at this run read, for a reviewed intervention.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OperationHash { get; init; }
+
+    /// <summary>The id of the operation revision with this hash.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OperationRevision { get; init; }
 }
 
 /// <summary>One unit of a goal's ledger.</summary>

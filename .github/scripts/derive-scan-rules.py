@@ -59,7 +59,7 @@ inventory_types = [
     'credential-reference', 'custody-exception', 'decision', 'device', 'discharge', 'document-review', 'document-revision', 'estate',
     'estate-policy', 'goal', 'goal-status', 'harness-qualification', 'history-checkpoint', 'living-document', 'migration', 'observation',
     'operation', 'operator-request', 'operator-request-close', 'policy-exception', 'possibility', 'principal', 'product', 'prompt-preference',
-    'qualification', 'reconciliation', 'release', 'resource', 'result', 'retirement', 'review', 'roster', 'saved-prompt', 'template-defaults',
+    'qualification', 'reconciliation', 'release', 'resource', 'result', 'retirement', 'review', 'roster', 'run-stop-request', 'saved-prompt', 'template-defaults',
     'verification', 'work-order', 'work-progress', 'work-status', 'writing-exception',
 ]
 assert inventory_types == sorted(set(inventory_types)) and all(re.fullmatch(r'[a-z][a-z0-9-]{0,63}', t) for t in inventory_types)

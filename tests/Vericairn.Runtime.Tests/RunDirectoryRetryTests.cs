@@ -50,7 +50,9 @@ public sealed class RunDirectoryRetryTests : IDisposable
         };
 
         AssertPublication(reader, request ? "request" : "state", "kept");
-        Assert.Equal(2, attempts);
+        // From 0.9.5 (REMOTE-04) a stop read first looks for a containment request: before any open, that absent file's read is the
+        // attempt that fails and is retried, and the stop request's own read is one more.
+        Assert.Equal(request && !afterOpen ? 3 : 2, attempts);
         Assert.Equal(1, waits);
     }
 

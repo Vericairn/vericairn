@@ -54,6 +54,7 @@ public static class RecordTypeRegistry
         new VerificationType(),
         new ObservationType(),
         new OperationType(),
+        new RunStopRequestType(),
         new LivingDocumentType(),
         new DocumentReviewType(),
         new TemplateDefaultsType(),

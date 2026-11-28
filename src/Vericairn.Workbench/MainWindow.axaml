@@ -316,6 +316,29 @@
                         <SelectableTextBlock MinHeight="24" Text="{Binding ResumeText}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" AutomationProperties.Name="Complete resume comparison" />
                       </ScrollViewer>
                     </TabItem>
+                    <TabItem Header="From Remote">
+                      <Grid RowDefinitions="Auto,Auto,120,*" Margin="0,6">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Button MinHeight="28" Content="Refresh handoffs" Click="OnReadRemoteHandoffs" />
+                          <Button MinHeight="28" Content="Open selected handoff" IsEnabled="{Binding CanOpenRemoteHandoff}" Click="OnOpenRemoteHandoff" />
+                          <Button MinHeight="28" Content="Remove selected handoff" IsEnabled="{Binding CanOpenRemoteHandoff}" Click="OnRemoveRemoteHandoff" />
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" Text="{Binding RemoteNote}" TextWrapping="Wrap" Margin="0,4" />
+                        <ListBox Grid.Row="2" ItemsSource="{Binding RemoteHandoffs}" SelectedItem="{Binding SelectedRemoteHandoff}" AutomationProperties.Name="Handoffs from Remote">
+                          <ListBox.ItemTemplate>
+                            <DataTemplate>
+                              <StackPanel MinHeight="28" x:CompileBindings="False">
+                                <TextBlock Text="{Binding Task}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding PreparedAt}" />
+                              </StackPanel>
+                            </DataTemplate>
+                          </ListBox.ItemTemplate>
+                        </ListBox>
+                        <ScrollViewer Grid.Row="3" Margin="0,6">
+                          <SelectableTextBlock Text="{Binding RemoteText}" TextWrapping="Wrap" AutomationProperties.Name="Opened handoff and original evidence" />
+                        </ScrollViewer>
+                      </Grid>
+                    </TabItem>
                     <TabItem Header="Portable package">
                       <ScrollViewer>
                         <SelectableTextBlock MinHeight="24" Text="{Binding PackageJson}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="11" AutomationProperties.Name="Portable hand-over JSON" />

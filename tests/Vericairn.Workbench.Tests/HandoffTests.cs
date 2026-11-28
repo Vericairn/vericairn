@@ -8,6 +8,7 @@ using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
+using Vericairn.Runtime.Service;
 using System.Text.Json;
 
 namespace Vericairn.Workbench.Tests;
@@ -81,6 +82,56 @@ public class HandoffTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task OpensThePhoneHandoffWithItsPinnedEvidenceAndClearsItOnPersonSwitch()
+    {
+        string root = Seed.Temp("wb-remote-handoff");
+        string person = Seed.Init(root);
+        string other = Seed.Admit(root, person, Seed.Temp("wb-remote-person"), "Other person", "human", "contributor");
+        using var connection = new ServiceConnection(root);
+        IEstateApi api = connection.Api!;
+        RecordResponse subject = Assert.IsType<RecordResponse>(api.Record(person));
+        var request = new DesktopHandoffRequest(person, Guid.NewGuid().ToString("N"), new(subject.Type, subject.Id, subject.Hash),
+            "Review on the desktop", "A desktop review is needed", "A private draft");
+        EstateService service = Assert.IsType<EstateService>(api);
+        WriteOutcome created = service.DeviceCreate(new(person, "Workbench handoff fixture device", "file"));
+        Assert.True(created.Ok, created.Problem?.Message);
+        string device = created.Written!.Id;
+        WriteOutcome admitted = service.DeviceAdmit(new(device, person, "Workbench handoff fixture admission."));
+        Assert.True(admitted.Ok, admitted.Problem?.Message);
+        using IDisposable socket = service.ForLocalSocketRequest();
+        using (service.ForDeviceRequest(device, service.Standing(device)!.PublicKey))
+            Assert.Equal(device, api.PrepareDesktopHandoff(request).Handoff?.PreparedByDevice);
+        string acting = person;
+        var page = new HandoffDocument(() => api, acting: () => acting);
+
+        await page.ReadRemoteHandoffsAsync(TestContext.Current.CancellationToken);
+        page.SelectedRemoteHandoff = Assert.Single(page.RemoteHandoffs);
+        Assert.Null(page.SelectedRemoteHandoff.OpenedAt);
+        using (service.ForDeviceRequest(device, service.Standing(device)!.PublicKey))
+            await page.OpenRemoteHandoffAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(device, page.RemoteText, StringComparison.Ordinal);
+        Assert.Contains("A private draft", page.RemoteText, StringComparison.Ordinal);
+        Assert.Contains(subject.Hash, page.RemoteText, StringComparison.Ordinal);
+        Assert.NotNull(Assert.Single(api.DesktopHandoffs(person).Handoffs).OpenedAt);
+
+        acting = other;
+        await page.ReadRemoteHandoffsAsync(TestContext.Current.CancellationToken);
+        Assert.Empty(page.RemoteHandoffs);
+        Assert.Empty(page.RemoteText);
+        Assert.Null(page.SelectedRemoteHandoff);
+
+        acting = person;
+        await page.ReadRemoteHandoffsAsync(TestContext.Current.CancellationToken);
+        page.SelectedRemoteHandoff = Assert.Single(page.RemoteHandoffs);
+        using (service.ForDeviceRequest(device, service.Standing(device)!.PublicKey))
+            await page.RemoveRemoteHandoffAsync(TestContext.Current.CancellationToken);
+        Assert.Empty(page.RemoteHandoffs);
+        Assert.Null(page.SelectedRemoteHandoff);
+        Assert.Contains("removed", page.RemoteNote, StringComparison.Ordinal);
+        Assert.Empty(api.DesktopHandoffs(person).Handoffs);
+    }
+
+    [Fact]
     public async Task TheSamePackageCanBeSavedLoadedAndResumedAndAnInvalidImportKeepsTheBasis()
     {
         string root = Seed.Temp("wb-retained");
@@ -117,7 +168,7 @@ public class HandoffTests(HeadlessFixture fixture)
         await fixture.UiAsync(() => next.CompareAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Contains("cached", next.Note, StringComparison.Ordinal);
         Assert.Equal(basis, next.PackageJson);
-        Assert.Contains("Remote does not open hand-overs yet", next.Text, StringComparison.Ordinal);
+        Assert.Contains("From Remote", next.Text, StringComparison.Ordinal);
     }
 
     [Fact]

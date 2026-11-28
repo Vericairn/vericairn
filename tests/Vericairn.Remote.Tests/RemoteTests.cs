@@ -128,7 +128,7 @@ public sealed class RemoteScreenReaderTests(HeadlessFixture fixture) : IDisposab
     private readonly TestEstate estate = RemoteFixtures.Seeded();
 
     [Fact]
-    public async Task EveryAreaInputAndCommandHasAScreenReaderNameAndHandoffsSayPlainlyTheyAreNotHereYet()
+    public async Task EveryAreaInputAndCommandHasAScreenReaderNameAndUnreadHandoffsAreUnavailable()
     {
         using var connections = new FakeConnections(estate.Root);
         await fixture.UiAsync(async () =>
@@ -142,7 +142,7 @@ public sealed class RemoteScreenReaderTests(HeadlessFixture fixture) : IDisposab
 
             string[] areas = [.. view.FindControl<TabControl>("Home")!.Items.OfType<TabItem>().Select(t => (string)t.Header!)];
             Assert.Equal(["Attention", "Work", "Products", "Nodes", "Handoffs"], areas);
-            Assert.Contains("not in Remote yet", RemoteViewModel.HandoffsLater, StringComparison.Ordinal);
+            Assert.Contains("have not been observed", model.HandoffFreshness, StringComparison.Ordinal);
             Assert.Contains("Developer build", RemoteViewModel.BuildLabel, StringComparison.Ordinal);
             window.Close();
             await Task.CompletedTask;
