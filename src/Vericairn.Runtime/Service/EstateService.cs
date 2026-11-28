@@ -3431,22 +3431,24 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// bytes, since the checks of stored files cannot see them.
     /// </summary>
     /// <summary>
-    /// Whether <paramref name="finding"/> is a signature a revocation among <paramref name="records"/> invalidates on a record dated beyond
-    /// the authoring tolerance of that revocation's own time. No runtime writes such a record, so it never stops its device's revocation:
-    /// the revocation is stored and the record stays reported as <c>signature.revoked</c> for the operator to remove.
+    /// Whether <paramref name="finding"/> is the signature of a device a revocation among <paramref name="records"/> revokes, on a record
+    /// dated beyond the authoring tolerance of this runtime's clock. No runtime writes such a record, so it never stops its device's
+    /// revocation: the revocation is stored and the record stays reported as <c>signature.revoked</c> for the operator to remove. The
+    /// clock, never the revocation's own stated time, decides, so a revocation stated in the past never voids a record honestly signed.
     /// </summary>
-    private static bool InvalidatedByRevocation(EstateModel model, IReadOnlyList<AuthoredRecord> records, Finding finding)
+    internal static bool InvalidatedByRevocation(EstateModel model, IReadOnlyList<AuthoredRecord> records, Finding finding)
     {
         if (finding.Code != "signature.revoked") return false;
         string path = finding.Location.Split('#')[0];
-        if (model.Records.FirstOrDefault(r => r.ExpectedPath == path) is not { } signed) return false;
+        if (model.Records.FirstOrDefault(r => r.ExpectedPath == path) is not { } signed
+            || signed.AtTime <= DateTimeOffset.UtcNow + global::Vericairn.Records.History.SignedHistory.ClockTolerance) return false;
         foreach (AuthoredRecord authored in records)
         {
             if (model.ById.GetValueOrDefault(authored.Envelope.Id) is not { Type: "admission" } revocation || EstateModel.BodyString(revocation, "status") != "revoked"
-                || revocation.Subject is not { } device) continue;
-            var revisions = model.Chain(model.ById.GetValueOrDefault(device.Id) ?? revocation).ToHashSet(StringComparer.Ordinal);
-            if (signed.AtTime > revocation.AtTime + global::Vericairn.Records.History.SignedHistory.ClockTolerance
-                && signed.Signatures.Any(signature => revisions.Contains(signature.Device))) return true;
+                || revocation.Subject is not { } device || model.ById.GetValueOrDefault(device.Id) is not { } revoked) continue;
+            // Only the revoked device's own finding: a co-signer's revocation stands on its own.
+            string identity = model.Chain(revoked)[0];
+            if (finding.Message.StartsWith($"Device {identity} was revoked", StringComparison.Ordinal)) return true;
         }
 
         return false;
