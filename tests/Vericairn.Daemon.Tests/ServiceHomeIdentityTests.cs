@@ -132,6 +132,30 @@ public sealed class ServiceHomeIdentityTests
         public string Path { get; } = Directory.CreateDirectory(System.IO.Path.Combine(parent ?? System.IO.Path.GetTempPath(),
             "vericairn-service-identity-" + Guid.NewGuid().ToString("N"))).FullName;
 
-        public void Dispose() => Directory.Delete(Path, recursive: true);
+        public void Dispose()
+        {
+            RemoveReparsePoints(new DirectoryInfo(Path));
+            Directory.Delete(Path, recursive: true);
+        }
+
+        private static void RemoveReparsePoints(DirectoryInfo directory)
+        {
+            foreach (FileSystemInfo entry in directory.GetFileSystemInfos())
+            {
+                bool isReparsePoint = (entry.Attributes & FileAttributes.ReparsePoint) != 0;
+                if (entry is DirectoryInfo child)
+                {
+                    // Delete the junction or symlink itself before recursive cleanup.
+                    if (isReparsePoint)
+                        Directory.Delete(child.FullName, recursive: false);
+                    else
+                        RemoveReparsePoints(child);
+                }
+                else if (isReparsePoint)
+                {
+                    File.Delete(entry.FullName);
+                }
+            }
+        }
     }
 }
