@@ -31,7 +31,7 @@ public sealed record McpPublicEndpoint(string Authority, string CertificatePath,
         return new IPEndPoint(IPAddress.TryParse(address.IdnHost, out IPAddress? ip) ? ip : IPAddress.Any, address.Port);
     }
 
-    /// <summary>Loads the certificate and private key without importing it into the machine's user key store.</summary>
+    /// <summary>Loads the certificate and private key, imported only temporarily where the platform's TLS requires it (macOS and Windows).</summary>
     public X509Certificate2 LoadCertificate(DateTimeOffset now)
     {
         Uri address = Address();
@@ -45,11 +45,13 @@ public sealed record McpPublicEndpoint(string Authority, string CertificatePath,
             throw new InvalidOperationException("The public MCP certificate must be current and name the published host in its subject alternative names.");
         }
 
-        // On macOS, TLS requires the certificate's key in a keychain. Use the platform's temporary import for this host only.
+        // TLS on macOS needs the certificate's key in a keychain, and Windows' TLS cannot use an ephemeral key, so both take the
+        // platform's temporary import for this host only, as the runtime certificate does (RuntimeCertificate.KeyStorage); Linux keeps
+        // the key ephemeral.
         byte[] pfx = pem.Export(X509ContentType.Pkcs12);
         try
         {
-            return X509CertificateLoader.LoadPkcs12(pfx, null, OperatingSystem.IsMacOS() ? X509KeyStorageFlags.DefaultKeySet : X509KeyStorageFlags.EphemeralKeySet);
+            return X509CertificateLoader.LoadPkcs12(pfx, null, RuntimeCertificate.KeyStorage);
         }
         finally
         {
