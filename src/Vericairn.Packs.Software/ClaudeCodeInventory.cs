@@ -44,7 +44,7 @@ internal static class ClaudeCodeInventory
         IReadOnlyList<string> command = new ClaudeCodeLauncher().Command(context);
         string binding = HarnessInventory.Binding(context, command);
         string version = InstalledVersion(context, qualifying);
-        string help = SecretShapes.Secret().Replace(HarnessInventory.Probe(context, "claude", "--help"), "<secret>");
+        string help = SecretShapes.RedactOutput(HarnessInventory.Probe(context, "claude", "--help"));
         HarnessInventory.Flags("claude", help, "-p", "--print", "--output-format", "--verbose", "--permission-mode", "--mcp-config",
             "--strict-mcp-config", "--setting-sources", "--settings", "--tools", "--model", "--effort", "--max-budget-usd");
         if (Login(context, profile) != login)

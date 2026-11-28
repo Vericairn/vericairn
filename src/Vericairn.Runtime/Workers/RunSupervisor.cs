@@ -473,13 +473,19 @@ public sealed class RunSupervisor
 
     private void Pump(StreamReader reader, bool errors)
     {
+        var redactor = launcher.Launcher == "claude-code" ? new SecretShapes.OutputRedactor() : null;
         try
         {
             while (reader.ReadLine() is string line)
             {
-                string safe = RedactHarnessText(line);
-                bool redacted = safe != line;
-                Log(errors ? "[stderr] " + safe : safe);
+                if (redactor is null)
+                {
+                    LogLine(line);
+                }
+                else
+                {
+                    foreach ((string safe, _) in redactor.Push(line)) LogLine(safe);
+                }
                 if (errors)
                 {
                     continue;
@@ -503,8 +509,10 @@ public sealed class RunSupervisor
                 {
                     // Inspect the original structure and command semantics. Only sanitized text leaves observation.
                     signal = launcher.Read(line);
+                    bool? redacted = null;
                     foreach (HarnessAction action in launcher.ReadActions(line))
                     {
+                        bool redactFingerprint = redacted ??= RedactHarnessText(line) != line;
                         lock (gate)
                         {
                             if (CommandAudit.TryFingerprint(action) is string fingerprint)
@@ -528,12 +536,12 @@ public sealed class RunSupervisor
                             foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted, environment, options.BeforeCredentialCheck))
                             {
                                 if (retrieving && observation.Code == "network" && observation.Severity == "warning") continue;
-                                AddSignal(redacted ? observation with { Fingerprint = null } : observation);
+                                AddSignal(redactFingerprint ? observation with { Fingerprint = null } : observation);
                             }
 
                             foreach (RunSignal observation in watch.Action(action))
                             {
-                                AddSignal(redacted ? observation with { Fingerprint = null } : observation);
+                                AddSignal(redactFingerprint ? observation with { Fingerprint = null } : observation);
                             }
 
                             if (retrieving && invokedSources.Add(action.Id))
@@ -658,11 +666,16 @@ public sealed class RunSupervisor
         {
             // Output closure proves no exit; the whole launch boundary must be observed exited.
         }
+        finally
+        {
+            if (redactor is not null)
+                foreach ((string safe, _) in redactor.Complete()) LogLine(safe);
+        }
+
+        void LogLine(string safe) => Log(errors ? "[stderr] " + safe : safe);
     }
 
-    private string RedactHarnessText(string text) => launcher.Launcher != "claude-code" ? text
-        : SecretShapes.HasEscapedClaudeSetupToken(text) ? "<secret-bearing harness line withheld>"
-        : SecretShapes.Secret().Replace(text, "<secret>");
+    private string RedactHarnessText(string text) => launcher.Launcher == "claude-code" ? SecretShapes.RedactOutput(text) : text;
 
     // A source the worker could not retain or log leaves the run's sources incomplete, which settlement records.
     private void SourcesIncomplete()

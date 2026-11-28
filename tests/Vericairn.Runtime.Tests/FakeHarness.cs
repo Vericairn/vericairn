@@ -240,6 +240,12 @@ internal static class FakeHarness
                 Console.Error.WriteLine("stand-in error: " + token);
                 Console.WriteLine("""{"type":"diagnostic","message":"stand-in escaped:\u0073""" + token[1..] + "\"}");
             }
+            if (setup == "wrapped-output")
+            {
+                const int split = 9;
+                Console.WriteLine("wrapped output: " + token[..split] + "\n" + token[split..]);
+                Console.Error.WriteLine("wrapped error: " + token[..split] + "\n" + token[split..]);
+            }
             if (setup == "rewrite")
             {
                 string home = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")!;

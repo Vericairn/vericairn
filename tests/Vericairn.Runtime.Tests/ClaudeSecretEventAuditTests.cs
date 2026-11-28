@@ -34,6 +34,24 @@ public sealed class ClaudeSecretEventAuditTests
     }
 
     [Fact]
+    public void WrappedSecretsAreRemovedFromBothStreamsAndTheNextResultIsObserved()
+    {
+        const int split = 9;
+        string token = FakeHarness.NewClaudeSetupToken();
+        using var fixture = new NativeRun("claude", recordFormat: 3, qualify: true, setupToken: token);
+        fixture.Probe.Behavior("setupToken", "wrapped-output");
+
+        RunResponse started = fixture.Start();
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", fixture.Run.Settled(started.Run).Status);
+        var directory = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);
+        string output = File.ReadAllText(directory.OutputLog);
+        Assert.False(output.Contains(token[..split], StringComparison.Ordinal));
+        Assert.False(output.Contains(token[split..], StringComparison.Ordinal));
+        Assert.Equal(0, directory.Read()!.Tokens);
+    }
+
+    [Fact]
     public void MalformedSecretBearingEventLeavesTheAuditUnverified()
     {
         using var fixture = new NativeRun("claude", recordFormat: 3, qualify: true, setupToken: FakeHarness.NewClaudeSetupToken());

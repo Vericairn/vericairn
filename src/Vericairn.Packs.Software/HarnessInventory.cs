@@ -32,7 +32,7 @@ internal static class HarnessInventory
         (int code, string output, _) = HarnessProcess.Run([.. HarnessProcess.Command(context.Settings, executable), .. arguments],
             context.Environment, TimeSpan.FromSeconds(30), context.Workspace);
         if (code != 0 || string.IsNullOrWhiteSpace(output) || output.Length > 1024 * 1024
-            || (executable == "claude" && (SecretShapes.ClaudeSetupToken().IsMatch(output) || SecretShapes.HasEscapedClaudeSetupToken(output))))
+            || (executable == "claude" && SecretShapes.HasClaudeSetupToken(output)))
         {
             // Probe output can contain local configuration and credentials. Never repeat it in a refusal or record.
             throw new ProviderRefusedException($"The {executable} {string.Join(' ', arguments.Where(a => a.StartsWith("--", StringComparison.Ordinal)))} inventory probe failed or returned no bounded evidence.");

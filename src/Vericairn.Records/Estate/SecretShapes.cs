@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -12,7 +13,10 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 internal static partial class SecretShapes
 {
-    private const string ClaudeSetupTokenPattern = "sk-ant-" + "oat01[A-Za-z0-9_-]{32,}";
+    private const string ClaudeSetupStem = "sk-ant-" + "oat01";
+    private const string ClaudeSetupPrefix = ClaudeSetupStem + "-";
+    private const string ClaudeSetupTokenPattern = ClaudeSetupStem + "[A-Za-z0-9_-]{32,}";
+    private static readonly SearchValues<char> TokenCharacters = SearchValues.Create("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-");
 
     /// <summary>The start of an absolute machine path on macOS, Linux or Windows.</summary>
     [GeneratedRegex(@"(?<![A-Za-z0-9_./-])(?:/Users/|/home/[A-Za-z0-9_-]+/|/Volumes/|/private/var/|/mnt/[a-z]/|[A-Za-z]:\\)")]
@@ -26,13 +30,208 @@ internal static partial class SecretShapes
     [GeneratedRegex(ClaudeSetupTokenPattern)]
     internal static partial Regex ClaudeSetupToken();
 
-    // Setup-token characters are ASCII. A JSON event can escape them before the stream reader sees them.
-    internal static bool HasEscapedClaudeSetupToken(string text) => text.Contains(@"\u00", StringComparison.Ordinal)
-        && ClaudeSetupToken().IsMatch(AsciiJsonEscape().Replace(text, static match =>
-            ((char)int.Parse(match.ValueSpan[4..], NumberStyles.HexNumber, CultureInfo.InvariantCulture)).ToString()));
+    /// <summary>Refuses a setup-token shape or terminal text whose safety cannot be established.</summary>
+    internal static bool HasClaudeSetupToken(string text)
+    {
+        string? normalized = NormalizeOutput(text);
+        return normalized is null || UnresolvedTerminal().IsMatch(normalized) || ClaudeSetupToken().IsMatch(text)
+            || CompactOutput(text, normalized).Contains(ClaudeSetupStem, StringComparison.Ordinal);
+    }
 
-    [GeneratedRegex(@"\\u00[0-7][a-fA-F0-9]")]
-    private static partial Regex AsciiJsonEscape();
+    internal static string RedactOutput(string text, string replacement = "<secret>") => RedactOutput(text, replacement, out _);
+
+    internal static string RedactOutput(string text, string replacement, out int secrets)
+    {
+        string? normalized = NormalizeOutput(text);
+        string? compact = normalized is null ? null : CompactOutput(text, normalized);
+        return RedactOutput(text, normalized, compact, replacement, out secrets);
+    }
+
+    private static string RedactOutput(string text, string? normalized, string? compact, string replacement, out int secrets)
+    {
+        if (compact is null || (normalized is not null && UnresolvedTerminal().IsMatch(normalized))
+            || (compact.Contains(ClaudeSetupStem, StringComparison.Ordinal)
+            && (normalized != text || OutputControls().IsMatch(text) || HasSeparatedSetupTail(text)
+                || compact.AsSpan().Count(ClaudeSetupStem) > ClaudeSetupToken().Count(text)))
+            || (normalized is not null && normalized != text && Secret().IsMatch(normalized)))
+        {
+            // Raw offsets are ambiguous after decoding or joining fragments. Withhold the entire text in that case.
+            secrets = 1;
+            return replacement;
+        }
+
+        int count = 0;
+        string safe = Secret().Replace(text, _ => { count++; return replacement; });
+        secrets = count;
+        return safe;
+    }
+
+    // Recognize ASCII character escapes and terminal decoration only in the comparison text. Repeating the pass handles
+    // encodings nested inside one another. Beyond the bound there is no reliable comparison, so callers withhold the text.
+    private static string? NormalizeOutput(string text)
+    {
+        if (text.AsSpan().IndexOfAny('\\', '%', '&') < 0 && !text.Contains('\u001b') && !text.Contains('\u009b')) return text;
+        for (int i = 0; i < 8; i++)
+        {
+            string normalized = OutputEscape().Replace(text, static match =>
+            {
+                if (match.Groups["amp"].Success) return "&";
+                if (match.Groups["space"].Success) return " ";
+                if (match.Groups["terminal"].Success) return "";
+                Group decimalCode = match.Groups["decimal"];
+                return int.TryParse(decimalCode.Success ? decimalCode.ValueSpan : match.Groups["hex"].ValueSpan,
+                    decimalCode.Success ? NumberStyles.None : NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int value)
+                    && value is >= 0 and <= 127 ? ((char)value).ToString() : match.Value;
+            });
+            if (normalized == text) return text;
+            text = normalized;
+        }
+        return null;
+    }
+
+    [GeneratedRegex(@"(?:(?<!\\)\\+(?:u00|x)|%)(?<hex>[0-7][a-f0-9])|&#x(?<hex>[0-9a-f]{1,6});|&#(?<decimal>[0-9]{1,7});|(?<amp>&amp;)|(?<space>(?<!\\)\\+[nrtfv])|(?<terminal>\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|[()][0-~]|[=>78])|\u009b[0-?]*[ -/]*[@-~])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex OutputEscape();
+
+    [GeneratedRegex(@"[\s\p{Cc}\p{Cf}]+")]
+    private static partial Regex OutputSeparators();
+
+    [GeneratedRegex(@"[\p{Cc}\p{Cf}]")]
+    private static partial Regex OutputControls();
+
+    [GeneratedRegex(@"[\x1b\u0090\u0098\u009b\u009d\u009e\u009f]")]
+    private static partial Regex UnresolvedTerminal();
+
+    // Encodings and a line wrap can split the escape itself. The normal pass above preserves boundaries for matching
+    // other credential shapes; only the distinctive setup-token prefix is sought after removing those boundaries.
+    private static string CompactOutput(string text, string normalized)
+    {
+        string compact = OutputSeparators().Replace(normalized, "");
+        if (compact.Contains(ClaudeSetupPrefix, StringComparison.Ordinal) || !text.Contains('\n') || !text.Contains('\\') && !text.Contains('%') && !text.Contains('&'))
+            return compact;
+        string joined = OutputSeparators().Replace(text, "");
+        return NormalizeOutput(joined) is string decoded ? OutputSeparators().Replace(decoded, "") : compact;
+    }
+
+    [GeneratedRegex(@"(?:\\{1,8}(?:u(?:0(?:0[0-7]?)?)?|x[0-7]?)?|%[0-7]?|&(?:a(?:m(?:p)?)?|#(?:[0-9]{0,7}|x[0-9a-f]{0,6}))?)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex IncompleteOutputEscape();
+
+    private static bool HasSeparatedSetupTail(string text)
+    {
+        ReadOnlySpan<char> rest = text.AsSpan();
+        while (true)
+        {
+            int prefix = rest.IndexOf(ClaudeSetupPrefix, StringComparison.Ordinal);
+            if (prefix < 0) return false;
+            rest = rest[(prefix + ClaudeSetupPrefix.Length)..];
+            int end = rest.IndexOfAnyExcept(TokenCharacters);
+            if (end < 0) return false;
+            rest = rest[end..];
+            if (char.IsWhiteSpace(rest[0]))
+            {
+                rest = rest.TrimStart();
+                if (!rest.IsEmpty && TokenCharacters.Contains(rest[0])) return true;
+            }
+        }
+    }
+
+    // Process physical lines in order. Only a partial setup-token prefix at the end of a line needs lookahead.
+    // Once the prefix is known, subsequent token-like text may be continuation and is withheld until a delimiter.
+    internal sealed class OutputRedactor(string replacement = "<secret>")
+    {
+        private readonly List<(string Text, int Secrets)> pending = [];
+        private string prefix = "";
+        private bool continuation;
+        private bool unresolvedTerminal;
+
+        internal IEnumerable<(string Text, int Secrets)> Push(string line)
+        {
+            string? normalized = NormalizeOutput(line);
+            string? compact = normalized is null ? null : CompactOutput(line, normalized);
+            if (prefix.Length > 0)
+            {
+                string? joined = compact is not null && NormalizeOutput(prefix + compact) is string decoded
+                    ? OutputSeparators().Replace(decoded, "") : null;
+                if (joined is null || joined.StartsWith(ClaudeSetupPrefix, StringComparison.Ordinal))
+                {
+                    foreach (var _ in pending) yield return (replacement, 1);
+                    pending.Clear();
+                    prefix = "";
+                    continuation = joined is null || Continues(joined, ClaudeSetupPrefix.Length);
+                    yield return (replacement, 1);
+                    yield break;
+                }
+
+                if (joined.Length > 0 && IncompletePrefix(joined) == joined)
+                {
+                    prefix = joined;
+                    string pendingText = RedactOutput(line, normalized, compact, replacement, out int pendingSecrets);
+                    pending.Add((pendingText, pendingSecrets));
+                    // Blank lines can extend lookahead indefinitely. Bound it while keeping the candidate prefix in memory.
+                    if (pending.Count == ClaudeSetupPrefix.Length)
+                    {
+                        foreach (var _ in pending) yield return (replacement, 1);
+                        pending.Clear();
+                    }
+                    yield break;
+                }
+
+                foreach (var item in Complete()) yield return item;
+            }
+
+            bool wasContinuation = continuation;
+            bool wasUnresolvedTerminal = unresolvedTerminal;
+            // A terminal sequence can itself cross a physical line. Withhold the next fragment when its end is unclear.
+            unresolvedTerminal = normalized is null || UnresolvedTerminal().IsMatch(normalized)
+                || (wasUnresolvedTerminal && compact is { Length: 0 });
+            int start = compact?.LastIndexOf(ClaudeSetupPrefix, StringComparison.Ordinal) ?? -1;
+            continuation = compact is null
+                || (start >= 0 && Continues(compact, start + ClaudeSetupPrefix.Length))
+                || (wasContinuation && Continues(compact, 0))
+                || (wasUnresolvedTerminal && compact is { Length: > 0 } && TokenCharacters.Contains(compact[^1]));
+
+            string safe = RedactOutput(line, normalized, compact, replacement, out int secrets);
+            if (wasUnresolvedTerminal
+                || (wasContinuation && !string.IsNullOrEmpty(compact) && (TokenCharacters.Contains(compact[0]) || compact[0] is '\\' or '%' or '&')))
+            {
+                safe = replacement;
+                secrets = 1;
+            }
+
+            string candidate = compact is null ? "" : IncompletePrefix(compact);
+            if (candidate.Length > 0)
+            {
+                prefix = candidate;
+                pending.Add((safe, secrets));
+                yield break;
+            }
+
+            yield return (safe, secrets);
+        }
+        internal IEnumerable<(string Text, int Secrets)> Complete()
+        {
+            bool distinctive = prefix.StartsWith("sk-" + "ant-", StringComparison.Ordinal);
+            foreach (var item in pending) yield return distinctive ? (replacement, 1) : item;
+            pending.Clear();
+            prefix = "";
+        }
+
+        private static string IncompletePrefix(string text)
+        {
+            Match escape = IncompleteOutputEscape().Match(text);
+            int end = escape.Success ? escape.Index : text.Length;
+            int length = Math.Min(ClaudeSetupPrefix.Length - 1, end);
+            while (length > 0 && !text.AsSpan(end - length, length).SequenceEqual(ClaudeSetupPrefix.AsSpan(0, length))) length--;
+            return text[(end - length)..];
+        }
+
+        private static bool Continues(string text, int start)
+        {
+            Match escape = IncompleteOutputEscape().Match(text, start);
+            int end = escape.Success ? escape.Index : text.Length;
+            return text.AsSpan(start, end - start).IndexOfAnyExcept(TokenCharacters) < 0;
+        }
+
+    }
 
     /// <summary>
     /// One element of inline data on a line, a data: URI from its scheme to the end of its data (FIX-172): a credential-shaped match is

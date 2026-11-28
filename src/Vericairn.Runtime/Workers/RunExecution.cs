@@ -206,6 +206,7 @@ public sealed class RunExecutionObservation
     };
 
     internal static bool Safe(string value) => ExecutionPolicy.IsIdentity(value)
+        && !SecretShapes.HasClaudeSetupToken(value)
         && !EstateChecks.Content("execution.txt", System.Text.Encoding.UTF8.GetBytes(value)).HasErrors;
 
     internal static string Hash(JsonNode value) => ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(value)));

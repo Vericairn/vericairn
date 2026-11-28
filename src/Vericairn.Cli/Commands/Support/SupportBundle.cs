@@ -26,8 +26,9 @@ internal static partial class SupportBundle
     internal const string Format = "vericairn.support/1";
     private const int ErrorLines = 30;
 
-    internal static JsonObject Gather(CommandContext context, string root)
+    internal static JsonObject Gather(CommandContext context, string root, out int errorSecrets)
     {
+        errorSecrets = 0;
         var bundle = new JsonObject
         {
             ["bundle"] = Format,
@@ -47,7 +48,7 @@ internal static partial class SupportBundle
         if (IsEstate(root))
         {
             bundle["estate"] = Estate(context, root);
-            bundle["recentErrors"] = RecentErrors(root);
+            bundle["recentErrors"] = RecentErrors(root, out errorSecrets);
             bundle["configuration"] = Configuration(root);
         }
         else
@@ -59,7 +60,7 @@ internal static partial class SupportBundle
     }
 
     /// <summary>The bundle as shown and as written: indented JSON after redaction, with what was redacted counted.</summary>
-    internal static string Render(JsonObject bundle)
+    internal static string Render(JsonObject bundle, int errorSecrets)
     {
         var redactor = new Redactor(KnownDirectories());
         JsonNode redacted = redactor.Redact(bundle)!;
@@ -71,7 +72,7 @@ internal static partial class SupportBundle
                 if (errors[i]?.GetValue<string>() is { Length: > 300 } line) errors[i] = line[..300] + "…";
             }
         }
-        redacted["redacted"] = new JsonObject { ["secrets"] = redactor.Secrets, ["paths"] = redactor.Paths };
+        redacted["redacted"] = new JsonObject { ["secrets"] = redactor.Secrets + errorSecrets, ["paths"] = redactor.Paths };
         return redacted.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) + "\n";
     }
 
@@ -108,19 +109,35 @@ internal static partial class SupportBundle
         return estate;
     }
 
-    private static JsonArray RecentErrors(string root)
+    private static JsonArray RecentErrors(string root, out int secrets)
     {
+        secrets = 0;
         string log = DaemonLifecycle.DaemonLogPath(root);
         if (!File.Exists(log))
         {
             return [];
         }
 
-        string[] lines;
-        try { lines = File.ReadLines(log).TakeLast(2000).ToArray(); }
+        (string Text, int Secrets, bool Error)[] lines;
+        try { lines = SafeLines().TakeLast(2000).Where(line => line.Error).TakeLast(ErrorLines).ToArray(); }
         catch (IOException) { return ["the runtime's log could not be read"]; }
         catch (UnauthorizedAccessException) { return ["the runtime's log could not be read"]; }
-        return [.. lines.Where(l => ErrorLine().IsMatch(l)).TakeLast(ErrorLines).Select(l => (JsonNode)l)];
+        secrets = lines.Sum(line => line.Secrets);
+        return [.. lines.Select(line => (JsonNode)line.Text)];
+
+        IEnumerable<(string Text, int Secrets, bool Error)> SafeLines()
+        {
+            // Redact the original stream before selecting its tail or only the lines with error words. A wrapped credential
+            // can start outside either selection. Carry only the selection flag alongside each pending line.
+            var redactor = new SecretShapes.OutputRedactor();
+            var errors = new Queue<bool>();
+            foreach (string line in File.ReadLines(log))
+            {
+                errors.Enqueue(ErrorLine().IsMatch(line));
+                foreach (var (text, count) in redactor.Push(line)) yield return (text, count, errors.Dequeue());
+            }
+            foreach (var (text, count) in redactor.Complete()) yield return (text, count, errors.Dequeue());
+        }
     }
 
     private static JsonObject Configuration(string root)
@@ -214,7 +231,8 @@ internal static partial class SupportBundle
 
         public string Text(string text)
         {
-            string result = text;
+            string result = SecretShapes.RedactOutput(text, "<secret>", out int secrets);
+            Secrets += secrets;
             foreach ((string path, string name) in known)
             {
                 if (result.Contains(path, StringComparison.OrdinalIgnoreCase))
@@ -224,12 +242,6 @@ internal static partial class SupportBundle
                 }
             }
 
-            if (SecretShapes.HasEscapedClaudeSetupToken(result))
-            {
-                Secrets++;
-                return "<secret>";
-            }
-            result = SecretShapes.Secret().Replace(result, _ => { Secrets++; return "<secret>"; });
             result = PathTail().Replace(result, match => SecretShapes.AbsolutePath().IsMatch(match.Value) || TempPath().IsMatch(match.Value) ? Count(match) : match.Value);
             return result;
         }
