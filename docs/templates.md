@@ -999,7 +999,8 @@ vericairn goal custody-exception '${goal}' --by '${operator}' --reason 'Only scr
 vericairn goal step '${goal}' --by '${operator}' --repository '${workspaceResource}' --setting 'command=${launcherCommand}'
 vericairn records show '${draftRun}'
 vericairn records show '${draftAssignment}'
-vericairn objects put '${scratch}/appointment.json'
+vericairn goal show '${goal}'
+vericairn records show '${draftResult}'
 vericairn goal step '${goal}' --by '${operator}'
 vericairn work observe SR-0001
 vericairn records new review --by '${operator}' --subject 'result:${draftResult}:${draftResultHash}' --body '${scratch}/approve-draft.json'

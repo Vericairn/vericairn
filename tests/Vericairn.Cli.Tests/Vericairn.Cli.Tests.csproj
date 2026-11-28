@@ -7,6 +7,7 @@
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CA1707;CA2007;CA1515</NoWarn>
+    <DefineConstants>$(DefineConstants);EXAMPLE_HARNESS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

@@ -37,7 +37,7 @@ internal sealed class ServicesJourneySurface : IExampleJourneySurface
         {
             return new(0, JsonSerializer.Serialize(new
             {
-                command = FakeHarness.Setting("codex", Path.Combine(command.Scratch, "scheduler-launch.jsonl")),
+                command = ServicesSchedulerHarness.Setting(Path.Combine(command.Scratch, "scheduler-launch.jsonl")),
                 expires = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(2)),
             }), "");
         }

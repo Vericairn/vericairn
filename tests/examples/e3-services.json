@@ -470,79 +470,47 @@
       }
     },
     {
-      "id": "scheduler-attempt",
-      "role": "scheduler",
-      "arguments": ["mcp", "work_attempt", "${scheduler}", "${scratch}/attempt.json"],
+      "id": "inspect-dispatched-draft",
+      "role": "operator",
+      "arguments": [
+        "goal",
+        "show",
+        "${goal}"
+      ],
       "expect": {
-        "exitCode": 0
+        "exitCode": 0,
+        "fields": {
+          "/flow/steps/0/state": "done",
+          "/flow/steps/0/attemptsUsed": 1,
+          "/flow/steps/0/attempts/0/assignment/id": "${draftAssignment}",
+          "/flow/steps/0/attempts/0/outcome": "completed",
+          "/flow/steps/0/outputs/0/name": "appointment",
+          "/flow/steps/0/outputs/0/mediaType": "application/json"
+        }
       },
       "capture": {
-        "attempt": "/written/id",
-        "attemptHash": "/written/hash"
-      },
-      "surface": "services",
-      "setup": true,
-      "files": {
-        "attempt.json": {
-          "assignment": "${draftAssignment}",
-          "workspace": "Example services workspace, work branch",
-          "note": "Draft the appointment."
-        }
+        "attempt": "/flow/steps/0/attempts/0/attempt/id",
+        "attemptHash": "/flow/steps/0/attempts/0/attempt/hash",
+        "draftResult": "/flow/steps/0/result/id",
+        "draftResultHash": "/flow/steps/0/result/hash",
+        "draftObject": "/flow/steps/0/outputs/0/hash"
       }
     },
     {
-      "id": "put-draft-object",
-      "role": "scheduler",
-      "arguments": ["objects", "put", "${scratch}/appointment.json"],
+      "id": "inspect-draft-author",
+      "role": "operator",
+      "arguments": [
+        "records",
+        "show",
+        "${draftResult}"
+      ],
       "expect": {
-        "exitCode": 0
-      },
-      "capture": {
-        "draftObject": "/hash"
-      },
-      "files": {
-        "appointment.json": {
-          "request": "SR-0001",
-          "service": "pool cleaning",
-          "site": "1 Sample Lane",
-          "start": "2026-12-08T09:00:00-06:00",
-          "durationMinutes": 60,
-          "technician": "Sample Technician"
-        }
-      }
-    },
-    {
-      "id": "scheduler-result",
-      "role": "scheduler",
-      "arguments": ["mcp", "work_result", "${scheduler}", "${scratch}/result-mcp.json"],
-      "expect": {
-        "exitCode": 0
-      },
-      "capture": {
-        "draftResult": "/written/id",
-        "draftResultHash": "/written/hash"
-      },
-      "surface": "services",
-      "setup": true,
-      "files": {
-        "result-mcp.json": {
-          "attempt": "${attempt}",
-          "body": {
-            "outcome": "completed",
-            "summary": "Proposed Tuesday morning for SR-0001.",
-            "outputs": [
-              {
-                "name": "appointment",
-                "hash": "${draftObject}",
-                "mediaType": "application/json"
-              }
-            ],
-            "evidence": [],
-            "checks": [],
-            "limitations": [],
-            "unresolvedEffects": [],
-            "nextStep": "The approver reviews the exact draft."
-          }
+        "exitCode": 0,
+        "fields": {
+          "/by": "${scheduler}",
+          "/subject/id": "${attempt}",
+          "/subject/hash": "${attemptHash}",
+          "/body/outputs/0/hash": "${draftObject}"
         }
       }
     },
