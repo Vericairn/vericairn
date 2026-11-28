@@ -92,7 +92,7 @@ public static class ServiceInstaller
         }
 
         if (vericairnHome.Any(char.IsControl))
-            throw new ArgumentException("The Vericairn home contains a control character the service unit cannot carry.", nameof(vericairnHome));
+            throw new ArgumentException("The Vericairn home contains a control character the service unit cannot carry.");
 
         string homeKey = Path.TrimEndingDirectorySeparator(vericairnHome);
         if (platform == "windows")
@@ -152,7 +152,9 @@ public static class ServiceInstaller
                 string label = "vericairn-runtime-" + estateId.ToLowerInvariant() + suffix;
                 string? xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
                 string unitPath = Path.Combine(string.IsNullOrWhiteSpace(xdg) ? Path.Combine(userHome, ".config") : xdg, "systemd", "user", label + ".service");
-                string exec = string.Join(' ', arguments.Select(SystemdQuote));
+                // A colon disables ExecStart's environment expansion. The paths are literal arguments.
+                string prefix = arguments.Any(argument => argument.Contains('$', StringComparison.Ordinal)) ? ":" : string.Empty;
+                string exec = prefix + string.Join(' ', arguments.Select(SystemdQuote));
                 string variables = string.Concat(settings.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => $"Environment={SystemdQuote(e.Key + "=" + e.Value)}\n"));
                 string unit = $"[Unit]\nDescription=Vericairn runtime for estate {estateId}\n\n[Service]\n{variables}ExecStart={exec}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
                 return new ServicePlan(
@@ -181,6 +183,7 @@ public static class ServiceInstaller
                     + "  <Settings>\n    <MultipleInstances>IgnoreNew</MultipleInstances>\n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
                     + "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n    <StartWhenAvailable>true</StartWhenAvailable>\n"
                     + "    <RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>\n    <Hidden>true</Hidden>\n  </Settings>\n"
+                    // Task Scheduler requires a matching Principal id for Actions/@Context.
                     + "  <Actions>\n"
                     + $"    <Exec><Command>{SecurityElement.Escape(command)}</Command><Arguments>{SecurityElement.Escape(argumentText)}</Arguments></Exec>\n"
                     + "  </Actions>\n</Task>\n";
@@ -288,7 +291,29 @@ public static class ServiceInstaller
 
     private static string SystemdQuote(string argument) => "\"" + argument.Replace("%", "%%", StringComparison.Ordinal).Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
-    private static string WindowsQuote(string argument) => argument.Contains(' ', StringComparison.Ordinal) || argument.Contains('"', StringComparison.Ordinal) ? "\"" + argument.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"" : argument;
+    private static string WindowsQuote(string argument)
+    {
+        if (argument.Length != 0 && !argument.Any(c => c is ' ' or '\t' or '"'))
+            return argument;
+
+        var quoted = new StringBuilder().Append('"');
+        int backslashes = 0;
+        foreach (char c in argument)
+        {
+            if (c == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            // A quote needs its own escape and doubles the backslashes immediately before it.
+            quoted.Append('\\', c == '"' ? (backslashes * 2) + 1 : backslashes);
+            quoted.Append(c);
+            backslashes = 0;
+        }
+
+        return quoted.Append('\\', backslashes * 2).Append('"').ToString();
+    }
 
     /// <summary>The user's numeric id from the system's own tool; launchd addresses per-user services by it.</summary>
     private static uint? GetUid()

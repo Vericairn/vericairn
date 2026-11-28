@@ -39,7 +39,9 @@ internal sealed class RuntimeServeCommand : Command, ITextOutputCommand
                 return context.Fail("The service's Vericairn home is invalid. Reinstall the service with 'vericairn runtime install'.");
             }
 
-            if (!Path.IsPathFullyQualified(home) || home.Any(char.IsControl))
+            if (home.Any(char.IsControl))
+                return context.Fail("The service's Vericairn home contains a control character. Reinstall the service with 'vericairn runtime install'.");
+            if (!Path.IsPathFullyQualified(home))
                 return context.Fail("The service's Vericairn home must be an absolute path. Reinstall the service with 'vericairn runtime install'.");
 
             string? previous = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
