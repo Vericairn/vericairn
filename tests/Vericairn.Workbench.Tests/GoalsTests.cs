@@ -18,7 +18,7 @@ namespace Vericairn.Workbench.Tests;
 /// recommendation first.
 /// </summary>
 [Collection("workbench")]
-public class GoalsTests(HeadlessFixture fixture)
+public partial class GoalsTests(HeadlessFixture fixture)
 {
     [Fact]
     public async Task TheGoalsWorkspaceShowsAGoalAndItsAsksAreDecisionsNeededKeyboardOnly()

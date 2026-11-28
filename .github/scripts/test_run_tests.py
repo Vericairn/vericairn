@@ -57,6 +57,9 @@ FAKE = textwrap.dedent('''\
         sys.stdout.buffer.write("skipped Vericairn.Records.Tests.TextTests.Keeps(text: \\"Cafe\\u0301\\") \\u2713\\n".encode("utf-8")); sys.exit(0)
     if scenario in ("flaky", "persistent"):
         failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); finish([result("failed with 1 error(s) (1m 2s)"), passed], 1)
+    if scenario == "whole-journey-failed":
+        failed("Vericairn.Cli.Tests.ExamplesJourneyTests.TierOneRunsEveryRegisteredJourney")
+        finish([result("failed with 1 error(s) (1m 2s)")], 1)
     if scenario == "crash":
         failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); finish([result("failed with 2 error(s) (1m 2s)"), passed], 2)
     if scenario == "unfinished":
@@ -109,6 +112,12 @@ class RetryRunnerTests(unittest.TestCase):
         assembly = self.root / "artifacts" / "bin" / "Vericairn.Cli.Tests" / "release" / "Vericairn.Cli.Tests.dll"
         assembly.parent.mkdir(parents=True)
         assembly.touch()
+
+    def test_a_journey_that_already_retried_still_fails_without_a_third_run(self):
+        code, output, retries, summary = self.run_scenario("whole-journey-failed")
+        self.assertEqual(1, code, output)
+        self.assertEqual([], retries)
+        self.assertIn("failed again", summary)
 
     def test_every_share_runs_its_classes_once_and_reports_its_retry(self):
         self.prepare_share_project()
