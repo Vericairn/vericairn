@@ -13,7 +13,7 @@ using Vericairn.Runtime.Tests;
 namespace Vericairn.Cli.Tests;
 
 [Collection("cli")]
-public sealed class ClaudeQualificationCheckTests : IDisposable
+public sealed partial class ClaudeQualificationCheckTests : IDisposable
 {
     private const string Launcher = "claude-code";
     private const string Shipped = "2.1.296";

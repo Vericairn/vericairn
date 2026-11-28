@@ -18,6 +18,7 @@ public sealed partial class WorkerConfigurationStore
     private const int ClaudeSetupTokenMinimumLength = 100;
     internal const int ClaudeSetupTokenMaximumLength = 1024;
     private const int ClaudeSetupTokenLifetimeDays = 365;
+    private const string ExpiredSetupToken = "The provisioned Claude Code setup token has expired. Generate and import a new one with worker configure.";
     private static readonly SearchValues<char> ClaudeSetupTokenCharacters = SearchValues.Create("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-");
     private static readonly string[] HarnessDirectories = [".claude", ".codex", ".gemini", ".agents"];
     private static readonly string[] HarnessDirectoryOverrides = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "GEMINI_CLI_HOME"];
@@ -59,10 +60,11 @@ public sealed partial class WorkerConfigurationStore
     {
         try
         {
-            if (ReadClaudeSetupToken() is not { } setup) return new(false);
+            if (ReadClaudeSetupToken(allowExpired: true) is not { } setup) return new(false);
             var expiry = DateTimeOffset.FromUnixTimeMilliseconds(setup.ExpiresAt);
             // The provision's expiry has always been stored as the import time plus this fixed lifetime.
-            return new(true, expiry.AddDays(-ClaudeSetupTokenLifetimeDays), setup.AccountType, "operator-statement", expiry);
+            return new(true, expiry.AddDays(-ClaudeSetupTokenLifetimeDays), setup.AccountType, "operator-statement", expiry,
+                SetupTokenExpired(setup) ? ExpiredSetupToken : null);
         }
         catch (ProviderRefusedException exception)
         {
@@ -81,29 +83,40 @@ public sealed partial class WorkerConfigurationStore
         return true;
     }
 
-    internal ClaudeSetupToken? ReadClaudeSetupToken(IReadOnlyDictionary<string, string>? environment = null)
+    internal ClaudeSetupToken? ReadClaudeSetupToken(IReadOnlyDictionary<string, string>? environment = null, bool allowExpired = false)
     {
         try
         {
             string path = ConfigurationPath(ClaudeSetupTokenFile);
             RefuseLink(path);
+            if (Directory.Exists(path)) throw new JsonException();
             if (!File.Exists(path)) return null;
             RefuseHarnessConfiguration(path, environment ?? WorkerEnvironment.Current());
             RequireOwnerOnly(Path.GetDirectoryName(path)!, isDirectory: true);
             RequireOwnerOnly(path, isDirectory: false);
+            if (OwnerOnlyState.IsOwnRegularFile(path) == false) throw new JsonException();
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
             if (stream.Length > 4096) throw new JsonException();
             ClaudeSetupToken? setup = JsonSerializer.Deserialize<ClaudeSetupToken>(stream, Json);
             if (setup is null || !IsClaudeSetupToken(setup.AccessToken) || !IsClaudeAccountType(setup.AccountType)
                 || setup.ExpiresAt <= 0 || setup.ExpiresAt > DateTimeOffset.MaxValue.ToUnixTimeMilliseconds())
                 throw new JsonException();
+            if (!allowExpired && SetupTokenExpired(setup)) throw SetupTokenProblem(ExpiredSetupToken);
             return setup;
         }
-        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException or ArgumentException)
+        catch (JsonException)
         {
-            throw new ProviderRefusedException("The provisioned Claude Code setup token could not be read. Import it again with worker configure.", exception);
+            throw SetupTokenProblem("The provisioned Claude Code setup token file is corrupt. Import it again with worker configure.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            throw SetupTokenProblem("The provisioned Claude Code setup token file could not be read. Check its owner and permissions or import it again with worker configure.");
         }
     }
+
+    private static bool SetupTokenExpired(ClaudeSetupToken setup) => setup.ExpiresAt <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    private static ProviderRefusedException SetupTokenProblem(string message) => new(message) { SafeForQualification = true };
 
     private void RefuseHarnessConfiguration(string path, IReadOnlyDictionary<string, string> environment)
     {
@@ -175,7 +188,7 @@ public sealed partial class WorkerConfigurationStore
 
     private static void RequireOwnerOnly(string path, bool isDirectory)
     {
-        const string message = "The provisioned Claude Code setup token requires an owner-only file and worker directory.";
+        const string message = "The provisioned Claude Code setup token file and worker directory must have owner-only permissions. Restrict access or import the token again with worker configure.";
         RefuseLink(path);
         if (OperatingSystem.IsWindows())
         {
@@ -183,15 +196,15 @@ public sealed partial class WorkerConfigurationStore
             FileSystemSecurity security = isDirectory ? new DirectoryInfo(path).GetAccessControl() : new FileInfo(path).GetAccessControl();
             SecurityIdentifier? owner = identity.User;
             if (owner is null || !owner.Equals(security.GetOwner(typeof(SecurityIdentifier))))
-                throw new ProviderRefusedException(message);
+                throw SetupTokenProblem(message);
             foreach (FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
             {
                 if (rule.AccessControlType == AccessControlType.Allow && !owner.Equals(rule.IdentityReference))
-                    throw new ProviderRefusedException(message);
+                    throw SetupTokenProblem(message);
             }
         }
         else if (File.GetUnixFileMode(path) != (isDirectory ? OwnerOnlyState.DirectoryMode : OwnerOnlyState.FileMode)
             || OwnerOnlyState.Restriction(path) is not null)
-            throw new ProviderRefusedException(message);
+            throw SetupTokenProblem(message);
     }
 }

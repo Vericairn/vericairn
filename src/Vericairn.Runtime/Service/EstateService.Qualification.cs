@@ -70,7 +70,8 @@ public sealed partial class EstateService
         catch (Exception exception) when (ProbeFailure(exception))
         {
             // A subprocess error may include command arguments, local paths or credentials. Never retain or repeat it.
-            return Refuse("The local harness qualification probes failed; no qualification was recorded and no agent was launched.");
+            return Refuse(exception is ProviderRefusedException { SafeForQualification: true } ? exception.Message
+                : "The local harness qualification probes failed; no qualification was recorded and no agent was launched.");
         }
         finally
         {
@@ -127,7 +128,8 @@ public sealed partial class EstateService
             return check with
             {
                 Version = ReadHarnessVersion(launcher, settings, model),
-                Problem = "The local harness probes failed. Check the executable and the provisioned sign-in.",
+                Problem = exception is ProviderRefusedException { SafeForQualification: true } ? exception.Message
+                    : "The local harness probes failed. Check the executable and the provisioned sign-in.",
             };
         }
         finally

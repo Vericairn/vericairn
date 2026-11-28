@@ -36,6 +36,9 @@ public sealed record ProviderDescriptor(string Id, string Contract, string Statu
 /// <summary>A provider refused before any effect could have happened: nothing was dispatched.</summary>
 public sealed class ProviderRefusedException : Exception
 {
+    // Qualification normally withholds provider errors because a subprocess can include credentials in them.
+    internal bool SafeForQualification { get; init; }
+
     /// <summary>Creates the exception.</summary>
     public ProviderRefusedException()
     {
