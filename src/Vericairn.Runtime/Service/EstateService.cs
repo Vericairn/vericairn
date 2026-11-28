@@ -749,6 +749,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("The principal must be a ULID.");
         }
 
+        if (request.Profiles?.Contains("token", StringComparer.Ordinal) == true)
+        {
+            return Refuse("Token devices are made by an approved MCP authorization.");
+        }
+
         lock (gate)
         {
             // Presence and the Secure Enclave are named in device records from record format 2: an older estate refuses them, and its
@@ -968,7 +973,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <inheritdoc />
     public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevoke(request, null);
 
-    // A supplied time lets journeys put revocation after signed history without waiting for the next wall-clock second.
+    // A supplied clock reading lets journeys exercise the whole-second boundary deterministically.
     internal WriteOutcome DeviceRevoke(RevokeRequest request, DateTimeOffset? at)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -980,24 +985,47 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         WriteOutcome outcome;
         lock (gate)
         {
-            EstateModel model = session.Load();
-            RecordEnvelope? device = Latest(model, request.Device, "device");
-            if (device is null)
+            // Other runtimes can also write this estate. Choose the signature cutoff and record the revocation under their shared lock.
+            outcome = UnderWriteLock(() =>
             {
-                return NotFound($"No device has id {request.Device}.");
-            }
+                EstateModel model = session.Load();
+                RecordEnvelope? device = Latest(model, request.Device, "device");
+                if (device is null)
+                {
+                    return NotFound($"No device has id {request.Device}.");
+                }
 
-            RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
-            if (admission is null || EstateModel.BodyString(admission, "status") != "admitted")
-            {
-                return Refuse($"Device {request.Device} has no current admission to revoke.");
-            }
+                RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
+                if (admission is null || EstateModel.BodyString(admission, "status") != "admitted")
+                {
+                    return Refuse($"Device {request.Device} has no current admission to revoke.");
+                }
 
-            DateTimeOffset revokedAt = at ?? DateTimeOffset.UtcNow;
-            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(revokedAt) };
-            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: revokedAt);
-            outcome = request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+                DateTimeOffset now = at ?? DateTimeOffset.UtcNow;
+                string revokedAt = RecordParser.FormatTimestamp(now);
+                if (string.CompareOrdinal(revokedAt, admission.At) < 0) revokedAt = admission.At;
+                var deviceRevisions = model.Chain(device).ToHashSet(StringComparer.Ordinal);
+                // Only a record dated within the authoring tolerance of this clock can move the cutoff: no runtime writes one later,
+                // so a record placed with a later date stays after the revocation and its signature does not count.
+                DateTimeOffset latest = now + global::Vericairn.Records.History.SignedHistory.ClockTolerance;
+                RecordEnvelope? lastSigned = model.CountingRecords
+                    .Where(record => string.CompareOrdinal(record.At, revokedAt) >= 0 && record.AtTime <= latest &&
+                        record.Signatures.Any(signature => deviceRevisions.Contains(signature.Device)) && SignatureChecks.IsAuthentic(model, record))
+                    .MaxBy(record => record.At, StringComparer.Ordinal);
+                if (lastSigned is not null)
+                {
+                    // A timestamp has whole-second precision and the signature cutoff is inclusive. Current standing is withdrawn
+                    // as soon as the revocation is recorded, independently of this cutoff for checking historical signatures.
+                    if (lastSigned.AtTime > DateTimeOffset.MaxValue.AddSeconds(-1))
+                        return Refuse("The device signed a record at the last representable second. A later signature cutoff cannot be recorded.");
+                    revokedAt = RecordParser.FormatTimestamp(lastSigned.AtTime.AddSeconds(1));
+                }
+
+                var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = revokedAt };
+                using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+                var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: now);
+                return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+            }, WriteOutcome.Fail);
             if (outcome.Written is not null) outcome = outcome with { RevocationReach = [ObserveRevocation("written")] };
         }
 
@@ -2890,6 +2918,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Judges an authored record against the tree's current files and stores it with its companions. Caller holds the gate and the write lock.</summary>
     private WriteOutcome StoreAuthoredLocked(AuthoredRecord record, EstateModel current)
     {
+        if (requestDevice.Value is { Closed: false } && RequestDeviceRefusal(session.Load()) is Problem denied)
+            return WriteOutcome.Fail(denied);
+
         if (JudgeProposedLocked([record]) is Problem rejected)
         {
             return WriteOutcome.Fail(rejected);
@@ -3419,10 +3450,34 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// output no longer has the bytes it claims, a goal recorded impossible without its evaluator's verdict of impossible, and a flow decision that leaves out a record its rules read or whose rules do not hold with the states they name read now. Records not stored yet get the content checks a stored file gets, on their canonical
     /// bytes, since the checks of stored files cannot see them.
     /// </summary>
+    /// <summary>
+    /// Whether <paramref name="finding"/> is the signature of a device a revocation among <paramref name="records"/> revokes, on a record
+    /// dated beyond the authoring tolerance of this runtime's clock. No runtime writes such a record, so it never stops its device's
+    /// revocation: the revocation is stored and the record stays reported as <c>signature.revoked</c> for the operator to remove. The
+    /// clock, never the revocation's own stated time, decides, so a revocation stated in the past never voids a record honestly signed.
+    /// </summary>
+    internal static bool InvalidatedByRevocation(EstateModel model, IReadOnlyList<AuthoredRecord> records, Finding finding)
+    {
+        if (finding.Code != "signature.revoked") return false;
+        string path = finding.Location.Split('#')[0];
+        if (model.Records.FirstOrDefault(r => r.ExpectedPath == path) is not { } signed
+            || signed.AtTime <= DateTimeOffset.UtcNow + global::Vericairn.Records.History.SignedHistory.ClockTolerance) return false;
+        foreach (AuthoredRecord authored in records)
+        {
+            if (model.ById.GetValueOrDefault(authored.Envelope.Id) is not { Type: "admission" } revocation || EstateModel.BodyString(revocation, "status") != "revoked"
+                || revocation.Subject is not { } device || model.ById.GetValueOrDefault(device.Id) is not { } revoked) continue;
+            // Only the revoked device's own finding: a co-signer's revocation stands on its own.
+            string identity = model.Chain(revoked)[0];
+            if (finding.Message.StartsWith($"Device {identity} was revoked", StringComparison.Ordinal)) return true;
+        }
+
+        return false;
+    }
+
     private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
     {
         var relevant = new FindingList();
-        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error && !InvalidatedByRevocation(model, records, f)))
         {
             relevant.Add(finding);
         }
@@ -3530,7 +3585,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         bool requiresPresence = draft.Type == "history-checkpoint" && HistoryCheckpointType.HasGitRemovals(draft.Body);
         List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => model.Chain(d)[0], StringComparer.Ordinal).ToList();
         // Keys are held under a device's identity, its first record, which signatures name across renames and rotations.
-        foreach (string identity in devices.Where(d => SignatureChecks.IsAdmitted(model, d)).Select(d => model.Chain(d)[0]))
+        foreach (string identity in devices.Where(d => !ProfilesOf(d).Contains("token", StringComparer.Ordinal) && SignatureChecks.IsAdmitted(model, d)).Select(d => model.Chain(d)[0]))
         {
             IDeviceKeyStore? store = stores.FirstOrDefault(s => s.Has(identity));
             if (store is not null)

@@ -19,6 +19,9 @@ public enum McpSigning
 
     /// <summary>Write the call's one record with the requesting device's signature over the plan it prepared.</summary>
     Sign,
+
+    /// <summary>Prepare and sign the request's one record with its runtime-held token device key.</summary>
+    Managed,
 }
 
 /// <summary>
@@ -30,6 +33,12 @@ public interface IMcpNetworkSession
 {
     /// <summary>The principal of the requesting device: the only one its calls act as.</summary>
     string Principal { get; }
+
+    /// <summary>Whether the runtime holds this token device's signing key.</summary>
+    bool RuntimeSigns => false;
+
+    /// <summary>Whether the connection may call the network contributor tools.</summary>
+    bool Contribute => true;
 
     /// <summary>
     /// Runs one call's <paramref name="operation"/> under a signing rule. For <see cref="McpSigning.Sign"/>, <paramref name="plan"/> and <paramref name="signature"/>
@@ -96,7 +105,7 @@ public sealed partial class ToolRegistry
     {
         ArgumentNullException.ThrowIfNull(tool);
         JsonObject described = tool.Describe();
-        if (network is not null && tool.Writes)
+        if (network is { RuntimeSigns: false } && tool.Writes)
         {
             described["_meta"] = new JsonObject { ["vericairn/prepared"] = true };
         }
@@ -106,7 +115,7 @@ public sealed partial class ToolRegistry
 
     private async Task<ToolCallResult> CallOverNetworkAsync(IMcpNetworkSession session, ToolDefinition? tool, JsonObject? arguments, JsonObject? meta, CancellationToken cancellationToken)
     {
-        if (tool is null || !OfferedOverNetwork(tool))
+        if (tool is null || !OfferedOverNetwork(tool) || tool.Writes && !session.Contribute)
         {
             return new ToolCallResult(string.Empty, true, Unknown: true);
         }
@@ -121,6 +130,13 @@ public sealed partial class ToolRegistry
         if (tool.Name == "work_result" && (arguments?.ContainsKey("expected") == true || arguments?["body"] is JsonObject body && body.ContainsKey("duties")))
         {
             return new ToolCallResult("Duty evidence and its expected hash are not offered over network MCP: they cannot be prepared for a device's signature. Submit the result without duties.", true);
+        }
+
+        if (session.RuntimeSigns)
+        {
+            (ToolCallResult managedResult, _) = await session.RunAsync(McpSigning.Managed, null, null,
+                () => tool.InvokeAsync(api, arguments, cancellationToken)).ConfigureAwait(false);
+            return managedResult;
         }
 
         bool prepare = meta?[PrepareMeta] is JsonValue flag && flag.TryGetValue(out bool asked) && asked;

@@ -12,7 +12,8 @@ namespace Vericairn.Cli;
 
 internal sealed class RuntimeNetworkConfiguration(CommandContext context)
 {
-    public int RuntimeConfigure(string root, string? localNetwork, bool allowPublic, bool json, string? mcp = null, string[]? origins = null, string? relay = null)
+    public int RuntimeConfigure(string root, string? localNetwork, bool allowPublic, bool json, string? mcp = null, string[]? origins = null, string? relay = null,
+        string? publicEndpoint = null, string? publicBind = null, string? certificate = null, string? key = null)
     {
         try
         {
@@ -108,7 +109,32 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                 settings = settings with { Relay = url?.AbsoluteUri };
             }
 
-            bool changed = localNetwork is not null || serveMcp is not null || allowed is not null || relay is not null;
+            bool changePublic = publicEndpoint is not null || publicBind is not null || certificate is not null || key is not null;
+            if (changePublic)
+            {
+                McpPublicEndpoint? next = null;
+                if (string.Equals(publicEndpoint, "off", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (publicBind is not null || certificate is not null || key is not null)
+                        return context.Fail("Give --public-endpoint off without a bind address or certificate.");
+                }
+                else
+                {
+                    string? authority = publicEndpoint ?? settings.PublicEndpoint?.Authority;
+                    certificate ??= settings.PublicEndpoint?.CertificatePath;
+                    key ??= settings.PublicEndpoint?.KeyPath;
+                    if (string.IsNullOrWhiteSpace(authority) || string.IsNullOrWhiteSpace(certificate) || string.IsNullOrWhiteSpace(key))
+                        return context.Fail("Configure public MCP with --public-endpoint <host:port>, --public-certificate <PEM file> and --public-key <PEM file>.");
+
+                    next = new McpPublicEndpoint(authority, Path.GetFullPath(certificate), Path.GetFullPath(key), publicBind ?? settings.PublicEndpoint?.Bind);
+                    _ = next.BindAddress();
+                    using var checkedCertificate = next.LoadCertificate(DateTimeOffset.UtcNow);
+                }
+
+                settings = settings with { PublicEndpoint = next };
+            }
+
+            bool changed = localNetwork is not null || serveMcp is not null || allowed is not null || relay is not null || changePublic;
             if (changed)
             {
                 settings.Save(directory);
@@ -123,6 +149,7 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                 {
                     localNetwork = settings.LocalNetwork, allowPublic = settings.AllowPublic, mcp = settings.Mcp, allowedOrigins = settings.AllowedOrigins, relay = settings.Relay,
                     served = alive ? served : null, mcpServed = alive ? running!.Mcp is not null : (bool?)null, restart = alive && changed,
+                    publicEndpoint = settings.PublicEndpoint?.Issuer, publicMcp = alive ? running!.PublicMcp : null,
                 }, ProtocolJson.Options));
                 return Clean;
             }
@@ -146,6 +173,9 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
             context.Output.WriteLine(settings.Relay is null
                 ? "the relay profile is off"
                 : $"the runtime registers with {settings.Relay} from its next start");
+
+            if (settings.PublicEndpoint is { } configured)
+                context.Output.WriteLine($"  public MCP configured at {configured.Issuer}/mcp, bound to {configured.BindAddress()}; MCP must be on");
             if (alive)
             {
                 context.Output.WriteLine(served is null ? $"  daemon {running!.ProcessId} serves no local-network profile now" : $"  daemon {running!.ProcessId} serves it now at {served}");
@@ -158,7 +188,7 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
 
             return Clean;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or System.Security.Cryptography.CryptographicException)
         {
             return context.Fail(exception.Message);
         }

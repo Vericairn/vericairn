@@ -100,6 +100,7 @@ internal sealed class RunAdmissionService(
         }
 
         RunPlan plan;
+        IReadOnlyList<RepositoryConfigurationReview> configurationReviews;
         lock (gate)
         {
             List<RecordFile> files = session.Files().Concat(carried.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
@@ -123,6 +124,7 @@ internal sealed class RunAdmissionService(
             }
 
             plan = planned;
+            configurationReviews = ConfigurationReviews(model, plan);
         }
 
         RunLimits limits = RunLimits.For(Element(plan.Cap), WorkerOptions);
@@ -193,7 +195,6 @@ internal sealed class RunAdmissionService(
             configuredRoot = new WorkerConfigurationStore().ReadWorkspaceRoot();
             string root = configuredRoot ?? Path.Combine(VericairnHome.Path(), "estates", plan.Estate, "workspaces");
             string path = configuredRoot is null ? Path.Combine(root, Slug(plan.Branch)) : Path.Combine(root, plan.Estate, Slug(plan.Branch));
-            IReadOnlyList<RepositoryConfigurationReview> configurationReviews = ConfigurationReviews(session.Load(), plan);
             workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, configurationReviews);
             brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
             baseline = workspaces.Capture(workspace);
@@ -232,7 +233,7 @@ internal sealed class RunAdmissionService(
                     }
 
                     // It ran as the person, with Git at hand: the workspace must still be this branch's own repository, at the head it left.
-                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, ConfigurationReviews(session.Load(), plan));
+                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, configurationReviews);
                     if (!string.Equals(rechecked.Path, workspace.Path, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                     {
                         throw new ProviderRefusedException($"The branch's workspace moved from '{workspace.Path}' to '{rechecked.Path}' while its setup command ran.");
@@ -345,6 +346,14 @@ internal sealed class RunAdmissionService(
             if (WorkspaceRootProblem(configuredRoot) is string rootProblem)
                 return Refused(RunProblem(pending, "not-started", "refused", rootProblem + " Nothing was recorded."));
             EstateModel model = recordAccess.LoadWith(carried);
+            // From 0.9.5 (FIX-184): the workspace was accepted under the configuration reviews judged with the plan. A review withdrawn
+            // or superseded since then refuses the run here, under the gate where its intent is written.
+            List<RepositoryConfigurationReview> currentReviews = ConfigurationReviews(model, plan);
+            if (configurationReviews.Any(review => !currentReviews.Contains(review)))
+            {
+                return Refused(RunProblem(pending, "not-started", "refused", "A repository configuration review changed while the workspace was prepared. Start the run again, so the workspace is judged under the current reviews. Nothing was recorded."));
+            }
+
             RecordEnvelope? goal = AgentRuns.GoalAt(model, plan.Goal);
             if (AssignmentRefusal(model, plan.Assignment, plan.Key) is string assignmentRefusal)
             {
@@ -778,7 +787,10 @@ internal sealed class RunAdmissionService(
         }
 
         IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
-        if (!model.Current("device").Any(d => EstateModel.BodyString(d, "principal") == request.Agent && SignatureChecks.IsAdmitted(model, d) && stores.Any(s => s.Has(model.Chain(d)[0]))))
+        // A token device's held key is reserved for its authorized MCP client.
+        if (!model.Current("device").Any(d => EstateModel.BodyString(d, "principal") == request.Agent &&
+            !Strings(d.Body, "profiles").Contains("token", StringComparer.Ordinal) && SignatureChecks.IsAdmitted(model, d) &&
+            stores.Any(s => s.Has(model.Chain(d)[0]))))
         {
             return (null, $"Agent {PrincipalName(model, request.Agent)} ({request.Agent}) has no admitted device whose key this machine holds, so its MCP server would list only the read-only tools and it could record no attempt and no result. Create its device here and have it admitted first.", null);
         }
