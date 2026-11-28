@@ -7,6 +7,7 @@ using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Processes;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Adapters.Git;
 
@@ -26,16 +27,19 @@ internal static class GitDocumentHistory
         }
 
         var watch = Stopwatch.StartNew();
-        // Do not accidentally search a containing repository, or accept a shallow clone even when a blob happens to remain.
-        if (Text(root, watch, "rev-parse", "--is-inside-work-tree") != "true" ||
-            Text(root, watch, "rev-parse", "--show-prefix") != string.Empty ||
-            Text(root, watch, "rev-parse", "--is-shallow-repository") != "false")
+        using GitHardening hardening = GitHardening.Create();
+        AcquisitionGitView view;
+        try { view = hardening.Acquire(root); }
+        catch (ProviderRefusedException) { return null; }
+        // Do not search a containing repository, or accept a shallow clone even when a blob happens to remain.
+        if (view.Bare || view.Root != Vericairn.Runtime.Workers.WorkspacePaths.Canonical(root) ||
+            Text("rev-parse", "--is-shallow-repository") != "false")
         {
             return null;
         }
 
         string literal = ":(literal)" + relativePath;
-        string? commits = Text(root, watch, "log", "--all", "--full-history", "--no-show-signature", "--no-notes", "--no-decorate", "--no-color", "--format=%H", "--", literal);
+        string? commits = Text("log", "--all", "--full-history", "--no-show-signature", "--no-notes", "--no-decorate", "--no-color", "--format=%H", "--", literal);
         if (commits is null)
         {
             return null;
@@ -44,7 +48,7 @@ internal static class GitDocumentHistory
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (string commit in commits.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            string? entry = Text(root, watch, "ls-tree", "-z", commit, "--", literal);
+            string? entry = Text("ls-tree", "-z", commit, "--", literal);
             if (entry is null)
             {
                 return null;
@@ -60,7 +64,7 @@ internal static class GitDocumentHistory
                 continue;
             }
 
-            byte[]? bytes = Run(root, watch, "cat-file", "blob", metadata[2]);
+            byte[]? bytes = Run(hardening, root, watch, "cat-file", "blob", metadata[2]);
             if (bytes is null)
             {
                 return null;
@@ -76,39 +80,19 @@ internal static class GitDocumentHistory
             }
         }
         return null;
+
+        string? Text(params string[] arguments) => Run(hardening, root, watch, arguments) is { } bytes
+            ? Encoding.UTF8.GetString(bytes).TrimEnd('\r', '\n') : null;
     }
 
-    private static string? Text(string root, Stopwatch watch, params string[] arguments) =>
-        Run(root, watch, arguments) is { } bytes ? Encoding.UTF8.GetString(bytes).TrimEnd('\r', '\n') : null;
-
-    private static byte[]? Run(string root, Stopwatch watch, params string[] arguments)
+    private static byte[]? Run(GitHardening hardening, string root, Stopwatch watch, params string[] arguments)
     {
         TimeSpan remaining = Deadline - watch.Elapsed;
         if (remaining <= TimeSpan.Zero)
         {
             return null;
         }
-        var info = new ProcessStartInfo("git")
-        {
-            WorkingDirectory = root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
-        };
-        info.ArgumentList.Add("--no-pager");
-        info.ArgumentList.Add("-c");
-        info.ArgumentList.Add("protocol.allow=never");
-        foreach (string argument in arguments)
-        {
-            info.ArgumentList.Add(argument);
-        }
-        // Inherited Git routing must not redirect the estate read to another repository or object directory.
-        foreach (string variable in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_INDEX_FILE", "GIT_NAMESPACE", "GIT_SHALLOW_FILE", "GIT_CONFIG_PARAMETERS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_LITERAL_PATHSPECS", "GIT_ICASE_PATHSPECS" })
-        {
-            info.Environment.Remove(variable);
-        }
-        info.Environment["GIT_CONFIG_COUNT"] = "0";
-        info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-        info.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
-        info.Environment["GIT_NO_LAZY_FETCH"] = "1";
+        ProcessStartInfo info = GitFileSource.StartInfo(root, hardening, arguments);
         try
         {
             using Process process = ProgramPath.Start(info) ?? throw new IOException("Git did not start.");
