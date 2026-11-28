@@ -1487,8 +1487,10 @@ a doubled backslash, caret or backtick before a newline inside the prefix.
 
 `worker configure` shows the provision's import time, operator-stated account type and local expiry, which is
 set to 365 days after import. Use `worker configure --remove-setup-token` to remove the machine's copy and return
-to the file form if a credentials file is provisioned. To revoke the issuer's authorization, remove the token from
-your Claude account's Settings > Account sessions or Settings > Claude Code, using the trash icon.
+to the file form if a credentials file is provisioned. On Windows and Unix, someone with write access to the
+Vericairn home can swap the `worker` directory before the removal command opens it. To revoke the issuer's
+authorization, remove the token from your Claude account's Settings > Account sessions or Settings > Claude Code,
+using the trash icon.
 [Claude Help Center](https://support.claude.com/en/articles/10310342-how-do-i-log-out-of-all-active-sessions)
 
 `--setting-sources ""` excludes user, project and local settings, and `--strict-mcp-config` restricts MCP to the explicit
