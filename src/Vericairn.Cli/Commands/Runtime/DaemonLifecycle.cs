@@ -543,7 +543,9 @@ internal sealed class DaemonLifecycle(CommandContext context)
             }
 
             ServicePlan plan = ServiceInstaller.PlanHere(root);
-            IReadOnlyList<string> log = ServiceInstaller.Uninstall(plan);
+            var log = new List<string>(ServiceInstaller.Uninstall(plan));
+            if (ServiceInstaller.LegacyUninstallHere(root) is { } legacy)
+                log.AddRange(ServiceInstaller.Uninstall(legacy));
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(new { uninstalled = plan.Label, log }));

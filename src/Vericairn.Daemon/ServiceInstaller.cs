@@ -45,7 +45,13 @@ public static class ServiceInstaller
     internal const string ServiceHomeOption = "--service-home";
 
     /// <summary>The plan for an estate on this machine, with the running executable.</summary>
-    public static ServicePlan PlanHere(string root)
+    public static ServicePlan PlanHere(string root) => PlanHere(root, legacy: false);
+
+    // A previous installation had one label per estate and ran on the platform default home.
+    internal static ServicePlan? LegacyUninstallHere(string root) =>
+        VericairnHome.SamePath(VericairnHome.Path(), VericairnHome.DefaultPath()) ? PlanHere(root, legacy: true) : null;
+
+    private static ServicePlan PlanHere(string root, bool legacy)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         root = Path.GetFullPath(root);
@@ -55,7 +61,7 @@ public static class ServiceInstaller
         uint? user = platform is "macos" or "linux" ? GetUid() : null;
         string home = Path.GetFullPath(VericairnHome.Path());
         return Plan(platform, root, manifest.Estate, CurrentLauncher(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), home, user,
-            PresenceSessionBuild.Current.RuntimeEnvironment);
+            PresenceSessionBuild.Current.RuntimeEnvironment, legacy);
     }
 
     /// <summary>The plan for a platform, pure: no file is touched and no command runs.</summary>
@@ -68,7 +74,10 @@ public static class ServiceInstaller
     /// and systemd carry it, and Windows, which opens no presence session, does not.
     /// </summary>
     public static ServicePlan Plan(string platform, string root, string estateId, IReadOnlyList<string> launcher, string userHome, string vericairnHome, uint? userId,
-        IReadOnlyDictionary<string, string> environment)
+        IReadOnlyDictionary<string, string> environment) => Plan(platform, root, estateId, launcher, userHome, vericairnHome, userId, environment, legacy: false);
+
+    private static ServicePlan Plan(string platform, string root, string estateId, IReadOnlyList<string> launcher, string userHome, string vericairnHome, uint? userId,
+        IReadOnlyDictionary<string, string> environment, bool legacy)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentException.ThrowIfNullOrWhiteSpace(platform);
@@ -88,10 +97,11 @@ public static class ServiceInstaller
         string homeKey = Path.TrimEndingDirectorySeparator(vericairnHome);
         if (platform == "windows")
             homeKey = homeKey.ToUpperInvariant();
-        string suffix = "-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(homeKey)));
+        string suffix = legacy ? string.Empty : "-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(homeKey)));
 
         var settings = new Dictionary<string, string>(environment, StringComparer.Ordinal);
-        settings[VericairnHome.EnvironmentVariable] = vericairnHome;
+        if (!legacy)
+            settings[VericairnHome.EnvironmentVariable] = vericairnHome;
 
         string[] arguments = [.. launcher, "--estate", root, "runtime", "serve"];
         switch (platform)
@@ -160,7 +170,8 @@ public static class ServiceInstaller
                 string label = "Vericairn Runtime " + estateId + suffix;
                 string unitPath = Path.Combine(vericairnHome, "services", "vericairn-runtime-" + estateId.ToLowerInvariant() + suffix + ".xml");
                 // An Exec action has no environment block. Encode the path so the scheduler cannot expand a literal %NAME% in it.
-                arguments = [.. arguments, ServiceHomeOption, Base64Url.EncodeToString(Encoding.UTF8.GetBytes(vericairnHome))];
+                if (!legacy)
+                    arguments = [.. arguments, ServiceHomeOption, Base64Url.EncodeToString(Encoding.UTF8.GetBytes(vericairnHome))];
                 string command = arguments[0];
                 string argumentText = string.Join(' ', arguments.Skip(1).Select(WindowsQuote));
                 string task = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"
