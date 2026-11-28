@@ -311,7 +311,10 @@ public sealed class McpResourceWatch
     /// runtime keeps a journal can make, so an idle session holds none of the runtime's stream slots; a failed read is retried later,
     /// and a refusal ends following.
     /// </summary>
-    public async Task FollowAsync(Func<JsonObject, Task> send, TextWriter? log, CancellationToken cancellationToken)
+    public Task FollowAsync(Func<JsonObject, Task> send, TextWriter? log, CancellationToken cancellationToken) =>
+        FollowCoreAsync(send, log, followWithoutResources: false, cancellationToken);
+
+    internal async Task FollowCoreAsync(Func<JsonObject, Task> send, TextWriter? log, bool followWithoutResources, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(send);
         int failures = 0;
@@ -320,7 +323,7 @@ public sealed class McpResourceWatch
             Task idle;
             lock (gate)
             {
-                idle = entries.Count > 0 ? Task.CompletedTask : subscribed.Task;
+                idle = followWithoutResources || entries.Count > 0 ? Task.CompletedTask : subscribed.Task;
             }
 
             await idle.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -432,12 +435,17 @@ public sealed class McpApiEventSource : IMcpEventSource
     private readonly Dictionary<string, EventSelection> interests = new(StringComparer.Ordinal);
     private string? cursor;
     private bool? available;
+    private readonly bool keepListCursor;
 
     /// <summary>A source reading through an API for a principal, or for the API's default reader when null.</summary>
-    public McpApiEventSource(IEstateApi api, string? principal)
+    public McpApiEventSource(IEstateApi api, string? principal) : this(api, principal, keepListCursor: false) { }
+
+    /// <summary>A source whose cursor also follows the resource list when it has no individual URI filters.</summary>
+    public McpApiEventSource(IEstateApi api, string? principal, bool keepListCursor)
     {
         this.api = api ?? throw new ArgumentNullException(nameof(api));
         this.principal = string.IsNullOrWhiteSpace(principal) ? null : principal;
+        this.keepListCursor = keepListCursor;
     }
 
     /// <inheritdoc />
@@ -542,7 +550,7 @@ public sealed class McpApiEventSource : IMcpEventSource
 
         lock (gate)
         {
-            cursor = interests.Count > 0 ? response.Cursor : null;
+            cursor = keepListCursor || interests.Count > 0 ? response.Cursor : null;
         }
 
         if (response.Reset)

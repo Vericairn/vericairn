@@ -856,19 +856,19 @@ internal sealed partial class RunDispatchService(
             return recordAccess.WriteLocked(draft, model);
         }
 
-        (AuthoredRecord? settlement, string? refusal) = recordAccess.AuthorLocked(draft, model);
-        if (settlement is null) return Refuse(refusal!);
+        (AuthoredRecord? settlement, Problem? refusal) = recordAccess.AuthorLocked(draft, model);
+        if (settlement is null) return WriteOutcome.Fail(refusal!);
         var records = new List<AuthoredRecord> { settlement };
         foreach (RecordDraft review in reviews)
         {
-            (AuthoredRecord? asked, string? problem) = recordAccess.AuthorLocked(review with { Subject = settlement.Envelope.Reference }, model);
-            if (asked is null) return Refuse(problem!);
+            (AuthoredRecord? asked, Problem? askRefusal) = recordAccess.AuthorLocked(review with { Subject = settlement.Envelope.Reference }, model);
+            if (asked is null) return WriteOutcome.Fail(askRefusal!);
             records.Add(asked);
         }
         foreach (RecordEnvelope ask in waiting)
         {
-            (AuthoredRecord? withdrawn, string? problem) = recordAccess.AuthorLocked(AttentionWithdrawal(run, settlement.Envelope, ask), model);
-            if (withdrawn is null) return Refuse(problem!);
+            (AuthoredRecord? withdrawn, Problem? withdrawalRefusal) = recordAccess.AuthorLocked(AttentionWithdrawal(run, settlement.Envelope, ask), model);
+            if (withdrawn is null) return WriteOutcome.Fail(withdrawalRefusal!);
             records.Add(withdrawn);
         }
 

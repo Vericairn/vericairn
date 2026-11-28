@@ -53,7 +53,7 @@ public static class SecurityReportRules
                 {
                     RecordEnvelope? resource = context.RequireReference(ProductField + ".repositories", id, "resource");
                     if (resource is not null && GitHubLocation(resource) is null)
-                        reports.Error("product.security-reports", "repositories", $"Resource {id} is not a repository resource located on GitHub.");
+                        reports.RelationshipError("product.security-reports", "repositories", $"Resource {id} is not a repository resource located on GitHub.");
                 }
             }
         }

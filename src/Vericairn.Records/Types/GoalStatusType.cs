@@ -75,11 +75,11 @@ public sealed class GoalStatusType : IRecordType
         body.NoOtherKeys();
         if (status == "closed" && context.Format < 3)
         {
-            context.Error("goal-status.closed", "A run is closed in record format 3, where runs of a flow are recorded.");
+            context.BodyError("goal-status.closed", "A run is closed in record format 3, where runs of a flow are recorded.");
         }
         else if (status is not null && status != "closed" && unsettled is not null)
         {
-            context.Error("goal-status.unsettled", "Only a closing names unsettled steps: unsettled goes with status closed.");
+            context.BodyError("goal-status.unsettled", "Only a closing names unsettled steps: unsettled goes with status closed.");
         }
 
         if (context.Principal(context.Record.By) is null)

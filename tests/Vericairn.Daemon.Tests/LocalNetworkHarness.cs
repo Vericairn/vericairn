@@ -5,12 +5,14 @@ using System.Buffers.Text;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Vericairn.Protocol;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Tests;
 using Vericairn.Sdk;
 
 namespace Vericairn.Daemon.Tests;
@@ -23,6 +25,7 @@ namespace Vericairn.Daemon.Tests;
 internal sealed class LocalNetworkHarness : IAsyncDisposable
 {
     private readonly DaemonOptions options;
+    private readonly SyntheticAndroidAttestation attestation = new();
 
     private LocalNetworkHarness(TestEstate estate, DaemonHost host, VericairnClient socket, ManualTime time, string deviceHome, string operatorDevice, DaemonOptions options)
     {
@@ -35,6 +38,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
         DeviceKeys = new FileKeyStore(deviceHome);
         Connections = new RuntimeConnections(deviceHome, DeviceKeys);
         OperatorDevice = operatorDevice;
+        attestation.UseFor(Host.Service);
     }
 
     public TestEstate Estate { get; }
@@ -70,7 +74,8 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
 
     /// <summary>Starts the runtime on loopback's local-network profile, on a clock the test moves, or on the system's when <paramref name="systemClock"/>.</summary>
     public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000, bool systemClock = false, Action<string>? log = null,
-        bool mcp = false, IReadOnlyList<string>? mcpOrigins = null)
+        bool mcp = false, IReadOnlyList<string>? mcpOrigins = null,
+        Uri? relay = null, Func<Uri, CancellationToken, Task<WebSocket>>? connectRelay = null)
     {
         DaemonTestHome.Ensure();
         var estate = new TestEstate(recordFormat);
@@ -78,7 +83,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
         var options = new DaemonOptions
         {
             LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time,
-            ReplayCapacity = replayCapacity, Log = log, Mcp = mcp, McpAllowedOrigins = mcpOrigins,
+            ReplayCapacity = replayCapacity, Log = log, Mcp = mcp, McpAllowedOrigins = mcpOrigins, RelayUrl = relay, ConnectRelay = connectRelay,
         };
         DaemonHost host = await DaemonTestHome.StartAsync(
             estate.Root,
@@ -107,6 +112,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
         await Host.DisposeAsync();
         Host = await DaemonTestHome.StartAsync(Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken);
         Socket = new VericairnClient(Host.Endpoint);
+        attestation.UseFor(Host.Service);
     }
 
     /// <summary>A pairing code the operator issues for a principal.</summary>
@@ -120,6 +126,8 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     /// <summary>Pairs a new device of the second machine for a principal and keeps its connection.</summary>
     public RuntimeConnection Pair(string principal, string name = "Phone", params string[] profiles) =>
         Connections.Add(Address, Issue(principal, profiles).Code, new PairingOptions(name));
+
+    internal AndroidPresenceKeyStandIn AndroidPresence(string? home = null) => new(home ?? DeviceHome, attestation);
 
     /// <summary>The signer of a paired device, its key held on the second machine.</summary>
     public DeviceRequestSigner Signer(RuntimeConnection connection) => new(DeviceKeys, connection.Device);
@@ -140,6 +148,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     {
         Socket.Dispose();
         await Host.DisposeAsync();
+        attestation.Dispose();
         Estate.Dispose();
         try
         {

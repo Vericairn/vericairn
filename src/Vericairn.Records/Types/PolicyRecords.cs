@@ -38,7 +38,7 @@ internal static class PolicyRecords
     internal static RecordEnvelope? Reference(ValidationContext context, BodyReader? reader, bool exact = true, params string[] types)
     {
         if (reader is null) return null;
-        RecordReference? reference = RecordParser.ParseReference(reader.Element, reader.Location, context.Findings);
+        RecordReference? reference = RecordParser.ParseReference(reader.Element, reader.Location, context.BodyFindings);
         if (reference is null) return null;
         if (exact && reference.Hash is null) reader.Error("policy.reference", "hash", "Evidence pins the type, id and exact hash.");
         if (!exact && reference.Hash is not null) reader.Error("policy.identity", "hash", "A selection names a continuing identity, without an evidence hash.");
@@ -49,9 +49,9 @@ internal static class PolicyRecords
         }
         RecordEnvelope? target = context.RequireReference(reader.Location, reference.Id, reference.Type);
         if (target is null) return null;
-        if (reference.Hash is not null && reference.Hash != target.ComputedHash) reader.Error("policy.reference", "hash", "The pinned hash does not match the record.");
-        if (!exact && Identity(context.Model, target) != target.Id) reader.Error("policy.identity", "id", "A selection names the first record of the identity.");
-        if (target.Id == context.Record.Id || string.CompareOrdinal(target.At, context.Record.At) > 0) reader.Error("policy.reference-time", "id", "A reference cannot cite itself or a record authored in the future.");
+        if (reference.Hash is not null && reference.Hash != target.ComputedHash) reader.RelationshipError("policy.reference", "hash", "The pinned hash does not match the record.");
+        if (!exact && Identity(context.Model, target) != target.Id) reader.RelationshipError("policy.identity", "id", "A selection names the first record of the identity.");
+        if (target.Id == context.Record.Id || string.CompareOrdinal(target.At, context.Record.At) > 0) reader.RelationshipError("policy.reference-time", "id", "A reference cannot cite itself or a record authored in the future.");
         return target;
     }
 
@@ -60,7 +60,7 @@ internal static class PolicyRecords
         string? id = reader.Ulid(field, true);
         RecordEnvelope? record = context.Find(id);
         if (id is not null && (record is null || !types.Contains(record.Type, StringComparer.Ordinal) || Identity(context.Model, record) != id))
-            reader.Error("policy.identity", field, $"Expected a {string.Join(" or ", types)} identity.");
+            reader.RelationshipError("policy.identity", field, $"Expected a {string.Join(" or ", types)} identity.");
         return record;
     }
 
@@ -90,7 +90,7 @@ internal static class PolicyRecords
                 foreach (string id in orders)
                 {
                     RecordEnvelope? order = context.RequireReference("appliesTo.workOrders", id, "work-order");
-                    if (order is not null && Identity(context.Model, order) != id) selection.Error("policy.identity", "workOrders", "Work selections name identities.");
+                    if (order is not null && Identity(context.Model, order) != id) selection.RelationshipError("policy.identity", "workOrders", "Work selections name identities.");
                 }
                 break;
             case "repository": Repository(context, selection); Selectors(selection); break;
@@ -101,7 +101,7 @@ internal static class PolicyRecords
     internal static void Repository(ValidationContext context, BodyReader reader)
     {
         RecordEnvelope? repository = IdentityField(context, reader, "repository", "estate", "resource");
-        if (repository is { Type: "resource" } && EstateModel.BodyString(repository, "kind") != "repository") reader.Error("policy.repository", "repository", "The resource must be a repository.");
+        if (repository is { Type: "resource" } && EstateModel.BodyString(repository, "kind") != "repository") reader.RelationshipError("policy.repository", "repository", "The resource must be a repository.");
     }
 
     internal static void Selectors(BodyReader reader)
@@ -127,7 +127,7 @@ internal static class PolicyRecords
         foreach (BodyReader record in records)
         {
             string? id = record.Ulid("record", true);
-            if (id is not null && context.Find(id) is null) record.Error("body.reference", "record", "The selected exact record must exist.");
+            if (id is not null && context.Find(id) is null) record.RelationshipError("body.reference", "record", "The selected exact record must exist.");
             record.Enum("field", false, ProseFields);
             record.NoOtherKeys();
         }

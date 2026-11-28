@@ -86,7 +86,7 @@ public sealed class EstateType : IRecordType
 
         if (context.Record.By != operatorId)
         {
-            context.Error("estate.operator", "The estate record must be authored by its own operator principal.");
+            context.BodyError("estate.operator", "The estate record must be authored by its own operator principal.");
         }
 
         if (context.Record.Supersedes is not null && context.Model.RootOperator is { } rootOperator && operatorId != rootOperator)

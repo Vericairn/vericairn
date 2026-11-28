@@ -620,14 +620,20 @@ public sealed class PushProviderTests
     private static bool AsksForTheGitDirectory(ProcessStartInfo info) => info.FileName == "git" && info.ArgumentList.Contains("--absolute-git-dir");
 
     // A git process of the scan starts with the hardened options of every git process on a repository Vericairn did not create (FIX-147):
-    // no pager, the empty hooks directory, then the shared settings. What follows them is the scan's own request.
+    // no pager; from 0.9.5 (CODE-88) the attributes and excludes files pointed at the empty global configuration, since Git reads its
+    // default global ones even when the global configuration is empty; the empty hooks directory; then the shared settings. What
+    // follows them is the scan's own request.
     private static string[] Requested(ProcessStartInfo info)
     {
         Assert.Equal("--no-pager", info.ArgumentList[0]);
         Assert.Equal("-c", info.ArgumentList[1]);
-        Assert.StartsWith("core.hooksPath=", info.ArgumentList[2], StringComparison.Ordinal);
-        Assert.Equal(GitHardening.Settings.SelectMany(setting => new[] { "-c", setting }), info.ArgumentList.Skip(3).Take(2 * GitHardening.Settings.Length));
-        return [.. info.ArgumentList.Skip(3 + 2 * GitHardening.Settings.Length)];
+        Assert.StartsWith("core.attributesFile=", info.ArgumentList[2], StringComparison.Ordinal);
+        Assert.Equal("-c", info.ArgumentList[3]);
+        Assert.StartsWith("core.excludesFile=", info.ArgumentList[4], StringComparison.Ordinal);
+        Assert.Equal("-c", info.ArgumentList[5]);
+        Assert.StartsWith("core.hooksPath=", info.ArgumentList[6], StringComparison.Ordinal);
+        Assert.Equal(GitHardening.Settings.SelectMany(setting => new[] { "-c", setting }), info.ArgumentList.Skip(7).Take(2 * GitHardening.Settings.Length));
+        return [.. info.ArgumentList.Skip(7 + 2 * GitHardening.Settings.Length)];
     }
 
     private sealed class RecordedGit

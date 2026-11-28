@@ -90,8 +90,8 @@ public sealed partial class EstateService
             foreach (RecordDraft planned in drafts)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                (AuthoredRecord? record, refusal) = AuthorLocked(SessionDraft(planned), model, [signer]);
-                if (record is null) return new(null, [], new("refused", refusal!, []));
+                (AuthoredRecord? record, Problem? authoringRefusal) = AuthorLocked(SessionDraft(planned), model, [signer]);
+                if (record is null) return new(null, [], authoringRefusal);
                 records.Add(record);
             }
 

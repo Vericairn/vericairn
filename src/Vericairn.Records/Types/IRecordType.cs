@@ -66,11 +66,17 @@ public sealed class ValidationContext
 {
     /// <summary>Creates a context.</summary>
     public ValidationContext(EstateModel model, RecordEnvelope record, FindingList findings)
+        : this(model, record, findings, findings)
+    {
+    }
+
+    internal ValidationContext(EstateModel model, RecordEnvelope record, FindingList findings, FindingList bodyFindings)
     {
         Model = model ?? throw new ArgumentNullException(nameof(model));
         Record = record ?? throw new ArgumentNullException(nameof(record));
         Findings = findings ?? throw new ArgumentNullException(nameof(findings));
-        Body = new BodyReader(record.Body, record.ExpectedPath + "#body", findings, record.Format);
+        BodyFindings = bodyFindings;
+        Body = new BodyReader(record.Body, record.ExpectedPath + "#body", bodyFindings, record.Format, findings);
     }
 
     /// <summary>The record format the record under validation states; its rules are the ones that apply.</summary>
@@ -84,6 +90,11 @@ public sealed class ValidationContext
 
     /// <summary>Where findings go.</summary>
     public FindingList Findings { get; }
+
+    // The full judgment receives both sets of findings in order. Draft preflight collects this set alone.
+    internal FindingList BodyFindings { get; }
+
+    internal bool CheckingBody => !ReferenceEquals(BodyFindings, Findings);
 
     /// <summary>Reader over the body.</summary>
     public BodyReader Body { get; }
@@ -146,8 +157,11 @@ public sealed class ValidationContext
         return target;
     }
 
-    /// <summary>Adds an error about the record as a whole.</summary>
+    /// <summary>Adds an error whose rule needs the estate's records or the record's signatures.</summary>
     public void Error(string code, string message) => Findings.Error(code, Location, message);
+
+    /// <summary>Adds an error whose rule reads only the record's own content.</summary>
+    internal void BodyError(string code, string message) => BodyFindings.Error(code, Location, message);
 
     /// <summary>Adds a warning about the record as a whole.</summary>
     public void Warning(string code, string message) => Findings.Warning(code, Location, message);

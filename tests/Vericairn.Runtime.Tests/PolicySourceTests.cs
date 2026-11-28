@@ -103,6 +103,46 @@ public sealed class PolicySourceTests
         Assert.Equal(commit, Git(clone, "rev-parse", "HEAD").Trim());
     }
 
+    [Theory]
+    [InlineData("symbolic")]
+    [InlineData("hard-link")]
+    public void AWorkingTreePolicyReadWithAnUntrackedLinkedFileIsUnavailable(string kind)
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows() && kind == "symbolic", "Creating symlinks needs Windows privileges.");
+        using var fixture = new PolicyFixture();
+        string clone = Path.Combine(fixture.Estate.Root, "fixture-repository");
+        Directory.CreateDirectory(clone);
+        Git(clone, "init", "--quiet");
+        File.WriteAllText(Path.Combine(clone, "guide.md"), "original\n");
+        Git(clone, "add", "guide.md");
+        Git(clone, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--no-gpg-sign", "-m", "Fixture source");
+        var resource = fixture.Add("resource", new JsonObject
+        {
+            ["kind"] = "repository", ["name"] = "Fixture repository", ["role"] = "Policy source fixture.",
+            ["location"] = new JsonObject { ["rootCommit"] = Git(clone, "rev-parse", "HEAD").Trim() }, ["visibility"] = "private",
+        });
+        RepositoryClones.Register(fixture.Estate.Estate.Id, resource.Id, clone);
+        string outside = Path.Combine(fixture.Estate.Root, "outside.md");
+        File.WriteAllText(outside, "text outside the clone\n");
+        string linked = Path.Combine(clone, "linked.md");
+        if (kind == "symbolic") File.CreateSymbolicLink(linked, outside);
+        else Assert.Equal(0, OperatingSystem.IsWindows() ? (CreateHardLinkW(linked, outside, 0) ? 0 : 1) : link(outside, linked));
+
+        // The working-tree copy keeps only the untracked file's name, so the read has no content for it and is unavailable,
+        // never complete with an empty file in its place.
+        Assert.False(new GitPolicySource().Read(fixture.Estate.Load(), resource, null).Complete);
+    }
+
+#pragma warning disable SYSLIB1054
+#pragma warning disable CA2101
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int link([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string existing, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string name);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkW(string name, string existing, nint security);
+#pragma warning restore CA2101
+#pragma warning restore SYSLIB1054
+
     private static string Git(string root, params string[] arguments)
     {
         var start = new ProcessStartInfo("git") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };

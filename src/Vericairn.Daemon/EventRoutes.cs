@@ -102,7 +102,7 @@ internal static class EventRoutes
             }
 
             (EventSubscription? subscription, IReadOnlyList<EventSelector> selectors, Problem? problem) = host.Service.OpenEventSelection(request.After, request.Filter, request.Selections,
-                request.Principal, device?.Identity, device?.PublicKey, device?.LocalNetwork == true ? RequestAuthenticator.LocalNetworkProfile : null);
+                request.Principal, device?.Identity, device?.PublicKey, device?.NetworkProfile);
             if (subscription is null)
             {
                 // A runtime keeping no journal is told from one briefly unable to read it: the first follows nothing, the second retries.
@@ -206,7 +206,7 @@ internal static class EventRoutes
         }
 
         (EventSubscription? subscription, Problem? problem) = host.Service.OpenEvents(after, filter, principal, device?.Identity, device?.PublicKey,
-            device?.LocalNetwork == true ? RequestAuthenticator.LocalNetworkProfile : null);
+            device?.NetworkProfile);
         if (subscription is null)
         {
             Problem refusal = problem ?? new Problem("refused", "The event stream is unavailable.", []);
@@ -362,7 +362,7 @@ internal static class EventRoutes
         }
 
         (EventEnvelope? envelope, Problem? problem) = host.Service.EventByKeyFor(key, principal, device?.Identity, device?.PublicKey,
-            device?.LocalNetwork == true ? RequestAuthenticator.LocalNetworkProfile : null);
+            device?.NetworkProfile);
         if (problem is not null)
         {
             return Refused(context, device, problem.Code == "unavailable" ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status401Unauthorized, problem);

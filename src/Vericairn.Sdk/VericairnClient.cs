@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
@@ -88,10 +89,10 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
         asyncHttp = AsyncTransport(chain, http.BaseAddress);
     }
 
-    private VericairnClient(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout, TimeProvider clock)
+    private VericairnClient(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout, TimeProvider clock, RelayRoute? route = null, Func<Uri, CancellationToken, Task<WebSocket>>? relayConnect = null)
     {
-        Endpoint = new DaemonEndpoint("local-network", connection.Address, 0, string.Empty, string.Empty, ApiVersion.Current);
-        Transport = "local-network";
+        Transport = route is null ? "local-network" : "relay";
+        Endpoint = new DaemonEndpoint(Transport, connection.Address, 0, string.Empty, string.Empty, ApiVersion.Current);
         OperationTimeout = _ => timeout;
         OperationClock = clock;
         credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey));
@@ -99,9 +100,10 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
         var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
+            UseProxy = false,
             // The synchronous client's timeout and the async operation's deadline already cover connection setup.
             ConnectTimeout = Timeout.InfiniteTimeSpan,
-            ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken),
+            ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken, route: route, relayConnect: relayConnect),
         };
 
         // TLS and the identity proof happen in the connect callback, so the requests themselves go over that stream as plain HTTP,
@@ -110,8 +112,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
         var asyncHandler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
+            UseProxy = false,
             ConnectTimeout = timeout ?? TimeSpan.FromSeconds(30),
-            ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken, classifyRefusal: true),
+            ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken, classifyRefusal: true, route: route, relayConnect: relayConnect),
         };
         asyncHttp = new HttpClient(new SigningHandler(signer, asyncHandler, connection), disposeHandler: true)
             { BaseAddress = http.BaseAddress, Timeout = Timeout.InfiniteTimeSpan };
@@ -151,6 +154,28 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
 
         return new VericairnClient(connection, signer, timeout, clock);
     }
+
+    /// <summary>Connects through the paired runtime's relay using the same pinned identity and signed operations.</summary>
+    public static VericairnClient ViaRelay(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout = null) =>
+        ViaRelay(connection, signer, timeout, null);
+
+    internal static VericairnClient ViaRelay(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout,
+        Func<Uri, CancellationToken, Task<WebSocket>>? connect)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(signer);
+        if (connection.Relay is not { } route || !RuntimeConnection.TryParseAddress(connection.Address, out _, out _))
+        {
+            throw new ArgumentException("This paired connection has no usable relay route.", nameof(connection));
+        }
+
+        return new VericairnClient(connection, signer, timeout, TimeProvider.System, route, connect);
+    }
+
+    /// <summary>Fetches a new ticket for this client's authenticated device over an existing direct or relayed route.</summary>
+    public Task<RelayRoute?> RefreshRelayAsync(CancellationToken cancellationToken = default) =>
+        RunOperationAsync(nameof(RefreshRelayAsync), token => GetAsync<RelayRoute>(RelayProtocol.TicketPath, allowNotFound: true, cancellationToken: token),
+            false, OperationTimeout?.Invoke(nameof(RefreshRelayAsync)), cancellationToken);
 
     /// <summary>
     /// The signed HTTP transport of a paired connection, from 0.9.2, for network MCP's bridge (MCP-03): mutual TLS with a certificate

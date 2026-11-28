@@ -69,7 +69,7 @@ public sealed class CommunicationSettingType : IRecordType
         body.NoOtherKeys();
         if ((scope == "estate" && recipient is not null) || (scope != "assignment" && assignment is not null))
         {
-            context.Error("communication.scope", "Estate defaults have no recipient; only assignment overrides name an assignment.");
+            context.BodyError("communication.scope", "Estate defaults have no recipient; only assignment overrides name an assignment.");
         }
 
         if (recipient is not null && context.Principal(recipient) is { } person && EstateModel.BodyString(person, "kind") != "human")
@@ -103,7 +103,7 @@ public sealed class CommunicationSettingType : IRecordType
 
         if (authority is null && authorityHash is not null)
         {
-            context.Error("communication.authority", "An authority hash requires its delegation id.");
+            context.BodyError("communication.authority", "An authority hash requires its delegation id.");
         }
 
         ValidateRevision(context, Name, ["scope", "recipient", "assignment"]);

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>vericairn-relay</AssemblyName>
+    <Description>The Vericairn relay joins a paired device with its runtime and forwards their encrypted bytes.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The plain SDK with the ASP.NET Core framework, as the daemon uses: the web SDK would publish its lock file and a
+         static-assets manifest beside the binary. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <InternalsVisibleTo Include="Vericairn.Daemon.Tests" />
+    <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>

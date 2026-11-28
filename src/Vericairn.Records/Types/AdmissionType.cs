@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Records.Types;
 
@@ -28,6 +30,7 @@ public sealed class AdmissionType : IRecordType
         new("status", "admitted|revoked", true, "admitted, or revoked by a superseding record."),
         new("note", "string", true, "Why."),
         new("revokedAt", FieldKinds.Timestamp, false, "When the admission ended; required when revoked; records signed by the device at or after this time are invalid."),
+        new(AndroidAttestationEvidence.Field, "object", false, "Runtime-verified Android hardware presence evidence for the exact first device record named by this admission.", 2),
     ];
 
     /// <inheritdoc />
@@ -39,6 +42,7 @@ public sealed class AdmissionType : IRecordType
         string? status = body.Enum("status", true, "admitted", "revoked");
         body.Text("note", true, 2000);
         string? revokedAt = body.Timestamp("revokedAt", status == "revoked");
+        BodyReader? attestation = body.Since(2, AndroidAttestationEvidence.Field) ? body.Nested(AndroidAttestationEvidence.Field, false) : null;
         body.NoOtherKeys();
         if (status == "admitted" && revokedAt is not null)
         {
@@ -60,9 +64,23 @@ public sealed class AdmissionType : IRecordType
             context.Error("admission.principal", "The admission's principal must be the device's principal.");
         }
 
+        if (attestation is not null)
+        {
+            AndroidAttestationEvidence.Validate(attestation);
+            // The device record a pairing writes in the same batch is not yet in the model the early check reads (FIX-158), so the
+            // device's own fields are judged in the full judgment; the admission's own fields are judged in both.
+            bool judgeDevice = !context.CheckingBody || device is not null;
+            if (status != "admitted" || context.Record.Supersedes is not null || judgeDevice && (device is not { Type: "device", Supersedes: null }
+                || EstateModel.BodyString(device, "platform") != "android"
+                || EstateModel.BodyString(device, "custody") != DeviceKeyStores.AndroidKeystoreKind
+                || EstateModel.BodyString(device, "presence") != "required"
+                || EstateModel.BodyString(device, "presenceVerification") != DeviceRecords.AndroidKeyAttestation))
+                body.Error("admission.attestation-device", AndroidAttestationEvidence.Field, "Android attestation belongs on an initial admission of the original Android presence device record.");
+        }
+
         if (status == "revoked" && context.Record.Supersedes is null)
         {
-            context.Error("admission.revoke", "A revocation supersedes the admission it ends.");
+            context.BodyError("admission.revoke", "A revocation supersedes the admission it ends.");
         }
     }
 }

@@ -22,19 +22,9 @@ internal static class WorkspaceGitScope
             throw new IOException("Linked Git administration is not a scope baseline.");
         }
 
-        if ((attributes & FileAttributes.Directory) == 0)
-        {
-            string pointer = Read(directory, 4096).Trim();
-            if (!pointer.StartsWith("gitdir: ", StringComparison.Ordinal))
-            {
-                throw new IOException("The Git directory is unavailable.");
-            }
-
-            directory = Path.GetFullPath(pointer[8..], workspace);
-        }
-
-        string common = Path.Combine(directory, "commondir");
-        return File.Exists(common) ? Path.GetFullPath(Read(common, 4096).Trim(), directory) : directory;
+        if ((attributes & FileAttributes.Directory) == 0 || Path.Exists(Path.Combine(directory, "commondir")))
+            throw new IOException("Linked Git administration is not a scope baseline.");
+        return directory;
     }
 
     internal static string Changes(string? directory, string branch, string? baseline, TimeSpan deadline, HashSet<string> changed)
@@ -45,47 +35,30 @@ internal static class WorkspaceGitScope
         }
 
         var watch = Stopwatch.StartNew();
-        string head = Head(directory, "refs/heads/" + branch);
-        string isolated = Path.Combine(Path.GetTempPath(), "vericairn-scope-" + Guid.NewGuid().ToString("N"));
-        try
+        using GitHardening hardening = GitHardening.Create();
+        AcquisitionGitView view = hardening.Acquire(directory);
+        string isolated = view.Directory;
+        string head = Head(isolated, "refs/heads/" + branch);
+        string[] commits = Git(["rev-list", "--max-count=10001", head, "^" + baseline, "--"]).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (commits.Length > 10000 || commits.Any(c => !ObjectId(c)))
         {
-            // A private bare repository sees only the pinned object storage and explicit object ids. In particular it never
-            // loads config, config.worktree, grafts, replace refs, attributes or hooks from the agent's repository.
-            Directory.CreateDirectory(Path.Combine(isolated, "objects"));
-            Directory.CreateDirectory(Path.Combine(isolated, "refs"));
-            File.WriteAllText(Path.Combine(isolated, "HEAD"), "ref: refs/heads/unused\n");
-            File.WriteAllText(Path.Combine(isolated, "config"), baseline!.Length == 64
-                ? "[core]\nrepositoryformatversion = 1\nbare = true\n[extensions]\nobjectformat = sha256\n"
-                : "[core]\nrepositoryformatversion = 0\nbare = true\n");
-            File.WriteAllText(Path.Combine(isolated, "empty-config"), string.Empty);
-            string[] commits = Git(["rev-list", "--max-count=10001", head, "^" + baseline, "--"]).Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            if (commits.Length > 10000 || commits.Any(c => !ObjectId(c)))
+            throw new IOException("The committed scope inventory exceeded its limit.");
+        }
+
+        // Compare the head even when it is an ancestor of the baseline, and every reachable new commit, including side
+        // branches of merges. An intermediate outside change remains visible when a later commit restores the baseline.
+        string comparisons = string.Concat(commits.Prepend(head).Distinct(StringComparer.Ordinal).Select(c => baseline + " " + c + "\n"));
+        string paths = Git(["diff-tree", "--stdin", "--no-commit-id", "--name-only", "-r", "-z", "--no-renames", "--no-ext-diff", "--no-textconv"], comparisons);
+        foreach (string path in paths.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!WorkspaceScopeAudit.Relative(path) || path.Contains('\ufffd', StringComparison.Ordinal) || changed.Count >= 100_000)
             {
-                throw new IOException("The committed scope inventory exceeded its limit.");
+                throw new IOException("The committed scope inventory contains an unreadable name or exceeded its limit.");
             }
 
-            // Compare the head even when it is an ancestor of the baseline, and every reachable new commit, including side
-            // branches of merges. An intermediate outside change remains visible when a later commit restores the baseline.
-            string comparisons = string.Concat(commits.Prepend(head).Distinct(StringComparer.Ordinal).Select(c => baseline + " " + c + "\n"));
-            string paths = Git(["diff-tree", "--stdin", "--no-commit-id", "--name-only", "-r", "-z", "--no-renames", "--no-ext-diff", "--no-textconv"], comparisons);
-            foreach (string path in paths.Split('\0', StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (!WorkspaceScopeAudit.Relative(path) || path.Contains('\ufffd', StringComparison.Ordinal) || changed.Count >= 100_000)
-                {
-                    throw new IOException("The committed scope inventory contains an unreadable name or exceeded its limit.");
-                }
-
-                changed.Add(path);
-            }
-            return head;
+            changed.Add(path);
         }
-        finally
-        {
-            if (Directory.Exists(isolated))
-            {
-                WorkspaceCleanup.Delete(isolated);
-            }
-        }
+        return head;
 
         string Git(string[] arguments, string input = "")
         {
@@ -113,8 +86,7 @@ internal static class WorkspaceGitScope
             }
 
             info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            info.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(isolated, "empty-config");
-            info.Environment["GIT_OBJECT_DIRECTORY"] = Path.Combine(directory, "objects");
+            info.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(hardening.Control, "config");
             info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
             info.Environment["GIT_NO_LAZY_FETCH"] = "1";
             info.Environment["GIT_TERMINAL_PROMPT"] = "0";

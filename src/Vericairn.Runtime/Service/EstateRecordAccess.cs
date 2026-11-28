@@ -17,7 +17,7 @@ internal sealed class EstateRecordAccess(
     object gate,
     EstateSession session,
     Func<RecordDraft, EstateModel, WriteOutcome> writeLocked,
-    Func<RecordDraft, EstateModel, (AuthoredRecord? Record, string? Refusal)> authorLocked,
+    Func<RecordDraft, EstateModel, (AuthoredRecord? Record, Problem? Problem)> authorLocked,
     Func<IReadOnlyList<AuthoredRecord>, string, string?, (IReadOnlyList<RecordWritten> Written, Problem? Problem)> storeTogetherLocked,
     Func<IReadOnlyList<AuthoredRecord>, EstateModel> loadWith,
     Func<EstateModel, Problem?> requestDeviceRefusal,
@@ -38,7 +38,7 @@ internal sealed class EstateRecordAccess(
     // These operations require the caller to hold Gate, just as the underlying record boundary does.
     internal WriteOutcome WriteLocked(RecordDraft draft, EstateModel model) => writeLocked(draft, model);
 
-    internal (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel model) => authorLocked(draft, model);
+    internal (AuthoredRecord? Record, Problem? Problem) AuthorLocked(RecordDraft draft, EstateModel model) => authorLocked(draft, model);
 
     internal (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder) =>
         storeTogetherLocked(records, purpose, workOrder);

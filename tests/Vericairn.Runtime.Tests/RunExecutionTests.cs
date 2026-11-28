@@ -149,7 +149,12 @@ public class RunExecutionTests
         run.Settled(started.Run);
         AgentRuns.Run found = AgentRuns.Find(run.Estate.Load(), started.Run)!;
         JsonObject changed = JsonNode.Parse(found.Latest.Body.GetRawText())!.AsObject();
-        if (remove) changed.Remove("execution");
+        if (remove)
+        {
+            // Keep the proposed body consistent so the locked judgment checks it against the previous revision.
+            changed.Remove("executionObserved");
+            changed.Remove("execution");
+        }
         else changed["execution"]!["requested"]!["model"] = "model-b";
         WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("operation", run.Estate.OperatorId, RunEstate.Json(changed.ToJsonString()),
             Subject: "assignment:" + run.Assignment, Supersedes: found.Latest.Id));

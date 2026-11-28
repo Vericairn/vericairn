@@ -48,6 +48,8 @@ public sealed class AuthorityType : IRecordType
         PolicyAuthority.ValidateGrant(context);
         DispatchAuthority.ValidateGrant(context);
         body.NoOtherKeys();
+        if (context.CheckingBody) return;
+
         if (grantee is not null && context.RequireReference("grantee", grantee, "principal") is null)
         {
             return;

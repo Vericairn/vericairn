@@ -48,6 +48,7 @@ internal sealed class McpServeCommand : Command, ITextOutputCommand
         var server = new McpServer(registry, CommandContext.VersionText())
         {
             Subscriptions = new McpResourceWatch(new McpApiEventSource(api, actingAs)),
+            ListenSubscriptions = () => new McpResourceWatch(new McpApiEventSource(api, actingAs, keepListCursor: true)),
         };
         context.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
         // From 0.9.4 (ID-11): an agent session acting for a principal registers its presence with the daemon, and this server, its

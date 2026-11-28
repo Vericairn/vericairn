@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers.Text;
+using System.Globalization;
+using System.Security.Cryptography;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Tests;
+using Vericairn.Runtime.Service;
 using Vericairn.Sdk;
 
 namespace Vericairn.Daemon.Tests;
 
 /// <summary>
 /// A phone pairs two keys under one code: its request key, which signs requests unattended, and its presence key, a second device of
-/// the same principal stating presence required, recorded and admitted with it under the same administrator's authority. An
+/// the same principal stating declared presence for iOS, recorded and admitted with it under the same administrator's authority. An
 /// existing pairing adds its presence key with a new code for the same principal; custody that cannot require presence claims none.
 /// </summary>
 [Collection("daemon")]
@@ -20,6 +26,54 @@ public class PresenceDevicePairingTests
     public PresenceDevicePairingTests()
     {
         DaemonTestHome.Ensure();
+    }
+
+    [Fact]
+    public void AnEarlierPhoneThatAsksForPresencePairsOnlyItsRequestKey()
+    {
+        using var estate = new TestEstate(recordFormat: 3);
+        using EstateService service = EstateService.Open(estate.Root);
+        WriteOutcome operatorDevice = service.DeviceCreate(new(estate.OperatorId, "Operator laptop", "file"));
+        Assert.True(operatorDevice.Ok, operatorDevice.Problem?.Message);
+        Assert.True(service.DeviceAdmit(new(operatorDevice.Written!.Id, estate.OperatorId, "The first authority.")).Ok);
+        IReadOnlyList<string> profiles = ["local-network"];
+        (PairingAuthority? issuer, string? refusal) = service.PairingIssuer(estate.OperatorId, estate.OperatorId, profiles);
+        Assert.True(issuer is not null, refusal);
+
+        var registry = new PairingRegistry(TimeProvider.System, service.PairingAuthorityRefusal);
+        (string? code, PairingRegistry.Pairing? pairing, string? problem) = registry.Issue(estate.OperatorId, issuer, profiles);
+        Assert.True(pairing is not null, problem);
+        (byte[] runtimeKey, byte[] deviceKey) = PairingProtocol.Keys(code!);
+        using ECDsa runtimeIdentity = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string identity = RecordSigning.EncodePublicKey(runtimeIdentity.ExportSubjectPublicKeyInfo());
+        string certificate = "sha256:" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
+        string nonce = PairingProtocol.NewNonce();
+        // This is a 0.9.0–0.9.4 phone with presence custody, before the hello carried presenceAttestation.
+        var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, certificate)) { Presence = true };
+        Assert.Same(pairing, registry.Hello(hello, Base64Url.DecodeFromChars(hello.Mac), certificate, "192.0.2.1").Pairing);
+        (PairingPlan plan, PairingChallenge challenge) = DaemonRoutes.Challenge(service, pairing, hello, identity, certificate);
+        Assert.Null(challenge.PresenceRecord);
+        Assert.Null(challenge.PresenceAttestation);
+        Assert.True(PairingProtocol.Matches(PairingProtocol.ChallengeMac(runtimeKey, hello, challenge), challenge.Mac));
+        Assert.Null(registry.Open(pairing, hello, challenge, plan));
+
+        using ECDsa requestKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string key = RecordSigning.EncodePublicKey(requestKey.ExportSubjectPublicKeyInfo());
+        var request = new PairingDevice("Legacy phone", "android", DeviceKeyStores.AndroidKeystoreKind, key, "none");
+        DateTimeOffset at = DateTimeOffset.Parse(challenge.At, CultureInfo.InvariantCulture);
+        string hash = DeviceRecords.Hash(DeviceRecords.Draft(challenge.Principal, challenge.Record, at, challenge.Format,
+            DeviceRecords.Body(challenge.Principal, request.Name, request.Platform, request.Custody, key, profiles, challenge.Format, request.Presence)));
+        string signature = Base64Url.EncodeToString(requestKey.SignHash(RecordSigning.Digest(hash)));
+        var confirm = new PairingConfirm(challenge.RuntimeNonce, request, signature, string.Empty);
+        confirm = confirm with { Mac = PairingProtocol.ConfirmMac(deviceKey, hello, challenge, confirm) };
+        Assert.Equal(plan, registry.Confirm(confirm).Exchange?.Plan);
+        (WriteOutcome written, WriteOutcome? admitted) = service.PairDevice(plan, profiles, request, signature, issuer, "Paired an earlier phone.");
+
+        Assert.True(written.Ok, written.Problem?.Message);
+        Assert.True(admitted?.Ok, admitted?.Problem?.Message);
+        EstateModel model = estate.Load();
+        Assert.Equal(2, model.Current("device").Count());
+        Assert.Equal("none", EstateModel.BodyString(model.ById[challenge.Record], "presence"));
     }
 
     [Fact]
@@ -39,7 +93,7 @@ public class PresenceDevicePairingTests
         RecordEnvelope request = model.ById[phone.Device];
         RecordEnvelope second = model.ById[phone.PresenceDevice!];
         Assert.Equal((person, person), (EstateModel.BodyString(request, "principal"), EstateModel.BodyString(second, "principal")));
-        Assert.Equal(("none", "required"), (EstateModel.BodyString(request, "presence"), EstateModel.BodyString(second, "presence")));
+        Assert.Equal(("none", "declared"), (EstateModel.BodyString(request, "presence"), EstateModel.BodyString(second, "presence")));
         Assert.Equal(("file-owner-only", DeviceKeyStores.IosSecureEnclaveKind), (EstateModel.BodyString(request, "custody"), EstateModel.BodyString(second, "custody")));
         Assert.Equal(phone.PresenceDevicePublicKey, EstateModel.BodyString(second, "publicKey"));
         Assert.Equal(["local-network"], second.Body.GetProperty("profiles").EnumerateArray().Select(p => p.GetString()));
@@ -121,7 +175,7 @@ public class PresenceDevicePairingTests
         Assert.NotNull(added.PresenceDevice);
         EstateModel model = harness.Estate.Load();
         Assert.Equal(before + 1, model.Current("device").Count());
-        Assert.Equal("required", EstateModel.BodyString(model.ById[added.PresenceDevice!], "presence"));
+        Assert.Equal("declared", EstateModel.BodyString(model.ById[added.PresenceDevice!], "presence"));
         Assert.Equal(person, EstateModel.BodyString(model.ById[added.PresenceDevice!], "principal"));
         Assert.Equal("admitted", harness.Host.Service.Standing(added.PresenceDevice!)!.Admission);
         Assert.Equal(added.PresenceDevice, Assert.Single(harness.Connections.List()).PresenceDevice);

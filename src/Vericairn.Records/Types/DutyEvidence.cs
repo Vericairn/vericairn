@@ -27,7 +27,7 @@ internal static partial class DutyRecords
             BodyReader? occurrence = duty.Nested("occurrence", true);
             if (policy is not null) Occurrence(context, occurrence, policy, rule, subject);
             string identity = policy?.Id + ":" + rule + ":" + (subject is null ? "?" : PolicyRecords.Identity(context.Model, subject)) + ":" + (occurrence is null ? "?" : CanonicalJson.Serialize(occurrence.Element));
-            if (!seen.Add(identity)) duty.Error("duty.duplicate", "occurrence", "A result names an occurrence only once, even across subject revisions.");
+            if (!seen.Add(identity)) duty.RelationshipError("duty.duplicate", "occurrence", "A result names an occurrence only once, even across subject revisions.");
             Scope(context, duty.Nested("scope", true));
             duty.Text("coverage", true, 8000);
             Proofs(context, duty, policy is null ? default : Rule(policy, rule));
@@ -39,7 +39,7 @@ internal static partial class DutyRecords
     {
         if (!context.Body.Since(3, "read")) return;
         PolicyRecords.References(context, context.Body, "read", false);
-        if (context.Body.Has("read") && context.Record.Subject?.Type != "result") context.Error("review.read", "The ordinary read list belongs only to result reviews; goal reviews retain conditions.read.");
+        if (context.Body.Has("read") && context.Record.Subject?.Type != "result") context.BodyError("review.read", "The ordinary read list belongs only to result reviews; goal reviews retain conditions.read.");
     }
 
     private static void Scope(ValidationContext context, BodyReader? scope)
@@ -54,8 +54,8 @@ internal static partial class DutyRecords
             repository.NoOtherKeys();
             if (record is not null)
             {
-                if (EstateModel.BodyString(record, "kind") != "repository") repository.Error("duty.repository", "record", "Repository scope names a repository resource.");
-                if (!seen.Add(PolicyRecords.Identity(context.Model, record))) repository.Error("duty.duplicate", "record", "Repository scope names each identity once.");
+                if (EstateModel.BodyString(record, "kind") != "repository") repository.RelationshipError("duty.repository", "record", "Repository scope names a repository resource.");
+                if (!seen.Add(PolicyRecords.Identity(context.Model, record))) repository.RelationshipError("duty.duplicate", "record", "Repository scope names each identity once.");
             }
         }
         IReadOnlyList<string> objects = scope.StringArray("objects", true, true, 71) ?? [];
@@ -97,7 +97,7 @@ internal static partial class DutyRecords
             proof.NoOtherKeys();
         }
         foreach (JsonElement clause in clauses)
-            if (!proofs.Any(p => PolicyRecords.Text(p.Element, "clause") == PolicyRecords.Text(clause, "key"))) duty.Error("duty.proofs", "proofs", "Every declared clause has exactly one binding.");
+            if (!proofs.Any(p => PolicyRecords.Text(p.Element, "clause") == PolicyRecords.Text(clause, "key"))) duty.RelationshipError("duty.proofs", "proofs", "Every declared clause has exactly one binding.");
     }
 
     internal static void Dispositions(ValidationContext context, RecordEnvelope? previous)
@@ -114,9 +114,9 @@ internal static partial class DutyRecords
             disposition.Enum("disposition", true, "ended-unmet");
             disposition.Text("reason", true, 4000);
             disposition.NoOtherKeys();
-            if (previous is null || policy is null || !context.Model.Chain(previous).Contains(policy.Id, StringComparer.Ordinal)) disposition.Error("duty.disposition", "policy", "A revision disposes only of an occurrence from its own retained history.");
+            if (previous is null || policy is null || !context.Model.Chain(previous).Contains(policy.Id, StringComparer.Ordinal)) disposition.RelationshipError("duty.disposition", "policy", "A revision disposes only of an occurrence from its own retained history.");
             else if (Ended(context.Model, previous, disposition.Element) || (due is not null && Completed(context.Model, policy, rule, PolicyRecords.Property(disposition.Element, "occurrence"), due.Value, context.Record.AtTime)))
-                disposition.Error("duty.disposition", "occurrence", "A disposition cannot repeat ended debt or relabel completed work as unmet.");
+                disposition.RelationshipError("duty.disposition", "occurrence", "A disposition cannot repeat ended debt or relabel completed work as unmet.");
         }
         if (previous is null) return;
         bool retired = EstateModel.BodyString(context.Record, "state") == "retired";
