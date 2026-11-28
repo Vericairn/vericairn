@@ -146,7 +146,11 @@ public sealed class RepositoryProgramIsolationTests
             calls++;
             Assert.StartsWith(Path.Combine(Path.GetTempPath(), "vericairn-git-"), info.WorkingDirectory, StringComparison.Ordinal);
             Assert.DoesNotContain(info.ArgumentList, argument => argument.Contains(probe.Repository, StringComparison.Ordinal));
-            Assert.Equal("1", info.Environment["GIT_CONFIG_NOSYSTEM"]);
+            // From 0.9.5 (CODE-88) one read sees the machine's own configuration, for the line-ending values alone, outside the repository.
+            string[] request = [.. info.ArgumentList.SkipWhile(argument => argument != "config")];
+            bool lineEndings = request.Length == 4 && request[1] is "--system" or "--global" && request[2] == "--get" && request[3] is "core.autocrlf" or "core.eol";
+            if (lineEndings) Assert.False(info.Environment.ContainsKey("GIT_CONFIG_NOSYSTEM"));
+            else Assert.Equal("1", info.Environment["GIT_CONFIG_NOSYSTEM"]);
             return BoundedProcess.Run(info, TestTiming.HangTimeout);
         });
         Assert.Equal("main", adapter.Inspect(probe.Repository).Branch);

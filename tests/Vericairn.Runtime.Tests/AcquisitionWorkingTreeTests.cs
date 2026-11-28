@@ -193,6 +193,23 @@ public sealed class AcquisitionWorkingTreeTests : IDisposable
     }
 
     [Fact]
+    public void ACloneCheckedOutWithLineEndingConversionReadsCleanThroughTheCopy()
+    {
+        string repository = Repository();
+        File.WriteAllText(Path.Combine(repository, "lines.txt"), "one\ntwo\n");
+        RunEstate.Git(repository, "add", "lines.txt");
+        RunEstate.Git(repository, "commit", "-qm", "Add lines");
+        string converted = Path.Combine(scratch, "converted");
+        RunEstate.Git(scratch, "-c", "core.autocrlf=true", "clone", "--no-hardlinks", "--quiet", repository, converted);
+        RunEstate.Git(converted, "config", "core.autocrlf", "true");
+        Assert.Contains("\r\n", File.ReadAllText(Path.Combine(converted, "lines.txt")), StringComparison.Ordinal);
+
+        // The copy is compared with the line-ending setting Git would use on the real files, so a CRLF checkout of LF content reads
+        // clean. A machine-wide setting, as Git for Windows' system configuration makes, is carried the same way.
+        Assert.True(new GitCommandAdapter().Inspect(converted).Clean);
+    }
+
+    [Fact]
     public void AnObjectStoreThatSharesFilesNamesAnIndependentCloneAsTheRemedy()
     {
         string repository = Repository();

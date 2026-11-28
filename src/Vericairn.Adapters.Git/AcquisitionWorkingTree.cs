@@ -13,6 +13,9 @@ internal static partial class AcquisitionWorkingTree
 {
     internal const long MaximumWorkingFileBytes = 64L * 1024 * 1024;
     private const long MaximumWorkingBytes = 512L * 1024 * 1024;
+    // Untracked content is copied only within a budget of its own, so build outputs never use up the budget tracked files need;
+    // past it an untracked file keeps only its name.
+    private const long MaximumUntrackedBytes = 64L * 1024 * 1024;
     private const long MaximumObjectBytes = 4L * 1024 * 1024 * 1024;
     private const int MaximumEntries = 100_000;
     private const int MaximumDepth = 128;
@@ -36,6 +39,7 @@ internal static partial class AcquisitionWorkingTree
         var watch = Stopwatch.StartNew();
         int entries = 0;
         long totalBytes = 0;
+        long untrackedBytes = 0;
         long maximumBytes = workingTree ? MaximumWorkingBytes : MaximumObjectBytes;
         long maximumFileBytes = workingTree ? MaximumWorkingFileBytes : MaximumObjectBytes;
         byte[] buffer = new byte[64 * 1024];
@@ -124,9 +128,24 @@ internal static partial class AcquisitionWorkingTree
                     continue;
                 }
 
-                using SafeFileHandle file = directory.OpenFile(leaf, info, out int mode);
+                SafeFileHandle file;
+                int mode;
+                try
+                {
+                    file = directory.OpenFile(leaf, info, out mode);
+                }
+                catch (IOException) when (mayWithhold)
+                {
+                    // Windows reports a file's link count only once it is open: an untracked hard-linked file keeps only its name.
+                    Withhold(next);
+                    continue;
+                }
+
+                using (file)
+                {
                 using var source = new FileStream(file, FileAccess.Read, bufferSize: 1);
-                if (source.Length > maximumFileBytes || source.Length > maximumBytes - totalBytes)
+                long budget = mayWithhold ? MaximumUntrackedBytes - untrackedBytes : maximumBytes - totalBytes;
+                if (source.Length > maximumFileBytes || source.Length > budget)
                 {
                     if (!mayWithhold) throw new IOException("the file size exceeds the acquisition limit.");
                     Withhold(next);
@@ -140,10 +159,10 @@ internal static partial class AcquisitionWorkingTree
                     while (true)
                     {
                         CheckTime();
-                        int read = source.Read(buffer, 0, (int)Math.Min(buffer.Length, Math.Min(maximumFileBytes - copied, maximumBytes - totalBytes - copied) + 1));
+                        int read = source.Read(buffer, 0, (int)Math.Min(buffer.Length, Math.Min(maximumFileBytes - copied, budget - copied) + 1));
                         if (read == 0) break;
                         copied += read;
-                        if (copied > maximumFileBytes || totalBytes + copied > maximumBytes)
+                        if (copied > maximumFileBytes || copied > budget)
                         {
                             if (!mayWithhold) throw new IOException("the file grew beyond the acquisition limit.");
                             grew = true;
@@ -161,7 +180,9 @@ internal static partial class AcquisitionWorkingTree
                     continue;
                 }
 
-                totalBytes += copied;
+                if (mayWithhold) untrackedBytes += copied;
+                else totalBytes += copied;
+                }
                 CheckTime();
                 if (!OperatingSystem.IsWindows() && (mode & 0x40) != 0)
                     File.SetUnixFileMode(next, File.GetUnixFileMode(next) | UnixFileMode.UserExecute);

@@ -178,6 +178,15 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         List<string> options = ["--git-dir=" + view.Directory, "--work-tree=" + mirror, "-c", "core.bare=false"];
         if (File.Exists(Path.Combine(view.Directory, "info", "sparse-checkout")))
             options.AddRange(["-c", "core.sparseCheckout=true"]);
+        // Line endings follow the machine's own Git setting, as Git's status on the real files would: Git for Windows sets
+        // core.autocrlf in its system configuration, which this read otherwise ignores. Only these two plain values are carried, and
+        // the repository's own setting, carried after them, wins.
+        foreach (string setting in MachineLineEndings(hardening))
+        {
+            options.Add("-c");
+            options.Add(setting);
+        }
+
         foreach (string setting in settings.Comparison)
         {
             options.Add("-c");
@@ -233,6 +242,36 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
             }
             return (gitlinks, sparseIndex, files);
         }
+    }
+
+    /// <summary>
+    /// The machine's system and global core.autocrlf and core.eol, the global value over the system one, each only when it is one of
+    /// Git's plain values. Read by name from those configuration files alone, outside any repository; nothing they name is run.
+    /// </summary>
+    private List<string> MachineLineEndings(GitHardening hardening)
+    {
+        var settings = new List<string>();
+        foreach ((string name, string[] allowed) in new[] { ("core.autocrlf", new[] { "true", "false", "input" }), ("core.eol", new[] { "lf", "crlf", "native" }) })
+        {
+            string? value = null;
+            foreach (string scope in new[] { "--system", "--global" })
+            {
+                var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+                    CreateNoWindow = true, WorkingDirectory = hardening.Control };
+                hardening.Apply(info, ["config", scope, "--get", name]);
+                // The one read that sees the machine's configuration: the hardened environment with only the system and global files
+                // unblocked, outside any repository, asking for one named value; `git config --get` runs nothing a file names.
+                info.Environment.Remove("GIT_CONFIG_NOSYSTEM");
+                info.Environment.Remove("GIT_CONFIG_GLOBAL");
+                ProcessResult read = run(info);
+                string found = read.Outcome == ProcessOutcome.Exited && read.ExitCode == 0 ? read.StandardOutput.Trim().ToLowerInvariant() : "";
+                if (allowed.Contains(found, StringComparer.Ordinal)) value = found;
+            }
+
+            if (value is not null) settings.Add(name + "=" + value);
+        }
+
+        return settings;
     }
 
     private int Git(GitHardening hardening, string path, out string output, params string[] arguments) => Git(hardening, path, null, out output, out _, arguments);
