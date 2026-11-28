@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Buffers.Text;
+using System.Text;
 using System.Globalization;
 using System.IO.Pipes;
 using System.Net;
@@ -445,6 +446,27 @@ public class DaemonTests
 
         Assert.Throws<PlatformNotSupportedException>(() => ServiceInstaller.Plan("other", root, "01ESTATE", launcher, "/home/someone", "/home/someone/.config/vericairn", null));
         Assert.NotEmpty(ServiceInstaller.CurrentLauncher());
+    }
+
+    [Theory]
+    [InlineData("macos", "/home/one & two")]
+    [InlineData("linux", "/home/one %n $HOME")]
+    [InlineData("windows", @"C:\Vericairn homes\%USERNAME%")]
+    public void ServicePlansCarryTheSelectedHomeAndNameItInTheLabel(string platform, string home)
+    {
+        ServicePlan Plan(string selected) => ServiceInstaller.Plan(platform, "/estate", "01ESTATE", ["vericairn"], "/home/user", selected, 1000);
+        ServicePlan plan = Plan(home);
+
+        string setting = platform switch
+        {
+            "macos" => "<key>VERICAIRN_HOME</key><string>/home/one &amp; two</string>",
+            "linux" => "Environment=\"VERICAIRN_HOME=/home/one %%n $HOME\"",
+            _ => "--service-home " + Base64Url.EncodeToString(Encoding.UTF8.GetBytes(home)),
+        };
+        Assert.Contains(setting, plan.UnitContent, StringComparison.Ordinal);
+        Assert.Equal(plan.Label, Plan(home).Label);
+        Assert.NotEqual(plan.Label, Plan(home + "-another").Label);
+        Assert.NotEqual(plan.UnitPath, Plan(home + "-another").UnitPath);
     }
 
     /// <summary>A client of the daemon's loopback TLS, pinned to the runtime certificate as the SDK pins it, that signs nothing itself.</summary>
