@@ -475,10 +475,11 @@ internal sealed class RunAdmissionService(
             else
             {
                 // Routing's assignment and the run's intent are stored together, or neither is.
-                (AuthoredRecord? authored, string? unsigned) = recordAccess.AuthorLocked(draft, model);
+                (AuthoredRecord? authored, Problem? refusal) = recordAccess.AuthorLocked(draft, model);
                 if (authored is null)
                 {
-                    return Refused(RunProblem(pending, "not-started", "refused", $"Not recorded: {unsigned} Nothing was recorded."));
+                    string message = $"Not recorded: {refusal!.Message} Nothing was recorded.";
+                    return Refused(new RunResponse(pending, "not-started", message, false, Problem: refusal with { Message = message }));
                 }
 
                 (IReadOnlyList<RecordWritten> stored, Problem? problem) = recordAccess.StoreTogetherLocked([routed, authored], $"routing's assignment of work order {plan.Key} to {plan.AgentName} and the intent of its run {run}", routed.Envelope.Subject?.Id);

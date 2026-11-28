@@ -184,7 +184,7 @@ public sealed class ResultType : IRecordType
         string? repository = change.Ulid("repository", true);
         if (repository is not null && !AssignmentOverlaps.IsRepository(context.Model, repository))
         {
-            change.Error("result.change", "repository", "The repository is the identity of the estate or of a repository resource: the first record of its lineage.");
+            change.RelationshipError("result.change", "repository", "The repository is the identity of the estate or of a repository resource: the first record of its lineage.");
         }
 
         change.Text("base", true, 40, Patterns.Commit, "a 40-character lower-case hex commit id");
@@ -313,6 +313,8 @@ public sealed class ResultType : IRecordType
         {
             return scheme;
         }
+
+        if (context.CheckingBody) return null;
 
         string full = Path.Combine(context.Model.Root, location.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(full))

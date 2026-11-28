@@ -91,7 +91,7 @@ public sealed class DeviceType : IRecordType
         // Custody never claims presence it cannot enforce, and an agent's or a service's device signs unattended.
         if (presence is "required" or "declared" && custody is not null && DeviceKeyStores.PresenceKinds.IndexOf(custody) < 0)
         {
-            context.Error("device.presence", $"{custody} custody cannot enforce its owner's presence, so the device cannot claim it.");
+            context.BodyError("device.presence", $"{custody} custody cannot enforce its owner's presence, so the device cannot claim it.");
         }
 
         if (presence is "required" or "declared" && owner is not null && EstateModel.BodyString(owner, "kind") != "human")
@@ -112,7 +112,7 @@ public sealed class DeviceType : IRecordType
         // A recovery device's key left the machine that made it, so its custody is offline; no other device's key is.
         if (purpose is not null && custody is not null && (purpose == "recovery") != (custody == DeviceKeyStores.OfflineKind))
         {
-            context.Error("device.recovery", "A recovery device's key is kept offline (custody 'offline'), and only a recovery device's is.");
+            context.BodyError("device.recovery", "A recovery device's key is kept offline (custody 'offline'), and only a recovery device's is.");
         }
 
         if (context.Record.By != principal && !context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))

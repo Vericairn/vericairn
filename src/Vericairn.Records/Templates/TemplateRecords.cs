@@ -26,7 +26,7 @@ public static class TemplateRecords
         {
             if (context.Find(context.Record.Supersedes) is { } retained && TemplateCatalog.Pin(retained) is not null)
                 context.Error("template.retained", "An instance revision retains its template contract; removing it cannot bypass required sections or their reviews.");
-            if (upgrade is not null) context.Error("template.upgrade", "An upgrade belongs to a template instance.");
+            if (upgrade is not null) context.BodyError("template.upgrade", "An upgrade belongs to a template instance.");
             return;
         }
         ReadPin(template);
@@ -50,7 +50,7 @@ public static class TemplateRecords
         }
         template.NoOtherKeys();
         if (EstateModel.BodyString(context.Record, "kind") != "authored" || body.Has("pathPattern"))
-            context.Error("template.instance", "A template instance is one authored living document, possibly containing generated sections.");
+            context.BodyError("template.instance", "A template instance is one authored living document, possibly containing generated sections.");
         RecordEnvelope? previous = context.Find(context.Record.Supersedes);
         string? previousOwner = previous is null ? null : TJson.Text(TJson.Object(previous.Body, "template"), "owner");
         if (context.Record.By != (previousOwner ?? owner) && !context.HasRole(context.Record.By, Roles.Operator))
@@ -171,7 +171,7 @@ public static class TemplateRecords
                     string? recordHash = reference.Hash("hash", true);
                     if (recordHash is not null) sourceHashes.Add(recordHash);
                     RecordEnvelope? record = type is null ? null : context.RequireReference("sources.records", recordId, type);
-                    if (record is not null && record.ComputedHash != recordHash) reference.Error("template.reference", "hash", "The source record hash must match its exact retained revision.");
+                    if (record is not null && record.ComputedHash != recordHash) reference.RelationshipError("template.reference", "hash", "The source record hash must match its exact retained revision.");
                     reference.NoOtherKeys();
                 }
                 source.NoOtherKeys();
@@ -242,7 +242,7 @@ public static class TemplateRecords
         string? id = section.Text("id", true, 100, Patterns.Slug, "a section identifier");
         RecordEnvelope? declaration = ReadReference(context, section, "document", "living-document", true);
         section.NoOtherKeys();
-        if (declaration is null) return true;
+        if (declaration is null || context.CheckingBody) return true;
         if (location != EstateModel.BodyString(declaration, "path")) context.Error("template.output", "A section output's location is the declared document path.");
         try
         {

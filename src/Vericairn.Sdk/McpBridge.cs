@@ -102,6 +102,9 @@ internal sealed class McpBridge : IDisposable
         ArgumentNullException.ThrowIfNull(output);
         using var writing = new SemaphoreSlim(1, 1);
         var pending = new List<Task>();
+        var stateless = new List<(Task Response, CancellationTokenSource Stop)>();
+        var active = new System.Collections.Concurrent.ConcurrentDictionary<string, (CancellationTokenSource Stop, bool Listening)>(StringComparer.Ordinal);
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         async Task WriteAsync(JsonObject message)
         {
@@ -114,6 +117,49 @@ internal sealed class McpBridge : IDisposable
             finally
             {
                 writing.Release();
+            }
+        }
+
+        async Task WriteStatelessAsync(JsonObject message, string method, JsonNode id, string key, CancellationTokenSource stop)
+        {
+            bool acknowledged = false;
+            async Task WriteSubscriptionAsync(JsonObject part)
+            {
+                if (Text(part["method"]) == Mcp20260728.Acknowledged) acknowledged = true;
+                await WriteAsync(part).ConfigureAwait(false);
+            }
+
+            try
+            {
+                JsonObject? answer = method == Mcp20260728.ListenMethod
+                    ? await ListenStatelessAsync(message, id, WriteSubscriptionAsync, stop.Token).ConfigureAwait(false)
+                    : await RequestAsync(message, method, WriteAsync, stop.Token).ConfigureAwait(false);
+                if (answer is not null) await WriteAsync(answer).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                // Closing the upstream POST stops observation. The stdio subscription can still end gracefully.
+                if (acknowledged)
+                {
+                    await WriteAsync(new JsonObject
+                    {
+                        ["jsonrpc"] = "2.0",
+                        ["id"] = id.DeepClone(),
+                        ["result"] = new JsonObject
+                        {
+                            ["resultType"] = "complete",
+                            ["_meta"] = new JsonObject { [Mcp20260728.SubscriptionId] = id.DeepClone() },
+                        },
+                    }).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException exception)
+            {
+                await WriteAsync(Error(id.DeepClone(), -32603, ClientFailure.FromException(exception)?.Message ?? exception.Message)).ConfigureAwait(false);
+            }
+            finally
+            {
+                active.TryRemove(key, out _);
             }
         }
 
@@ -153,6 +199,38 @@ internal sealed class McpBridge : IDisposable
                     continue;
                 }
 
+                if (method == "notifications/cancelled" && id is null && message["params"] is JsonObject cancelled
+                    && cancelled["requestId"] is JsonNode cancelledId)
+                {
+                    if (active.TryGetValue(cancelledId.ToJsonString(), out var operation))
+                    {
+                        await operation.Stop.CancelAsync().ConfigureAwait(false);
+                        continue;
+                    }
+                    if (session is null) continue;
+                }
+
+                if (id is not null && method is not null && Mcp20260728.IsStateless(method, message["params"]))
+                {
+                    for (int index = stateless.Count - 1; index >= 0; index--)
+                    {
+                        if (!stateless[index].Response.IsCompletedSuccessfully) continue;
+                        stateless[index].Stop.Dispose();
+                        stateless.RemoveAt(index);
+                    }
+
+                    string key = id.ToJsonString();
+                    var stop = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+                    if (!active.TryAdd(key, (stop, method == Mcp20260728.ListenMethod)))
+                    {
+                        stop.Dispose();
+                        await WriteAsync(Error(id.DeepClone(), -32600, "A request with this id is already active.")).ConfigureAwait(false);
+                        continue;
+                    }
+                    stateless.Add((Task.Run(() => WriteStatelessAsync(message, method, id, key, stop), CancellationToken.None), stop));
+                    continue;
+                }
+
                 if (id is null || method is null)
                 {
                     // A notification or a response: forwarded, its acceptance reported only on standard error.
@@ -169,7 +247,7 @@ internal sealed class McpBridge : IDisposable
                 }
 
                 pending.RemoveAll(task => task.IsCompleted);
-                pending.Add(Task.Run(async () => await WriteAsync(await RequestAsync(message, method, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false), CancellationToken.None));
+                pending.Add(Task.Run(async () => await WriteAsync(await RequestAsync(message, method, notify: null, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false), CancellationToken.None));
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -178,7 +256,18 @@ internal sealed class McpBridge : IDisposable
         }
         finally
         {
-            await Task.WhenAll(pending).ConfigureAwait(false);
+            foreach (var operation in active.Values)
+            {
+                if (operation.Listening) await operation.Stop.CancelAsync().ConfigureAwait(false);
+            }
+            try
+            {
+                await Task.WhenAll(pending.Concat(stateless.Select(entry => entry.Response))).ConfigureAwait(false);
+            }
+            finally
+            {
+                foreach (var entry in stateless) entry.Stop.Dispose();
+            }
             await StopStreamAsync().ConfigureAwait(false);
             await EndAsync().ConfigureAwait(false);
         }
@@ -312,6 +401,17 @@ internal sealed class McpBridge : IDisposable
             return false;
         }
 
+        await foreach (JsonObject message in MessagesAsync(response, cancellationToken).ConfigureAwait(false))
+        {
+            if (message["id"] is null && Text(message["method"]) is string method && Forwarded.Contains(method))
+                await write(message).ConfigureAwait(false);
+        }
+        return true;
+    }
+
+    private async IAsyncEnumerable<JsonObject> MessagesAsync(HttpResponseMessage response,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         Stream body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using (body.ConfigureAwait(false))
         {
@@ -353,10 +453,9 @@ internal sealed class McpBridge : IDisposable
                 {
                     log?.WriteLine($"vericairn mcp: a message on the server stream exceeded {MaxStreamBlock} characters and was discarded");
                 }
-                else if (kind == "message" && data.Length > 0 && TryParse(data.ToString()) is JsonObject message && message["id"] is null
-                    && Text(message["method"]) is string method && Forwarded.Contains(method))
+                else if (kind == "message" && data.Length > 0 && TryParse(data.ToString()) is JsonObject message)
                 {
-                    await write(message).ConfigureAwait(false);
+                    yield return message;
                 }
 
                 data.Clear();
@@ -365,7 +464,6 @@ internal sealed class McpBridge : IDisposable
             }
         }
 
-        return true;
     }
 
     /// <summary>Lines of a text stream, each held to a bound: a longer line is consumed to its end and reported as overflowed.</summary>
@@ -468,19 +566,19 @@ internal sealed class McpBridge : IDisposable
         }
     }
 
-    private async Task<JsonObject> RequestAsync(JsonObject message, string method, CancellationToken cancellationToken)
+    private async Task<JsonObject> RequestAsync(JsonObject message, string method, Func<JsonObject, Task>? notify, CancellationToken cancellationToken)
     {
         JsonNode id = message["id"]!.DeepClone();
         try
         {
             if (method == "tools/call")
             {
-                return await CallAsync(message, id, cancellationToken).ConfigureAwait(false);
+                return await CallAsync(message, id, notify, cancellationToken).ConfigureAwait(false);
             }
 
-            if (method is "resources/subscribe" or "resources/unsubscribe")
+            if (notify is null && method is ("resources/subscribe" or "resources/unsubscribe"))
             {
-                JsonObject answer = await ForwardAsync(message, id, cancellationToken).ConfigureAwait(false);
+                JsonObject answer = await ForwardAsync(message, id, notify, cancellationToken).ConfigureAwait(false);
                 if (answer["result"] is not null && Text(message["params"]?["uri"]) is string uri)
                 {
                     Track(method, uri);
@@ -489,7 +587,7 @@ internal sealed class McpBridge : IDisposable
                 return answer;
             }
 
-            return await ForwardAsync(message, id, cancellationToken).ConfigureAwait(false);
+            return await ForwardAsync(message, id, notify, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or TimeoutException or InvalidOperationException or JsonException)
         {
@@ -501,13 +599,13 @@ internal sealed class McpBridge : IDisposable
     /// A write in two steps: prepared, checked to be the record its call asks for, signed by this device, repeated with the plan.
     /// Any other call is forwarded once, unchanged, and nothing it returns is signed.
     /// </summary>
-    private async Task<JsonObject> CallAsync(JsonObject message, JsonNode id, CancellationToken cancellationToken)
+    private async Task<JsonObject> CallAsync(JsonObject message, JsonNode id, Func<JsonObject, Task>? notify, CancellationToken cancellationToken)
     {
         JsonObject parameters = message["params"] as JsonObject ?? [];
         string? tool = Text(parameters["name"]);
         if (tool is null || !Writes.ContainsKey(tool))
         {
-            return await ForwardAsync(message, id, cancellationToken).ConfigureAwait(false);
+            return await ForwardAsync(message, id, notify, cancellationToken).ConfigureAwait(false);
         }
 
         JsonObject arguments = parameters["arguments"] as JsonObject ?? [];
@@ -521,7 +619,7 @@ internal sealed class McpBridge : IDisposable
         meta["vericairn/prepare"] = true;
         preparingParameters["_meta"] = meta;
 
-        JsonObject first = await ForwardAsync(preparing, id, cancellationToken).ConfigureAwait(false);
+        JsonObject first = await ForwardAsync(preparing, id, notify, cancellationToken).ConfigureAwait(false);
         if (first["result"] is not JsonObject result || result["isError"] is JsonValue failed && failed.TryGetValue(out bool isError) && isError
             || result["_meta"]?["vericairn/plan"]?["prepared"] is not JsonObject prepared)
         {
@@ -532,7 +630,14 @@ internal sealed class McpBridge : IDisposable
         if (Unsignable(prepared, tool, arguments) is string refusal)
         {
             log?.WriteLine("vericairn mcp: " + refusal);
-            return Result(id, refusal, isError: true);
+            JsonObject refused = Result(id, refusal, isError: true);
+            if (notify is not null)
+            {
+                refused["result"]!["resultType"] = "complete";
+                if (result["_meta"]?[Mcp20260728.ServerInfo] is JsonNode identity)
+                    refused["result"]!["_meta"] = new JsonObject { [Mcp20260728.ServerInfo] = identity.DeepClone() };
+            }
+            return refused;
         }
 
         string hash = Text(prepared["hash"])!;
@@ -554,7 +659,12 @@ internal sealed class McpBridge : IDisposable
         signed["vericairn/plan"] = Text(prepared["plan"]);
         signed["vericairn/signature"] = signature;
         signingParameters["_meta"] = signed;
-        return await ForwardAsync(signing, id, cancellationToken).ConfigureAwait(false);
+        JsonNode upstreamId = notify is null ? id :
+            JsonValue.Create("vericairn-bridge-" + Interlocked.Increment(ref reopened).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (notify is not null) signing["id"] = upstreamId.DeepClone();
+        JsonObject answer = await ForwardAsync(signing, upstreamId, notify, cancellationToken).ConfigureAwait(false);
+        if (notify is not null) answer["id"] = id.DeepClone();
+        return answer;
     }
 
     /// <summary>
@@ -683,8 +793,12 @@ internal sealed class McpBridge : IDisposable
     }
 
     /// <summary>Forwards a request and returns its answer; a session the runtime ended is opened again once and the request repeated.</summary>
-    private async Task<JsonObject> ForwardAsync(JsonObject message, JsonNode id, CancellationToken cancellationToken)
+    private async Task<JsonObject> ForwardAsync(JsonObject message, JsonNode id, Func<JsonObject, Task>? notify, CancellationToken cancellationToken)
     {
+        if (notify is not null)
+            return await StatelessAsync(message, id, notify, subscription: false, cancellationToken).ConfigureAwait(false)
+                ?? Error(id, -32603, "The runtime closed the response before returning a result.");
+
         (HttpStatusCode status, JsonObject? body, string? problem, _) = await PostAsync(message, cancellationToken).ConfigureAwait(false);
         if (status == HttpStatusCode.NotFound && await ReopenAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -805,6 +919,92 @@ internal sealed class McpBridge : IDisposable
             // The runtime ends an unused session within the hour by itself.
             log?.WriteLine("vericairn mcp: the session could not be ended now: " + exception.Message);
         }
+    }
+
+    private async Task<JsonObject?> ListenStatelessAsync(JsonObject message, JsonNode id, Func<JsonObject, Task> notify, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await StatelessAsync(message, id, notify, subscription: true, cancellationToken).ConfigureAwait(false)
+                ?? Error(id.DeepClone(), -32603, "The runtime closed the subscription before returning a result.");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or TimeoutException or InvalidOperationException or JsonException)
+        {
+            return Error(id.DeepClone(), -32603, "The runtime could not be reached: " + (ClientFailure.FromException(exception)?.Message ?? exception.Message));
+        }
+    }
+
+    private async Task<JsonObject?> StatelessAsync(JsonObject message, JsonNode id, Func<JsonObject, Task> notify, bool subscription, CancellationToken cancellationToken)
+    {
+        string method = Text(message["method"])!;
+        JsonNode? parameters = message["params"];
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(Endpoint, UriKind.Relative))
+        {
+            Content = new StringContent(message.ToJsonString(), new UTF8Encoding(false), "application/json"),
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        if (Mcp20260728.RequestedVersion(parameters) is string requested)
+            request.Headers.TryAddWithoutValidation(VersionHeader, Mcp20260728.EncodeHeader(requested));
+        request.Headers.TryAddWithoutValidation(Mcp20260728.MethodHeader, Mcp20260728.EncodeHeader(method));
+        if (Mcp20260728.Name(method, parameters) is string name)
+            request.Headers.TryAddWithoutValidation(Mcp20260728.NameHeader, Mcp20260728.EncodeHeader(name));
+
+        using HttpResponseMessage response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (response.Content.Headers.ContentType?.MediaType != "text/event-stream")
+        {
+            string text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            JsonObject? answer = TryParse(text);
+            if (answer is not null && JsonNode.DeepEquals(answer["id"], id) && (answer["result"] is JsonObject || answer["error"] is JsonObject))
+                return answer;
+            return Error(id.DeepClone(), -32603, Refused(response.StatusCode, Text(answer?["message"])));
+        }
+
+        JsonObject? acknowledged = null;
+        JsonObject? interests = parameters is JsonObject filterParams ? filterParams["notifications"] as JsonObject : null;
+        JsonObject? meta = parameters is JsonObject p ? p["_meta"] as JsonObject : null;
+        await foreach (JsonObject part in MessagesAsync(response, cancellationToken).ConfigureAwait(false))
+        {
+            if (part["method"] is null && JsonNode.DeepEquals(part["id"], id) && (part["result"] is JsonObject || part["error"] is JsonObject))
+                return part;
+            if (part["id"] is not null || Text(part["method"]) is not string notification) continue;
+            if (subscription)
+            {
+                if (part["params"] is not JsonObject details || details["_meta"] is not JsonObject tagged
+                    || !JsonNode.DeepEquals(tagged[Mcp20260728.SubscriptionId], id)) continue;
+                if (acknowledged is null && notification == Mcp20260728.Acknowledged && details["notifications"] is JsonObject agreed)
+                {
+                    acknowledged = agreed;
+                    await notify(part).ConfigureAwait(false);
+                }
+                else if (acknowledged is not null && interests is not null
+                    && MatchesInterest(acknowledged, notification, details) && MatchesInterest(interests, notification, details))
+                {
+                    await notify(part).ConfigureAwait(false);
+                }
+            }
+            else if ((notification == "notifications/progress" && meta?["progressToken"] is JsonNode token
+                && part["params"] is JsonObject progress && JsonNode.DeepEquals(progress["progressToken"], token))
+                || (notification == "notifications/message" && Text(meta?["io.modelcontextprotocol/logLevel"]) is not null))
+            {
+                await notify(part).ConfigureAwait(false);
+            }
+        }
+        return null;
+    }
+
+    private static bool MatchesInterest(JsonObject filter, string method, JsonObject details)
+    {
+        string? flag = method switch
+        {
+            "notifications/tools/list_changed" => "toolsListChanged",
+            "notifications/prompts/list_changed" => "promptsListChanged",
+            "notifications/resources/list_changed" => "resourcesListChanged",
+            _ => null,
+        };
+        if (flag is not null) return filter[flag] is JsonValue value && value.TryGetValue(out bool enabled) && enabled;
+        return method == "notifications/resources/updated" && Text(details["uri"]) is string uri
+            && filter["resourceSubscriptions"] is JsonArray uris && uris.Any(candidate => Text(candidate) == uri);
     }
 
     private async Task<(HttpStatusCode Status, JsonObject? Body, string? Problem, string? Session)> PostAsync(JsonObject message, CancellationToken cancellationToken)

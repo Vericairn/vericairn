@@ -96,7 +96,15 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 
 ## Protocol subset
 
-`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+`initialize` (the server accepts 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05 and proposes 2025-06-18 when the client names none of these; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+
+From 0.9.5 (MCP-06), the stateless `2026-07-28` revision is available alongside the session-based revisions.
+A stateless client sends `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities`
+in each request's `params._meta`. It may start with `server/discover` to get the supported versions, capabilities
+and server identity. Both revisions use the same tools, resources, prompts and runtime authorization. A stateless
+client follows resource changes with `subscriptions/listen`. The first notification acknowledges its filter and the
+stream's notifications carry the subscription's request ID. Successful stateless results carry `resultType`.
+Discovery, lists and resource reads carry private cache metadata with a zero TTL.
 
 From 0.9.4 the `initialize` result's `_meta` also carries `vericairn/toolDefinitions`, the count and
 SHA-256 of the build's tool definitions ([Tool annotations and definitions](#tool-annotations-and-definitions-094)),
@@ -621,12 +629,12 @@ IP address and port (or `localhost` on loopback), and an `Origin` it names must 
 allowed with `--mcp-origin`; none is allowed by default. A name an attacker's DNS points at the
 runtime therefore reaches nothing.
 
-**The transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
+**Session-based transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
 request is answered with one JSON body; a notification or a response gets `202` and no body. Batches
-and the older HTTP transport are not served: `initialize` negotiates 2025-06-18 or 2025-03-26.
-`initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits; every later request
-names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A request
-without a session gets `400`, and one naming a session its device does not hold, or one that ended,
+and the older HTTP transport are not served: `initialize` negotiates 2025-11-25, 2025-06-18 or 2025-03-26.
+`initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits. Every later request
+names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A legacy POST
+without a session gets `400`, and a request naming a session its device does not hold, or one that ended,
 gets `404`, after which a client initializes again. DELETE ends a session. A session is bound to the
 device, principal and profile that opened it and is never authentication: it ends on DELETE, an idle
 hour, its device's revocation or loss of the profile, or the runtime's restart. A device holds at most
@@ -635,6 +643,26 @@ requests at once and all devices eight (notifications, a cancellation above all,
 that count), so network MCP never takes the connections the API and the
 event streams need. A dropped connection cancels nothing: a write whose answer is lost is reconciled
 by reading. `notifications/cancelled` stops observing the named request and undoes no effect.
+
+**Stateless transport (0.9.5).** A modern POST opens no MCP session. It sends `MCP-Protocol-Version` and
+`Mcp-Method`, plus `Mcp-Name` for the tool name, prompt name or resource URI in `tools/call`, `prompts/get`
+or `resources/read`. These headers must match the JSON-RPC body. `Accept` must explicitly list both
+`application/json` and `text/event-stream` with positive quality. Wildcards do not satisfy either requirement.
+
+| HTTP status | JSON-RPC code | Condition |
+| --- | --- | --- |
+| `400` | `-32602` | Required version or client capabilities are missing from `params._meta`, or the body omits the required tool name, prompt name or resource URI. |
+| `400` | `-32020` | A required version, method or name header is missing or disagrees with the body. |
+| `400` | `-32022` | The request names an unsupported version. Error data contains `requested` and `supported`. |
+| `404` | `-32601` | The JSON-RPC method is unknown. |
+| `405` | | GET or DELETE names `2026-07-28`, or supplies neither a version nor a session ID. The response includes `Allow: POST`. |
+| `406` | | `Accept` fails the two-media-type requirement. |
+
+`subscriptions/listen` streams its acknowledgment and notifications on the opening POST, with a keep-alive
+comment every 15 seconds. Each signed HTTP listener registers presence for its device's principal. The daemon
+renews that lease while the stream is open, releases it on cleanup and logs refusals. The stream can run for
+up to an hour. A dropped connection stops observing the subscription or an in-flight stateless request.
+A client opens a new subscription after a drop and uses a checked read to reconcile an uncertain write.
 
 **One authorization model.** Each tool call runs as its API operation for the requesting device: the
 daemon runs the very route the API maps, in its own process, with that route's request scope, so a
@@ -678,11 +706,13 @@ record, is dated within a plan's ten minutes of this machine's clock (allowing t
 signed request may have), is about the assignment or attempt the call names, and holds every field the
 call supplies unchanged with nothing beyond what the runtime adds, then signs it with the same key and
 repeats the call, returning only the final answer. Any other call is forwarded once as it came, and
-nothing it returns is signed. A session the runtime ended is opened again once; when its input ends,
-the bridge ends its session. While its client holds a resource subscription the runtime accepted, the bridge also
-holds the session's server stream and writes each resource notification on it to its client as a line, opening the
-stream again after the runtime ends it. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
-`DeviceSignedRecords` or its own code, is Vericairn-aware.
+nothing it returns is signed. The bridge preserves the revision and forwards under the signed device's identity.
+In the session-based revision, a session the runtime ended is opened again once. When its input ends, the bridge
+ends its session. While its client holds an accepted legacy resource subscription, the bridge holds the session's
+server stream and writes each resource notification to its client as a line, opening the stream again after the
+runtime ends it. In the stateless revision, the bridge forwards each `subscriptions/listen` separately and sends
+its acknowledgment and notifications back to the client. Any other client doing the same, with the SDK's
+`DeviceRequestSigner` and `DeviceSignedRecords` or its own code, is Vericairn-aware.
 
 **What a device's signature vouches for.** The bridge binds what the call itself supplies: its
 arguments, the author, the subject an assignment or attempt argument names, the record type, its time

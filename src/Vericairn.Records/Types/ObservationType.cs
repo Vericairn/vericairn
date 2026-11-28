@@ -96,12 +96,12 @@ public sealed class ObservationType : IRecordType
 
             if (context.Record.Subject?.Type != "estate")
             {
-                context.Error("observation.estate", "An estate observation pins an estate charter as its subject.");
+                context.BodyError("observation.estate", "An estate observation pins an estate charter as its subject.");
             }
 
             if (asOf is not null && string.CompareOrdinal(asOf, context.Record.At) > 0)
             {
-                context.Error("observation.future", "An estate observation cannot report seeing a future state.");
+                context.BodyError("observation.future", "An estate observation cannot report seeing a future state.");
             }
         }
     }

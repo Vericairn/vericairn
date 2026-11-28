@@ -34,6 +34,7 @@ TOTAL_FAILED = re.compile(r"^\s*failed: (\d+)$")
 ASSEMBLY = re.compile(r"^Vericairn\.\w+\.Tests$")
 TESTS_FAILED = 2  # The test platform's exit code when the tests ran and some failed.
 LIMIT = 5
+WHOLE_JOURNEY = "Vericairn.Cli.Tests.ExamplesJourneyTests.TierOneRunsEveryRegisteredJourney"
 
 
 def run(command):
@@ -99,6 +100,10 @@ def run_and_retry(command):
         return code
     results = []
     for assembly, test in failed:
+        if test == WHOLE_JOURNEY:
+            # The test already did its one whole-journey retry using fresh state.
+            results.append((test, False))
+            continue
         print(f"::group::Retrying {test} once")
         again, _ = run(["dotnet", "test", "--project", str(Path("tests") / assembly), "--no-build", "--configuration", "Release", "--", "--filter-method", test])
         print("::endgroup::")
