@@ -28,8 +28,9 @@ class ExamplesJourneyTests(unittest.TestCase):
             report = {}
             finished = subprocess.CompletedProcess([], 0, stdout="", stderr="")
             SMOKE.write_json(journey_report, [{"result": "passed"}])
-            with patch.object(SMOKE, "execute", return_value=finished) as execute:
-                SMOKE.journey_leg(cli, scratch, environment, [{"legs": ["tier2"]}], report)
+            with (patch.object(SMOKE, "execute", return_value=finished) as execute,
+                  patch.object(SMOKE.time, "monotonic", return_value=100.0)):
+                SMOKE.journey_leg(cli, scratch, environment, [{"legs": ["tier2"]}], report, 100.0)
 
             driver = ROOT / "artifacts/bin/Vericairn.Cli.Tests/release/Vericairn.Cli.Tests.dll"
             self.assertEqual(1, execute.call_count, "Tier 2 must not build the driver inside the smoke.")
@@ -38,8 +39,33 @@ class ExamplesJourneyTests(unittest.TestCase):
                  "Vericairn.Cli.Tests.ExamplesJourneyTests.TierTwoRunsEveryRegisteredJourney"],
                 ROOT,
                 {"VERICAIRN_EXAMPLES_BINARY": str(cli), "VERICAIRN_EXAMPLES_JOURNEY_REPORT": str(journey_report)},
+                timeout=SMOKE.STEP_SECONDS - SMOKE.REPORT_MARGIN_SECONDS,
             )
             self.assertEqual({"journeys": [{"result": "passed"}]}, report)
+
+    def test_the_journeys_get_what_the_read_leg_left_of_the_step(self):
+        with tempfile.TemporaryDirectory(prefix="example-driver-test-") as directory:
+            scratch = Path(directory)
+            SMOKE.write_json(scratch / "journeys.json", [{"result": "passed"}])
+            finished = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            with (patch.object(SMOKE, "execute", return_value=finished) as execute,
+                  patch.object(SMOKE.time, "monotonic", return_value=160.0)):
+                SMOKE.journey_leg(scratch / "candidate", scratch, {}, [{"legs": ["tier2"]}], {}, 100.0)
+            self.assertEqual(SMOKE.STEP_SECONDS - SMOKE.REPORT_MARGIN_SECONDS - 60, execute.call_args.kwargs["timeout"])
+
+    def test_journeys_that_outrun_the_step_fail_the_smoke_with_its_own_message(self):
+        with tempfile.TemporaryDirectory(prefix="example-driver-test-") as directory:
+            scratch = Path(directory)
+            expired = subprocess.TimeoutExpired(["dotnet"], 1)
+            with (patch.object(SMOKE, "execute", side_effect=expired),
+                  patch.object(SMOKE.time, "monotonic", return_value=100.0)):
+                with self.assertRaisesRegex(SMOKE.SmokeFailure, "did not finish in the 170 seconds"):
+                    SMOKE.journey_leg(scratch / "candidate", scratch, {}, [{"legs": ["tier2"]}], {}, 100.0)
+            with (patch.object(SMOKE, "execute") as execute,
+                  patch.object(SMOKE.time, "monotonic", return_value=400.0)):
+                with self.assertRaisesRegex(SMOKE.SmokeFailure, "no time is left"):
+                    SMOKE.journey_leg(scratch / "candidate", scratch, {}, [{"legs": ["tier2"]}], {}, 100.0)
+            execute.assert_not_called()
 
 
 class ExamplesReadTests(unittest.TestCase):
@@ -235,9 +261,9 @@ class ExamplesReadTests(unittest.TestCase):
                 (cache / "unexpected").touch()
             return 0, {"applied": False}
 
-        def execute_step(argv, cwd, environment):
+        def execute_step(argv, cwd, environment, timeout=120):
             if argv[0] == "git":
-                return execute(argv, cwd, environment)
+                return execute(argv, cwd, environment, timeout)
             # Stub the final regression subprocess so a missing assertion cannot nest this test.
             return subprocess.CompletedProcess(argv, 0)
 
