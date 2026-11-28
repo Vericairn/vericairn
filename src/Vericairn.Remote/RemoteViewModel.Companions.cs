@@ -5,6 +5,7 @@ using System.Net;
 using System.Text.Json;
 using Vericairn.Presentation;
 using Vericairn.Protocol;
+using Vericairn.Records.Hashing;
 
 namespace Vericairn.Remote;
 
@@ -12,7 +13,22 @@ namespace Vericairn.Remote;
 public sealed record RemoteCompanionCollectionRow(string Name, CompanionGeneratorRow Generator);
 
 /// <summary>An item named by the shared reader, with its exact permitted revision.</summary>
-public sealed record RemoteCompanionItem(string Name, AttentionReference Source);
+public sealed record RemoteCompanionItem(string Name, AttentionReference Source)
+{
+    /// <summary>The title and a compact exact-source label for the list and assistive readers.</summary>
+    public string Label
+    {
+        get
+        {
+            string shortId = Source.Id.Length > 8 ? Source.Id[^8..] : Source.Id;
+            string label = $"{Name} · {Source.Type} {shortId}";
+            if (Source.Hash is not { Length: > 0 } hash) return label;
+            string digest = hash.StartsWith(ContentHash.Prefix, StringComparison.Ordinal) ? hash[ContentHash.Prefix.Length..] : hash;
+            string prefix = digest.Length > 8 ? digest[..8] : digest;
+            return $"{label} · Hash {prefix}";
+        }
+    }
+}
 
 public sealed partial class RemoteViewModel
 {

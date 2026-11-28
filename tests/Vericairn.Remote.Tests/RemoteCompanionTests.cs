@@ -127,6 +127,32 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task EstateRecordRowsIdentifyUntitledRecords()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = CompanionConnections(estate);
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            await model.OpenCompanionsCommand.ExecuteAsync();
+            model.SelectedCompanionCollection = Assert.Single(model.CompanionCollections, collection => collection.Name == "Estate records");
+            await model.OpenCompanionCollectionCommand.ExecuteAsync();
+
+            RemoteCompanionItem[] principals = model.CompanionItems.Where(item => item.Source.Type == "principal").ToArray();
+            Assert.True(principals.Length > 1);
+            Assert.All(principals, item =>
+            {
+                Assert.Equal("item", item.Name);
+                Assert.Contains("principal", item.Label, StringComparison.Ordinal);
+                Assert.Contains(item.Source.Id[^8..], item.Label, StringComparison.Ordinal);
+                Assert.Contains(item.Source.Hash![7..15], item.Label, StringComparison.Ordinal);
+            });
+            Assert.Equal(principals.Length, principals.Select(item => item.Label).Distinct(StringComparer.Ordinal).Count());
+            return true;
+        });
+    }
+
+    [Fact]
     [Trait("Journey", "D19-A")]
     public async Task AnUnavailableRenditionHandsOffItsVerifiedExactSubjectToWorkbench()
     {
