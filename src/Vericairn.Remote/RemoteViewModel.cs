@@ -459,12 +459,17 @@ public sealed partial class RemoteViewModel : Observable
                     ClientFailure.FromException(exception)?.Message ?? "The runtime did not provide a complete readable observation. Update the runtime if needed and refresh.");
             }
         }
-        finally { Busy = false; }
-        if (Selected == estate && CompanionsOpen)
+        finally
         {
-            if (estate.Current) await ReadCompanionsAsync(companionRequest, refresh: true).ConfigureAwait(true);
-            else CompanionReadUnavailable();
+            if (Selected == estate && !estate.Current)
+            {
+                if (CompanionsOpen) CompanionReadUnavailable();
+                else cachedCollection = cachedItem = null;
+            }
+            Busy = false;
         }
+        if (Selected == estate && estate.Current && CompanionsOpen)
+            await ReadCompanionsAsync(companionRequest, refresh: true).ConfigureAwait(true);
         if (Selected == estate && estate.Current && decision is { Attempted: false } draft)
             await OpenDecisionAsync(draft.Review.Subject.Id).ConfigureAwait(true);
     }

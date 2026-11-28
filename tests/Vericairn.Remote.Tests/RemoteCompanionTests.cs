@@ -222,6 +222,42 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
         });
     }
 
+    [Theory]
+    [InlineData(ConnectionStates.Denied)]
+    [InlineData(ConnectionStates.Unavailable)]
+    public async Task AFailedHomeRefreshDiscardsBothPagesWhileTheReaderIsClosed(string state)
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = CompanionConnections(estate);
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            await OpenWorkOrdersAsync(model);
+            await OpenItemAsync(model);
+            await model.BackCompanionCommand.ExecuteAsync();
+            Assert.StartsWith("Cached", model.CompanionFreshness, StringComparison.Ordinal);
+            await model.BackCompanionCommand.ExecuteAsync();
+            await model.BackCompanionCommand.ExecuteAsync();
+            Assert.False(model.CompanionsOpen);
+
+            connections.Checks.Enqueue((state, "The runtime could not serve this phone."));
+            await model.RefreshCommand.ExecuteAsync();
+            Assert.False(model.CompanionsOpen);
+
+            // Subsequent probes succeed with exactly the same basis. Neither page may be reused.
+            List<string> calls = [];
+            connections.BeforeApiCall = calls.Add;
+            await OpenWorkOrdersAsync(model);
+            string collectionFreshness = model.CompanionFreshness;
+            await OpenItemAsync(model);
+            string itemFreshness = model.CompanionFreshness;
+            Assert.Equal(2, calls.Count(name => name == nameof(IEstateApi.CompanionRenderAsync)));
+            Assert.StartsWith("Observed", collectionFreshness, StringComparison.Ordinal);
+            Assert.StartsWith("Observed", itemFreshness, StringComparison.Ordinal);
+            return true;
+        });
+    }
+
     [Fact]
     public async Task AReadableExactItemDoesNotOfferDesktopContinuation()
     {
