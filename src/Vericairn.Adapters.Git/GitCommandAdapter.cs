@@ -265,6 +265,8 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
                 info.Environment.Remove("GIT_CONFIG_GLOBAL");
                 ProcessResult read = run(info);
                 string found = read.Outcome == ProcessOutcome.Exited && read.ExitCode == 0 ? read.StandardOutput.Trim().ToLowerInvariant() : "";
+                // Git's other spellings of a boolean name the same setting.
+                if (name == "core.autocrlf") found = found switch { "yes" or "on" or "1" => "true", "no" or "off" or "0" => "false", _ => found };
                 if (allowed.Contains(found, StringComparer.Ordinal)) value = found;
             }
 
