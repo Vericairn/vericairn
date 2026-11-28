@@ -130,6 +130,59 @@ public sealed class InterventionReceiptTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task ALatePauseAfterNotDeliveredIsObservedWhenTheTargetIsReviewedAgain()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
+        RecordEnvelope goal = RemoteInspectionSeed.Goal(estate);
+        estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Started for the phone check."}""", goal.Reference);
+        _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate), goal);
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await OpenRun(connections);
+            Func<WriteOutcome>? delayed = null;
+            connections.DispatchSignedIntervention = send => { delayed = send; throw new HttpRequestException("Not arrived yet."); };
+            await model.ReviewPauseCommand.ExecuteAsync();
+            await model.SubmitInterventionCommand.ExecuteAsync();
+            connections.DispatchSignedIntervention = null;
+            await model.ReconcileInterventionCommand.ExecuteAsync();
+            Assert.Equal("not-delivered", Assert.Single(model.Interventions).State);
+
+            // The held request arrives within its plan's lifetime; the next review reads the receipt again before anything else.
+            Assert.True(delayed!().Ok);
+            await model.ReviewPauseCommand.ExecuteAsync();
+            Assert.Equal("completed", Assert.Single(model.Interventions).State);
+            Assert.Null(model.Intervention);
+            return true;
+        });
+    }
+
+    [Fact]
+    public async Task ALateStopAfterNotDeliveredIsObservedWhenTheTargetIsReviewedAgain()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
+        _ = RemoteInspectionSeed.Run(estate, RemoteInspectionSeed.Assign(estate));
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await OpenRun(connections);
+            Func<WriteOutcome>? delayed = null;
+            connections.DispatchSignedIntervention = send => { delayed = send; throw new HttpRequestException("Not arrived yet."); };
+            await model.ReviewCancelCommand.ExecuteAsync();
+            await model.SubmitInterventionCommand.ExecuteAsync();
+            connections.DispatchSignedIntervention = null;
+            await model.ReconcileInterventionCommand.ExecuteAsync();
+            Assert.Equal("not-delivered", Assert.Single(model.Interventions).State);
+
+            Assert.True(delayed!().Ok);
+            await model.ReviewCancelCommand.ExecuteAsync();
+            Assert.NotEqual("not-delivered", Assert.Single(model.Interventions).State);
+            Assert.Single(estate.Load().OfType("run-stop-request"));
+            return true;
+        });
+    }
+
+    [Fact]
     public async Task RestartAtThePresencePromptFindsNoBlockingReceipt()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);

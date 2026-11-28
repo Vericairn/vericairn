@@ -137,6 +137,7 @@ public sealed partial class RemoteViewModel
                 if (Selected == estate) InterventionMessage = "Reconnect to the runtime before reviewing an intervention.";
                 return;
             }
+            await RefreshUndeliveredAsync(estate, api).ConfigureAwait(true);
             RemoteIntervention? review = await ReadInterventionAsync(api, operation, target.Run).ConfigureAwait(true);
             if (Selected != estate || InterventionTarget != target) return;
             if (review is null)
@@ -209,10 +210,12 @@ public sealed partial class RemoteViewModel
         Busy = true;
         try
         {
-            if (await CheckRuntimeAsync(estate).ConfigureAwait(true) is not { } api ||
-                await ReadInterventionAsync(api, review.Operation, run.Run).ConfigureAwait(true) != review ||
+            IEstateApi? api = await CheckRuntimeAsync(estate).ConfigureAwait(true);
+            if (api is null || await ReadInterventionAsync(api, review.Operation, run.Run).ConfigureAwait(true) != review ||
                 Selected != estate || intervention != review)
             {
+                // The target can have changed because a request marked not delivered arrived late: read those receipts again.
+                if (api is not null) await RefreshUndeliveredAsync(estate, api).ConfigureAwait(true);
                 if (Selected == estate) InterventionMessage = "The reviewed target changed or could not be confirmed. Review it again. Nothing was sent.";
                 return;
             }
@@ -232,6 +235,17 @@ public sealed partial class RemoteViewModel
         {
             if (Selected == estate) SetIntervention(null);
             Busy = false;
+        }
+    }
+
+    // A request marked not delivered can still arrive while its signed plan is valid. Every review and every refused submission reads
+    // such receipts again first, so the phone shows what the runtime observed, never what an earlier read let it infer.
+    private async Task RefreshUndeliveredAsync(RemoteEstate estate, IEstateApi api)
+    {
+        foreach (RemoteInterventionReceipt receipt in Interventions.Where(r => r.State == "not-delivered").ToArray())
+        {
+            RemoteInterventionReceipt observed = await ObserveInterventionAsync(api, estate.Connection.Principal, receipt).ConfigureAwait(true);
+            if (observed != receipt) KeepIntervention(estate, observed);
         }
     }
 
