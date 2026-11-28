@@ -48,7 +48,7 @@ public sealed partial class GitleaksScanner : ISecretScanner
         + "|credential-reference|custody-exception|decision|device|discharge|document-review|document-revision|estate|estate-policy|goal|goal-status"
         + "|harness-qualification|history-checkpoint|living-document|migration|observation|operation|operator-request|operator-request-close"
         + "|policy-exception|possibility|principal|product|prompt-preference|qualification|reconciliation|release|resource|result|retirement|review"
-        + "|roster|saved-prompt|template-defaults|verification|work-order|work-progress|work-status|writing-exception";
+        + "|roster|run-stop-request|saved-prompt|template-defaults|verification|work-order|work-progress|work-status|writing-exception";
 
     /// <summary>
     /// The shape of a history checkpoint inventory's line, without its line feed: one of those record types, a month, a record id and .json,
