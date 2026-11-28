@@ -33,6 +33,15 @@ internal sealed class ServicesJourneySurface : IExampleJourneySurface
             return new(0, "{}", "");
         }
 
+        if (command.Arguments is ["launcher"])
+        {
+            return new(0, JsonSerializer.Serialize(new
+            {
+                command = FakeHarness.Setting("codex", Path.Combine(command.Scratch, "scheduler-launch.jsonl")),
+                expires = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(2)),
+            }), "");
+        }
+
         using EstateService service = EstateService.Open(command.Estate);
         service.Providers = command.Providers;
         service.FlowClock = command.Clock;
@@ -51,16 +60,7 @@ internal sealed class ServicesJourneySurface : IExampleJourneySurface
         providers.Register(new ReportedLauncher(providers.Launcher("codex")!));
         service.Providers = providers;
 
-        // The exception belongs only to the fixture's file-custody keys. The launcher
-        // receives the test executable as its command, never an installed harness.
-        string[] context = ["--estate", command.Estate, "--json"];
-        CliHarness.Outcome custody = CliHarness.RunWithApi(service, null,
-            [.. context, "goal", "custody-exception", command.Captures["goal"], "--by", command.Captures["operator"],
-             "--reason", "Only scratch fixture keys are held here.",
-             "--expires", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(2))]);
-        if (custody.Code != 0) return custody;
-        string standIn = FakeHarness.Setting("codex", Path.Combine(command.Scratch, "scheduler-launch.jsonl"));
-        return CliHarness.RunWithApi(service, null, [.. context, .. command.Arguments, "--setting", "command=" + standIn]);
+        return CliHarness.RunWithApi(service, null, ["--estate", command.Estate, "--json", .. command.Arguments]);
     }
 
     private static CliHarness.Outcome CallMcp(EstateService service, string tool, string principal, string file)

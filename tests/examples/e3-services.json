@@ -343,9 +343,88 @@
       }
     },
     {
+      "id": "prepare-launcher",
+      "role": "operator",
+      "arguments": [
+        "launcher"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "launcherCommand": "/command",
+        "custodyExpiry": "/expires"
+      },
+      "setup": true,
+      "surface": "services"
+    },
+    {
+      "id": "refuse-file-custody",
+      "role": "operator",
+      "arguments": [
+        "goal",
+        "step",
+        "${goal}",
+        "--by",
+        "${operator}",
+        "--repository",
+        "${workspaceResource}",
+        "--setting",
+        "command=${launcherCommand}"
+      ],
+      "expect": {
+        "exitCode": 2,
+        "errorContains": "can sign without its owner's presence on this machine"
+      },
+      "surface": "services"
+    },
+    {
+      "id": "inspect-guarded-draft",
+      "role": "operator",
+      "arguments": ["goal", "show", "${goal}"],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/flow/steps/0/assignment": null,
+          "/flow/steps/0/attempts": []
+        }
+      }
+    },
+    {
+      "id": "record-custody-exception",
+      "role": "operator",
+      "arguments": [
+        "goal",
+        "custody-exception",
+        "${goal}",
+        "--by",
+        "${operator}",
+        "--reason",
+        "Only scratch fixture keys are held here.",
+        "--expires",
+        "${custodyExpiry}"
+      ],
+      "expect": {
+        "exitCode": 0
+      },
+      "capture": {
+        "custodyException": "/id"
+      }
+    },
+    {
       "id": "route-draft",
       "role": "operator",
-      "arguments": ["goal", "step", "${goal}", "--by", "${operator}", "--repository", "${workspaceResource}"],
+      "arguments": [
+        "goal",
+        "step",
+        "${goal}",
+        "--by",
+        "${operator}",
+        "--repository",
+        "${workspaceResource}",
+        "--setting",
+        "command=${launcherCommand}"
+      ],
       "expect": {
         "exitCode": 0,
         "fields": {
@@ -356,9 +435,26 @@
         }
       },
       "capture": {
-        "draftAssignment": "/step/assignment/id"
+        "draftAssignment": "/step/assignment/id",
+        "draftRun": "/step/run/run"
       },
       "surface": "services"
+    },
+    {
+      "id": "inspect-run-custody",
+      "role": "operator",
+      "arguments": [
+        "records",
+        "show",
+        "${draftRun}"
+      ],
+      "expect": {
+        "exitCode": 0,
+        "fields": {
+          "/body/target/custodyException": "${custodyException}",
+          "/body/target/assignment": "${draftAssignment}"
+        }
+      }
     },
     {
       "id": "inspect-draft-brief",
