@@ -51,11 +51,15 @@ def examples():
     if not entries or len({entry["key"] for entry in entries}) != len(entries):
         raise SmokeFailure("The examples manifest needs at least one unique example.")
     for entry in entries:
-        if not VERSION.fullmatch(entry["release"]):
+        repositories = entry["repositories"]
+        release = entry["release"]
+        if repositories and (not isinstance(release, str) or not VERSION.fullmatch(release)):
             raise SmokeFailure(f"Invalid release pin for {entry['key']}.")
-        if "read" in entry["legs"] and sum(repo["estate"] is True for repo in entry["repositories"]) != 1:
+        if not repositories and (release is not None or entry["guidedSteps"] is not None):
+            raise SmokeFailure(f"{entry['key']} has no public records to pin.")
+        if "read" in entry["legs"] and sum(repo["estate"] is True for repo in repositories) != 1:
             raise SmokeFailure(f"{entry['key']} needs exactly one public estate for its read leg.")
-        for repo in entry["repositories"]:
+        for repo in repositories:
             if not REPOSITORY.fullmatch(repo["name"]) or not COMMIT.fullmatch(repo["commit"]):
                 raise SmokeFailure(f"Invalid public repository or commit pin for {entry['key']}.")
     return entries
