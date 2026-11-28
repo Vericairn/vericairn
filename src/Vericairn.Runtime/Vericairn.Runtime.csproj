@@ -13,6 +13,7 @@
     <InternalsVisibleTo Include="Vericairn.Workbench.Tests" />
     <InternalsVisibleTo Include="Vericairn.Remote.Tests" />
     <InternalsVisibleTo Include="Vericairn.Cli.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Daemon" />
     <InternalsVisibleTo Include="Vericairn.Daemon.Tests" />
     <InternalsVisibleTo Include="Vericairn.Daemon" />
     <InternalsVisibleTo Include="Vericairn.Adapters.Git" />

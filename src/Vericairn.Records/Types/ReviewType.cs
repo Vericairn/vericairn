@@ -30,6 +30,7 @@ public sealed class ReviewType : IRecordType
         new("summary", "string", true, "What was reviewed and how."),
         new("findings", "object[]", true, "severity (error|warning|info), summary, optional location; may be empty."),
         new("conditions", "object[]", false, "For a review of a goal, its evaluation, and only then: one entry per completion condition in the goal's order, each a verdict (" + string.Join('|', GoalRules.EvaluationVerdicts) + "), the reason and the records it read ({type, id, hash}); the outcome is pass when every verdict is met, fail when one is impossible, and findings otherwise.", 2),
+        new("repositoryConfiguration", "object", false, "A human operator's signed review of the exact Git configuration of a repository resource, with the SHA-256 config and optional worktreeConfig hashes.", 3),
         new("read", "reference[]", false, "Unique exact evidence references for a result review. Optional, and never what makes a review duty evidence: a review of a result with duties is duty evidence with or without read, authored with the expected current result hash and an admitted-device signature; a review of a result without duties needs neither.", 3),
     ];
 
@@ -51,6 +52,10 @@ public sealed class ReviewType : IRecordType
             finding.NoOtherKeys();
         }
 
+        BodyReader? configuration = body.Since(3, "repositoryConfiguration") ? body.Nested("repositoryConfiguration", false) : null;
+        configuration?.Hash("config", true);
+        configuration?.Hash("worktreeConfig", false);
+        configuration?.NoOtherKeys();
         body.NoOtherKeys();
         RecordEnvelope? reviewer = context.Principal(context.Record.By);
         if (reviewer is null)
@@ -60,6 +65,16 @@ public sealed class ReviewType : IRecordType
         }
 
         RecordEnvelope? subject = context.Record.Subject is null ? null : context.Find(context.Record.Subject.Id);
+        if (configuration is not null)
+        {
+            if (subject?.Type != "resource" || EstateModel.BodyString(subject, "kind") != "repository")
+                context.Error("review.repository-configuration", "A Git configuration review names an exact repository resource revision.");
+            if (EstateModel.BodyString(reviewer, "kind") != "human" || !context.HasRole(context.Record.By, Roles.Operator))
+                context.Error("review.repository-configuration", "A Git configuration review is authored by a human operator.");
+            if (context.Record.Signatures.Count == 0)
+                context.Error("signature.required", "A Git configuration review requires an admitted-device signature from its human operator.");
+        }
+
         if (subject is not null)
         {
             Evaluation(context, subject, conditions, outcome);

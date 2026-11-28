@@ -17,7 +17,9 @@ internal sealed class SourcesAdoptCommand : Command
         var roleOption = new Option<string>("--role") { Description = "What the estate uses the repository for.", Required = true };
         var visibilityOption = new Option<string>("--visibility") { Description = "public, private or n/a.", DefaultValueFactory = _ => "private" };
         var notesOption = new Option<string?>("--notes") { Description = "Free text." };
+        var boundaryOption = new Option<string?>("--boundary") { Description = "Operator-selected local directory that may contain the repository and its Git metadata. Defaults to the repository root." };
         Arguments.Add(pathArgument);
+        Options.Add(boundaryOption);
         Options.Add(byOption);
         Options.Add(nameOption);
         Options.Add(roleOption);
@@ -31,6 +33,6 @@ internal sealed class SourcesAdoptCommand : Command
             parseResult.GetValue(roleOption)!,
             parseResult.GetValue(visibilityOption)!,
             parseResult.GetValue(notesOption),
-            parseResult.GetValue(context.JsonOption)));
+            parseResult.GetValue(boundaryOption), parseResult.GetValue(context.JsonOption)));
     }
 }

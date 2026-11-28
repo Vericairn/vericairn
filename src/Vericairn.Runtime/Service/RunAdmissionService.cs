@@ -193,7 +193,8 @@ internal sealed class RunAdmissionService(
             configuredRoot = new WorkerConfigurationStore().ReadWorkspaceRoot();
             string root = configuredRoot ?? Path.Combine(VericairnHome.Path(), "estates", plan.Estate, "workspaces");
             string path = configuredRoot is null ? Path.Combine(root, Slug(plan.Branch)) : Path.Combine(root, plan.Estate, Slug(plan.Branch));
-            workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root);
+            IReadOnlyList<RepositoryConfigurationReview> configurationReviews = ConfigurationReviews(session.Load(), plan);
+            workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, configurationReviews);
             brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
             baseline = workspaces.Capture(workspace);
             IReadOnlyList<string> permitted = Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges");
@@ -231,7 +232,7 @@ internal sealed class RunAdmissionService(
                     }
 
                     // It ran as the person, with Git at hand: the workspace must still be this branch's own repository, at the head it left.
-                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root);
+                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root, ConfigurationReviews(session.Load(), plan));
                     if (!string.Equals(rechecked.Path, workspace.Path, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                     {
                         throw new ProviderRefusedException($"The branch's workspace moved from '{workspace.Path}' to '{rechecked.Path}' while its setup command ran.");
@@ -498,6 +499,28 @@ internal sealed class RunAdmissionService(
         admitted = new AdmittedRun(request, plan, launcher, configuration, workspaces, workspace, baseline, configuredRoot,
             directory, launch, environment, limits, environmentPolicy, admittedBinding, run, where, intent, excepted, Refused, efficiency, prepared);
         return null;
+    }
+
+    private static List<RepositoryConfigurationReview> ConfigurationReviews(EstateModel model, RunPlan plan)
+    {
+        if (!model.ById.TryGetValue(plan.Resource, out RecordEnvelope? resource)) return [];
+        resource = model.Latest(resource);
+        var reviews = new List<RepositoryConfigurationReview>();
+        foreach (RecordEnvelope review in model.Current("review"))
+        {
+            if (review.Subject is not { Type: "resource" } subject || subject.Id != resource.Id || subject.Hash != resource.ComputedHash
+                || EstateModel.BodyString(review, "outcome") != "pass" || review.Signatures.Count == 0 || !model.Counts(review)
+                || !model.HasRole(review.By, Roles.Operator) || model.CurrentPrincipal(review.By) is not { } person
+                || EstateModel.BodyString(person, "kind") != "human"
+                || !review.Body.TryGetProperty("repositoryConfiguration", out JsonElement body) || body.ValueKind != JsonValueKind.Object
+                || !body.TryGetProperty("config", out JsonElement config) || config.ValueKind != JsonValueKind.String
+                || !Vericairn.Records.Hashing.ContentHash.IsValid(config.GetString())) continue;
+
+            string? worktree = body.TryGetProperty("worktreeConfig", out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+            if (body.TryGetProperty("worktreeConfig", out _) && !Vericairn.Records.Hashing.ContentHash.IsValid(worktree)) continue;
+            reviews.Add(new(config.GetString()!, worktree));
+        }
+        return reviews;
     }
 
     /// <summary>

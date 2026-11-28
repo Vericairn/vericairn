@@ -94,6 +94,14 @@ public static partial class SourceAdoption
             limitations.Add("The repository has no origin remote; it is identified by its root commit.");
         }
 
+        if (observation.ConfigurationHash is string config)
+            limitations.Add("Exact observed Git configuration: " + config + ".");
+        if (observation.WorktreeConfigurationHash is string worktree)
+            limitations.Add("Exact observed Git worktree configuration: " + worktree + ".");
+        if (observation.IgnoredConfiguration.Count > 0)
+            limitations.Add($"Git configuration settings ignored: {observation.IgnoredConfiguration.Count}.");
+        if (observation.GitRedirections.Count > 0)
+            limitations.Add($"Git metadata redirections within the selected boundary: {observation.GitRedirections.Count}.");
         string state = observation.Clean ? "clean working tree" : $"{observation.Modified} modified and {observation.Untracked} untracked files preserved";
         return new JsonObject
         {

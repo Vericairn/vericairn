@@ -3,6 +3,7 @@
 
 using Vericairn.Packs.Software;
 using Vericairn.Protocol;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -20,8 +21,8 @@ public class WorkspaceRepositoryTests
         Assert.True(Directory.Exists(Path.Combine(workspace.Path, ".git")));
         Assert.Equal(HarnessWorkspace.Canonical(Path.Combine(workspace.Path, ".git")).Replace('\\', '/'),
             RunEstate.Git(workspace.Path, "rev-parse", "--path-format=absolute", "--git-common-dir"));
-        Assert.Equal(HarnessWorkspace.Canonical(Path.Combine(run.Clone, ".git", "objects")).Replace('\\', '/'),
-            File.ReadAllText(Path.Combine(workspace.Path, ".git", "objects", "info", "alternates")).Trim());
+        Assert.False(File.Exists(Path.Combine(workspace.Path, ".git", "objects", "info", "alternates")));
+        Assert.Equal(workspace.Commit, RunEstate.Git(workspace.Path, "rev-parse", "HEAD"));
         File.WriteAllText(Path.Combine(workspace.Path, "allowed.txt"), "an agent's commit\n");
         RunEstate.Git(workspace.Path, "add", "allowed.txt");
         RunEstate.Git(workspace.Path, "commit", "-q", "-m", "Permitted work");
@@ -71,8 +72,22 @@ public class WorkspaceRepositoryTests
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(hook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         RunEstate.Git(run.Clone, "config", "core.hooksPath", hooks);
         var provider = new GitWorktreeWorkspaces();
-        _ = provider.Prepare(run.Clone, "work/hook", null, Path.Combine(run.Scratch, "workspace"));
+        string workspace = Path.Combine(run.Scratch, "workspace");
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => provider.Prepare(run.Clone, "work/hook", null, workspace));
+        Assert.Contains("core.hookspath", refused.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(workspace));
         Assert.False(File.Exists(marker));
+
+        RepositoryObservation observed = new GitCommandAdapter().Inspect(run.Clone);
+        PreparedWorkspace prepared = provider.Prepare(run.Clone, "work/hook", null, workspace, run.Scratch,
+            [new RepositoryConfigurationReview(observed.ConfigurationHash!, observed.WorktreeConfigurationHash)]);
+        Assert.True(Directory.Exists(prepared.Path));
+        Assert.False(File.Exists(marker));
+        if (!OperatingSystem.IsWindows())
+        {
+            RunEstate.Git(run.Clone, "checkout", "--quiet", "--detach", "HEAD");
+            Assert.True(File.Exists(marker));
+        }
     }
 
     [Fact]
@@ -102,7 +117,8 @@ public class WorkspaceRepositoryTests
         RunEstate.Git(workspace.Path, "config", "core.hooksPath", hooks);
         // A deliberately unreadable format proves even non-executing workspace configuration is not parsed.
         RunEstate.Git(workspace.Path, "config", "core.repositoryformatversion", "999");
-        Assert.True(provider.Prepare(run.Clone, workspace.Branch, null, workspace.Path).Reused);
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => provider.Prepare(run.Clone, workspace.Branch, null, workspace.Path));
+        Assert.Contains("signed review", refused.Message, StringComparison.Ordinal);
         RunScope scope = provider.CheckScope(workspace, baseline, ["widget/**"]);
         Assert.Null(scope.Problem);
         Assert.Contains("README.md", scope.Outside);
@@ -110,6 +126,183 @@ public class WorkspaceRepositoryTests
         Assert.Equal(head, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + workspace.Branch));
         Assert.False(File.Exists(marker));
         Assert.Equal(workspace.Commit, RunEstate.Git(run.Clone, "rev-parse", "HEAD"));
+    }
+
+    [Fact]
+    public void RetentionAddsOnlyTheRunsNewObjectsToTheClone()
+    {
+        using var run = new RunEstate();
+        // A history of its own in the clone, which a retained run must not copy again.
+        for (int i = 0; i < 20; i++)
+        {
+            File.WriteAllText(Path.Combine(run.Clone, $"history-{i}.txt"), $"history {i}\n");
+            RunEstate.Git(run.Clone, "add", ".");
+            RunEstate.Git(run.Clone, "commit", "-q", "-m", $"History {i}");
+        }
+
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/incremental", null, Path.Combine(run.Scratch, "workspace"));
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        Directory.CreateDirectory(Path.Combine(workspace.Path, "widget"));
+        File.WriteAllText(Path.Combine(workspace.Path, "widget", "new.txt"), "the run's one new file\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "The run's change");
+        string head = RunEstate.Git(workspace.Path, "rev-parse", "HEAD");
+        Assert.Null(provider.CheckScope(workspace, baseline, ["widget/**"]).Problem);
+
+        string packs = Path.Combine(run.Clone, ".git", "objects", "pack");
+        string[] before = Directory.Exists(packs) ? Directory.GetFiles(packs, "*.pack") : [];
+        Assert.Null(provider.RetainForReview(workspace));
+        Assert.Equal(head, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + workspace.Branch));
+        string added = Assert.Single(Directory.GetFiles(packs, "*.pack").Except(before));
+        // The run's commit, its root tree, the widget tree and the new blob: four objects, never the clone's 60-odd.
+        string listed = RunEstate.Git(run.Clone, "verify-pack", "-v", Path.ChangeExtension(added, ".idx"));
+        int objects = listed.Split('\n').Count(line => line.Length > 40 && line[40] == ' ' && !line.StartsWith("chain", StringComparison.Ordinal));
+        Assert.InRange(objects, 1, 6);
+        RunEstate.Git(run.Clone, "fsck", "--connectivity-only", "--no-dangling");
+    }
+
+    [Fact]
+    public void ARunWithNoCommitOnANewBranchAddsNoPack()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/nothing", null, Path.Combine(run.Scratch, "workspace"));
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        Assert.Null(provider.CheckScope(workspace, baseline, ["widget/**"]).Problem);
+
+        string packs = Path.Combine(run.Clone, ".git", "objects", "pack");
+        int before = Directory.Exists(packs) ? Directory.GetFiles(packs, "*.pack").Length : 0;
+        Assert.Null(provider.RetainForReview(workspace));
+        Assert.Equal(workspace.Commit, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + workspace.Branch));
+        Assert.Equal(before, Directory.Exists(packs) ? Directory.GetFiles(packs, "*.pack").Length : 0);
+    }
+
+    [Fact]
+    public void RetentionCarriesACommitAReusedWorkspaceNeverRetained()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        string path = Path.Combine(run.Scratch, "workspace");
+        PreparedWorkspace first = provider.Prepare(run.Clone, "work/reused", null, path);
+        Directory.CreateDirectory(Path.Combine(path, "widget"));
+        File.WriteAllText(Path.Combine(path, "widget", "one.txt"), "never retained\n");
+        RunEstate.Git(path, "add", ".");
+        RunEstate.Git(path, "commit", "-q", "-m", "A commit never retained");
+        string unretained = RunEstate.Git(path, "rev-parse", "HEAD");
+
+        // The workspace is reused for the next run, whose commit sits on the one never retained.
+        PreparedWorkspace second = provider.Prepare(run.Clone, first.Branch, null, path);
+        WorkspaceSnapshot baseline = provider.Capture(second);
+        File.WriteAllText(Path.Combine(path, "widget", "two.txt"), "retained\n");
+        RunEstate.Git(path, "add", ".");
+        RunEstate.Git(path, "commit", "-q", "-m", "The retained commit");
+        string head = RunEstate.Git(path, "rev-parse", "HEAD");
+        Assert.Null(provider.CheckScope(second, baseline, ["widget/**"]).Problem);
+
+        Assert.Null(provider.RetainForReview(second));
+        Assert.Equal(head, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + second.Branch));
+        Assert.Equal("commit", RunEstate.Git(run.Clone, "cat-file", "-t", unretained));
+        RunEstate.Git(run.Clone, "fsck", "--connectivity-only", "--no-dangling");
+    }
+
+    [Fact]
+    public void AShallowFileInAWorkspaceRefusesItsAuditAndRetention()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/shallow", null, Path.Combine(run.Scratch, "workspace"));
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        File.WriteAllText(Path.Combine(workspace.Path, "README.md"), "outside the brief\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "Outside change");
+        Directory.CreateDirectory(Path.Combine(workspace.Path, "widget"));
+        File.WriteAllText(Path.Combine(workspace.Path, "widget", "inside.txt"), "inside\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "Inside change");
+        // The agent writes a shallow file naming its head, which would hide the outside commit from the audit and the transfer.
+        File.WriteAllText(Path.Combine(workspace.Path, ".git", "shallow"), RunEstate.Git(workspace.Path, "rev-parse", "HEAD") + "\n");
+
+        string shallow = Path.Combine(workspace.Path, ".git", "shallow");
+        RunScope scope = provider.CheckScope(workspace, baseline, ["widget/**"]);
+        Assert.Contains("shallow file", scope.Problem, StringComparison.Ordinal);
+        Assert.NotNull(provider.RetainForReview(workspace));
+
+        // Without the file the audit sees the outside commit; a shallow file written after the audit still refuses retention.
+        File.Delete(shallow);
+        Assert.Contains("README.md", provider.CheckScope(workspace, baseline, ["widget/**"]).Outside);
+        File.WriteAllText(shallow, RunEstate.Git(workspace.Path, "rev-parse", "HEAD") + "\n");
+        Assert.Contains("shallow file", provider.RetainForReview(workspace), StringComparison.Ordinal);
+        Assert.DoesNotContain("refs/heads/" + workspace.Branch, RunEstate.Git(run.Clone, "for-each-ref", "--format=%(refname)", "refs/heads"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AWorkspaceFetchTakesTheNamedCommitWithoutSubmoduleAdministrationOrInstall()
+    {
+        using var run = new RunEstate();
+        string baseCommit = RunEstate.Git(run.Clone, "rev-parse", "HEAD");
+        File.WriteAllText(Path.Combine(run.Clone, ".gitmodules"),
+            "[submodule \"child\"]\n\tpath = child\n\turl = https://example.invalid/child\n");
+        File.WriteAllText(Path.Combine(run.Clone, "package.json"), """{"name":"workspace-fixture","scripts":{"install":"unused-fixture-entry"}}""");
+        RunEstate.Git(run.Clone, "add", ".gitmodules", "package.json");
+        RunEstate.Git(run.Clone, "update-index", "--add", "--cacheinfo", "160000," + baseCommit + ",child");
+        RunEstate.Git(run.Clone, "commit", "-qm", "Gitlink and inert install fixture");
+        string named = RunEstate.Git(run.Clone, "rev-parse", "HEAD");
+        RunEstate.Git(run.Clone, "tag", "extra-tag");
+        RunEstate.Git(run.Clone, "commit", "--allow-empty", "-qm", "Unrequested descendant");
+        string descendant = RunEstate.Git(run.Clone, "rev-parse", "HEAD");
+        string child = Path.Combine(run.Clone, "child");
+        Directory.CreateDirectory(child);
+        File.WriteAllText(Path.Combine(child, ".git"), "gitdir: unavailable-fixture\n");
+        using (FileStream large = File.Create(Path.Combine(child, "large"))) large.SetLength(AcquisitionWorkingTree.MaximumWorkingFileBytes + 1);
+        Assert.True(new GitCommandAdapter().Inspect(run.Clone).Clean);
+
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/named", named, Path.Combine(run.Scratch, "workspace"));
+
+        Assert.Equal(named, workspace.Commit);
+        Assert.False(Path.Exists(Path.Combine(workspace.Path, "child", ".git")));
+        Assert.False(Path.Exists(Path.Combine(workspace.Path, ".git", "modules")));
+        Assert.Empty(RunEstate.Git(workspace.Path, "tag", "--list"));
+        Assert.NotEqual(0, WorkspaceGitCommand.Run(workspace.Path, out _, "cat-file", "-e", descendant));
+        Assert.False(Path.Exists(Path.Combine(workspace.Path, "node_modules")));
+    }
+
+    [Fact]
+    public void AnIgnoredSettingRequiresReviewOfTheExactConfigurationBytes()
+    {
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
+        string config = Path.Combine(run.Clone, ".git", "config");
+        File.AppendAllText(config, "[future]\n\tsetting = inert-test-data\n");
+        var adapter = new GitCommandAdapter();
+        RepositoryObservation observation = adapter.Inspect(run.Clone);
+        Assert.Contains("future.setting", observation.IgnoredConfiguration);
+
+        string report = run.Report("prepare");
+        RunStartRequest request = PrepareOnlyWorkspaceTests.Request(run, report);
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() =>
+            provider.Prepare(run.Clone, "work/review", null, Path.Combine(run.Scratch, "workspace")));
+        Assert.Contains("future.setting", refused.Message, StringComparison.Ordinal);
+
+        string subject = $"resource:{run.Resource}:{run.Service.Record(run.Resource)!.Hash}";
+        System.Text.Json.JsonElement body = RunEstate.Json($$"""
+            {"independence":"self","outcome":"pass","summary":"Read the exact configuration.","findings":[],
+             "repositoryConfiguration":{"config":"{{observation.ConfigurationHash}}"} }
+            """);
+        WriteOutcome foreign = run.Service.NewRecord(new NewRecordRequest("review", run.Estate.BuilderId, body, subject));
+        Assert.False(foreign.Ok);
+        Assert.Contains(foreign.Problem!.Findings, finding => finding.Code == "review.repository-configuration");
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("review", run.Estate.OperatorId, body, subject)));
+        new FileKeyStore(VericairnHome.Path()).Remove(run.OperatorDevice);
+
+        RunResponse prepared = run.Service.RunPrepare(request);
+        Assert.True(prepared.Ok, prepared.Message);
+        Assert.False(File.Exists(report));
+        File.AppendAllText(config, "# changes the reviewed bytes without changing any setting\n");
+        RunResponse stale = run.Service.RunPrepare(request);
+        Assert.False(stale.Ok);
+        Assert.Contains("signed review", stale.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -130,6 +323,24 @@ public class WorkspaceRepositoryTests
         Assert.Null(provider.CheckScope(workspace, baseline, ["**"]).Problem);
         Assert.Contains("moved unexpectedly", provider.RetainForReview(workspace), StringComparison.Ordinal);
         Assert.Equal(moved, RunEstate.Git(run.Clone, "rev-parse", "refs/heads/" + branch));
+    }
+
+    [Fact]
+    public void RetentionRefusesAConflictingPackedReference()
+    {
+        using var run = new RunEstate();
+        const string branch = "work/packed";
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, branch, null, Path.Combine(run.Scratch, "workspace"));
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        RunEstate.Git(workspace.Path, "commit", "--allow-empty", "-q", "-m", "Agent change");
+        Assert.Null(provider.CheckScope(workspace, baseline, ["**"]).Problem);
+        RunEstate.Git(run.Clone, "branch", branch + "/child");
+        RunEstate.Git(run.Clone, "pack-refs", "--all");
+
+        Assert.Contains("a packed branch name conflicts", provider.RetainForReview(workspace), StringComparison.Ordinal);
+        Assert.Equal(branch + "/child", RunEstate.Git(run.Clone, "for-each-ref", "--format=%(refname:short)", "refs/heads/work"));
+        Assert.False(File.Exists(Path.Combine(run.Clone, ".git", "packed-refs.lock")));
     }
 
     [Fact]

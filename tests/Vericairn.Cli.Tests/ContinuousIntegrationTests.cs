@@ -411,12 +411,40 @@ public class ContinuousIntegrationTests
             Assert.DoesNotContain("git checkout --", publish, StringComparison.Ordinal);
         }
         Assert.Contains("git diff --exit-code -- '*.lock.json'", package, StringComparison.Ordinal);
-        foreach (string project in new[] { "Vericairn.Cli", "Vericairn.Workbench" })
+        foreach (string project in new[] { "Vericairn.Cli", "Vericairn.Workbench", "Vericairn.Relay" })
         {
             using System.Text.Json.JsonDocument locks = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(RepositoryRoot(), "src", project, "packages.distributable.lock.json")));
             foreach (string rid in new[] { "linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64" })
                 Assert.True(locks.RootElement.GetProperty("dependencies").TryGetProperty("net10.0/" + rid, out _), $"{project} locks its {rid} graph.");
         }
+    }
+
+    [Fact]
+    public void TheRelayShipsInChecksummedArchivesForEverySupportedPlatform()
+    {
+        string root = RepositoryRoot();
+        const string project = "src/Vericairn.Relay/Vericairn.Relay.csproj";
+        Assert.Contains($"<Project Path=\"{project}\" />", Read(Path.Combine(root, "Vericairn.slnx")), StringComparison.Ordinal);
+
+        string workflows = Path.Combine(root, ".github", "workflows");
+        string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
+        Assert.Contains(project, Block(package, "- name: Restore the distributables (locked)", 6), StringComparison.Ordinal);
+        string relay = Block(package, "- name: Publish the relay distributables", 6);
+        Assert.Contains("linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64", relay, StringComparison.Ordinal);
+        Assert.Contains($"dotnet publish {project} --no-restore", relay, StringComparison.Ordinal);
+        Assert.Contains("-p:VericairnDistributable=true -p:PublishSingleFile=true", relay, StringComparison.Ordinal);
+        Assert.Contains("dist/vericairn-relay-$VERSION-$rid.zip", relay, StringComparison.Ordinal);
+        Assert.Contains("dist/vericairn-relay-$VERSION-$rid.tar.gz", relay, StringComparison.Ordinal);
+
+        Assert.True(package.IndexOf(relay, StringComparison.Ordinal) < package.IndexOf("- name: Checksums and notes", StringComparison.Ordinal));
+        Assert.Contains("(cd dist && sha256sum -- * > SHA256SUMS)", package, StringComparison.Ordinal);
+        string draft = Block(Read(Path.Combine(workflows, "release.yml")), "- name: Create the draft release", 6);
+        foreach (string rid in new[] { "linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64" })
+        {
+            string extension = rid.StartsWith("win-", StringComparison.Ordinal) ? "zip" : "tar.gz";
+            Assert.Contains($"\"dist/vericairn-relay-$VERSION-{rid}.{extension}\"", draft, StringComparison.Ordinal);
+        }
+        Assert.Contains("src/Vericairn.Relay/packages.distributable.lock.json --runtime-packs", package, StringComparison.Ordinal);
     }
 
     [Fact]

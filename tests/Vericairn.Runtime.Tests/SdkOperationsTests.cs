@@ -330,7 +330,7 @@ public sealed class SdkOperationsTests
         }
 
         foreach (MethodInfo method in typeof(VericairnClient).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
-            .Where(method => !method.IsSpecialName && !method.Name.EndsWith("Async", StringComparison.Ordinal) && method.Name is not ("Dispose" or "Loopback" or "LocalNetwork")))
+            .Where(method => !method.IsSpecialName && !method.Name.EndsWith("Async", StringComparison.Ordinal) && method.Name is not ("Dispose" or "Loopback" or "LocalNetwork" or "ViaRelay")))
         {
             MethodInfo? counterpart = typeof(VericairnClient).GetMethod(method.Name + "Async", [.. method.GetParameters().Select(p => p.ParameterType), typeof(CancellationToken)]);
             Assert.NotNull(counterpart);

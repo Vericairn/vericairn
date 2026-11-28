@@ -3,6 +3,8 @@
 
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Adapters.Git;
 
@@ -22,20 +24,20 @@ internal sealed class WorkspaceScopeFiles
     internal WorkspaceScopeFiles(string workspace, string directory, TimeSpan deadline)
     {
         var watch = Stopwatch.StartNew();
-        string head = WorkspaceGitScope.Read(Path.Combine(directory, "HEAD"), 4096).Trim();
-        if (head.StartsWith("ref: ", StringComparison.Ordinal)) head = WorkspaceGitScope.Head(directory, head[5..]);
-        using var view = new WorkspaceGitView(Path.Combine(directory, "objects"), head);
+        string boundary = WorkspacePaths.Canonical(workspace);
+        using GitHardening hardening = GitHardening.Create();
+        AcquisitionGitView view = hardening.Acquire(workspace);
         // Use a copy: even optional index refreshes must not write the workspace's administration.
-        CopyIndex(directory, view.Path, deadline, watch);
-        string? exclude = ReadExclude(directory);
+        CopyIndex(boundary, MetadataPath(workspace, directory, "index"), view.Directory, deadline, watch);
+        string? exclude = ReadText(boundary, MetadataPath(workspace, directory, "info/exclude"));
         ExcludeHash = Hash(exclude);
         if (exclude is not null)
         {
-            Directory.CreateDirectory(Path.Combine(view.Path, "info"));
-            File.WriteAllText(Path.Combine(view.Path, "info", "exclude"), exclude);
+            Directory.CreateDirectory(Path.Combine(view.Directory, "info"));
+            File.WriteAllText(Path.Combine(view.Directory, "info", "exclude"), exclude);
         }
-        tracked = Names(view.Path, workspace, deadline, watch, "--cached");
-        ignored = Names(view.Path, workspace, deadline, watch, "--others", "--ignored", "--exclude-standard", "--directory");
+        tracked = Names(view.Directory, workspace, deadline, watch, "--cached");
+        ignored = Names(view.Directory, workspace, deadline, watch, "--others", "--ignored", "--exclude-standard", "--directory");
     }
 
     /// <summary>
@@ -45,13 +47,14 @@ internal sealed class WorkspaceScopeFiles
     internal WorkspaceScopeFiles(string workspace, string directory, string start, string? startExclude, TimeSpan deadline)
     {
         var watch = Stopwatch.StartNew();
+        string boundary = WorkspacePaths.Canonical(workspace);
         using var view = new WorkspaceGitView(Path.Combine(directory, "objects"), start);
         string shadow = Path.Combine(view.Path, "rules");
         Directory.CreateDirectory(shadow);
         // Not the user's global ignore file, which is outside the workspace and the run could change.
         string noExcludes = Path.Combine(view.Path, "no-excludes");
         File.WriteAllText(noExcludes, string.Empty);
-        CopyIndex(directory, view.Path, deadline, watch);
+        CopyIndex(boundary, MetadataPath(workspace, directory, "index"), view.Path, deadline, watch);
         tracked = Names(view.Path, workspace, deadline, watch, "--cached");
 
         // The base commit's tracked names stay tracked, and its regular ignore files are the rules, checked out byte for byte.
@@ -75,7 +78,7 @@ internal sealed class WorkspaceScopeFiles
             throw new IOException("The run's starting ignore rules could not be read: " + checkout.Trim());
 
         var changed = new SortedSet<string>(StringComparer.Ordinal);
-        string? exclude = ReadExclude(directory);
+        string? exclude = ReadText(boundary, MetadataPath(workspace, directory, "info/exclude"));
         if (startExclude is not null && Hash(exclude) == startExclude)
         {
             if (exclude is not null)
@@ -122,9 +125,10 @@ internal sealed class WorkspaceScopeFiles
             level = next;
         }
 
+        string startingRules = WorkspacePaths.Canonical(shadow);
         foreach (string name in committed.Union(present, StringComparer.Ordinal))
         {
-            if (!present.Contains(name) || !File.Exists(Path.Combine(shadow, name)) || !Same(Path.Combine(workspace, name), Path.Combine(shadow, name)))
+            if (!present.Contains(name) || !Same(boundary, startingRules, name))
                 changed.Add(name);
         }
         Changed = changed.ToArray();
@@ -171,9 +175,12 @@ internal sealed class WorkspaceScopeFiles
         }
     }
 
-    private static void CopyIndex(string directory, string view, TimeSpan deadline, Stopwatch watch)
+    private static string MetadataPath(string workspace, string directory, string name) =>
+        Path.GetRelativePath(workspace, Path.Combine(directory, name));
+
+    private static void CopyIndex(string boundary, string index, string view, TimeSpan deadline, Stopwatch watch)
     {
-        using var handle = WorkspaceScopeAudit.OpenRegular(Path.Combine(directory, "index"));
+        using var handle = AcquisitionWorkingTree.OpenRegular(boundary, index);
         using var source = new FileStream(handle, FileAccess.Read);
         if (source.Length > Limit) throw new IOException("The scope index exceeded its limit.");
         using var target = File.Create(Path.Combine(view, "index"));
@@ -187,26 +194,32 @@ internal sealed class WorkspaceScopeFiles
         }
     }
 
-    private static string? ReadExclude(string directory)
+    private static string? ReadText(string root, string name)
     {
-        string exclude = Path.Combine(directory, "info", "exclude");
-        return File.Exists(exclude) ? WorkspaceGitScope.Read(exclude, 1024 * 1024) : null;
+        using var handle = AcquisitionWorkingTree.TryOpenRegular(root, name);
+        if (handle is null) return null;
+        using var stream = new FileStream(handle, FileAccess.Read);
+        if (stream.Length > 1024 * 1024) throw new IOException("The scope ignore file exceeded its size limit.");
+        byte[] bytes = new byte[stream.Length];
+        stream.ReadExactly(bytes);
+        if (stream.ReadByte() != -1) throw new IOException("The scope ignore file changed while being read.");
+        using var reader = new StreamReader(new MemoryStream(bytes, writable: false), new UTF8Encoding(false, true));
+        return reader.ReadToEnd();
     }
 
     private static string? Hash(string? text) => text is null ? null : "sha256:" + Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
 
     // Line endings that a checkout may convert are not a change of rules.
-    private static bool Same(string current, string starting)
+    private static bool Same(string workspace, string shadow, string name)
     {
         try
         {
-            using var handle = WorkspaceScopeAudit.OpenRegular(current);
-            using var stream = new FileStream(handle, FileAccess.Read);
-            if (stream.Length > 1024 * 1024) return false;
-            using var reader = new StreamReader(stream);
-            return reader.ReadToEnd().Replace("\r\n", "\n", StringComparison.Ordinal) == File.ReadAllText(starting).Replace("\r\n", "\n", StringComparison.Ordinal);
+            string? current = ReadText(workspace, name);
+            string? starting = ReadText(shadow, name);
+            return current is not null && starting is not null &&
+                current.Replace("\r\n", "\n", StringComparison.Ordinal) == starting.Replace("\r\n", "\n", StringComparison.Ordinal);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException)
         {
             // A link or an unreadable file in an ignore file's place is a change.
             return false;

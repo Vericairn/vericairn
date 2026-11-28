@@ -78,7 +78,10 @@ public partial class GoalJourneyTests
             Assert.Equal(2, CliHarness.MergeRecords(a, b));
             Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, homeB);
             string cloneB = Path.Combine(scratch, "widget-b");
-            Git(scratch, "clone", "-q", clone, cloneB);
+            Git(scratch, "clone", "-q", "--no-hardlinks", clone, cloneB);
+            // From 0.9.5 (CODE-88) a local origin outside the operator's boundary needs a person's review of the configuration; the
+            // second machine's clone keeps no remote naming the first machine's.
+            Git(cloneB, "remote", "remove", "origin");
             CliHarness.Ok("--estate", b, "--json", "sources", "clone", cloneB, "--resource", resource);
 
             // There the goal is paused, as the laptop left it, and takes no step; its sponsor resumes it there, signed by that machine's device.

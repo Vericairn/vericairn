@@ -12,7 +12,7 @@ namespace Vericairn.Cli;
 
 internal sealed class SourceOperations(CommandContext context)
 {
-    public int SourcesInspect(string path, bool json)
+    public int SourcesInspect(string path, string? boundary, bool json)
     {
         try
         {
@@ -22,7 +22,7 @@ internal sealed class SourceOperations(CommandContext context)
                 return failure;
             }
 
-            RepositoryObservation observation = adapter.Inspect(path);
+            RepositoryObservation observation = adapter.Inspect(path, boundary);
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(observation, ProtocolJson.Options));
@@ -41,12 +41,12 @@ internal sealed class SourceOperations(CommandContext context)
         }
     }
 
-    public int SourcesAdopt(string root, string path, string by, string name, string role, string visibility, string? notes, bool json)
+    public int SourcesAdopt(string root, string path, string by, string name, string role, string visibility, string? notes, string? boundary, bool json)
     {
         RepositoryObservation observation;
         try
         {
-            observation = (CommandProviders.Git(context, out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
+            observation = (CommandProviders.Git(context, out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path, boundary);
         }
         catch (ProviderRefusedException exception)
         {
@@ -69,7 +69,8 @@ internal sealed class SourceOperations(CommandContext context)
 
             if (json)
             {
-                context.Output.WriteLine(JsonSerializer.Serialize(new { resource = resource.Written, observation = observed.Written, commit = observation.Commit, clean = observation.Clean }, ProtocolJson.Options));
+                context.Output.WriteLine(JsonSerializer.Serialize(new { resource = resource.Written, observation = observed.Written, commit = observation.Commit, clean = observation.Clean,
+                    observation.IgnoredConfiguration, observation.ConfigurationHash, observation.WorktreeConfigurationHash, observation.GitRedirections }, ProtocolJson.Options));
             }
             else
             {
@@ -84,12 +85,22 @@ internal sealed class SourceOperations(CommandContext context)
     }
 
     /// <summary>Registers this machine's clone of an adopted repository, for the sources that read it, such as living documents of other repositories; nothing is recorded.</summary>
-    public int SourcesClone(string root, string resourceId, string path, bool json)
+    public int SourcesClone(string root, string resourceId, string path, string? boundary, bool json)
     {
         RepositoryObservation observation;
         try
         {
-            observation = (CommandProviders.Git(context, out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
+            ISourceAdapter adapter = CommandProviders.Git(context, out int failure)
+                ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.");
+            observation = adapter.Inspect(path, boundary);
+            if (boundary is not null && observation.GitRedirections.Count > 0)
+            {
+                try { _ = adapter.Inspect(path); }
+                catch (ProviderRefusedException exception)
+                {
+                    return context.Fail("The clone could not be registered: later reads use the repository root as their boundary. " + exception.Message);
+                }
+            }
         }
         catch (ProviderRefusedException exception)
         {
@@ -115,17 +126,26 @@ internal sealed class SourceOperations(CommandContext context)
             }
 
             RepositoryClones.Register(api.Health().Estate, resource.Id, path);
-            context.Output.WriteLine(json ? JsonSerializer.Serialize(new { resource = resource.Id, commit = observation.Commit }) : $"Registered this machine's clone of resource {resource.Id} at {observation.Commit[..12]}; the path stays in this machine's configuration, never in a record.");
+            if (json)
+            {
+                context.Output.WriteLine(JsonSerializer.Serialize(new { resource = resource.Id, commit = observation.Commit,
+                    observation.IgnoredConfiguration, observation.ConfigurationHash, observation.WorktreeConfigurationHash, observation.GitRedirections }, ProtocolJson.Options));
+            }
+            else
+            {
+                context.Output.WriteLine($"Registered this machine's clone of resource {resource.Id} at {observation.Commit[..12]}; the path stays in this machine's configuration, never in a record.");
+                PrintAcquisition(observation);
+            }
             return Clean;
         });
     }
 
-    public int SourcesObserve(string root, string path, string resourceId, string by, bool json)
+    public int SourcesObserve(string root, string path, string resourceId, string by, string? boundary, bool json)
     {
         RepositoryObservation observation;
         try
         {
-            observation = (CommandProviders.Git(context, out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
+            observation = (CommandProviders.Git(context, out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path, boundary);
         }
         catch (ProviderRefusedException exception)
         {
@@ -140,7 +160,9 @@ internal sealed class SourceOperations(CommandContext context)
                 return context.Fail($"No current resource has id {resourceId}.");
             }
 
-            return context.ReportOutcome(api.NewRecord(new NewRecordRequest("observation", by, CommandJson.Element(SourceAdoption.ObservationBody(observation)), $"resource:{resource.Id}:{resource.Hash}")), json);
+            int result = context.ReportOutcome(api.NewRecord(new NewRecordRequest("observation", by, CommandJson.Element(SourceAdoption.ObservationBody(observation)), $"resource:{resource.Id}:{resource.Hash}")), json);
+            if (result == Clean) PrintAcquisition(observation, json ? context.Error : context.Output);
+            return result;
         });
     }
 
@@ -151,9 +173,18 @@ internal sealed class SourceOperations(CommandContext context)
         context.Output.WriteLine($"identity    root commit {observation.RootCommit}{(SourceAdoption.GitHubRepository(observation.Remote) is string github ? ", github " + github : string.Empty)}");
         context.Output.WriteLine($"working     {(observation.Clean ? "clean" : $"{observation.Modified} modified, {observation.Untracked} untracked")}");
         context.Output.WriteLine($"tags        {(observation.Tags.Count == 0 ? "none" : string.Join(", ", observation.Tags))}");
+        PrintAcquisition(observation);
         foreach (RecentCommit commit in observation.Recent)
         {
             context.Output.WriteLine($"  {commit.Commit[..12]}  {commit.At}  {commit.Summary}");
         }
+    }
+    private void PrintAcquisition(RepositoryObservation observation, TextWriter? writer = null)
+    {
+        writer ??= context.Output;
+        if (observation.ConfigurationHash is { } hash) writer.WriteLine($"git config  {hash}");
+        if (observation.WorktreeConfigurationHash is { } worktree) writer.WriteLine($"worktree config  {worktree}");
+        foreach (string key in observation.IgnoredConfiguration) writer.WriteLine($"ignored git configuration  {key}");
+        foreach (string member in observation.GitRedirections) writer.WriteLine($"git redirection inside boundary  {member}");
     }
 }

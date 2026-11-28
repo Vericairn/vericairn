@@ -5,6 +5,7 @@ using System.Buffers.Text;
 using System.Globalization;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
@@ -26,17 +27,19 @@ internal static class LocalNetworkTransport
     public static X509ChainPolicy OfflineChainPolicy() => new() { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
 
     public static async ValueTask<Stream> ConnectAsync(RuntimeConnection connection, IRequestSigner signer, LocalNetworkCredential credential, CancellationToken cancellationToken, bool classifyRefusal = false,
-        LocalNetworkTls.Platform? platform = null)
+        LocalNetworkTls.Platform? platform = null, RelayRoute? route = null, Func<Uri, CancellationToken, Task<WebSocket>>? relayConnect = null)
     {
         LocalNetworkTls.Platform tlsPlatform = platform ?? LocalNetworkTls.Current;
-        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        Stream? transport = null;
         SslStream? tls = null;
         TlsScreenStream? screen = null;
         try
         {
-            await socket.ConnectAsync(connection.Host, connection.Port, cancellationToken).ConfigureAwait(false);
+            transport = route is null
+                ? await ConnectDirectAsync(connection, cancellationToken).ConfigureAwait(false)
+                : await ConnectRelayAsync(connection, route, relayConnect, cancellationToken).ConfigureAwait(false);
             // The screen refuses a runtime certificate that names an address to fetch before this machine's TLS reads it.
-            screen = new TlsScreenStream(new NetworkStream(socket, ownsSocket: true));
+            screen = new TlsScreenStream(transport);
             tls = new SslStream(screen, leaveInnerStreamOpen: false);
             X509Certificate2 own = credential.Current();
             byte[]? presented = null;
@@ -58,11 +61,53 @@ internal static class LocalNetworkTransport
             }
             else
             {
-                socket.Dispose();
+                transport?.Dispose();
             }
 
             if (classifyRefusal && (screen?.RefusedPeer == true || exception is System.Security.Authentication.AuthenticationException or RuntimeConnectionException))
                 throw new ClientRefusedException(exception.Message, exception);
+            throw;
+        }
+    }
+
+    private static async Task<Stream> ConnectDirectAsync(RuntimeConnection connection, CancellationToken cancellationToken)
+    {
+        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(connection.Host, connection.Port, cancellationToken).ConfigureAwait(false);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task<Stream> ConnectRelayAsync(RuntimeConnection connection, RelayRoute route, Func<Uri, CancellationToken, Task<WebSocket>>? connect, CancellationToken cancellationToken)
+    {
+        if (!RelayProtocol.TryUrl(route.Url, out Uri? url) || route.Ticket.Device != connection.Device)
+        {
+            throw new RuntimeConnectionException("The runtime's relay route is unavailable for this device.");
+        }
+
+        WebSocket socket = connect is null
+            ? await RelayProtocol.ConnectAsync(url!, cancellationToken).ConfigureAwait(false)
+            : await connect(url!, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await RelayProtocol.SendAsync(socket, new("join", Ticket: route.Ticket), cancellationToken).ConfigureAwait(false);
+            if (await RelayProtocol.ReceiveAsync(socket, cancellationToken).ConfigureAwait(false) is not { Kind: "joined" })
+            {
+                throw new RuntimeConnectionException("The relay refused the ticket or the runtime is unavailable.");
+            }
+
+            return new RelayStream(socket);
+        }
+        catch
+        {
+            socket.Dispose();
             throw;
         }
     }
