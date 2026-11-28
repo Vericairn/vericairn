@@ -361,7 +361,10 @@ internal sealed class McpOAuth
         }
 
         var grant = new McpTokenGrant(device.Device, device.Principal, device.PublicKey, device.Admission, accepted.Authority.Principal,
-            flow.Request.Client.Id, Resource, accepted.Scope, accepted.ExpiresAt);
+            flow.Request.Client.Id, Resource, accepted.Scope, accepted.ExpiresAt)
+        {
+            ClientName = flow.Request.Client.Name,
+        };
         registrations.Use(flow.Request.Client.Id, accepted.ExpiresAt);
         string? code = browser.Complete(flow.Request, grant);
         await browser.RedirectAsync(http, flow.Request, code, code is null ? "temporarily_unavailable" : null).ConfigureAwait(false);

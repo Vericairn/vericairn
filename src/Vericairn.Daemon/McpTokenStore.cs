@@ -151,11 +151,20 @@ internal sealed class McpTokenStore(string directory, TimeProvider clock)
         }
     }
 
+    // The local command reads an atomic snapshot and projects only public client facts.
+    internal IReadOnlyDictionary<string, McpTokenGrant> ClientGrants()
+    {
+        lock (gate)
+        {
+            return Load().Values.ToDictionary(family => family.Grant.Device, family => family.Grant, StringComparer.Ordinal);
+        }
+    }
+
     private Dictionary<string, McpTokenFamily> Load()
     {
         if (families is not null) return families;
         if (!File.Exists(path)) return families = new Dictionary<string, McpTokenFamily>(StringComparer.Ordinal);
-        using FileStream file = File.OpenRead(path);
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         McpTokenState? state = JsonSerializer.Deserialize<McpTokenState>(file, ProtocolJson.Options);
         if (state?.Format != Format || state.Families is null)
         {
@@ -210,7 +219,11 @@ internal sealed class McpTokenStore(string directory, TimeProvider clock)
         value.Length == prefix.Length + 43 && value.StartsWith(prefix, StringComparison.Ordinal) && IsUrlValue(value);
 }
 
-internal sealed record McpTokenGrant(string Device, string Principal, string PublicKey, string Admission, string By, string Client, string Resource, string Scope, DateTimeOffset ExpiresAt);
+internal sealed record McpTokenGrant(string Device, string Principal, string PublicKey, string Admission, string By, string Client, string Resource, string Scope, DateTimeOffset ExpiresAt)
+{
+    public string? ClientName { get; init; }
+}
+
 internal sealed record McpTokenAccess(string Family, McpTokenGrant Grant, DateTimeOffset ExpiresAt);
 internal sealed record McpTokenRefresh(string Family, string Hash, McpTokenGrant Grant);
 internal sealed record McpAccessDigest(string Hash, DateTimeOffset ExpiresAt, string Scope);
