@@ -72,6 +72,10 @@ internal sealed class WorkerSettings(CommandContext context)
             foreach (string warning in warnings) context.Error.WriteLine("warning: " + warning);
             return Clean;
         }
+        catch (DirectoryHandles.WindowsSharingViolationException)
+        {
+            return context.Fail("Could not remove the provisioned Claude Code setup token because of a Windows sharing violation.");
+        }
         catch (ProviderRefusedException exception)
         {
             return context.Fail(exception.Message);

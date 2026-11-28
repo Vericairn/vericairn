@@ -276,6 +276,29 @@ public sealed class ClaudeSetupTokenCommandTests : IDisposable
         Assert.False((result.Out + result.Err).Contains(token, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task RemoveReportsAWindowsSharingViolation()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Skip("This exercises Windows file sharing.");
+        string token = Token();
+        string home = Path.Combine(scratch, "worker-home");
+        Assert.Equal(0, (await Import(home, token, "max")).Code);
+        string provision = Provision(home);
+
+        using (File.Open(provision, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            CliHarness.Outcome result = await Invoke(home, "", null, "worker", "configure", "--remove-setup-token");
+
+            Assert.Equal(2, result.Code);
+            Assert.Contains("Windows sharing violation", result.Err, StringComparison.Ordinal);
+            Assert.DoesNotContain(token, result.Out + result.Err, StringComparison.Ordinal);
+            Assert.True(File.Exists(provision));
+        }
+
+        Assert.Equal(0, (await Invoke(home, "", null, "worker", "configure", "--remove-setup-token")).Code);
+        Assert.False(File.Exists(provision));
+    }
+
     [Theory]
     [InlineData("repository")]
     [InlineData("estate")]

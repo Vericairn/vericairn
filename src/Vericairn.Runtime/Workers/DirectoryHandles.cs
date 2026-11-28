@@ -17,6 +17,10 @@ internal static class DirectoryHandles
     private const uint OpenReparsePoint = 0x00200000;
     private const int FileDispositionInfo = 4;
     private const int FileAttributeTagInfo = 9;
+    private const int ErrorSharingViolation = 32;
+
+    internal sealed class WindowsSharingViolationException(Win32Exception cause)
+        : IOException("A Windows sharing violation prevented access to the local entry.", cause);
 
     internal static SafeFileHandle OpenUnix(string path, SafeFileHandle? parent = null, bool searchOnly = false)
     {
@@ -40,7 +44,7 @@ internal static class DirectoryHandles
             : OpenWindowsChild(parent, path, access);
         try
         {
-            if (handle.IsInvalid) throw Failure();
+            if (handle.IsInvalid) throw WindowsFailure(Marshal.GetLastPInvokeError(), "The local directory could not be opened.");
             VerifyWindowsEntry(handle, directory: true);
             return handle;
         }
@@ -58,7 +62,7 @@ internal static class DirectoryHandles
         VerifyWindowsEntry(handle, directory: false);
         byte delete = 1; // FILE_DISPOSITION_INFO.DeleteFile is a BOOLEAN.
         if (!SetFileInformationByHandle(handle, FileDispositionInfo, in delete, sizeof(byte)))
-            throw new IOException("The local file could not be removed.", new Win32Exception(Marshal.GetLastPInvokeError()));
+            throw WindowsFailure(Marshal.GetLastPInvokeError(), "The local file could not be removed.");
         return true;
     }
 
@@ -93,7 +97,7 @@ internal static class DirectoryHandles
             const int noSuchFile = unchecked((int)0xc000000f);
             if (allowMissing && status is objectNameNotFound or noSuchFile)
                 return new SafeFileHandle(0, ownsHandle: true);
-            throw new IOException("The local entry could not be opened without following links.", new Win32Exception(RtlNtStatusToDosError(status)));
+            throw WindowsFailure(RtlNtStatusToDosError(status), "The local entry could not be opened.");
         }
         finally
         {
@@ -113,6 +117,12 @@ internal static class DirectoryHandles
     }
 
     private static IOException Failure() => new("The local directory could not be opened without following links.", new Win32Exception(Marshal.GetLastPInvokeError()));
+
+    private static IOException WindowsFailure(int error, string message)
+    {
+        var cause = new Win32Exception(error);
+        return error == ErrorSharingViolation ? new WindowsSharingViolationException(cause) : new IOException(message, cause);
+    }
 
 #pragma warning disable SYSLIB1054 // Runtime marshalling keeps the project free of unsafe code.
 #pragma warning disable CA2101 // UTF-8 on Unix, explicit Unicode entry points on Windows.
