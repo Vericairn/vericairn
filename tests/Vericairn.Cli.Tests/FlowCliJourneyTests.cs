@@ -44,7 +44,7 @@ public partial class FlowCliJourneyTests
             string[] propose = ["goal", "propose", "--by", op, "--title", "Master the song", "--objective", "Produce the master.", "--done", """{"type":"work-order","fields":{"key":"SONG-1"}}""",
                 "--work-order", order, "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2"];
             Refused(root, "go with --flow", [.. propose, "--until", "master"]);
-            Refused(root, "--flow-path configures a run and goes with --flow", [.. propose, "--flow-path", "song/**"]);
+            Refused(root, "--flow-path configures routed steps and goes with --flow or --standing", [.. propose, "--flow-path", "song/**"]);
             Refused(root, "--subject is name=value with a field of the flow's subject", [.. propose, "--flow", "example/song@1.0.0", "--subject", "carrier=x"]);
             Refused(root, "Step master is required", [.. propose, "--flow", "example/song@1.0.0", "--subject", "recording=" + order, "--subject", "tracks=intro", "--flow-option", "step.master=off"]);
             CliHarness.Outcome refusedPaths = CliHarness.Run(["--estate", root, "--json", .. propose, "--flow", "example/song@1.0.0", "--subject", "recording=" + order,

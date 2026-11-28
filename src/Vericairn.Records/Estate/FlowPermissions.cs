@@ -8,7 +8,7 @@ using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Estate;
 
-/// <summary>Derives a routed step's repository permissions from the run's typed path declarations.</summary>
+/// <summary>Derives a routed step's repository permissions from typed path declarations.</summary>
 internal static class FlowPermissions
 {
     internal const string Code = "flow.permitted-paths";
@@ -36,7 +36,7 @@ internal static class FlowPermissions
     {
         var sources = new List<string[]>();
         AddDeclared(step.Element);
-        AddDeclared(FlowRuns.Plan(goal));
+        AddDeclared(StandingAgents.IsStanding(goal) ? StandingAgents.Plan(goal) : FlowRuns.Plan(goal));
 
         // The named revision's path: entries are the work order's grant; a later revision only narrows a grant the named one gives, so
         // entries first added after it grant nothing until the goal names that revision.
@@ -120,15 +120,7 @@ internal static class FlowPermissions
 
         bool MayRouteToAgent(FlowStep step) =>
             (!step.Decides || (step.Transition is { PersonOnly: false } && configuration.Decider(step) != "rule"))
-            && AgentRole(step.Role);
-
-        bool AgentRole(string role) => flow.Role(role)?.Holder switch
-        {
-            "person" => false,
-            "agent" => true,
-            _ => Routing.Principals(model, goal, role).Principals.Any(principal =>
-                model.CurrentPrincipal(principal) is RecordEnvelope record && EstateModel.BodyString(record, "kind") == "agent"),
-        };
+            && AgentRole(model, goal, flow, step.Role);
 
         bool HasAgentReview(FlowStep step)
         {
@@ -143,11 +135,34 @@ internal static class FlowPermissions
         }
 
         bool AgentReview(FlowReview? review) =>
-            review is { Independence: not ("none" or "person" or "self") } && AgentRole(review.Role ?? Roles.Reviewer);
+            review is { Independence: not ("none" or "person" or "self") } && AgentRole(model, goal, flow, review.Role ?? Roles.Reviewer);
     }
+
+    internal static IReadOnlyList<FlowStep> MissingForStanding(EstateModel model, RecordEnvelope goal, FlowDefinition flow, RecordEnvelope order) =>
+        StandingAgents.WorkStep(flow) is FlowStep { Reserved: null } step && Routing.ReservedAction(step.Role) is null
+            && AgentRole(model, goal, flow, step.Role) && For(model, goal, order, step).Count == 0 ? [step] : [];
+
+    private static bool AgentRole(EstateModel model, RecordEnvelope goal, FlowDefinition flow, string role) => flow.Role(role)?.Holder switch
+    {
+        "person" => false,
+        "agent" => true,
+        _ => Routing.Principals(model, goal, role).Principals.Any(principal =>
+            model.CurrentPrincipal(principal) is RecordEnvelope record && EstateModel.BodyString(record, "kind") == "agent"),
+    };
 
     internal static string Message(string step) =>
         $"Flow step {step} would receive no interpretable permitted path. Give it a repository-relative pattern in the step, the goal's flow paths, or a path: entry in the work order revision the goal names. The supplied sources must permit a common pattern.";
+
+    internal static string HeldMessage(RecordEnvelope assignment, string step)
+    {
+        bool standing = StandingAgents.KeyOf(assignment) is not null;
+        string name = FlowRuns.StepOf(assignment)?.ToString() ?? step;
+        string message = $"Assignment {assignment.Id} of flow step {name} needs a brief with permitted paths within the step's current path declarations.";
+        string takeover = $"A person can take over the {(standing ? "occurrence" : "step")} with 'vericairn work takeover {assignment.Id} --by <person>'.";
+        return standing
+            ? $"{message} {takeover} If the brief already has permitted paths, the sponsor can also revise the goal so its typed path declarations cover them."
+            : $"{message} {takeover} If the step is eligible for a fresh assignment, take the step again with 'vericairn goal step'.";
+    }
 
     private static string? Pattern(string entry)
     {

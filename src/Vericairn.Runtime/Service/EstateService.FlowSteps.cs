@@ -24,21 +24,29 @@ public sealed partial class EstateService
 {
     private static Problem? FlowPathRefusal(EstateModel model, RecordEnvelope goal)
     {
-        if (!FlowRuns.IsRun(goal) || FlowRuns.Work(model, goal) is not RecordEnvelope order
-            || FlowRuns.Resolve(model, goal).Flow is not FlowDefinition flow)
+        bool standing = StandingAgents.IsStanding(goal);
+        if ((!standing && !FlowRuns.IsRun(goal)) || FlowRuns.Work(model, goal) is not RecordEnvelope order)
         {
             return null;
         }
 
-        FlowRuns.Configuration configuration = FlowRuns.Configure(model, goal, flow);
-        IReadOnlyList<FlowStep> missing = FlowPermissions.Missing(model, goal, flow, configuration, order);
+        FlowDefinition? flow = standing ? StandingAgents.Resolve(model, goal).Flow : FlowRuns.Resolve(model, goal).Flow;
+        if (flow is null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<FlowStep> missing = standing
+            ? FlowPermissions.MissingForStanding(model, goal, flow, order)
+            : FlowPermissions.Missing(model, goal, flow, FlowRuns.Configure(model, goal, flow), order);
         if (missing.Count == 0)
         {
             return null;
         }
 
+        string plan = standing ? "standing" : "flow";
         FindingDto[] findings = [.. missing.Select(step =>
-            new FindingDto("error", FlowPermissions.Code, $"plan.flow.{step.Key}", FlowPermissions.Message(step.Key)))];
+            new FindingDto("error", FlowPermissions.Code, $"plan.{plan}.{step.Key}", FlowPermissions.Message(step.Key)))];
         return new Problem(FlowPermissions.Code, string.Join(" ", findings.Select(finding => finding.Message)), findings);
     }
 

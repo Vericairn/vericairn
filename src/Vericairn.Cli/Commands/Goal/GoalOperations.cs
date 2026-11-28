@@ -178,9 +178,9 @@ internal sealed class GoalOperations(CommandContext context)
             return context.Fail("--subject, --flow-option and --until configure a run, and go with --flow or --standing.");
         }
 
-        if (proposal.Flow is null && proposal.FlowPaths is { Length: > 0 })
+        if (proposal.Flow is null && !standing && proposal.FlowPaths is { Length: > 0 })
         {
-            return context.Fail("--flow-path configures a run and goes with --flow.");
+            return context.Fail("--flow-path configures routed steps and goes with --flow or --standing.");
         }
 
         if (!standing && ((proposal.Triggers?.Length ?? 0) > 0 || (proposal.Period?.Length ?? 0) > 0 || proposal.RunsOn is not null || proposal.AwaitingReview is not null || (proposal.Outputs?.Length ?? 0) > 0))
@@ -396,6 +396,11 @@ internal sealed class GoalOperations(CommandContext context)
             ["period"] = period,
             ["until"] = proposal.Until ?? RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddDays(Vericairn.Records.Estate.StandingAgents.DefaultDays)),
         };
+        if (proposal.FlowPaths is { Length: > 0 } paths)
+        {
+            plan["paths"] = new Json.JsonArray(paths.Select(path => (Json.JsonNode)path).ToArray());
+        }
+
         if (proposal.RunsOn is not null)
         {
             plan["runsOn"] = proposal.RunsOn;

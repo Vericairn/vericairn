@@ -1387,6 +1387,7 @@ internal static partial class StandingAgents
         standing.Hash("runsOn", false);
         standing.Number("awaitingReview", false, 1, 100);
         StandingOutputs.ValidateCaps(standing.Nested("outputs", false));
+        FlowPermissions.Validate(standing);
         standing.NoOtherKeys();
         if (kind != "stewardship")
         {

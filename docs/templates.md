@@ -482,6 +482,7 @@ every template.
   `["src/docs/**"]`. A flow run's `plan.flow.paths` and `path:` entries in the run's work-order scope also constrain the
   step. Its assignment brief carries patterns allowed by every supplied list. Put explanations in the step's action or
   the work-order scope. Scope text supplies a path only when it has the `path:` prefix and a valid pattern.
+  From 0.9.5 (FIX-179), a standing occurrence uses the same rule with the goal's `plan.standing.paths`.
 - A step waits on the step declared before it, or on the steps its `after`
   names (an empty list for none), and on the producers of its inputs; steps
   whose waits are done may run in parallel. References name earlier steps only.

@@ -108,10 +108,23 @@ public static partial class NextEligible
             }
         }
 
-        OccurrenceRoute? next = routes.Failure is null ? routes.Occurrences.FirstOrDefault(o => o.Dispatches) : null;
-        text.Append(next is null
-            ? "  Next: nothing to dispatch now; vericairn goal due lists each occurrence\n"
-            : $"  Next: occurrence {next.Occurrence.Occurrence.Key}, {next.Route!.State}; vericairn goal step {agent.Goal.Id} carries it\n");
+        OccurrenceRoute? next = NextOccurrence(routes);
+        string? refusal = NextPathRefusal(model, agent, next);
+        if (refusal is not null)
+        {
+            text.Append("  Next: occurrence ").Append(next!.Occurrence.Occurrence.Key).Append('.').Append(' ').Append(StandingView.PathRefusalLine(refusal)).Append('\n');
+        }
+        else
+        {
+            if (StandingView.PathRefusal(model, agent) is { } warning)
+            {
+                text.Append("  ").Append(StandingView.PathRefusalLine(warning)).Append('\n');
+            }
+
+            text.Append(next is null
+                ? "  Next: nothing to dispatch now; vericairn goal due lists each occurrence\n"
+                : $"  Next: occurrence {next.Occurrence.Occurrence.Key}, {next.Route!.State}; vericairn goal step {agent.Goal.Id} carries it\n");
+        }
         return text.ToString();
     }
 
@@ -122,7 +135,7 @@ public static partial class NextEligible
         ArgumentNullException.ThrowIfNull(routes);
         StandingAgents.Agent agent = routes.Agent;
         AgentRuns.Ledger ledger = routes.Ledger;
-        OccurrenceRoute? next = routes.Failure is null ? routes.Occurrences.FirstOrDefault(o => o.Dispatches) : null;
+        OccurrenceRoute? next = NextOccurrence(routes);
         var json = new JsonObject
         {
             ["format"] = "vericairn.next/1",
@@ -135,7 +148,7 @@ public static partial class NextEligible
                 ["inFlight"] = ledger.InFlight,
                 ["fenced"] = new JsonArray(),
             },
-            ["standing"] = StandingView.Summary(model, agent),
+            ["standing"] = StandingView.Summary(model, agent, NextPathRefusal(model, agent, next)),
             ["steps"] = new JsonArray(agent.Occurrences.Select(o =>
             {
                 string? contributor = o.Assignment is null ? null : EstateModel.BodyString(o.Assignment, "contributor");
@@ -158,5 +171,25 @@ public static partial class NextEligible
         };
         using JsonDocument document = JsonDocument.Parse(json.ToJsonString());
         return CanonicalJson.SerializePretty(document.RootElement);
+    }
+
+    private static OccurrenceRoute? NextOccurrence(StandingRoutes routes) =>
+        routes.Failure is null ? routes.Occurrences.FirstOrDefault(o => o.Dispatches) : null;
+
+    // Inspect the same agent route that goal step would take, including an assignment already holding the occurrence.
+    private static string? NextPathRefusal(EstateModel model, StandingAgents.Agent agent, OccurrenceRoute? next)
+    {
+        if (next?.Route is not { State: "agent" } route || agent.Step is not { } step || agent.Order is not { } order)
+        {
+            return null;
+        }
+
+        IReadOnlyList<string> paths = FlowPermissions.For(model, agent.Goal, order, step);
+        if (route.Assignment is { } assignment && FlowPermissions.Carried(paths, assignment) is null)
+        {
+            return FlowPermissions.HeldMessage(assignment, step.Key);
+        }
+
+        return paths.Count == 0 ? FlowPermissions.Message(step.Key) : null;
     }
 }
