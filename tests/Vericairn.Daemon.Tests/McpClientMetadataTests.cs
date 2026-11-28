@@ -7,6 +7,8 @@ namespace Vericairn.Daemon.Tests;
 
 public sealed class McpClientMetadataTests
 {
+    private static readonly string[] Redirects = ["https://client.example/callback"];
+
     [Fact]
     public void DynamicRegistrationDefaultsToWebAndAppliesTheWebRedirectRules()
     {
@@ -31,5 +33,24 @@ public sealed class McpClientMetadataTests
             application_type = "native",
         });
         Assert.Equal("native", McpClientMetadata.Parse(native, client, dynamic: true)?.ApplicationType);
+    }
+
+    [Theory]
+    [InlineData('\u061c')]
+    [InlineData('\u200f')]
+    [InlineData('\u202e')]
+    [InlineData('\u2067')]
+    public void ClientNamesRejectBidirectionalControls(char control)
+    {
+        const string id = "https://client.example/registration.json";
+        static JsonElement Document(string name) => JsonSerializer.SerializeToElement(new
+        {
+            client_id = id,
+            client_name = name,
+            redirect_uris = Redirects,
+        });
+
+        Assert.Null(McpClientMetadata.Parse(Document("Example " + control + " client"), id, dynamic: false));
+        Assert.NotNull(McpClientMetadata.Parse(Document("مثال"), id, dynamic: false));
     }
 }

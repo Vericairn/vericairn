@@ -113,15 +113,16 @@ internal sealed class McpBrowserAuthorization(TimeProvider clock, string issuer)
     internal static Task PageAsync(HttpContext http, string id, PairingPlan? estate = null, McpApproval? approval = null, McpClientMetadata? client = null, string? redirect = null, bool denied = false)
     {
         static string Escape(string value) => WebUtility.HtmlEncode(value);
-        string? origin = client is not null && Uri.TryCreate(client.Id, UriKind.Absolute, out Uri? identifier)
-            ? identifier.GetLeftPart(UriPartial.Authority)
-            : redirect is not null ? new Uri(redirect).GetLeftPart(UriPartial.Authority) : null;
+        Uri? clientUri = client is not null && Uri.TryCreate(client.Id, UriKind.Absolute, out Uri? identifier)
+            ? identifier
+            : redirect is null ? null : new Uri(redirect);
+        string? origin = clientUri is null ? null : new UriBuilder(clientUri) { Host = clientUri.IdnHost }.Uri.GetLeftPart(UriPartial.Authority);
         string message = denied ? "<p>The approval code could not be used.</p>" : string.Empty;
         string prompt = estate is null || approval is null || client is null
             ? "<label>Approval code <input name=\"approval_code\" required autocomplete=\"off\"></label> <button name=\"action\" value=\"prove\">Continue</button>"
             : "<dl><dt>Estate</dt><dd>" + Escape(estate.EstateName ?? estate.Estate) + "</dd><dt>Principal</dt><dd>"
-                + Escape(estate.PrincipalName ?? estate.Principal) + "</dd><dt>Client</dt><dd>" + Escape(client.Name)
-                + "</dd><dt>Client origin</dt><dd>" + Escape(origin ?? string.Empty) + "</dd><dt>Scope</dt><dd>" + Escape(approval.Scope) + "</dd><dt>Expires</dt><dd>" + Escape(RecordParser.FormatTimestamp(approval.ExpiresAt))
+                + Escape(estate.PrincipalName ?? estate.Principal) + "</dd><dt>Client</dt><dd><bdi>" + Escape(client.Name)
+                + "</bdi></dd><dt>Client origin</dt><dd>" + Escape(origin ?? string.Empty) + "</dd><dt>Scope</dt><dd>" + Escape(approval.Scope) + "</dd><dt>Expires</dt><dd>" + Escape(RecordParser.FormatTimestamp(approval.ExpiresAt))
                 + "</dd></dl><p>Tool results go to this client and any model it uses.</p>"
                 + "<button name=\"action\" value=\"approve\">Approve</button> <button name=\"action\" value=\"deny\">Deny</button>";
         http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";

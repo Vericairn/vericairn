@@ -83,7 +83,8 @@ internal sealed record McpClientMetadata(string Id, string Name, string[] Redire
         string? application = ReadString(document, "application_type");
         if (dynamic && !document.TryGetProperty("application_type", out _)) application = "web";
         if ((!dynamic && suppliedId != id) || (dynamic && application is not ("web" or "native"))
-            || string.IsNullOrWhiteSpace(name) || name.Length > 120 || name.Any(c => char.IsControl(c))
+            || string.IsNullOrWhiteSpace(name) || name.Length > 120 || name.Any(c => char.IsControl(c) || c is '\u061c' or '\u200e' or '\u200f'
+                or >= '\u202a' and <= '\u202e' or >= '\u2066' and <= '\u2069')
             || !SupportsPublicClient(document, dynamic)
             || !document.TryGetProperty("redirect_uris", out JsonElement redirects) || redirects.ValueKind != JsonValueKind.Array
             || redirects.GetArrayLength() is < 1 or > 12)
