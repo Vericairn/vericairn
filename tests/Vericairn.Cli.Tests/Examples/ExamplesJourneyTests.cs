@@ -10,7 +10,7 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class ExamplesJourneyTests
 {
-    private static string TestRoot()
+    internal static string TestRoot()
     {
         for (DirectoryInfo? parent = new(AppContext.BaseDirectory); parent is not null; parent = parent.Parent)
             if (File.Exists(Path.Combine(parent.FullName, "Vericairn.slnx"))) return Path.Combine(parent.FullName, "tests", "examples");

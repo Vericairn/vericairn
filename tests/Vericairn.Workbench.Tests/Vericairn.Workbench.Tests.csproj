@@ -31,6 +31,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Workbench's example checks replay the CLI test journey as a subprocess. -->
+    <ProjectReference Include="../Vericairn.Cli.Tests/Vericairn.Cli.Tests.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <ProjectReference Include="../../src/Vericairn.Workbench/Vericairn.Workbench.csproj" />
     <ProjectReference Include="../../src/Vericairn.Presentation/Vericairn.Presentation.csproj" />
     <ProjectReference Include="../../src/Vericairn.Runtime/Vericairn.Runtime.csproj" />

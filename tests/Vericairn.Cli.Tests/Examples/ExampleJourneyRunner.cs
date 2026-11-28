@@ -31,13 +31,18 @@ internal static class ExampleJourneyRunner
         .ToDictionary(surface => surface.Name, StringComparer.Ordinal));
 
     internal static ExampleJourneyRun Run(ExampleJourney journey, string variant, string? executable = null,
-        Func<ExampleCommand, CliHarness.Outcome>? run = null)
+        Func<ExampleCommand, CliHarness.Outcome>? run = null, string? retainedRoot = null,
+        Action<IReadOnlyDictionary<string, string>>? onCompleted = null)
     {
         Func<ExampleCommand, CliHarness.Outcome> invoke = run ?? Invoke;
         var attempts = new List<ExampleJourneyAttempt>();
         for (int attempt = 0; attempt < 2; attempt++)
         {
-            string scratch = CliHarness.TempDirectory("example-journey");
+            string scratch = retainedRoot is null ? CliHarness.TempDirectory("example-journey")
+                : Path.Combine(retainedRoot, attempt == 0 ? "journey" : "retry");
+            if (retainedRoot is not null && Path.Exists(scratch))
+                throw new IOException("The retained journey needs a fresh attempt directory.");
+            bool retain = false;
             string? original = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
             var steps = new List<ExampleJourneyStep>();
             try
@@ -123,6 +128,8 @@ internal static class ExampleJourneyRunner
                         }
                     }
                 }
+                onCompleted?.Invoke(captures);
+                retain = retainedRoot is not null;
                 attempts.Add(new(variant, steps, null));
                 return new(attempts.Count == 1 ? "passed" : "intermittent", attempts);
             }
@@ -133,7 +140,7 @@ internal static class ExampleJourneyRunner
             finally
             {
                 Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, original);
-                CliHarness.Delete(scratch);
+                if (!retain) CliHarness.Delete(scratch);
             }
         }
         return new("failed", attempts);
