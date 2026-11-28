@@ -18,7 +18,7 @@ namespace Vericairn.Workbench.Tests;
 
 /// <summary>The release flow and the runtime workspace, keyboard only, and the theme's roles.</summary>
 [Collection("workbench")]
-public class ReleaseJourneyTests(HeadlessFixture fixture)
+public partial class ReleaseJourneyTests(HeadlessFixture fixture)
 {
     // The product declares its provider and one setting; the repository is left for the form, as a person would type it.
     private const string Product = """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free.","license":"Apache-2.0"}],"surfaces":[{"name":"CLI","slug":"cli","summary":"The command line."}],"release":{"destination":{"provider":"github-releases","settings":{"workflow":"release.yml"}}}}""";

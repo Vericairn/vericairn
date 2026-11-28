@@ -97,3 +97,12 @@ end
 errors = WorkflowActions.check(File.expand_path('../workflows', __dir__))
 raise errors.join("\n") unless errors.empty?
 puts 'PASS repository workflows'
+
+package = Psych.safe_load(File.read(File.expand_path('../workflows/package.yml', __dir__)))
+steps = package.fetch('jobs').fetch('package').fetch('steps')
+upload = steps.index do |step|
+  step.fetch('uses', '').start_with?('actions/upload-artifact@') && step.dig('with', 'path') == 'dist'
+end
+smoke = steps.index { |step| step.fetch('run', '').include?('tools/examples/smoke.py') }
+raise 'The package job must upload dist before running the examples smoke' unless upload && smoke && upload < smoke
+puts 'PASS package artifact precedes the examples smoke'
