@@ -281,6 +281,7 @@ internal static class FakeHarness
                 "cloud" => " " + "AK" + "IA" + new string('A', 16),
                 "generic" => " " + "s" + "k-" + new string('b', 40),
                 "setup" or "malformed" => " " + NewClaudeSetupToken(),
+                "provision-fragment" => " " + ClaudeSetupSignIn()![60..80],
                 _ => string.Empty,
             };
             string? assistantEvent = null;
@@ -314,9 +315,9 @@ internal static class FakeHarness
         if (!codex && behavior["retrieval"]?.GetValue<string>() is string retrieval)
         {
             // A retrieval run's web tools, as Claude Code's stream reports them: each invocation, then the result given to the agent.
-            if (retrieval == "secret-text")
+            if (retrieval is "secret-text" or "provision-fragment")
             {
-                string secret = NewClaudeSetupToken();
+                string secret = retrieval == "provision-fragment" ? ClaudeSetupSignIn()![60..80] : NewClaudeSetupToken();
                 Console.WriteLine(JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "tool_use", id = secret, name = "WebSearch", input = new { query = "Widget guide " + secret } } } } }));
                 Console.WriteLine(JsonSerializer.Serialize(new { type = "user", message = new { content = new[] { new { type = "tool_result", tool_use_id = secret, content = "Retrieved widget page " + secret } } } }));
                 return 0;

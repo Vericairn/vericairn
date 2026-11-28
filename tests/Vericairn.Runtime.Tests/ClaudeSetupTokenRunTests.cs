@@ -2,7 +2,9 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.IO.Compression;
+using Vericairn.Packs.Software;
 using Vericairn.Protocol;
+using Vericairn.Records.Identity;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
@@ -106,6 +108,52 @@ public class ClaudeSetupTokenRunTests
         Assert.False(output.Contains(token[60..80], StringComparison.Ordinal));
         Assert.Contains("<secret>", output, StringComparison.Ordinal);
         Assert.Contains("[stderr] <secret>", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheOutputPumpAndSupervisorProtectTheProvisionWhileTheyObserve()
+    {
+        string token = FakeHarness.NewClaudeSetupToken();
+        string fragment = token[60..80];
+        string run = Ulid.NewUlid().Value;
+        var directory = new RunDirectory(Ulid.NewUlid().Value, run);
+        directory.Create();
+        var pumpRegistration = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool protectedBySupervisor = false;
+        var options = new WorkerOptions
+        {
+            SetupToken = new WorkerConfigurationStore.ClaudeSetupToken(token, "pro", long.MaxValue),
+            Heartbeat = TimeSpan.FromMilliseconds(20),
+            AfterEvent = () =>
+            {
+                // Supervise has yet to start, so any registration here belongs to an output pump.
+                pumpRegistration.TrySetResult(ClaudeOutputSecrets.ContainsActiveFragment(fragment));
+            },
+            StopAdapter = () =>
+            {
+                // Supervise calls this after the process exits and both pumps finish.
+                protectedBySupervisor = ClaudeOutputSecrets.ContainsActiveFragment(fragment);
+            },
+        };
+
+        string report = Path.Combine(directory.Path, "harness.jsonl");
+        var supervisor = RunSupervisor.Start(run, FakeHarness.Command("generic", report), directory.Path,
+            WorkerEnvironment.Build(WorkerEnvironment.Current()), new GenericLauncher(), directory, options, 60, null);
+        bool protectedByPump;
+        RunOutcome? outcome;
+        try
+        {
+            protectedByPump = await pumpRegistration.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            outcome = supervisor.Supervise(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(0, outcome?.ExitCode);
+        Assert.True(protectedByPump, "The output pump did not register the provision.");
+        Assert.True(protectedBySupervisor, "The supervisor did not register the provision.");
+        Assert.False(ClaudeOutputSecrets.ContainsActiveFragment(fragment));
     }
 
     [Fact]

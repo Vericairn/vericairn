@@ -88,11 +88,14 @@ public class RetrievalRunTests
         }
     }
 
-    [Fact]
-    public void SecretBearingSourceEventsRetainTheRedactedQueryAndResult()
+    [Theory]
+    [InlineData("secret-text", "Widget guide <secret>", "Retrieved widget page <secret>")]
+    [InlineData("provision-fragment", "<secret>", "<secret>")]
+    public void SecretBearingSourceEventsRetainTheRedactedQueryAndResult(string scenario, string query, string result)
     {
-        using NativeRun fixture = Fixture("claude");
-        fixture.Probe.Behavior("retrieval", "secret-text");
+        string? setupToken = scenario == "provision-fragment" ? FakeHarness.NewClaudeSetupToken() : null;
+        using NativeRun fixture = Fixture("claude", setupToken: setupToken);
+        fixture.Probe.Behavior("retrieval", scenario);
         RunResponse started = fixture.Start();
         Assert.True(started.Ok, started.Message);
         Assert.Equal("observed-success", fixture.Run.Settled(started.Run).Status);
@@ -101,14 +104,14 @@ public class RetrievalRunTests
         Assert.True(observed.GetProperty("complete").GetBoolean());
         JsonElement source = Assert.Single(observed.GetProperty("sources").EnumerateArray());
         Assert.Equal("WebSearch", source.GetProperty("tool").GetString());
-        Assert.Equal("Widget guide <secret>", source.GetProperty("query").GetString());
         Assert.True(source.GetProperty("retained").GetBoolean());
 
         var directory = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);
         bool secretRetained = SecretShapes.Secret().IsMatch(File.ReadAllText(directory.SourcesFile));
         Assert.False(secretRetained);
         string path = Assert.Single(Directory.EnumerateFiles(directory.SourcesDirectory));
-        Assert.True(File.ReadAllText(path) == "Retrieved widget page <secret>");
+        Assert.True(File.ReadAllText(path) == result, "The retained result was not redacted.");
+        Assert.True(source.GetProperty("query").GetString() == query, "The retained query was not redacted.");
     }
 
     // D07-A requires retrieval to be refused when the run's records name a credential reference.
@@ -405,14 +408,14 @@ public class RetrievalRunTests
     /// A run whose brief permits retrieval, in a format-3 estate whose own repository is a git repository recorded by a repository
     /// resource (public unless named otherwise), with the widget's resource public unless named otherwise.
     /// </summary>
-    private static NativeRun Fixture(string harness, bool workspacePublic = true, string? estate = "public", Action<NativeRun, int>? afterProbe = null)
+    private static NativeRun Fixture(string harness, bool workspacePublic = true, string? estate = "public", Action<NativeRun, int>? afterProbe = null, string? setupToken = null)
     {
         TestPrerequisites.RequireGit();
         NativeRun? self = null;
         int probes = 0;
         // The launcher's probes run before the intent and again before dispatch; a hook after each changes the records between them.
-        var fixture = new NativeRun(harness, recordFormat: 3, brief: PermittingBrief, retrieval: harness == "claude",
-            afterProbe: afterProbe is null ? null : () => afterProbe(self!, ++probes));
+        var fixture = new NativeRun(harness, qualify: setupToken is not null, recordFormat: 3, brief: PermittingBrief, retrieval: harness == "claude",
+            afterProbe: afterProbe is null ? null : () => afterProbe(self!, ++probes), setupToken: setupToken);
         self = fixture;
         RunEstate run = fixture.Run;
         if (estate != "unobserved") run.Service.Providers.Register(new GitCommandAdapter());

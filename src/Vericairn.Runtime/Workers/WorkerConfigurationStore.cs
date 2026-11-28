@@ -50,6 +50,7 @@ public sealed partial class WorkerConfigurationStore
         WriteIndented = true,
     };
     private readonly string directory;
+    internal Func<string, string> ResolveConfigurationAncestor { get; init; } = CanonicalDirectory;
 
     /// <summary>Uses this user's Vericairn home, or an isolated home supplied by a host.</summary>
     public WorkerConfigurationStore(string? home = null) => directory = Path.Combine(home ?? VericairnHome.Path(), "worker");
@@ -158,7 +159,7 @@ public sealed partial class WorkerConfigurationStore
         RefuseLink(home.FullName);
         // Resolve only ancestors of the home. A change to the worker or home must not redirect the provision path.
         string canonicalHome = home.Parent is { } ancestor
-            ? Path.Combine(CanonicalDirectory(ancestor.FullName), home.Name)
+            ? Path.Combine(ResolveConfigurationAncestor(ancestor.FullName), home.Name)
             : home.FullName;
         string canonical = Path.Combine(canonicalHome, worker.Name);
         for (DirectoryInfo? parent = new(canonical); parent is not null; parent = parent.Parent)

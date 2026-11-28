@@ -77,7 +77,7 @@ public sealed partial class WorkerConfigurationStore
         }
     }
 
-    internal (bool Removed, IReadOnlyList<string> Warnings) RemoveClaudeSetupToken()
+    internal (bool Removed, IReadOnlyList<string> Warnings) RemoveClaudeSetupToken(Action? beforeUnixUnlink = null)
     {
         string path = ConfigurationPath(ClaudeSetupTokenFile);
         RefuseLink(path);
@@ -100,6 +100,7 @@ public sealed partial class WorkerConfigurationStore
         else
         {
             RefuseLink(path);
+            beforeUnixUnlink?.Invoke();
             // Unlink removes the entry in this directory even if a concurrent rename substitutes a link at the leaf.
             if (DirectoryHandles.UnlinkAt(workerHandle, ClaudeSetupTokenFile, 0) != 0)
             {
