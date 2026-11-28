@@ -869,7 +869,7 @@ run. The worker's observations of the stop are separate facts.
 | `operation` | Required: `cancel`, with the runtime's normal grace, or `contain`, with no additional grace. |
 | `requestId` | Required: the reviewing device's request identity, 32 lowercase hexadecimal digits, not all zero. |
 | `reason` | Required, at most 512 characters, nonblank with no surrounding whitespace: the reason the run's stop observations carry. |
-| `expectedStopReason` | Optional, for `contain` only: the earlier stop's reason, which the containment tightens; it differs from `reason`. |
+| `expectedStopReason` | Optional, for `contain` only, at most 512 characters and nonblank: the earlier stop's reason, which the containment tightens; it differs from `reason`. |
 
 Its subject is the run's operation with its hash. It must be an in-flight revision (`not-started`, `dispatched` or `uncertain`)
 of the run the record names. Validation refuses each of these, with its code:
@@ -882,13 +882,19 @@ of the run the record names. Validation refuses each of these, with its code:
 - an author who is not a person (`run-stop-request.person`);
 - a subject that is not an in-flight revision of the named run (`run-stop-request.run`).
 
-Validation also refuses the type in an estate whose format is earlier than 3 (`record.type-format`).
+A text longer than its limit, an empty one, or an identity of the wrong length is also reported as `body.length`, by the
+shared body reader. A record of this type that states a format earlier than 3 is refused as `record.type-format`, in any
+estate; a format-3 record in a format-2 estate is `record.format-ahead`.
 
 When it writes the record, the runtime also refuses:
 
 - a second record from the same person with the same run, operation and request identity;
 - a stop of a run that has ended;
-- a subject that is no longer the run's latest operation revision.
+- a subject that is no longer the run's latest operation revision;
+- a person who may not stop the run;
+- a containment whose `expectedStopReason` no longer matches the earlier stop: there is none, it has another reason, it
+  already allows no grace, the run has exited, or escalation or containment has begun. When the earlier stop cannot be read, the answer is
+  `unavailable`.
 
 Readers before 0.9.5 refuse the type (`record.unknown-type`). Upgrade every reader of an estate before a phone signs an
 intervention in it.
