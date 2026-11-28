@@ -52,6 +52,11 @@ an acceptance. Completeness is explicit:
 `selected-page`, `bounded-overview`, `source-basis`, or `unavailable`; the rendition
 labels its page or partial overview and how to inspect complete authoritative detail.
 
+From 0.9.5, the render response includes optional `page` metadata when the generator reports page boundaries.
+`number` is the one-based page and `total` is the number of pages. On a collection page, `items` lists
+the permitted record rows in the order they appear in the rendition, with `revision`, `hash`, `recordType`
+and `title` for each. `items` is empty for a single-item page. The sources-only response omits `page`.
+
 `docs regenerate --compare` checks bytes and complete membership without writing
 output, a journal, a pin or a review. Missing, changed and unexpected members are
 distinct. It exits zero only when current, one for differences, and nonzero when
@@ -93,6 +98,23 @@ the selected snapshot. Failed refresh clears cached content and currentness.
 Successful refresh retains the prior rendition with its own historical basis and
 a bounded line comparison. Correct the authoritative source, then refresh;
 generated text has no editor or submission action. See [Workbench](workbench.md).
+
+### Readable companions in Remote
+
+From 0.9.5 (READ-05), choose **Readable companions** in **Products** to open Remote's collection catalog.
+Open a collection to read its current revisions at the selected snapshot, then choose **Read selected item**
+to open an exact revision from that list. Remote uses the same runtime generator as Workbench through the SDK.
+
+The last collection page and the last item page stay in memory. Remote checks current access and the exact
+source and generator basis before it reuses a page. **Cached** labels a reused page with its original
+observation time and age. A phone that is offline or has had its access revoked sees an unavailable reader
+without the companion text, rows or source details. A refused or unavailable read or home refresh discards
+both cached pages.
+
+When an exact permitted item's rendition is unavailable, choose **Continue in Workbench** to prepare a
+desktop task pinned to that revision. Workbench checks access again when you open the task in **From Remote**.
+With a 0.9.4 runtime, a newer Remote shows the collection text and explains that item navigation requires a newer runtime.
+See [Remote](remote.md#readable-companions).
 
 ## Record coverage
 
