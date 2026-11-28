@@ -10,7 +10,7 @@ using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
-public sealed class WorkerConfigurationTests : IDisposable
+public sealed partial class WorkerConfigurationTests : IDisposable
 {
     private readonly string home = Path.Combine(Path.GetTempPath(), "worker-config-" + Guid.NewGuid().ToString("N"));
     private static readonly JsonElement Cap = JsonSerializer.SerializeToElement(new { wallMinutes = 1 });

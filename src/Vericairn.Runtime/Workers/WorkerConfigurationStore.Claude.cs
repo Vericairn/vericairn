@@ -90,21 +90,22 @@ public sealed partial class WorkerConfigurationStore
             ? DirectoryHandles.OpenWindows(home)
             : DirectoryHandles.OpenUnix(home, searchOnly: true);
         using SafeFileHandle workerHandle = OperatingSystem.IsWindows()
-            ? DirectoryHandles.OpenWindows(worker)
+            ? DirectoryHandles.OpenWindows(Path.GetFileName(worker), homeHandle)
             : DirectoryHandles.OpenUnix(Path.GetFileName(worker), homeHandle, searchOnly: true);
 
-        RefuseLink(path);
         if (OperatingSystem.IsWindows())
         {
-            // The directory handles deny delete sharing, so the path cannot be redirected by a directory swap.
-            if (!File.Exists(path)) return (false, []);
-            File.Delete(path);
+            if (!DirectoryHandles.UnlinkWindows(workerHandle, ClaudeSetupTokenFile)) return (false, []);
         }
-        else if (DirectoryHandles.UnlinkAt(workerHandle, ClaudeSetupTokenFile, 0) != 0)
+        else
         {
+            RefuseLink(path);
             // Unlink removes the entry in this directory even if a concurrent rename substitutes a link at the leaf.
-            if (Marshal.GetLastPInvokeError() == 2) return (false, []); // ENOENT
-            throw new IOException("The provisioned Claude Code setup token could not be removed.");
+            if (DirectoryHandles.UnlinkAt(workerHandle, ClaudeSetupTokenFile, 0) != 0)
+            {
+                if (Marshal.GetLastPInvokeError() == 2) return (false, []); // ENOENT
+                throw new IOException("The provisioned Claude Code setup token could not be removed.");
+            }
         }
 
         List<string> warnings = [];
