@@ -41,6 +41,9 @@ internal static class DaemonRoutes
         if (host.OAuth is not { } authorization)
             return Problem(StatusCodes.Status409Conflict, "refused", "Enable MCP and configure a public endpoint on this runtime before issuing an approval.");
 
+        if (!host.PublicMcpCertificateCurrent)
+            return Problem(StatusCodes.Status409Conflict, "refused", "The public MCP certificate has expired. Install a current certificate and restart the runtime.");
+
         context.Response.Headers.CacheControl = "no-store";
         (McpApprovalIssued? issued, string? refused) = authorization.Issue(request.Principal, request.By, request.Scope, request.Days, request.Renew);
         return issued is null ? Problem(StatusCodes.Status422UnprocessableEntity, "refused", refused!) : Results.Json(issued, ProtocolJson.Options);

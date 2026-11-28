@@ -8,6 +8,9 @@
 > with `vericairn runtime configure --mcp on --public-endpoint <host:port> --public-certificate <pem> --public-key <pem>`,
 > then restart the runtime. Supply a certificate chain the client trusts. To listen on a private overlay, name its interface's
 > address and matching port with `--public-bind`. `runtime status` shows the endpoint and its certificate's expiry.
+> Attention alerts the operator in the last 14 days. An expired or unreadable certificate takes only the public HTTPS
+> endpoint out of service. Keep the renewed certificate and key at the configured paths and run
+> `vericairn runtime stop` followed by `vericairn runtime start` to load them.
 >
 > On the runtime's machine, `vericairn mcp authorize --principal <agent> --by <administrator> --scope read|contribute` shows a
 > one-time approval code valid for ten minutes. In the client's browser authorization, enter that code and confirm the exact

@@ -64,6 +64,8 @@ public sealed partial class EstateService
     }
 
     // The stage a client operation stopped at its request limit names while attention is derived (FIX-152).
+    internal Func<(string State, string Why)?>? McpCertificateAttention { get; set; }
+
     private const string AttentionStage = "deriving the required attention";
 
     private AttentionResponse AttentionLocked(EstateModel model, string principal)
@@ -153,6 +155,9 @@ public sealed partial class EstateService
                 client.Reused ? "A refresh token was reused. The token family was ended." : "An administrator approved a new MCP token device.",
                 client.Reused ? "refresh reuse" : "approved",
                 "Inspect token devices with vericairn mcp clients.", "device", client.Device, sourceAt: client.At);
+        if (model.HasRole(principal, Roles.Operator) && McpCertificateAttention?.Invoke() is { } certificate)
+            Add("incident", "Public MCP certificate", certificate.Why, certificate.State,
+                "Install a current certificate and key at the configured paths, then restart the runtime.", "runtime", "public-mcp-certificate");
         notices.AddRange(PolicyNotices(progress, principal));
         Dictionary<string, AttentionAcknowledgment> kept = ReadAcknowledgments(principal);
         // Several findings can concern the same kind and subject. Keep every reason in that notice.

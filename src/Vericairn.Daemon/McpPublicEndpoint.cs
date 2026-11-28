@@ -54,6 +54,15 @@ public sealed record McpPublicEndpoint(string Authority, string CertificatePath,
         }
     }
 
+    internal static (string State, string Why)? ExpiryAttention(DateTimeOffset expires, DateTimeOffset now)
+    {
+        if (expires > now.AddDays(14)) return null;
+        string date = Vericairn.Records.Model.RecordParser.FormatTimestamp(expires);
+        return expires <= now
+            ? ("expired", $"The public MCP certificate expired at {date}. Only the public MCP listener is unavailable.")
+            : ("expiring", $"The public MCP certificate expires at {date}.");
+    }
+
     internal X509Certificate2Collection LoadChain(X509Certificate2 leaf)
     {
         var chain = new X509Certificate2Collection();
