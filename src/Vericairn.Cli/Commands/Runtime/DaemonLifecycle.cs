@@ -506,13 +506,13 @@ internal sealed class DaemonLifecycle(CommandContext context, Func<DaemonEndpoin
                 return context.Fail(NotAnEstate(root));
             }
 
-            ServicePlan plan = ServiceInstaller.PlanHere(root);
             if (planOnly)
             {
-                PrintPlan(plan, json);
+                PrintPlan(ServiceInstaller.PlanHere(root), json);
                 return Clean;
             }
 
+            ServicePlan plan = ServiceInstaller.PlanHereForInstall(root);
             IReadOnlyList<string> log = ServiceInstaller.Install(plan);
             if (json)
             {

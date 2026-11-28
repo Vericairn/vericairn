@@ -47,11 +47,13 @@ public static class ServiceInstaller
     /// <summary>The plan for an estate on this machine, with the running executable.</summary>
     public static ServicePlan PlanHere(string root) => PlanHere(root, legacy: false);
 
+    internal static ServicePlan PlanHereForInstall(string root) => PlanHere(root, legacy: false, createHome: true);
+
     // A previous installation had one label per estate and ran on the platform default home.
     internal static ServicePlan? LegacyUninstallHere(string root) =>
         VericairnHome.SamePath(VericairnHome.Path(), VericairnHome.DefaultPath()) ? PlanHere(root, legacy: true) : null;
 
-    private static ServicePlan PlanHere(string root, bool legacy)
+    private static ServicePlan PlanHere(string root, bool legacy, bool createHome = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         root = Path.GetFullPath(root);
@@ -60,16 +62,23 @@ public static class ServiceInstaller
         string platform = VericairnHome.Platform();
         uint? user = platform is "macos" or "linux" ? GetUid() : null;
         string home = Path.GetFullPath(VericairnHome.Path());
+        if (createHome && platform is "macos" or "linux" or "windows" && !Directory.Exists(home))
+        {
+            ValidateServiceHome(home);
+            // Concurrent first installs through spelling aliases now plan against the same directory.
+            OwnerOnlyState.CreateDirectory(home, home);
+        }
+
         return Plan(platform, root, manifest.Estate, CurrentLauncher(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), home, user,
             PresenceSessionBuild.Current.RuntimeEnvironment, legacy);
     }
 
-    /// <summary>The plan for a platform, pure: no file is touched and no command runs.</summary>
+    /// <summary>The plan for a platform. On this platform it resolves the home's identity. No files are written and no commands run.</summary>
     public static ServicePlan Plan(string platform, string root, string estateId, IReadOnlyList<string> launcher, string userHome, string vericairnHome, uint? userId) =>
         Plan(platform, root, estateId, launcher, userHome, vericairnHome, userId, new Dictionary<string, string>(StringComparer.Ordinal));
 
     /// <summary>
-    /// From 0.9.4 (ID-16): the plan for a platform with the environment the service's runtime starts with, pure. A release build passes the
+    /// From 0.9.4 (ID-16): the plan for a platform with the environment the service's runtime starts with. A release build passes the
     /// .NET diagnostics channel off (DOTNET_EnableDiagnostics=0), which .NET reads only from a process's environment at its start; launchd
     /// and systemd carry it, and Windows, which opens no presence session, does not.
     /// </summary>
@@ -91,13 +100,17 @@ public static class ServiceInstaller
             throw new ArgumentException("A launcher names at least the executable.", nameof(launcher));
         }
 
-        if (vericairnHome.Any(char.IsControl))
-            throw new ArgumentException("The Vericairn home contains a control character the service unit cannot carry.");
+        ValidateServiceHome(vericairnHome);
 
-        string homeKey = Path.TrimEndingDirectorySeparator(vericairnHome);
-        if (platform == "windows")
-            homeKey = homeKey.ToUpperInvariant();
-        string suffix = legacy ? string.Empty : "-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(homeKey)));
+        string suffix = string.Empty;
+        if (!legacy)
+        {
+            string homeKey = platform == VericairnHome.Platform() && Path.IsPathFullyQualified(vericairnHome)
+                ? VericairnHome.CanonicalIdentity(vericairnHome)
+                : platform == "windows" ? Path.TrimEndingDirectorySeparator(vericairnHome).ToUpperInvariant()
+                : Path.TrimEndingDirectorySeparator(vericairnHome);
+            suffix = "-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(homeKey)));
+        }
 
         var settings = new Dictionary<string, string>(environment, StringComparer.Ordinal);
         if (!legacy)
@@ -200,6 +213,12 @@ public static class ServiceInstaller
             default:
                 throw new PlatformNotSupportedException($"Installing the runtime as a service is not supported on {platform}.");
         }
+    }
+
+    private static void ValidateServiceHome(string home)
+    {
+        if (home.Any(char.IsControl))
+            throw new ArgumentException("The Vericairn home contains a control character the service unit cannot carry.");
     }
 
     /// <summary>Writes the unit and registers the service; throws with the command's output when a command fails.</summary>
