@@ -124,6 +124,7 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
     public Action? AfterWrite { get; set; }
     public Action<string>? BeforeApiCall { get; set; }
     public Func<CompanionRequest, bool>? CompanionRenditionUnavailable { get; set; }
+    public Func<CompanionRequest, CompanionResponse, CompanionResponse>? TransformCompanionRendition { get; set; }
     public Func<Task>? WaitBeforeReview { get; set; }
     public Func<RecordPrepared, RecordPrepared>? ChangePrepared { get; set; }
     public int PreparedCalls { get; private set; }
@@ -161,9 +162,10 @@ internal sealed partial class FakeConnections(string root) : IRemoteConnections,
     private async Task<CompanionResponse> RenderCompanionAsync(RuntimeConnection connection, CompanionRequest request, CancellationToken token)
     {
         CompanionResponse response = await ReadCompanionAsync(connection, api => api.CompanionRenderAsync(request, token)).ConfigureAwait(false);
-        return response.Status == "success" && CompanionRenditionUnavailable?.Invoke(request) == true
-            ? CompanionResponse.Unavailable("The rendition is unavailable on this phone.")
-            : response;
+        if (response.Status != "success") return response;
+        if (CompanionRenditionUnavailable?.Invoke(request) == true)
+            return CompanionResponse.Unavailable("The rendition is unavailable on this phone.");
+        return TransformCompanionRendition?.Invoke(request, response) ?? response;
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1852", Justification = "DispatchProxy generates a subclass at runtime.")]

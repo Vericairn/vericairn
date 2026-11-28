@@ -6,8 +6,8 @@
 
 > From 0.9.5 (READ-05), open **Readable companions** in Remote's **Products** area. Browse a collection at its exact snapshot
 > and select a listed current record to read the exact revision shown on the page. A cached page shows its original observation
-> time and age. When complete material needs the desktop, choose **Continue in Workbench** and prepare a task for the exact
-> permitted subject. Open it
+> time and age. When the item rendition is unavailable and the runtime confirms access to its source, choose
+> **Continue in Workbench** and prepare a task for the exact permitted subject. Open it
 > through **From Remote** on the paired runtime. See the [Remote guide](remote.md).
 
 ## docs/limitations-and-platforms.md

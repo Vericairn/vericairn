@@ -222,6 +222,30 @@ public sealed class RemoteCompanionTests(HeadlessFixture fixture)
         });
     }
 
+    [Fact]
+    public async Task AReadableExactItemDoesNotOfferDesktopContinuation()
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        using var connections = CompanionConnections(estate);
+        // The runtime does not emit this marker for record items. A successful record read keeps its text on the phone.
+        connections.TransformCompanionRendition = (request, response) => request.Revision is null
+            ? response
+            : response with { Completeness = "bounded-overview" };
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            await OpenWorkOrdersAsync(model);
+            await OpenItemAsync(model);
+            Assert.NotEmpty(model.CompanionText);
+            Assert.False(model.CanHandOffCompanion);
+            await model.BackCompanionCommand.ExecuteAsync();
+            await OpenItemAsync(model);
+            Assert.StartsWith("Cached", model.CompanionFreshness, StringComparison.Ordinal);
+            Assert.False(model.CanHandOffCompanion);
+            return true;
+        });
+    }
+
     private static void RevokePhone(PolicyFixture policy, FakeConnections connections)
     {
         TestEstate estate = policy.Estate;

@@ -250,7 +250,7 @@ public sealed partial class RemoteViewModel
                 if (Selected != estate || !CompanionsOpen) return;
                 if (MatchesCompanionBasis(retained.Response, basis))
                 {
-                    ShowCompanion(retained, cached: true, handoff: CompanionHandoff(retained.Response, item));
+                    ShowCompanion(retained, cached: true);
                     CompanionMessage = retained.Response.Reason ?? "";
                     return;
                 }
@@ -270,7 +270,7 @@ public sealed partial class RemoteViewModel
             var observation = new CompanionObservation(request, response, Now);
             if (request.Revision is null) cachedCollection = observation;
             else cachedItem = observation;
-            ShowCompanion(observation, handoff: CompanionHandoff(response, item));
+            ShowCompanion(observation);
             CompanionMessage = response.Reason ?? "";
         }
         catch (Exception exception) when (ClientFailure.FromException(exception) is not null ||
@@ -299,9 +299,6 @@ public sealed partial class RemoteViewModel
     private static bool HasCompanionSource(CompanionResponse response, AttentionReference item) =>
         response.Sources.Any(source => source.Kind == "record" && source.RecordType == item.Type &&
             source.Identity == item.Id && source.Hash == item.Hash);
-
-    private static AttentionReference? CompanionHandoff(CompanionResponse response, AttentionReference? item) =>
-        item is not null && response.Completeness == "bounded-overview" && HasCompanionSource(response, item) ? item : null;
 
     private static string CollectionName(string id) => id switch
     {
