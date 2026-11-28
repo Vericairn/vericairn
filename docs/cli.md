@@ -484,8 +484,8 @@ Choose `pro` or `max` for the account and wait for the hidden prompt before ente
 and supply the token on a single line of standard input. The worker stores the login outside the estate, the
 repository and the harness configuration. Only the worker reads the provisioned token. It holds the bytes to copy
 them into each run or preflight, the copy deleted afterwards, and in memory for that run's lifetime to withhold any
-run of 12 or more of its characters from the run's output, its probes and the daemon's log. It records, prints and
-passes on nothing of them.
+run of 12 or more of its characters from the run's output and its probes. While the token is provisioned, the daemon
+may read it to withhold it from its own log at any time. The worker records, prints and passes on nothing of those bytes.
 
 A provisioned setup token takes precedence over an existing provisioned `.credentials.json`. The headless sign-in
 carries no account type. The qualification identifies Pro or Max as the operator's statement at import. Importing a

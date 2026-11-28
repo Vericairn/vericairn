@@ -1472,10 +1472,11 @@ The token is read at a hidden prompt, or as a single line of redirected standard
 stores the token and account statement in the owner-only `worker/claude-code-setup-token.json` under the machine-local
 Vericairn home. The home must be outside repositories, estates and harness configuration directories. The run file lives
 outside the workspace. Sign-in input never passes through a command argument or environment variable, and credential
-content and its digest stay out of inventory evidence. Only the worker reads the provisioned token. The worker holds
-the bytes to copy them into each run or preflight, the copy deleted afterwards, and in memory for that run's lifetime to
-withhold any run of 12 or more of its characters from the run's output, its probes and the daemon's log. It records,
-prints and passes on nothing of them. A probe that would admit matching output as evidence is refused.
+content and its digest stay out of inventory evidence. Only the worker reads the provisioned token. It holds the bytes
+to copy them into each run or preflight, the copy deleted afterwards, and in memory for that run's lifetime to withhold
+any run of 12 or more of its characters from the run's output and its probes. While the token is provisioned, the daemon
+may read it to withhold it from its own log at any time. The worker records, prints and passes on nothing of those bytes.
+A probe that would admit matching output as evidence is refused.
 
 The value comparison can leave fragments of 11 characters or fewer, including an 11-column box wrap. A prefix-free
 body can remain visible with a zero-width space, soft hyphen, NUL or combining mark such as U+0301 every 11 characters
