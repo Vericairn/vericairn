@@ -25,7 +25,10 @@
 ### In "Network MCP limits (0.9.2)", after the existing signed-mode limits
 
 > The public OAuth listener is off by default. It serves HTTPS MCP and the discovery and authorization endpoints, with its own
-> connection and rate limits. Its certificate and key are supplied by the operator. It supports public Client ID Metadata
+> connection and rate limits. Its certificate and key are supplied by the operator. While the runtime serves them, the key is
+> also in memory on Linux, in a temporary keychain file in the user's owner-only temporary directory on macOS, and in the
+> user's key store on Windows. The runtime disposes of it when it stops; one that crashes may leave that file or stored key
+> behind, which outlives deleting the PEM file. It supports public Client ID Metadata
 > Documents and dynamic registration. Read scope has no write tools. Contribute scope offers only the network contributor writes.
 > Each bearer access token lasts at most 15 minutes. A refresh token rotates on use, and reuse ends its family.
 > The public listener serves up to 12 open connections, with up to four from one peer and five seconds to finish TLS.
